@@ -197,15 +197,14 @@ This will prompt you to choose an LLM provider (Anthropic, OpenAI, etc.), enter 
 
 ### Step 2: Configure `.env`
 
-Set the auth token from onboarding and your Groq key for TTS:
+Set the auth token from onboarding:
 
 ```bash
 PORT=5001
 CLAWDBOT_AUTH_TOKEN=<token-from-onboarding>
-GROQ_API_KEY=your-groq-key
 ```
 
-> `CLAWDBOT_GATEWAY_URL` does not need to be set — Docker Compose automatically routes to the OpenClaw container via internal networking.
+> `CLAWDBOT_GATEWAY_URL` does not need to be set — Docker Compose automatically routes to the OpenClaw container via loopback networking. TTS works out of the box with Supertonic (local, free). Optionally add `GROQ_API_KEY` for Groq Orpheus TTS.
 
 ### Step 3: Start
 
@@ -226,6 +225,12 @@ The `docker-compose.yml` runs three services:
 | `openvoiceui` | OpenVoiceUI server (Python/Flask) — serves the frontend and connects to OpenClaw and Supertonic |
 
 OpenClaw config is persisted in a Docker volume (`openclaw-data`), so onboarding only needs to run once.
+
+### TTS setup
+
+Supertonic (local, free) is included and works out of the box — select "supertonic" as the TTS provider in the Settings panel.
+
+To use **Groq Orpheus TTS** instead, you must first accept the model terms at [console.groq.com/playground?model=canopylabs%2Forpheus-v1-english](https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english), then set `GROQ_API_KEY` in `.env`.
 
 ---
 

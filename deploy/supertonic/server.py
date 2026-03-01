@@ -64,9 +64,9 @@ async def tts(req: TTSRequest):
         wav, duration = _tts(
             text=req.text,
             lang=req.lang,
-            style=_styles[req.voice],
+            voice_style=_styles[req.voice],
             speed=req.speed,
-            total_step=req.steps,
+            total_steps=req.steps,
         )
         audio = wav[0, : int(_tts.sample_rate * duration[0].item())]
         buf = BytesIO()
