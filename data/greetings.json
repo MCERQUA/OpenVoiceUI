@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "updated_at": "",
+  "updated_by": "system",
+  "notes": "Default greeting library. Edit or extend via /api/greetings/add. Categories: generic (all users) and contextual (face-recognized users).",
+  "next_greeting": null,
+  "last_context": null,
+  "greetings": {
+    "generic": {
+      "standard": [
+        "Hello! How can I help you today?",
+        "Hey there! What can I do for you?",
+        "Hi! What's on your mind?",
+        "Good to see you. What do you need?",
+        "Hello! Ready when you are.",
+        "Hey! What can I help you with?",
+        "Hi there! Ask me anything.",
+        "What can I do for you today?",
+        "Hey, what's up? How can I help?",
+        "Hello! What would you like to talk about?"
+      ]
+    },
+    "contextual": []
+  }
+}
