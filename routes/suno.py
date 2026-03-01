@@ -32,7 +32,9 @@ from flask import Blueprint, jsonify, request
 # Paths & config
 # ---------------------------------------------------------------------------
 
-GENERATED_MUSIC_DIR = Path(__file__).parent.parent / 'generated_music'
+from routes import DATA_DIR
+
+GENERATED_MUSIC_DIR = DATA_DIR / 'generated_music'
 GENERATED_MUSIC_DIR.mkdir(exist_ok=True)
 GENERATED_METADATA_FILE = GENERATED_MUSIC_DIR / 'generated_metadata.json'
 

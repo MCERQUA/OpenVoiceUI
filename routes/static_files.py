@@ -25,12 +25,12 @@ static_files_bp = Blueprint('static_files', __name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-BASE_DIR = Path(__file__).parent.parent
+from routes import APP_ROOT, DATA_DIR
 
-SOUNDS_DIR = BASE_DIR / "sounds"
-UPLOADS_DIR = BASE_DIR / "uploads"
-KNOWN_FACES_DIR = BASE_DIR / "known_faces"
-STATIC_DIR = BASE_DIR / "static"
+SOUNDS_DIR = APP_ROOT / "sounds"
+UPLOADS_DIR = DATA_DIR / "uploads"
+KNOWN_FACES_DIR = DATA_DIR / "known_faces"
+STATIC_DIR = APP_ROOT / "static"
 
 UPLOADS_DIR.mkdir(exist_ok=True)
 
@@ -138,7 +138,7 @@ def serve_upload(filename):
 def serve_src(filepath):
     """Serve frontend source files (JS, CSS modules)"""
     # P7-T3 security: prevent path traversal (same guard used by serve_sound)
-    src_path = _safe_path(BASE_DIR / 'src', filepath)
+    src_path = _safe_path(APP_ROOT / 'src', filepath)
     if src_path is None:
         return jsonify({"error": "Invalid path"}), 400
     if not src_path.exists():
@@ -284,7 +284,7 @@ def serve_install():
 @static_files_bp.route('/admin')
 def serve_admin():
     """Serve the OpenUI admin dashboard"""
-    admin_path = BASE_DIR / 'src' / 'admin.html'
+    admin_path = APP_ROOT / 'src' / 'admin.html'
     if not admin_path.exists():
         return jsonify({"error": "Admin dashboard not found"}), 404
     resp = send_file(admin_path, mimetype='text/html')

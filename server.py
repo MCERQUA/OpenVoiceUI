@@ -289,7 +289,9 @@ init_db()
 # Upload directory
 # ---------------------------------------------------------------------------
 
-UPLOADS_DIR = Path(__file__).parent / "uploads"
+from routes import DATA_DIR
+
+UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 

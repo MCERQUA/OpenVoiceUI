@@ -33,9 +33,11 @@ vision_bp = Blueprint('vision', __name__)
 # Storage
 # ---------------------------------------------------------------------------
 
+from routes import DATA_DIR
+
 # known_faces/ is the DeepFace database directory.
 # Layout: known_faces/<PersonName>/photo_001.jpg  (one subdir per person)
-FACES_DIR = Path(__file__).parent.parent / 'known_faces'
+FACES_DIR = DATA_DIR / 'known_faces'
 FACES_DIR.mkdir(exist_ok=True)
 
 # Latest frame received from browser (in-memory, ephemeral)
