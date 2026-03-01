@@ -185,28 +185,56 @@ sudo journalctl -u openvoiceui -f
 
 ## Local Install (Docker)
 
-If you want to run OpenVoiceUI on a local machine, Docker is the easiest path. Note that browser microphone access requires HTTPS — on localhost Chrome/Edge will still allow it, but other devices on your network won't work without a cert.
+Docker is the easiest path — it runs OpenClaw, Supertonic TTS, and OpenVoiceUI together. Note that browser microphone access requires HTTPS — on localhost Chrome/Edge will still allow it, but other devices on your network won't work without a cert.
 
 ```bash
 git clone https://github.com/MCERQUA/OpenVoiceUI-public
 cd OpenVoiceUI-public
 cp .env.example .env
-# Edit .env — set CLAWDBOT_AUTH_TOKEN and GROQ_API_KEY
+```
+
+### Step 1: Onboard OpenClaw (one-time)
+
+Run the interactive onboarding wizard to configure your LLM provider and generate an auth token:
+
+```bash
+docker compose build openclaw
+docker compose run --rm openclaw openclaw onboard
+```
+
+This will prompt you to choose an LLM provider (Anthropic, OpenAI, etc.), enter your API key, and generate a gateway auth token.
+
+### Step 2: Configure `.env`
+
+Set the auth token from onboarding and your Groq key for TTS:
+
+```bash
+PORT=5001
+CLAWDBOT_AUTH_TOKEN=<token-from-onboarding>
+GROQ_API_KEY=your-groq-key
+```
+
+> `CLAWDBOT_GATEWAY_URL` does not need to be set — Docker Compose automatically routes to the OpenClaw container via internal networking.
+
+### Step 3: Start
+
+```bash
 docker compose up --build
 ```
 
 Open `http://localhost:5001` in your browser.
 
-### Minimum `.env`
+### How it works
 
-```bash
-PORT=5001
-CLAWDBOT_GATEWAY_URL=ws://host.docker.internal:18791
-CLAWDBOT_AUTH_TOKEN=your-openclaw-gateway-token
-GROQ_API_KEY=your-groq-key
-```
+The `docker-compose.yml` runs three services:
 
-> **Note:** `host.docker.internal` lets the container reach your local OpenClaw gateway. On Linux add `extra_hosts: ["host.docker.internal:host-gateway"]` to `docker-compose.yml` if needed.
+| Service | Description |
+|---------|-------------|
+| `openclaw` | OpenClaw gateway (Node.js) — handles LLM routing, tool use, and agent sessions on port 18791 |
+| `supertonic` | Local TTS engine (ONNX) — provides free text-to-speech without external API keys |
+| `openvoiceui` | OpenVoiceUI server (Python/Flask) — serves the frontend and connects to OpenClaw and Supertonic |
+
+OpenClaw config is persisted in a Docker volume (`openclaw-data`), so onboarding only needs to run once.
 
 ---
 
