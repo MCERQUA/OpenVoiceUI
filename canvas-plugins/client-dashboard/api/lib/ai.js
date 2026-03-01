@@ -1,111 +1,153 @@
 /**
  * AI helper using Google Gemini
+ * Falls back to mock mode if GEMINI_API_KEY not set
  */
 
-import { GoogleGenAI } from '@google/genai';
+const HAS_API_KEY = !!process.env.GEMINI_API_KEY;
 
-const genAI = new GoogleGenAI(process.env.GEMINI_API_KEY);
+// Only import and create client if API key is set
+let ai = null;
+if (HAS_API_KEY) {
+  const { GoogleGenAI } = await import('@google/genai');
+  ai = new GoogleGenAI(process.env.GEMINI_API_KEY);
+}
 
 /**
- * Generate post variations
+ * Check if AI is available
  */
-export async function generatePostVariations(topic, brandContext, count = 3) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+export function hasAI() {
+  return HAS_API_KEY;
+}
 
-  const prompt = `You are a social media content creator for ${brandContext.name || 'a business'}.
-
-Brand context:
-${brandContext.profile || 'Professional services company'}
-
-Topic: ${topic}
-
-Generate ${count} different post variations:
-1. Educational - teach something valuable
-2. Urgency - create a sense of urgency
-3. Solution-focused - present a solution to a problem
-
-Each post should be:
-- 280 characters max
-- Include 2-3 relevant hashtags
-- Engaging and on-brand
-
-Format as JSON array:
-[{"type": "educational", "content": "...", "hashtags": ["#tag1", "#tag2"]}, ...]`;
+/**
+ * Generate text content
+ */
+export async function generateText(prompt, options = {}) {
+  if (!HAS_API_KEY) {
+    console.warn('Gemini API not configured - returning mock response');
+    return {
+      text: 'AI generation not available. Please configure GEMINI_API_KEY.',
+      success: false
+    };
+  }
 
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-
-    // Extract JSON from response
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-
-    // Fallback parsing
-    return [
-      { type: 'general', content: topic, hashtags: [] }
-    ];
+    const response = await ai.models.generateContent({
+      model: options.model || 'gemini-2.0-flash',
+      contents: prompt,
+      ...options
+    });
+    
+    return {
+      text: response.text,
+      success: true
+    };
   } catch (error) {
-    console.error('AI generation error:', error);
-    throw new Error('Failed to generate post variations');
+    console.error('Gemini error:', error);
+    return {
+      text: `Error: ${error.message}`,
+      success: false
+    };
   }
 }
 
 /**
- * Generate image prompt for a post
+ * Generate image prompt for post
  */
 export async function generateImagePrompt(postContent, brandContext) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  if (!HAS_API_KEY) {
+    return {
+      prompt: 'AI image generation not available',
+      success: false
+    };
+  }
 
-  const prompt = `Create a detailed image generation prompt for a social media post.
+  const prompt = `Create an image prompt for a social media post.
 
-Brand: ${brandContext.name || 'Company'}
-Brand colors: ${brandContext.colors || '#4a9eff, #2ecc71'}
+Brand: ${brandContext?.name || 'Unknown'}
 Post content: ${postContent}
 
-Requirements:
-- Professional and eye-catching
-- Include brand colors subtly
-- Suitable for Instagram/Facebook
-- No text overlays
+Generate a detailed image prompt that:
+1. Matches the brand's visual style
+2. Is appropriate for social media
+3. Includes relevant visual elements
+4. Specifies style, lighting, and composition
 
-Output just the image prompt (max 200 characters):`;
+Return only the image prompt text.`;
 
-  try {
-    const result = await model.generateContent(prompt);
-    return result.response.text().trim();
-  } catch (error) {
-    console.error('Image prompt generation error:', error);
-    return `Professional social media image for ${brandContext.name || 'business'} with ${brandContext.colors || 'blue'} accents`;
-  }
+  const response = await generateText(prompt);
+  return {
+    prompt: response.text,
+    success: response.success
+  };
 }
 
 /**
- * Optimize blog title for SEO
+ * Optimize a title for SEO
  */
-export async function optimizeTitle(title, keywords = []) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+export async function optimizeTitle(title, context = '') {
+  if (!HAS_API_KEY) {
+    return {
+      optimizedTitle: title,
+      success: false
+    };
+  }
 
-  const prompt = `Optimize this blog title for SEO.
+  const prompt = `Optimize this title for SEO and engagement.
 
 Original title: ${title}
-Target keywords: ${keywords.join(', ') || 'none provided'}
+Context: ${context}
 
-Requirements:
-- Keep it under 60 characters
-- Include primary keyword naturally
-- Make it compelling for clicks
+Return an optimized title that:
+1. Is under 60 characters
+2. Includes relevant keywords
+3. Is engaging and click-worthy
+4. Maintains the original meaning
 
-Output just the optimized title:`;
+Return only the optimized title.`;
 
+  const response = await generateText(prompt);
+  return {
+    optimizedTitle: response.text.trim().replace(/^["']|["']$/g, ''),
+    success: response.success
+  };
+}
+
+/**
+ * Generate post variations for a brand
+ */
+export async function generatePostVariations(brandContext, topic, count = 3) {
+  if (!HAS_API_KEY) {
+    return [{
+      title: 'Demo Post',
+      content: 'AI generation not available. Please configure GEMINI_API_KEY.',
+      style: 'educational'
+    }];
+  }
+
+  const prompt = `Generate ${count} social media post variations for a brand.
+
+Brand context: ${brandContext}
+Topic: ${topic}
+
+Generate ${count} posts with different styles:
+1. Educational - teach something valuable
+2. Urgency - create urgency or fear of missing out
+3. Solution-focused - present the brand as a solution
+
+Format as JSON array with title, content, and style fields.`;
+
+  const response = await generateText(prompt);
+  
   try {
-    const result = await model.generateContent(prompt);
-    return result.response.text().trim();
-  } catch (error) {
-    console.error('Title optimization error:', error);
-    return title;
+    return JSON.parse(response.text);
+  } catch {
+    return [{
+      title: 'Generated Post',
+      content: response.text,
+      style: 'general'
+    }];
   }
 }
 
-export default { generatePostVariations, generateImagePrompt, optimizeTitle };
+export default { hasAI, generateText, generateImagePrompt, optimizeTitle, generatePostVariations };

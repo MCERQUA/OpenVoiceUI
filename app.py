@@ -15,6 +15,7 @@ server.py module-level decorators (@app.route, @sock.route) keep working.
 """
 import logging
 import os
+from pathlib import Path
 
 from flask import Flask, jsonify, redirect, request
 from flask_cors import CORS
@@ -148,7 +149,7 @@ def create_app(config_override: dict = None):
                 return
             # Canvas pages and images have their own auth logic (public flag)
             # handled inside canvas_bp — let them through here
-            if path.startswith('/pages/') or path.startswith('/canvas-proxy') or path.startswith('/website-dev'):
+            if path.startswith('/pages/') or path.startswith('/canvas-proxy') or path.startswith('/website-dev') or path.startswith('/dashboard-api'):
                 return
 
             from services.auth import get_token_from_request, verify_clerk_token
@@ -186,5 +187,30 @@ def create_app(config_override: dict = None):
             "worker-src 'self' blob:"
         )
         return response
+
+    # ── Swagger / OpenAPI documentation ───────────────────────────────────────
+    # Serves interactive API docs at /apidocs
+    # OpenAPI spec is loaded from openapi.yaml in project root
+    openapi_path = Path(__file__).parent / 'openapi.yaml'
+    if openapi_path.exists():
+        try:
+            from flasgger import Swagger
+            swagger = Swagger(
+                app,
+                template_file=str(openapi_path),
+                config={
+                    'headers': [],
+                    'specs': [{'endpoint': 'apispec', 'route': '/apispec.json'}],
+                    'swagger_ui': True,
+                    'specs_route': '/apidocs',
+                }
+            )
+            logger.info('Swagger UI available at /apidocs')
+        except ImportError:
+            logger.warning('flasgger not installed — Swagger UI disabled. Run: pip install flasgger')
+        except Exception as exc:
+            logger.warning(f'Failed to initialize Swagger UI: {exc}')
+    else:
+        logger.debug(f'OpenAPI spec not found at {openapi_path} — Swagger UI disabled')
 
     return app, sock
