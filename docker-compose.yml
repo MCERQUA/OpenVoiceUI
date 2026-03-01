@@ -1,23 +1,47 @@
 services:
-  openvoiceui:
-    build: .
-    ports:
-      - "${PORT:-5001}:${PORT:-5001}"
-    env_file:
-      - .env
+  openclaw:
+    build: deploy/openclaw
     volumes:
-      # Persist runtime data outside the container so it survives restarts.
-      # Note: if CANVAS_PAGES_DIR is set in .env, it must match this mount path.
-      # For Docker, leave CANVAS_PAGES_DIR unset in .env (defaults to /app/canvas-pages).
-      - ./uploads:/app/uploads
-      - ./canvas-pages:/app/canvas-pages
-      - ./known_faces:/app/known_faces
-      - ./music:/app/music
-      - ./generated_music:/app/generated_music
+      - openclaw-data:/root/.openclaw
+    ports:
+      - "18791:18791"
+      - "${PORT:-5001}:${PORT:-5001}"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health/live')"]
+      test: ["CMD", "node", "-e", "const h=require('http');h.get('http://localhost:18791',r=>{process.exit(r.statusCode<500?0:1)}).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 30s
+
+  supertonic:
+    build: deploy/supertonic
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  openvoiceui:
+    build: .
+    network_mode: "service:openclaw"
+    env_file:
+      - .env
+    environment:
+      - CLAWDBOT_GATEWAY_URL=ws://127.0.0.1:18791
+      - SUPERTONIC_API_URL=http://supertonic:8765
+      - DATA_DIR=/app/data
+    volumes:
+      - openvoiceui_data:/app/data
+    depends_on:
+      openclaw:
+        condition: service_started
+      supertonic:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  openclaw-data:
+  openvoiceui_data:
