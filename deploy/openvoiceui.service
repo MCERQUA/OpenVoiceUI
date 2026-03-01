@@ -1,0 +1,30 @@
+# =============================================================================
+# OpenVoiceUI systemd service template
+#
+# !! EDIT BEFORE USING !!
+# Replace all /path/to/OpenVoiceUI and YOUR_USER with real values, then:
+#
+#   sudo cp deploy/openvoiceui.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable openvoiceui
+#   sudo systemctl start openvoiceui
+#
+# Or use deploy/setup-sudo.sh which fills these in automatically.
+# =============================================================================
+
+[Unit]
+Description=OpenVoiceUI Voice Agent Server
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER                                              # ← your Linux username
+WorkingDirectory=/path/to/OpenVoiceUI                      # ← full path to repo
+ExecStart=/path/to/OpenVoiceUI/venv/bin/python3 /path/to/OpenVoiceUI/server.py
+Restart=always
+RestartSec=10
+Environment=PATH=/usr/bin:/usr/local/bin
+EnvironmentFile=/path/to/OpenVoiceUI/.env                  # ← full path to .env
+
+[Install]
+WantedBy=multi-user.target
