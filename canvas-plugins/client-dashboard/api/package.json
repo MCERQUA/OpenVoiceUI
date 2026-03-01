@@ -1,0 +1,19 @@
+{
+  "name": "client-dashboard-api",
+  "version": "1.0.0",
+  "description": "API server for Client Dashboard canvas plugin",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "@neondatabase/serverless": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.34.0"
+  }
+}

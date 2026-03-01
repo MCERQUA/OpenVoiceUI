@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard</title>
+  <link rel="stylesheet" href="/pages/dashboard.css">
+  <script src="/pages/dashboard.js"></script>
+</head>
+<body>
+  <div class="dashboard-container">
+    <header class="dashboard-header">
+      <h1>Dashboard</h1>
+      <div class="header-actions">
+        <button class="btn-secondary" onclick="dashboard.openPage('dashboard-create')">+ New Post</button>
+      </div>
+    </header>
+
+    <div class="stats-grid" id="statsGrid">
+      <div class="stat-card">
+        <span class="stat-value">-</span>
+        <span class="stat-label">Pending</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">-</span>
+        <span class="stat-label">Approved</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">-</span>
+        <span class="stat-label">Scheduled</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">-</span>
+        <span class="stat-label">Articles</span>
+      </div>
+    </div>
+
+    <div class="quick-actions">
+      <button onclick="dashboard.openPage('dashboard-posts')">View Posts</button>
+      <button onclick="dashboard.openPage('dashboard-schedule')">Schedule</button>
+      <button onclick="dashboard.openPage('dashboard-content')">Content Library</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('recent')">Recent</button>
+      <button class="tab" onclick="showTab('pending')">Pending Approval</button>
+    </div>
+
+    <div id="recentSection">
+      <div class="activity-list" id="activityList">
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading...
+        </div>
+      </div>
+    </div>
+
+    <div id="pendingSection" style="display: none;">
+      <div class="post-queue" id="pendingQueue">
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { api, openPage, showLoading, showToast, getStatusBadge, timeAgo } = dashboard;
+
+    let currentTab = 'recent';
+
+    async function loadStats() {
+      try {
+        const [postStats, scheduleStats, contentStats] = await Promise.all([
+          api('/posts/stats'),
+          api('/schedule/stats'),
+          api('/content/stats')
+        ]);
+
+        document.getElementById('statsGrid').innerHTML = `
+          <div class="stat-card">
+            <span class="stat-value">${postStats.pending || 0}</span>
+            <span class="stat-label">Pending</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">${postStats.approved || 0}</span>
+            <span class="stat-label">Approved</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">${scheduleStats.scheduled || 0}</span>
+            <span class="stat-label">Scheduled</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">${contentStats.articles || 0}</span>
+            <span class="stat-label">Articles</span>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Failed to load stats:', error);
+      }
+    }
+
+    async function loadRecent() {
+      const container = document.getElementById('activityList');
+      showLoading(container);
+
+      try {
+        const posts = await api('/posts?limit=10');
+
+        if (posts.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <p>No posts yet</p>
+              <button class="btn-secondary" onclick="openPage('dashboard-create')">Create your first post</button>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = posts.map(post => `
+          <div class="activity-item" onclick="viewPost(${post.id})">
+            <div class="activity-icon">${getStatusBadge(post.approval_status)}</div>
+            <div class="activity-details">
+              <strong>${post.title || 'Untitled'}</strong>
+              <span style="color: var(--text-muted); margin-left: 8px;">${post.brand_name || ''}</span>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">${timeAgo(post.created_at)}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch (error) {
+        container.innerHTML = `<div class="empty-state"><p>Failed to load recent posts</p></div>`;
+      }
+    }
+
+    async function loadPending() {
+      const container = document.getElementById('pendingQueue');
+      showLoading(container);
+
+      try {
+        const posts = await api('/approvals/pending');
+
+        if (posts.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <p>No pending approvals</p>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = posts.map(post => `
+          <div class="post-card">
+            <div class="post-content">
+              <h3>${post.title || 'Untitled'}</h3>
+              <p>${post.content?.substring(0, 200) || ''}${post.content?.length > 200 ? '...' : ''}</p>
+              <div style="margin-top: 8px;">
+                ${getStatusBadge(post.approval_status)}
+                <span style="color: var(--text-muted); font-size: 0.75rem;">${post.brand_name || ''}</span>
+              </div>
+            </div>
+            ${post.image_url ? `
+              <div class="post-image">
+                <img src="${post.image_url}" alt="${post.title}">
+              </div>
+            ` : ''}
+            <div class="post-actions">
+              <button class="btn-approve" onclick="approvePost(${post.id}, event)">Approve</button>
+              <button class="btn-reject" onclick="rejectPost(${post.id}, event)">Reject</button>
+            </div>
+          </div>
+        `).join('');
+      } catch (error) {
+        container.innerHTML = `<div class="empty-state"><p>Failed to load pending posts</p></div>`;
+      }
+    }
+
+    function showTab(tab) {
+      currentTab = tab;
+
+      // Update tab buttons
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+
+      // Show/hide sections
+      document.getElementById('recentSection').style.display = tab === 'recent' ? 'block' : 'none';
+      document.getElementById('pendingSection').style.display = tab === 'pending' ? 'block' : 'none';
+
+      // Load data
+      if (tab === 'pending') {
+        loadPending();
+      }
+    }
+
+    function viewPost(postId) {
+      openPage('dashboard-posts');
+    }
+
+    async function approvePost(postId, event) {
+      event.stopPropagation();
+      try {
+        await api('/approvals', {
+          method: 'POST',
+          body: JSON.stringify({ postId, status: 'approved' })
+        });
+        showToast('Post approved!', 'success');
+        loadPending();
+        loadStats();
+      } catch (error) {
+        showToast('Failed to approve: ' + error.message, 'error');
+      }
+    }
+
+    async function rejectPost(postId, event) {
+      event.stopPropagation();
+      const reason = prompt('Rejection reason:');
+      if (!reason) return;
+
+      try {
+        await api('/approvals', {
+          method: 'POST',
+          body: JSON.stringify({ postId, status: 'rejected', rejection_reason: reason })
+        });
+        showToast('Post rejected', 'success');
+        loadPending();
+        loadStats();
+      } catch (error) {
+        showToast('Failed to reject: ' + error.message, 'error');
+      }
+    }
+
+    // Initial load
+    loadStats();
+    loadRecent();
+
+    // Auto-refresh every 60s
+    setInterval(loadStats, 60000);
+  </script>
+</body>
+</html>

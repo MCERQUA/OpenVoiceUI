@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create Post</title>
+  <link rel="stylesheet" href="/pages/dashboard.css">
+  <script src="/pages/dashboard.js"></script>
+</head>
+<body>
+  <div class="dashboard-container">
+    <header class="dashboard-header">
+      <h1>Create Post</h1>
+      <button class="btn-secondary" onclick="dashboard.openPage('dashboard-posts')">Back to Posts</button>
+    </header>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+      <!-- Form -->
+      <div>
+        <form id="postForm" onsubmit="submitPost(event)">
+          <div class="form-group">
+            <label for="brand">Brand</label>
+            <select id="brand" required>
+              <option value="">Select brand...</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="title">Title (optional)</label>
+            <input type="text" id="title" placeholder="Post title...">
+          </div>
+
+          <div class="form-group">
+            <label for="topic">Topic for AI Generation</label>
+            <input type="text" id="topic" placeholder="e.g., insulation benefits for homeowners">
+            <button type="button" onclick="generateWithAI()" style="margin-top: 8px;" class="btn-secondary">
+              Generate with AI
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label for="content">Content</label>
+            <textarea id="content" required placeholder="Write your post content here..."></textarea>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+              <span id="charCount">0</span> / 280 characters
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="platform">Platform</label>
+            <select id="platform">
+              <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="twitter">Twitter/X</option>
+              <option value="linkedin">LinkedIn</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="imageUrl">Image URL (optional)</label>
+            <input type="url" id="imageUrl" placeholder="https://...">
+            <button type="button" onclick="generateImage()" style="margin-top: 8px;" class="btn-secondary">
+              Generate Image with AI
+            </button>
+          </div>
+
+          <div style="display: flex; gap: 12px;">
+            <button type="submit" class="btn-approve" style="flex: 1;">Create Post</button>
+            <button type="button" class="btn-secondary" onclick="clearForm()">Clear</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Preview -->
+      <div>
+        <h3 style="margin-bottom: 16px; color: var(--text-secondary);">Preview</h3>
+        <div style="background: var(--bg-secondary); border-radius: var(--radius); padding: 20px;">
+          <div id="previewContent" style="min-height: 200px;">
+            <p style="color: var(--text-muted);">Start typing to see preview...</p>
+          </div>
+          <div id="previewImage" style="margin-top: 16px; display: none;">
+            <img id="previewImg" style="width: 100%; border-radius: var(--radius);" alt="Preview">
+          </div>
+        </div>
+
+        <h3 style="margin: 24px 0 16px; color: var(--text-secondary);">AI Suggestions</h3>
+        <div id="aiSuggestions" style="background: var(--bg-secondary); border-radius: var(--radius); padding: 20px;">
+          <p style="color: var(--text-muted);">Enter a topic and click "Generate with AI" to get suggestions.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { api, showToast, openPage } = dashboard;
+
+    let createdPostId = null;
+
+    async function loadBrands() {
+      try {
+        const brands = await api('/brands');
+        const select = document.getElementById('brand');
+        brands.forEach(brand => {
+          const option = document.createElement('option');
+          option.value = brand.id;
+          option.textContent = brand.name;
+          select.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Failed to load brands:', error);
+      }
+    }
+
+    // Character counter
+    document.getElementById('content').addEventListener('input', function() {
+      document.getElementById('charCount').textContent = this.value.length;
+      updatePreview();
+    });
+
+    document.getElementById('title').addEventListener('input', updatePreview);
+    document.getElementById('imageUrl').addEventListener('input', updatePreview);
+
+    function updatePreview() {
+      const title = document.getElementById('title').value;
+      const content = document.getElementById('content').value;
+      const imageUrl = document.getElementById('imageUrl').value;
+
+      let preview = '';
+      if (title) {
+        preview += `<h3 style="margin-bottom: 12px;">${title}</h3>`;
+      }
+      if (content) {
+        preview += `<p style="white-space: pre-wrap;">${content}</p>`;
+      }
+      if (!title && !content) {
+        preview = '<p style="color: var(--text-muted);">Start typing to see preview...</p>';
+      }
+
+      document.getElementById('previewContent').innerHTML = preview;
+
+      const imgContainer = document.getElementById('previewImage');
+      if (imageUrl) {
+        document.getElementById('previewImg').src = imageUrl;
+        imgContainer.style.display = 'block';
+      } else {
+        imgContainer.style.display = 'none';
+      }
+    }
+
+    async function generateWithAI() {
+      const topic = document.getElementById('topic').value;
+      const brandId = document.getElementById('brand').value;
+
+      if (!topic) {
+        showToast('Please enter a topic', 'error');
+        return;
+      }
+
+      if (!brandId) {
+        showToast('Please select a brand first', 'error');
+        return;
+      }
+
+      const container = document.getElementById('aiSuggestions');
+      container.innerHTML = '<div class="loading"><div class="spinner"></div>Generating...</div>';
+
+      try {
+        // Get brand context
+        const brand = await api(`/brands/${document.getElementById('brand').selectedOptions[0].text.toLowerCase().replace(/\s+/g, '-')}/content`);
+
+        // Call AI endpoint (would normally be on the API)
+        // For now, show placeholder suggestions
+        const suggestions = [
+          {
+            type: 'Educational',
+            content: `Learn about ${topic}! Our experts share valuable insights that can help you make informed decisions. #tips #education`,
+            hashtags: ['#tips', '#education']
+          },
+          {
+            type: 'Problem-Solution',
+            content: `Struggling with ${topic}? We've got you covered. Contact us today for a free consultation! #solution #help`,
+            hashtags: ['#solution', '#help']
+          },
+          {
+            type: 'Urgency',
+            content: `Limited time offer! Get expert help with ${topic} before spots fill up. Book now! #limited #offer`,
+            hashtags: ['#limited', '#offer']
+          }
+        ];
+
+        container.innerHTML = suggestions.map((s, i) => `
+          <div style="background: var(--bg-card); border-radius: var(--radius); padding: 12px; margin-bottom: 8px; cursor: pointer;"
+               onclick="useSuggestion(${i})">
+            <div style="font-size: 0.75rem; color: var(--accent-blue); margin-bottom: 4px;">${s.type}</div>
+            <div style="font-size: 0.875rem;">${s.content.substring(0, 100)}...</div>
+          </div>
+        `).join('');
+
+        window.suggestions = suggestions;
+      } catch (error) {
+        container.innerHTML = `<p style="color: var(--accent-red);">Failed to generate: ${error.message}</p>`;
+      }
+    }
+
+    function useSuggestion(index) {
+      const suggestion = window.suggestions[index];
+      document.getElementById('content').value = suggestion.content;
+      document.getElementById('charCount').textContent = suggestion.content.length;
+      updatePreview();
+      showToast('Suggestion applied!', 'success');
+    }
+
+    async function generateImage() {
+      showToast('Image generation would be triggered here. Requires Gemini API integration.', 'info');
+    }
+
+    async function submitPost(event) {
+      event.preventDefault();
+
+      const brandId = document.getElementById('brand').value;
+      const title = document.getElementById('title').value;
+      const content = document.getElementById('content').value;
+      const platform = document.getElementById('platform').value;
+      const imageUrl = document.getElementById('imageUrl').value || null;
+
+      if (!brandId || !content) {
+        showToast('Brand and content are required', 'error');
+        return;
+      }
+
+      try {
+        const post = await api('/posts', {
+          method: 'POST',
+          body: JSON.stringify({
+            brand_id: brandId,
+            title,
+            content,
+            platform,
+            image_url: imageUrl
+          })
+        });
+
+        createdPostId = post.id;
+        showToast('Post created!', 'success');
+
+        // Option to create another or view posts
+        if (confirm('Post created! View pending posts?')) {
+          openPage('dashboard-posts');
+        } else {
+          clearForm();
+        }
+      } catch (error) {
+        showToast('Failed to create post: ' + error.message, 'error');
+      }
+    }
+
+    function clearForm() {
+      document.getElementById('postForm').reset();
+      document.getElementById('charCount').textContent = '0';
+      document.getElementById('previewContent').innerHTML = '<p style="color: var(--text-muted);">Start typing to see preview...</p>';
+      document.getElementById('previewImage').style.display = 'none';
+      document.getElementById('aiSuggestions').innerHTML = '<p style="color: var(--text-muted);">Enter a topic and click "Generate with AI" to get suggestions.</p>';
+    }
+
+    // Initial load
+    loadBrands();
+  </script>
+</body>
+</html>

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Content Library</title>
+  <link rel="stylesheet" href="/pages/dashboard.css">
+  <script src="/pages/dashboard.js"></script>
+</head>
+<body>
+  <div class="dashboard-container">
+    <header class="dashboard-header">
+      <h1>Content Library</h1>
+      <div class="header-actions">
+        <input type="search" id="searchInput" placeholder="Search..." style="padding: 8px 12px; border-radius: var(--radius); border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary);">
+      </div>
+    </header>
+
+    <div class="tabs">
+      <button class="tab active" onclick="setTab('images', event)">Images</button>
+      <button class="tab" onclick="setTab('topical', event)">Topical Map</button>
+      <button class="tab" onclick="setTab('profile', event)">Client Profile</button>
+    </div>
+
+    <!-- Images Tab -->
+    <div id="imagesTab">
+      <div class="content-grid" id="imageGrid">
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading images...
+        </div>
+      </div>
+    </div>
+
+    <!-- Topical Map Tab -->
+    <div id="topicalTab" style="display: none;">
+      <div style="margin-bottom: 16px;">
+        <select id="websiteSelect" onchange="loadTopicalMap()">
+          <option value="">Select website...</option>
+        </select>
+      </div>
+      <div id="topicalMapContent">
+        <div class="empty-state">
+          <p>Select a website to view topical map</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Profile Tab -->
+    <div id="profileTab" style="display: none;">
+      <div style="margin-bottom: 16px;">
+        <select id="profileSelect" onchange="loadProfile()">
+          <option value="">Select website...</option>
+        </select>
+      </div>
+      <div id="profileContent" style="background: var(--bg-secondary); border-radius: var(--radius); padding: 20px;">
+        <div class="empty-state">
+          <p>Select a website to view client profile</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Preview Modal -->
+  <div id="imageModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 1000; align-items: center; justify-content: center;">
+    <button onclick="closeImageModal()" style="position: absolute; top: 20px; right: 20px; background: none; border: none; color: white; font-size: 2rem; cursor: pointer;">&times;</button>
+    <img id="modalImage" style="max-width: 90%; max-height: 90%; border-radius: var(--radius);">
+  </div>
+
+  <script>
+    const { api, showLoading, showEmpty, openPage } = dashboard;
+
+    let currentTab = 'images';
+    let images = [];
+
+    async function loadImages() {
+      const container = document.getElementById('imageGrid');
+      showLoading(container);
+
+      try {
+        images = await api('/content/library');
+
+        if (images.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <p>No images in library</p>
+              <button class="btn-secondary" onclick="openPage('dashboard-create')">Create a post with image</button>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = images.map(img => `
+          <div class="content-card" onclick="previewImage('${img.image_url}')">
+            <img src="${img.image_url}" alt="${img.title}">
+            <div class="info">
+              <div class="title">${img.title || 'Untitled'}</div>
+              <div class="meta">${img.image_filename || ''}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch (error) {
+        container.innerHTML = `<div class="empty-state"><p>Failed to load images</p></div>`;
+      }
+    }
+
+    function previewImage(url) {
+      document.getElementById('modalImage').src = url;
+      document.getElementById('imageModal').style.display = 'flex';
+    }
+
+    function closeImageModal() {
+      document.getElementById('imageModal').style.display = 'none';
+    }
+
+    // Close modal on escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeImageModal();
+      }
+    });
+
+    async function loadWebsites() {
+      // For now, hardcode known websites based on volume structure
+      // In production, this would be dynamic
+      const websites = [
+        { id: 'foamologyinsulation-web', name: 'Foamology' },
+        { id: 'CCA', name: 'CCA' },
+        { id: 'ICA-Website', name: 'ICA' }
+      ];
+
+      const selects = ['websiteSelect', 'profileSelect'];
+      selects.forEach(selectId => {
+        const select = document.getElementById(selectId);
+        websites.forEach(site => {
+          const option = document.createElement('option');
+          option.value = site.id;
+          option.textContent = site.name;
+          select.appendChild(option);
+        });
+      });
+    }
+
+    async function loadTopicalMap() {
+      const domain = document.getElementById('websiteSelect').value;
+      const container = document.getElementById('topicalMapContent');
+
+      if (!domain) {
+        container.innerHTML = '<div class="empty-state"><p>Select a website</p></div>';
+        return;
+      }
+
+      showLoading(container);
+
+      try {
+        const data = await api(`/content/topical-map?domain=${domain}`);
+
+        if (!data.pillars || data.pillars.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <p>No topical map found for this website</p>
+              <p style="font-size: 0.75rem; margin-top: 8px;">Expected: /websites/${domain}/AI/knowledge/topical-map.json</p>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = data.pillars.map(pillar => `
+          <div style="background: var(--bg-secondary); border-radius: var(--radius); padding: 20px; margin-bottom: 16px;">
+            <h3 style="margin-bottom: 12px; color: var(--accent-blue);">${pillar.title}</h3>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">
+              Keywords: ${pillar.keywords?.join(', ') || 'none'}
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              ${pillar.articles?.map(article => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: var(--bg-card); border-radius: 4px;">
+                  <span>${article.title}</span>
+                  <span class="status-badge status-${article.status || 'planned'}">${article.status || 'planned'}</span>
+                </div>
+              `).join('') || '<p style="color: var(--text-muted);">No articles</p>'}
+            </div>
+          </div>
+        `).join('');
+      } catch (error) {
+        container.innerHTML = `<div class="empty-state"><p>Failed to load topical map: ${error.message}</p></div>`;
+      }
+    }
+
+    async function loadProfile() {
+      const domain = document.getElementById('profileSelect').value;
+      const container = document.getElementById('profileContent');
+
+      if (!domain) {
+        container.innerHTML = '<div class="empty-state"><p>Select a website</p></div>';
+        return;
+      }
+
+      showLoading(container);
+
+      try {
+        const data = await api(`/content/profile?domain=${domain}`);
+
+        if (!data.content) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <p>No client profile found</p>
+              <p style="font-size: 0.75rem; margin-top: 8px;">Expected: /websites/${domain}/AI/CLIENT-PROFILE.md</p>
+            </div>
+          `;
+          return;
+        }
+
+        // Simple markdown rendering
+        const html = data.content
+          .replace(/^### (.*$)/gim, '<h3 style="color: var(--accent-blue); margin: 16px 0 8px;">$1</h3>')
+          .replace(/^## (.*$)/gim, '<h2 style="color: var(--text-primary); margin: 20px 0 12px;">$1</h2>')
+          .replace(/^# (.*$)/gim, '<h1 style="font-size: 1.5rem; margin-bottom: 16px;">$1</h1>')
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/- (.*$)/gim, '<li style="margin-left: 16px;">$1</li>')
+          .replace(/\n/g, '<br>');
+
+        container.innerHTML = html;
+      } catch (error) {
+        container.innerHTML = `<div class="empty-state"><p>Failed to load profile: ${error.message}</p></div>`;
+      }
+    }
+
+    function setTab(tab, event) {
+      currentTab = tab;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+
+      document.getElementById('imagesTab').style.display = tab === 'images' ? 'block' : 'none';
+      document.getElementById('topicalTab').style.display = tab === 'topical' ? 'block' : 'none';
+      document.getElementById('profileTab').style.display = tab === 'profile' ? 'block' : 'none';
+    }
+
+    // Search functionality
+    document.getElementById('searchInput').addEventListener('input', function() {
+      const query = this.value.toLowerCase();
+      const filtered = images.filter(img =>
+        (img.title || '').toLowerCase().includes(query) ||
+        (img.image_filename || '').toLowerCase().includes(query)
+      );
+      renderImages(filtered);
+    });
+
+    function renderImages(imgs) {
+      const container = document.getElementById('imageGrid');
+      if (imgs.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No matching images</p></div>';
+        return;
+      }
+      container.innerHTML = imgs.map(img => `
+        <div class="content-card" onclick="previewImage('${img.image_url}')">
+          <img src="${img.image_url}" alt="${img.title}">
+          <div class="info">
+            <div class="title">${img.title || 'Untitled'}</div>
+            <div class="meta">${img.image_filename || ''}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Initial load
+    loadImages();
+    loadWebsites();
+  </script>
+</body>
+</html>
