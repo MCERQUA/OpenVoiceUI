@@ -658,6 +658,45 @@ def website_dev_proxy(path=''):
         return 'Dev server unavailable', 503
 
 
+# Dashboard API proxy for canvas plugin
+DASHBOARD_API_PORT = int(os.getenv('DASHBOARD_API_PORT', '16300'))
+
+@canvas_bp.route('/dashboard-api', methods=['GET', 'POST', 'PUT', 'DELETE'], strict_slashes=False)
+@canvas_bp.route('/dashboard-api/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def dashboard_api_proxy(path=''):
+    """Proxy requests to the Dashboard API server (canvas plugin)."""
+    try:
+        api_url = f'http://localhost:{DASHBOARD_API_PORT}/{path}'
+        headers = {k: v for k, v in request.headers if k.lower() not in ['host', 'content-length']}
+
+        if request.method == 'GET':
+            resp = http_requests.get(api_url, params=request.args, headers=headers, timeout=30, stream=True)
+        elif request.method == 'POST':
+            resp = http_requests.post(api_url, json=request.get_json(silent=True), data=request.get_data(), headers=headers, timeout=30, stream=True)
+        elif request.method == 'PUT':
+            resp = http_requests.put(api_url, json=request.get_json(silent=True), data=request.get_data(), headers=headers, timeout=30, stream=True)
+        elif request.method == 'DELETE':
+            resp = http_requests.delete(api_url, headers=headers, timeout=30, stream=True)
+        else:
+            return 'Method not allowed', 405
+
+        content_type = resp.headers.get('content-type', '')
+
+        def generate():
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+
+        # Forward content type and other relevant headers
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        response_headers = [(k, v) for k, v in resp.headers.items() if k.lower() not in excluded_headers]
+
+        return Response(generate(), status=resp.status_code, headers=response_headers)
+    except Exception as exc:
+        logger.error(f'Dashboard API proxy error: {exc}')
+        return jsonify({'error': 'Dashboard API unavailable', 'message': str(exc)}), 503
+
+
 @canvas_bp.route('/canvas-session/<path:path>', methods=['GET', 'POST'])
 def canvas_session_proxy(path):
     """Proxy Canvas session API requests."""

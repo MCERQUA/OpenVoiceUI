@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Schedule</title>
+  <link rel="stylesheet" href="/pages/dashboard.css">
+  <script src="/pages/dashboard.js"></script>
+</head>
+<body>
+  <div class="dashboard-container">
+    <header class="dashboard-header">
+      <h1>Schedule</h1>
+      <div class="header-actions">
+        <select id="brandFilter" onchange="loadSchedule()">
+          <option value="">All Brands</option>
+        </select>
+      </div>
+    </header>
+
+    <div class="stats-grid" id="statsGrid">
+      <div class="stat-card">
+        <span class="stat-value">-</span>
+        <span class="stat-label">Scheduled</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">-</span>
+        <span class="stat-label">Published</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">-</span>
+        <span class="stat-label">This Week</span>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="setView('calendar', event)">Calendar</button>
+      <button class="tab" onclick="setView('list', event)">List</button>
+    </div>
+
+    <div id="calendarView">
+      <div id="calendarHeader" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <button class="btn-secondary" onclick="prevWeek()">&larr; Previous</button>
+        <h3 id="weekLabel">This Week</h3>
+        <button class="btn-secondary" onclick="nextWeek()">Next &rarr;</button>
+      </div>
+
+      <div id="calendarGrid" class="calendar-grid">
+        <!-- Calendar days will be rendered here -->
+      </div>
+    </div>
+
+    <div id="listView" style="display: none;">
+      <div class="post-queue" id="scheduleList">
+        <div class="loading">
+          <div class="spinner"></div>
+          Loading schedule...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schedule Modal -->
+  <div id="scheduleModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: var(--bg-secondary); border-radius: var(--radius); padding: 24px; max-width: 500px; width: 90%;">
+      <h3 style="margin-bottom: 16px;">Schedule Post</h3>
+      <div class="form-group">
+        <label>Post</label>
+        <p id="modalPostTitle" style="color: var(--text-secondary);"></p>
+      </div>
+      <div class="form-group">
+        <label for="scheduleDate">Date & Time</label>
+        <input type="datetime-local" id="scheduleDate">
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 16px;">
+        <button class="btn-approve" onclick="confirmSchedule()">Schedule</button>
+        <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { api, showLoading, showToast, formatDate, openPage } = dashboard;
+
+    let currentView = 'calendar';
+    let currentWeekStart = getWeekStart(new Date());
+    let selectedPostId = null;
+    let scheduledPosts = [];
+
+    function getWeekStart(date) {
+      const d = new Date(date);
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      return new Date(d.setDate(diff));
+    }
+
+    function formatDateHeader(date) {
+      return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    async function loadBrands() {
+      try {
+        const brands = await api('/brands');
+        const select = document.getElementById('brandFilter');
+        brands.forEach(brand => {
+          const option = document.createElement('option');
+          option.value = brand.id;
+          option.textContent = brand.name;
+          select.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Failed to load brands:', error);
+      }
+    }
+
+    async function loadStats() {
+      try {
+        const stats = await api('/schedule/stats');
+        document.getElementById('statsGrid').innerHTML = `
+          <div class="stat-card">
+            <span class="stat-value">${stats.scheduled || 0}</span>
+            <span class="stat-label">Scheduled</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">${stats.published || 0}</span>
+            <span class="stat-label">Published</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">${countThisWeek()}</span>
+            <span class="stat-label">This Week</span>
+          </div>
+        `;
+      } catch (error) {
+        console.error('Failed to load stats:', error);
+      }
+    }
+
+    function countThisWeek() {
+      const weekEnd = new Date(currentWeekStart);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      return scheduledPosts.filter(p => {
+        const date = new Date(p.scheduled_for);
+        return date >= currentWeekStart && date < weekEnd;
+      }).length;
+    }
+
+    async function loadSchedule() {
+      const brandFilter = document.getElementById('brandFilter').value;
+      const listContainer = document.getElementById('scheduleList');
+      showLoading(listContainer);
+
+      try {
+        let url = '/schedule';
+        if (brandFilter) {
+          url += `?brand_id=${brandFilter}`;
+        }
+
+        scheduledPosts = await api(url);
+
+        renderCalendar();
+        renderList();
+        loadStats();
+      } catch (error) {
+        listContainer.innerHTML = `<div class="empty-state"><p>Failed to load schedule</p></div>`;
+      }
+    }
+
+    function renderCalendar() {
+      const grid = document.getElementById('calendarGrid');
+      grid.innerHTML = '';
+
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(currentWeekStart);
+        date.setDate(date.getDate() + i);
+
+        const isToday = date.toDateString() === new Date().toDateString();
+        const dayPosts = scheduledPosts.filter(p => {
+          const postDate = new Date(p.scheduled_for);
+          return postDate.toDateString() === date.toDateString();
+        });
+
+        const dayEl = document.createElement('div');
+        dayEl.className = `calendar-day${isToday ? ' today' : ''}`;
+        dayEl.innerHTML = `
+          <div class="date">${days[i]} ${date.getDate()}</div>
+          ${dayPosts.map(post => `
+            <div class="scheduled-item" onclick="showPostOptions(${post.id})">
+              <div style="font-weight: 500;">${post.title || 'Untitled'}</div>
+              <div style="font-size: 0.7rem; color: var(--text-muted);">
+                ${new Date(post.scheduled_for).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              </div>
+            </div>
+          `).join('')}
+        `;
+        grid.appendChild(dayEl);
+      }
+
+      // Update week label
+      const weekEnd = new Date(currentWeekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      document.getElementById('weekLabel').textContent =
+        `${formatDateHeader(currentWeekStart)} - ${formatDateHeader(weekEnd)}`;
+    }
+
+    function renderList() {
+      const container = document.getElementById('scheduleList');
+
+      if (scheduledPosts.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <p>No scheduled posts</p>
+            <button class="btn-secondary" onclick="openPage('dashboard-posts')">Approve posts first</button>
+          </div>
+        `;
+        return;
+      }
+
+      // Sort by date
+      const sorted = [...scheduledPosts].sort((a, b) =>
+        new Date(a.scheduled_for) - new Date(b.scheduled_for)
+      );
+
+      container.innerHTML = sorted.map(post => `
+        <div class="post-card">
+          <div class="post-content">
+            <h3>${post.title || 'Untitled'}</h3>
+            <p>${post.content?.substring(0, 150) || ''}...</p>
+            <div style="margin-top: 8px; color: var(--accent-blue);">
+              Scheduled: ${formatDate(post.scheduled_for)}
+            </div>
+          </div>
+          ${post.image_url ? `
+            <div class="post-image">
+              <img src="${post.image_url}" alt="${post.title}">
+            </div>
+          ` : ''}
+          <div class="post-actions">
+            <button class="btn-approve" onclick="publishNow(${post.id})">Publish Now</button>
+            <button class="btn-reject" onclick="unschedule(${post.id})">Unschedule</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function setView(view, event) {
+      currentView = view;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('calendarView').style.display = view === 'calendar' ? 'block' : 'none';
+      document.getElementById('listView').style.display = view === 'list' ? 'block' : 'none';
+    }
+
+    function prevWeek() {
+      currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+      renderCalendar();
+    }
+
+    function nextWeek() {
+      currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+      renderCalendar();
+    }
+
+    function showPostOptions(postId) {
+      const post = scheduledPosts.find(p => p.id === postId);
+      if (!post) return;
+
+      if (confirm(`Publish "${post.title || 'Untitled'}" now?`)) {
+        publishNow(postId);
+      }
+    }
+
+    async function publishNow(postId) {
+      try {
+        await api('/schedule/publish', {
+          method: 'POST',
+          body: JSON.stringify({ postId })
+        });
+        showToast('Post published!', 'success');
+        loadSchedule();
+      } catch (error) {
+        showToast('Failed to publish: ' + error.message, 'error');
+      }
+    }
+
+    async function unschedule(postId) {
+      if (!confirm('Remove this post from the schedule?')) return;
+
+      try {
+        await api(`/schedule/${postId}`, { method: 'DELETE' });
+        showToast('Post unscheduled', 'success');
+        loadSchedule();
+      } catch (error) {
+        showToast('Failed to unschedule: ' + error.message, 'error');
+      }
+    }
+
+    // Initial load
+    loadBrands();
+    loadSchedule();
+  </script>
+</body>
+</html>

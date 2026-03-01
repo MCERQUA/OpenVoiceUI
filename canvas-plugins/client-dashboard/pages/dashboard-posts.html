@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Post Approvals</title>
+  <link rel="stylesheet" href="/pages/dashboard.css">
+  <script src="/pages/dashboard.js"></script>
+</head>
+<body>
+  <div class="dashboard-container">
+    <header class="dashboard-header">
+      <h1>Post Approvals</h1>
+      <div class="header-actions">
+        <select id="brandFilter" onchange="loadPosts()">
+          <option value="">All Brands</option>
+        </select>
+        <button class="btn-secondary" onclick="dashboard.openPage('dashboard-create')">+ New Post</button>
+      </div>
+    </header>
+
+    <div class="tabs">
+      <button class="tab active" onclick="setStatusFilter('pending', event)">Pending</button>
+      <button class="tab" onclick="setStatusFilter('approved', event)">Approved</button>
+      <button class="tab" onclick="setStatusFilter('rejected', event)">Rejected</button>
+      <button class="tab" onclick="setStatusFilter('published', event)">Published</button>
+    </div>
+
+    <div class="post-queue" id="postQueue">
+      <div class="loading">
+        <div class="spinner"></div>
+        Loading posts...
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { api, showLoading, showToast, getStatusBadge, timeAgo, openPage } = dashboard;
+
+    let statusFilter = 'pending';
+    let brandFilter = '';
+
+    async function loadBrands() {
+      try {
+        const brands = await api('/brands');
+        const select = document.getElementById('brandFilter');
+        brands.forEach(brand => {
+          const option = document.createElement('option');
+          option.value = brand.id;
+          option.textContent = brand.name;
+          select.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Failed to load brands:', error);
+      }
+    }
+
+    async function loadPosts() {
+      const container = document.getElementById('postQueue');
+      showLoading(container);
+
+      brandFilter = document.getElementById('brandFilter').value;
+
+      try {
+        let url = `/posts?status=${statusFilter}&limit=50`;
+        if (brandFilter) {
+          url = `/posts?brand_id=${brandFilter}&limit=50`;
+        }
+
+        const posts = await api(url);
+
+        // Filter by status on client side if needed
+        let filteredPosts = posts;
+        if (statusFilter && !brandFilter) {
+          filteredPosts = posts.filter(p => p.approval_status === statusFilter);
+        }
+
+        if (filteredPosts.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <p>No ${statusFilter} posts</p>
+              ${statusFilter === 'pending' ? '<button class="btn-secondary" onclick="openPage(\'dashboard-create\')">Create a post</button>' : ''}
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = filteredPosts.map(post => `
+          <div class="post-card" data-id="${post.id}">
+            <div class="post-content">
+              <h3>${post.title || 'Untitled Post'}</h3>
+              <p>${post.content || ''}</p>
+              <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center;">
+                ${getStatusBadge(post.approval_status)}
+                <span style="color: var(--text-muted); font-size: 0.75rem;">${post.brand_name || ''}</span>
+                <span style="color: var(--text-muted); font-size: 0.75rem;">${timeAgo(post.created_at)}</span>
+              </div>
+              ${post.approval_status === 'rejected' && post.rejection_reason ? `
+                <div style="margin-top: 8px; color: var(--accent-red); font-size: 0.875rem;">
+                  Reason: ${post.rejection_reason}
+                </div>
+              ` : ''}
+            </div>
+            ${post.image_url ? `
+              <div class="post-image">
+                <img src="${post.image_url}" alt="${post.title}">
+              </div>
+            ` : `
+              <div class="post-image" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
+                No image
+              </div>
+            `}
+            <div class="post-actions">
+              ${post.approval_status === 'pending' ? `
+                <button class="btn-approve" onclick="approvePost(${post.id})">Approve</button>
+                <button class="btn-reject" onclick="rejectPost(${post.id})">Reject</button>
+              ` : ''}
+              ${post.approval_status === 'approved' ? `
+                <button class="btn-secondary" onclick="schedulePost(${post.id})">Schedule</button>
+                <button class="btn-approve" onclick="publishNow(${post.id})">Publish Now</button>
+              ` : ''}
+              ${post.approval_status === 'rejected' ? `
+                <button class="btn-secondary" onclick="editPost(${post.id})">Edit & Resubmit</button>
+              ` : ''}
+            </div>
+          </div>
+        `).join('');
+      } catch (error) {
+        container.innerHTML = `<div class="empty-state"><p>Failed to load posts: ${error.message}</p></div>`;
+      }
+    }
+
+    function setStatusFilter(status, event) {
+      statusFilter = status;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      loadPosts();
+    }
+
+    async function approvePost(postId) {
+      try {
+        await api('/approvals', {
+          method: 'POST',
+          body: JSON.stringify({ postId, status: 'approved' })
+        });
+        showToast('Post approved!', 'success');
+        loadPosts();
+      } catch (error) {
+        showToast('Failed to approve: ' + error.message, 'error');
+      }
+    }
+
+    async function rejectPost(postId) {
+      const reason = prompt('Rejection reason:');
+      if (!reason) return;
+
+      try {
+        await api('/approvals', {
+          method: 'POST',
+          body: JSON.stringify({ postId, status: 'rejected', rejection_reason: reason })
+        });
+        showToast('Post rejected', 'success');
+        loadPosts();
+      } catch (error) {
+        showToast('Failed to reject: ' + error.message, 'error');
+      }
+    }
+
+    function schedulePost(postId) {
+      // Navigate to schedule page with post selected
+      openPage('dashboard-schedule');
+    }
+
+    async function publishNow(postId) {
+      if (!confirm('Publish this post now?')) return;
+
+      try {
+        await api('/schedule/publish', {
+          method: 'POST',
+          body: JSON.stringify({ postId })
+        });
+        showToast('Post published!', 'success');
+        loadPosts();
+      } catch (error) {
+        showToast('Failed to publish: ' + error.message, 'error');
+      }
+    }
+
+    function editPost(postId) {
+      openPage('dashboard-create');
+    }
+
+    // Initial load
+    loadBrands();
+    loadPosts();
+
+    // Auto-refresh every 30s
+    setInterval(loadPosts, 30000);
+  </script>
+</body>
+</html>

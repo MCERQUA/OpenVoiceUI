@@ -1,0 +1,21 @@
+{
+  "id": "client-dashboard",
+  "name": "Client Dashboard",
+  "version": "1.0.0",
+  "description": "Social media content management dashboard for OpenVoiceUI canvas",
+  "author": "JAM Social",
+  "pages": [
+    {"file": "dashboard.html", "title": "Dashboard", "voice_aliases": ["dashboard", "overview", "home"]},
+    {"file": "dashboard-posts.html", "title": "Post Approvals", "voice_aliases": ["posts", "approvals", "pending posts", "post queue"]},
+    {"file": "dashboard-create.html", "title": "Create Post", "voice_aliases": ["create post", "new post", "add post"]},
+    {"file": "dashboard-schedule.html", "title": "Schedule", "voice_aliases": ["schedule", "calendar", "scheduled posts"]},
+    {"file": "dashboard-content.html", "title": "Content Library", "voice_aliases": ["content", "library", "images", "media"]}
+  ],
+  "api_port_range": [16300, 16399],
+  "requires": {
+    "database": "postgresql",
+    "env": ["DATABASE_URL", "GEMINI_API_KEY", "ONEUP_API_KEY"]
+  },
+  "install": "./install.sh",
+  "uninstall": "./uninstall.sh"
+}
