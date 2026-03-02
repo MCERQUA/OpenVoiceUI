@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import struct
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,27 @@ def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) 
 
 # ===== UNIFIED GENERATE FUNCTION =====
 
+# Fallback order when a provider fails (provider_id → fallback_id)
+_FALLBACK_CHAIN = {
+    'groq': 'supertonic',
+    'qwen3': 'supertonic',
+}
+
+_MAX_RETRIES = 2
+_RETRY_DELAYS = (0.5, 1.5)  # seconds between retries
+
+
+def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
+    """Generate audio bytes from a single provider (no retry/fallback)."""
+    provider = get_provider(tts_provider)
+    provider_info = provider.get_info()
+    audio_format = provider_info.get('audio_format', 'wav')
+
+    if audio_format == 'mp3':
+        return provider.generate_speech(text=text, voice=voice)
+    return generate_tts_chunked(provider, text, voice)
+
+
 def generate_tts_b64(
     text: str,
     voice: Optional[str] = None,
@@ -185,8 +207,8 @@ def generate_tts_b64(
     """
     Generate TTS audio and return as a base64-encoded string.
 
-    Uses whichever provider is specified. MP3 providers (groq, qwen3) bypass
-    WAV chunking logic.
+    Retries transient failures up to _MAX_RETRIES times, then falls back
+    to an alternate provider (e.g. groq → supertonic).
 
     Args:
         text: Text to synthesize.
@@ -198,21 +220,37 @@ def generate_tts_b64(
     """
     voice = voice or 'M1'
 
-    try:
-        provider = get_provider(tts_provider)
-        provider_info = provider.get_info()
-        audio_format = provider_info.get('audio_format', 'wav')
+    # ── Try primary provider with retries ────────────────────────────
+    last_err = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            audio_bytes = _generate_with_provider(tts_provider, text, voice)
+            logger.info(f"TTS generated: provider={tts_provider}, voice={voice}, attempt={attempt + 1}")
+            return base64.b64encode(audio_bytes).decode('utf-8')
+        except Exception as e:
+            last_err = e
+            if attempt < _MAX_RETRIES:
+                delay = _RETRY_DELAYS[attempt]
+                logger.warning(f"TTS attempt {attempt + 1} failed (provider={tts_provider}): {e} — retrying in {delay}s")
+                time.sleep(delay)
+            else:
+                logger.error(f"TTS retries exhausted (provider={tts_provider}): {e}")
 
-        if audio_format == 'mp3':
-            audio_bytes = provider.generate_speech(text=text, voice=voice)
-        else:
-            audio_bytes = generate_tts_chunked(provider, text, voice)
+    # ── Fallback to alternate provider ───────────────────────────────
+    fallback_id = _FALLBACK_CHAIN.get(tts_provider)
+    if fallback_id:
+        logger.info(f"TTS falling back: {tts_provider} → {fallback_id}")
+        try:
+            fallback_provider = get_provider(fallback_id)
+            fallback_voice = fallback_provider.get_default_voice()
+            audio_bytes = _generate_with_provider(fallback_id, text, fallback_voice)
+            logger.info(f"TTS fallback OK: provider={fallback_id}, voice={fallback_voice}")
+            return base64.b64encode(audio_bytes).decode('utf-8')
+        except Exception as fb_err:
+            logger.error(f"TTS fallback also failed (provider={fallback_id}): {fb_err}")
 
-        logger.info(f"TTS generated: provider={tts_provider}, voice={voice}, format={audio_format}")
-        return base64.b64encode(audio_bytes).decode('utf-8')
-    except Exception as e:
-        logger.error(f"TTS generation failed (provider={tts_provider}): {e}")
-        return None
+    logger.error(f"TTS generation failed — all providers exhausted for: '{text[:60]}'")
+    return None
 
 
 __all__ = [
