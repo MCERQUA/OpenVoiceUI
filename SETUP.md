@@ -85,6 +85,24 @@ GROQ_API_KEY=your-groq-key
 SECRET_KEY=any-random-string-here
 ```
 
+**Optional: enable the coding-agent skill**
+
+The coding-agent skill lets the AI write code, create files, and run commands
+autonomously. It requires a coding CLI installed in the openclaw container.
+Set `CODING_CLI` in your `.env` before building — same options as openclaw's
+setup wizard:
+
+```bash
+# Choose one (or leave unset to skip):
+CODING_CLI=codex      # OpenAI Codex — also needs OPENAI_API_KEY
+CODING_CLI=claude     # Anthropic Claude Code — also needs ANTHROPIC_API_KEY
+CODING_CLI=opencode   # OpenCode — bring your own provider key
+CODING_CLI=pi         # Pi coding agent — bring your own provider key
+```
+
+> If you already ran openclaw's interactive setup wizard, it asked you this
+> question — you don't need to set it here.
+
 ```bash
 docker compose up --build
 ```
