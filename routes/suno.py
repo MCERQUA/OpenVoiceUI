@@ -39,9 +39,16 @@ GENERATED_METADATA_FILE = GENERATED_MUSIC_DIR / 'generated_metadata.json'
 
 SUNO_API_KEY = os.environ.get('SUNO_API_KEY', '')
 SUNO_API_BASE = 'https://api.sunoapi.org'
-SUNO_CALLBACK_URL = os.environ.get('SUNO_CALLBACK_URL', '')
 SUNO_WEBHOOK_SECRET = os.environ.get('SUNO_WEBHOOK_SECRET', '')
 SUNO_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB cap on audio downloads
+
+# Callback URL: explicit > auto-derived from DOMAIN > empty
+# sunoapi.org requires callBackUrl; auto-derive from DOMAIN if not set explicitly.
+_domain = os.environ.get('DOMAIN', '')
+SUNO_CALLBACK_URL = (
+    os.environ.get('SUNO_CALLBACK_URL')
+    or (f'https://{_domain}/api/suno/callback' if _domain else '')
+)
 
 # ---------------------------------------------------------------------------
 # In-memory job tracking (single-worker deployment)
