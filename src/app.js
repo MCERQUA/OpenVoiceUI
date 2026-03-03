@@ -2650,6 +2650,7 @@ inject();
                 FaceModule.setMood('thinking');
                 StatusModule.update('thinking', 'CONNECTING...');
                 document.getElementById('thought-bubbles')?.classList.add('active');
+                window.HaloSmokeFace?.setThinking(true);
 
                 // Guard mic from the start — greeting fetch + TTS play will set this properly
                 // via onSpeaking, but setting it here prevents any STT results that arrive
@@ -2822,6 +2823,7 @@ inject();
                 StatusModule.update('thinking', 'THINKING');
                 TranscriptPanel.showThinking();
                 document.getElementById('thought-bubbles')?.classList.add('active');
+                window.HaloSmokeFace?.setThinking(true);
 
                 ActionConsole.addEntry('chat', `Sent: "${text.substring(0, 80)}${text.length > 80 ? '...' : ''}"`);
 
@@ -3038,6 +3040,7 @@ inject();
                                         TranscriptPanel.removeThinking();
                                         TranscriptPanel.startStreaming();
                                         document.getElementById('thought-bubbles')?.classList.remove('active');
+                                        window.HaloSmokeFace?.setThinking(false);
                                         // Create streaming message element
                                         streamingMsgEl = this.displayMessage('assistant', stripCanvasTags(streamingText), true);
                                     } else if (streamingMsgEl) {
@@ -3188,6 +3191,7 @@ inject();
                         TranscriptPanel.removeThinking();
                         TranscriptPanel.finalizeStreaming(null);
                         document.getElementById('thought-bubbles')?.classList.remove('active');
+                        window.HaloSmokeFace?.setThinking(false);
                         setTimeout(() => FaceModule.setMood('neutral'), 2000);
                     }
                 } finally {
@@ -4053,6 +4057,7 @@ inject();
                 StatusModule.update('thinking', 'THINKING');
                 TranscriptPanel.showThinking();
                 document.getElementById('thought-bubbles')?.classList.add('active');
+                window.HaloSmokeFace?.setThinking(true);
 
                 // NOTE: STT stays running - isProcessing flag blocks new transcripts
 
@@ -4090,6 +4095,7 @@ inject();
                         FaceModule.setMood('neutral');
                         TranscriptPanel.removeThinking();
                         document.getElementById('thought-bubbles')?.classList.remove('active');
+                        window.HaloSmokeFace?.setThinking(false);
 
                         console.log('AI responded:', data.response);
                         const rawResponse = data.response;
@@ -4138,6 +4144,7 @@ inject();
                     // Reset processing flag to allow new transcripts
                     TranscriptPanel.removeThinking();
                     document.getElementById('thought-bubbles')?.classList.remove('active');
+                    window.HaloSmokeFace?.setThinking(false);
                     this.stt.resetProcessing();
                     this.callbacks.onListening();
                 }
@@ -5114,6 +5121,7 @@ inject();
                     FaceModule.setMood('thinking');
                     StatusModule.update('thinking', 'CONNECTING...');
                     document.getElementById('thought-bubbles')?.classList.add('active');
+                    window.HaloSmokeFace?.setThinking(true);
 
                     // Flash buttons and start conversation
                     callButton.classList.add('auto-triggered');
@@ -5165,6 +5173,7 @@ inject();
                     document.getElementById('stop-button').style.display = '';
                     // Clear thinking state when TTS starts — agent is now speaking, not thinking
                     document.getElementById('thought-bubbles')?.classList.remove('active');
+                    window.HaloSmokeFace?.setThinking(false);
                     TranscriptPanel.removeThinking?.();
                     if (voiceConversation.stt) {
                         console.log('🔇 Muting mic during TTS');
@@ -5252,6 +5261,7 @@ inject();
                         FaceModule.setMood('thinking');
                         StatusModule.update('thinking', 'CONNECTING...');
                         document.getElementById('thought-bubbles')?.classList.add('active');
+                        window.HaloSmokeFace?.setThinking(true);
                     }
                     ModeManager.toggleVoice();
                 });

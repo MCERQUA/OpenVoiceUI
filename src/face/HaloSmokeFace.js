@@ -64,8 +64,14 @@ window.HaloSmokeFace = (function () {
         const an = window.audioAnalyser;
 
         if (!an) {
-            // Gentle idle pulse — calm swirling with no reactivity
             const t = performance.now() * 0.001;
+            if (_thinking) {
+                // Breathing pulse — dramatic slow oscillation while AI processes
+                const breath = (Math.sin(t * Math.PI) * 0.5 + 0.5); // ~2s cycle
+                const amp = 0.08 + breath * 0.27; // 0.08 – 0.35
+                return { amp, bass: amp * 0.9, mid: amp * 0.5, treble: amp * 0.3, kick: 0, drive: amp * 0.8, burst: 0, freq: null };
+            }
+            // Gentle idle pulse — calm swirling with no reactivity
             const idle = (Math.sin(t * 0.9) * 0.5 + 0.5) * 0.06;
             return { amp: idle, bass: idle, mid: idle * 0.5, treble: idle * 0.2, kick: 0, drive: idle * 0.8, burst: 0, freq: null };
         }
@@ -151,6 +157,7 @@ window.HaloSmokeFace = (function () {
     let _distortion = 0;
     let _colorShock = 0;
     let _spin = 0;
+    let _thinking = false;
 
     function _initWisps() {
         _wisps = [];
@@ -221,7 +228,8 @@ window.HaloSmokeFace = (function () {
         const segments = S.quality === 'high' ? 48 : S.quality === 'low' ? 24 : 36;
 
         for (const ws of _wisps) {
-            ws.angle += dt * ws.speed * (0.3 + dr * 1.5 + burst * 3.0) * mo;
+            const thinkBoost = _thinking ? 1.2 : 0;
+            ws.angle += dt * ws.speed * (0.3 + thinkBoost + dr * 1.5 + burst * 3.0) * mo;
             const layerDepth = 0.4 + ws.layer * 0.25;
 
             ctx.beginPath();
@@ -273,6 +281,38 @@ window.HaloSmokeFace = (function () {
                 ctx.lineTo(cx + Math.cos(fa) * (fr + fl2), cy + Math.sin(fa) * (fr + fl2));
                 ctx.stroke();
             }
+        }
+
+        // ── Thinking: orbiting dots ──
+        if (_thinking) {
+            const orbitSpeed = 1.2;
+            const dotCount = 3;
+            const dotRadius = 4;
+            const trailLen = 0.35; // radians of trail arc
+            for (let i = 0; i < dotCount; i++) {
+                const baseAngle = t * orbitSpeed + (i / dotCount) * TAU;
+                const dx = cx + Math.cos(baseAngle) * ringR;
+                const dy = cy + Math.sin(baseAngle) * ringR;
+                const dotHue = (calmHue + i * 40) % 360;
+
+                // Comet trail
+                ctx.beginPath();
+                ctx.arc(cx, cy, ringR, baseAngle - trailLen, baseAngle, false);
+                ctx.strokeStyle = `hsla(${dotHue},80%,65%,0.25)`;
+                ctx.lineWidth = 3;
+                ctx.shadowColor = `hsla(${dotHue},90%,60%,0.3)`;
+                ctx.shadowBlur = 10;
+                ctx.stroke();
+
+                // Bright dot
+                ctx.beginPath();
+                ctx.arc(dx, dy, dotRadius, 0, TAU);
+                ctx.fillStyle = `hsla(${dotHue},85%,75%,0.9)`;
+                ctx.shadowColor = `hsla(${dotHue},100%,70%,0.8)`;
+                ctx.shadowBlur = 18;
+                ctx.fill();
+            }
+            ctx.shadowBlur = 0;
         }
 
         // ── Central bright core dot ──
@@ -441,6 +481,7 @@ window.HaloSmokeFace = (function () {
         _distortion = 0;
         _colorShock = 0;
         _spin       = 0;
+        _thinking   = false;
         _firstFrame = true;
 
         _t0   = performance.now();
@@ -462,5 +503,7 @@ window.HaloSmokeFace = (function () {
         _container = null;
     }
 
-    return { start, stop };
+    function setThinking(v) { _thinking = !!v; }
+
+    return { start, stop, setThinking };
 })();
