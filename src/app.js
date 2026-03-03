@@ -440,6 +440,7 @@ inject();
             noiseOffset: 0,
             isSpeaking: false,
             wavePhase: 0,
+            _tdBuf: null,
 
             init() {
                 this.ctx = this.canvas.getContext('2d');
@@ -461,13 +462,30 @@ inject();
             },
 
             animate() {
-                // When speaking, generate random amplitude like original ai-eyes
-                if (this.isSpeaking) {
+                const an = window.audioAnalyser;
+
+                // Drive amplitude from real analyser data when available
+                if (this.isSpeaking && an) {
+                    // Compute RMS from time-domain for amplitude
+                    if (!this._tdBuf || this._tdBuf.length !== an.fftSize) {
+                        this._tdBuf = new Uint8Array(an.fftSize);
+                    }
+                    an.getByteTimeDomainData(this._tdBuf);
+                    let sum = 0;
+                    for (let i = 0; i < this._tdBuf.length; i++) {
+                        const v = (this._tdBuf[i] - 128) / 128;
+                        sum += v * v;
+                    }
+                    const rms = Math.sqrt(sum / this._tdBuf.length);
+                    // Scale RMS up for visible mouth movement (speech RMS is typically 0.05-0.3)
+                    this.targetAmplitude = Math.min(1, rms * 4.5);
+                } else if (this.isSpeaking) {
+                    // Fallback: no analyser — use random (legacy behavior)
                     this.wavePhase += 0.12 + this.amplitude * 0.1;
                     this.targetAmplitude = 0.3 + Math.random() * 0.7;
                 }
 
-                this.amplitude += (this.targetAmplitude - this.amplitude) * 0.3;
+                this.amplitude += (this.targetAmplitude - this.amplitude) * 0.25;
                 this.noiseOffset += 0.3;
 
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -475,9 +493,43 @@ inject();
                 const centerY = this.canvas.height / 2;
                 const time = Date.now() * 0.001;
 
-                // When speaking, draw chaotic intense waveform
-                if (this.amplitude > 0.1) {
-                    // Multiple overlapping waves + noise for chaos
+                // Draw real waveform from analyser when speaking with audio data
+                if (this.amplitude > 0.05 && an && this._tdBuf) {
+                    const td = this._tdBuf;
+                    const w = this.canvas.width;
+                    const h = this.canvas.height;
+                    const halfH = h * 0.45; // vertical range
+
+                    // Main waveform — draw actual time-domain audio
+                    this.ctx.strokeStyle = '#00ffff';
+                    this.ctx.lineWidth = 2.5;
+                    this.ctx.lineCap = 'round';
+                    this.ctx.lineJoin = 'round';
+                    this.ctx.beginPath();
+
+                    const step = Math.max(1, Math.floor(td.length / 100));
+                    const points = Math.floor(td.length / step);
+                    for (let i = 0; i < points; i++) {
+                        const x = (i / points) * w;
+                        const normalizedX = i / points;
+                        const edgeFade = Math.sin(normalizedX * Math.PI);
+                        // Map sample: 128 = silence (center), 0/-128 = peaks
+                        const sample = (td[i * step] - 128) / 128;
+                        const y = centerY + sample * halfH * edgeFade * Math.min(1, this.amplitude * 2.5);
+
+                        if (i === 0) this.ctx.moveTo(x, y);
+                        else this.ctx.lineTo(x, y);
+                    }
+                    this.ctx.stroke();
+
+                    // Glow layer
+                    this.ctx.strokeStyle = `rgba(0, 255, 255, ${0.15 + this.amplitude * 0.2})`;
+                    this.ctx.lineWidth = 7;
+                    this.ctx.stroke();
+
+                } else if (this.amplitude > 0.1) {
+                    // Fallback chaotic waveform (no analyser)
+                    this.wavePhase += 0.12 + this.amplitude * 0.1;
                     this.ctx.strokeStyle = '#00ffff';
                     this.ctx.lineWidth = 3;
                     this.ctx.lineCap = 'round';
@@ -489,28 +541,16 @@ inject();
                         const x = (i / points) * this.canvas.width;
                         const normalizedX = i / points;
                         const edgeFade = Math.sin(normalizedX * Math.PI);
-
-                        // Layer multiple frequencies for complex waveform
                         const wave1 = Math.sin((normalizedX * 4 + this.wavePhase) * Math.PI * 2) * 8;
                         const wave2 = Math.sin((normalizedX * 7 + this.wavePhase * 1.3) * Math.PI * 2) * 12;
                         const wave3 = Math.sin((normalizedX * 13 + this.wavePhase * 0.7) * Math.PI * 2) * 5;
-
-                        // Add randomized noise/jitter
                         const noise = (Math.random() - 0.5) * 8 * this.amplitude;
-
-                        // Combine all waves with edge fade
                         const combined = (wave1 + wave2 + wave3 + noise) * this.amplitude * edgeFade;
                         const y = centerY + combined;
-
-                        if (i === 0) {
-                            this.ctx.moveTo(x, y);
-                        } else {
-                            this.ctx.lineTo(x, y);
-                        }
+                        if (i === 0) this.ctx.moveTo(x, y);
+                        else this.ctx.lineTo(x, y);
                     }
                     this.ctx.stroke();
-
-                    // Glow layer - thicker line for the glow effect
                     this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
                     this.ctx.lineWidth = 8;
                     this.ctx.stroke();
