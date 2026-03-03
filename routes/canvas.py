@@ -446,16 +446,18 @@ def canvas_update():
             update_canvas_context(path, title)
             logger.info(f'Canvas context updated: {path}')
 
-        canvas_response = http_requests.post(
-            f'http://localhost:{CANVAS_SSE_PORT}/update',
-            json=data,
-            headers={'Content-Type': 'application/json'},
-            timeout=5,
-        )
-
-        if canvas_response.status_code != 200:
-            logger.error(f'Canvas server error: {canvas_response.status_code}')
-            return jsonify({'error': f'Canvas update failed: {canvas_response.status_code}'}), canvas_response.status_code
+        try:
+            canvas_response = http_requests.post(
+                f'http://localhost:{CANVAS_SSE_PORT}/update',
+                json=data,
+                headers={'Content-Type': 'application/json'},
+                timeout=5,
+            )
+            if canvas_response.status_code != 200:
+                logger.warning(f'Canvas SSE server error: {canvas_response.status_code}')
+        except Exception as sse_exc:
+            # SSE server not running — canvas context already updated above, non-fatal
+            logger.debug(f'Canvas SSE not available (no live display): {sse_exc}')
 
         return jsonify({'success': True, 'message': 'Canvas updated successfully'})
 
@@ -521,8 +523,8 @@ def canvas_sse_proxy(path):
             headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
         )
     except Exception as exc:
-        logger.error(f'Canvas SSE proxy error: {exc}')
-        return jsonify({'error': 'Canvas proxy error'}), 500
+        logger.debug(f'Canvas SSE not available: {exc}')
+        return jsonify({'error': 'Canvas SSE not available'}), 503
 
 
 def _safe_canvas_path(base: str, user_path: str) -> Path | None:

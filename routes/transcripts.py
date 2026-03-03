@@ -118,3 +118,78 @@ def get_transcript(date_dir, filename):
         return jsonify({'error': 'Not found'}), 404
     with open(filepath, 'r', encoding='utf-8') as f:
         return f.read(), 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+
+import logging as _transcript_logger
+
+def save_conversation_turn(
+    user_msg: str,
+    ai_response: str,
+    session_id: str = 'default',
+    session_key: str = None,
+    tts_provider: str = None,
+    voice: str = None,
+    duration_ms: int = None,
+    actions: list = None,
+    identified_person: dict = None,
+) -> 'str | None':
+    """Save one conversation turn as a JSON transcript file.
+
+    Organized as: transcripts/YYYY-MM-DD/HH-MM-SS_<session_key>_<session_id>.json
+
+    Returns the relative file path on success, or None on failure.
+    Never raises — errors are logged at debug level so callers are never broken.
+    """
+    try:
+        now = datetime.now()
+        date_str = now.strftime('%Y-%m-%d')
+        time_str = now.strftime('%H-%M-%S')
+        ms_str = f'{now.microsecond // 1000:03d}'
+        ts_iso = f'{now.strftime("%Y-%m-%dT%H:%M:%S")}.{ms_str}Z'
+
+        # Extract brief tool summaries from captured actions (phase=result only)
+        tools = []
+        if actions:
+            for action in actions:
+                if action.get('type') == 'tool' and action.get('phase') == 'result':
+                    name = action.get('name', 'unknown')
+                    result = action.get('result', '')
+                    summary = str(result)[:120] if result else ''
+                    tools.append({'name': name, 'phase': 'result', 'summary': summary})
+
+        user_words = len(user_msg.split()) if user_msg else 0
+        ai_words = len(ai_response.split()) if ai_response else 0
+        key = session_key or 'unknown'
+
+        payload = {
+            'schema': 'v1',
+            'session_id': session_id,
+            'session_key': key,
+            'timestamp': ts_iso,
+            'date': date_str,
+            'time': now.strftime('%H:%M:%S'),
+            'tts_provider': tts_provider,
+            'voice': voice,
+            'duration_ms': duration_ms,
+            'user': user_msg,
+            'assistant': ai_response,
+            'tools': tools,
+            'identified_person': identified_person,
+            'word_count': {'user': user_words, 'assistant': ai_words},
+        }
+
+        save_dir = os.path.join(TRANSCRIPTS_DIR, date_str)
+        os.makedirs(save_dir, exist_ok=True)
+        filename = f'{time_str}_{key}_{session_id}.json'
+        filepath = os.path.join(save_dir, filename)
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+        return f'transcripts/{date_str}/{filename}'
+
+    except Exception as exc:
+        _transcript_logger.getLogger(__name__).debug(
+            f'save_conversation_turn failed (non-critical): {exc}'
+        )
+        return None

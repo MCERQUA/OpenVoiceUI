@@ -32,6 +32,7 @@ from pathlib import Path
 from flask import Blueprint, Response, jsonify, make_response, request
 
 from routes.canvas import canvas_context, update_canvas_context, CANVAS_PAGES_DIR
+from routes.transcripts import save_conversation_turn
 from routes.music import current_music_state as _music_state
 from services.gateway_manager import gateway_manager
 from services.tts import generate_tts_b64 as _tts_generate_b64
@@ -885,6 +886,17 @@ def _conversation_inner():
                                     log_conversation('assistant', full_response,
                                                      session_id=session_id,
                                                      tts_provider=tts_provider, voice=voice)
+                                    save_conversation_turn(
+                                        user_msg=user_message,
+                                        ai_response=full_response,
+                                        session_id=session_id,
+                                        session_key=_session_key,
+                                        tts_provider=tts_provider,
+                                        voice=voice,
+                                        duration_ms=metrics.get('total_ms'),
+                                        actions=captured_actions,
+                                        identified_person=identified_person,
+                                    )
                                 break
 
                             t_tts_start = time.time()
@@ -919,6 +931,17 @@ def _conversation_inner():
                                 log_conversation('assistant', full_response,
                                                  session_id=session_id,
                                                  tts_provider=tts_provider, voice=voice)
+                                save_conversation_turn(
+                                    user_msg=user_message,
+                                    ai_response=full_response,
+                                    session_id=session_id,
+                                    session_key=_session_key,
+                                    tts_provider=tts_provider,
+                                    voice=voice,
+                                    duration_ms=metrics.get('total_ms'),
+                                    actions=captured_actions,
+                                    identified_person=identified_person,
+                                )
                             break
 
                         if evt['type'] == 'error':
@@ -1005,6 +1028,17 @@ def _conversation_inner():
     if ai_response:
         log_conversation('assistant', ai_response, session_id=session_id,
                          tts_provider=tts_provider, voice=voice)
+        save_conversation_turn(
+            user_msg=user_message,
+            ai_response=ai_response,
+            session_id=session_id,
+            session_key=get_voice_session_key(),
+            tts_provider=tts_provider,
+            voice=voice,
+            duration_ms=metrics.get('total_ms'),
+            actions=captured_actions,
+            identified_person=identified_person,
+        )
 
     response_data = {'response': ai_response, 'user_said': user_message}
     if audio_base64:
