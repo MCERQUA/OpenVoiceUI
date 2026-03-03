@@ -103,6 +103,20 @@ window.VisualizerModule = {
         if (this._dom.audio1) this._dom.audio1.addEventListener('ended', () => this.onTrackEnded());
         if (this._dom.audio2) this._dom.audio2.addEventListener('ended', () => this.onTrackEnded());
 
+        // Listen for face mode changes — hide/show square bars dynamically
+        window.addEventListener('faceModeChanged', (e) => {
+            const isHalo = e.detail === 'halo-smoke';
+            if (this._vizContainers) {
+                this._vizContainers.forEach(el => {
+                    if (isHalo) {
+                        el.classList.remove('active');
+                    } else if (this._containersActive) {
+                        el.classList.add('active');
+                    }
+                });
+            }
+        });
+
         // Expose global toggle functions for HTML onclick handlers
         window.toggleAutoplay = (enabled) => this.setAutoplay(enabled);
         window.toggleVisualizer = (enabled) => this.setEnabled(enabled);
@@ -353,7 +367,9 @@ window.VisualizerModule = {
         // Show effects containers (once, not every frame)
         if (!this._containersActive) {
             if (this._dom.partyContainer) this._dom.partyContainer.classList.add('active');
-            if (this._vizContainers) {
+            // Only show square-frame bars when NOT in halo-smoke mode
+            const isHaloMode = this._dom.faceBox && this._dom.faceBox.classList.contains('halo-smoke-mode');
+            if (this._vizContainers && !isHaloMode) {
                 this._vizContainers.forEach(el => el.classList.add('active'));
             }
             this._containersActive = true;
@@ -578,6 +594,9 @@ window.VisualizerModule = {
 
     updateVisualizerBars() {
         if (!this.frequencyData) return;
+
+        // Skip bar updates when halo-smoke face is active (bars are hidden via CSS)
+        if (this._dom.faceBox && this._dom.faceBox.classList.contains('halo-smoke-mode')) return;
 
         // Use cached bar arrays with pre-parsed multipliers
         const numBars = this.NUM_BARS;

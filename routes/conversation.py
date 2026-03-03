@@ -736,6 +736,25 @@ def _conversation_inner():
                                 if sentence:
                                     _tts_pending.append(_fire_tts(sentence))
                             yield json.dumps({'type': 'delta', 'text': evt['text']}) + '\n'
+                            # Flush any TTS chunks that finished while text was streaming —
+                            # play audio as soon as it's ready instead of waiting for text_done
+                            while _tts_pending and _tts_pending[0][0].is_set():
+                                _done_evt, _res = _tts_pending.pop(0)
+                                if _res.get('error'):
+                                    yield _tts_error_event(_res['error'])
+                                elif _res.get('audio'):
+                                    yield json.dumps({
+                                        'type': 'audio',
+                                        'audio': _res['audio'],
+                                        'audio_format': _audio_fmt,
+                                        'chunk': _chunks_sent,
+                                        'total_chunks': None,
+                                        'timing': {
+                                            'tts_ms': 0,
+                                            'total_ms': int((time.time() - t_request_start) * 1000),
+                                        },
+                                    }) + '\n'
+                                    _chunks_sent += 1
                             continue
 
                         if evt['type'] == 'action':

@@ -922,7 +922,7 @@ def clawdbot_websocket(ws):
                 logger.info(f"WebSocket connected to Gateway at {gateway_url}")
 
                 # Handshake
-                challenge = json.loads(await gw.recv())
+                challenge = json.loads(await asyncio.wait_for(gw.recv(), timeout=10.0))
                 logger.debug(f"Gateway challenge: {challenge.get('event')}")
 
                 await gw.send(json.dumps({
@@ -942,7 +942,7 @@ def clawdbot_websocket(ws):
                     },
                 }))
 
-                resp = json.loads(await gw.recv())
+                resp = json.loads(await asyncio.wait_for(gw.recv(), timeout=10.0))
                 if resp.get("type") != "res" or not resp.get("ok"):
                     logger.error(f"Gateway handshake failed: {resp}")
                     ws.send(json.dumps({"type": "error", "message": "Gateway handshake failed"}))
@@ -971,7 +971,12 @@ def clawdbot_websocket(ws):
 
                 async def _from_gateway():
                     while True:
-                        data = json.loads(await gw.recv())
+                        try:
+                            data = json.loads(await asyncio.wait_for(gw.recv(), timeout=120.0))
+                        except asyncio.TimeoutError:
+                            logger.warning("Gateway recv() timed out after 120s — closing connection")
+                            ws.send(json.dumps({"type": "error", "message": "Gateway connection timed out"}))
+                            return
                         if data.get("type") != "event":
                             continue
                         event = data.get("event")

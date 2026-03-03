@@ -13,6 +13,7 @@
             padding: 20px;
             position: relative;
             z-index: 10;
+            pointer-events: none;
         }
 
         /* Face Box - Black rounded container with glow */
@@ -36,6 +37,7 @@
             border: 2px solid rgba(0, 136, 255, 0.3);
             z-index: 1;
             --shake-amount: 5px;
+            pointer-events: none;
         }
 
         /* Halo Smoke Orb — hide square, only circle canvas shows */
@@ -46,6 +48,13 @@
         }
         .face-box.halo-smoke-mode .mouth-container {
             display: none;
+        }
+
+        /* Hide square-frame equalizer bars when halo orb is active —
+           the box outline clashes with the circular halo face. */
+        .face-box.halo-smoke-mode .visualizer-container,
+        .face-box.halo-smoke-mode .side-visualizer {
+            display: none !important;
         }
 
         /* Eyes container */
