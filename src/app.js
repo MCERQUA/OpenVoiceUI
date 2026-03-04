@@ -895,7 +895,7 @@ inject();
             _adjustOverlayPanels() {
                 const mpHeight = (this.panelState !== 'closed' && this.panel)
                     ? this.panel.offsetHeight : 0;
-                const offset = mpHeight > 0 ? `${60 + mpHeight + 8}px` : '60px';
+                const offset = mpHeight > 0 ? `${mpHeight + 4}px` : '60px';
                 const tp = document.getElementById('transcript-panel');
                 const ac = document.getElementById('action-console');
                 if (tp) { tp.style.bottom = offset; tp.style.transition = 'bottom 0.3s ease'; }
