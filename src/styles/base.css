@@ -959,7 +959,7 @@
             border-radius: 14px 14px 0 0;
             transform: translateX(-50%) translateY(100%);
             transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 100;
+            z-index: 200;
             overflow: hidden;
             box-shadow: 0 -4px 25px rgba(0, 229, 255, 0.25),
                         0 0 40px rgba(0, 229, 255, 0.12),
