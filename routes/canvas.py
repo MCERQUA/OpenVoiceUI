@@ -624,6 +624,30 @@ def canvas_pages_proxy(path):
                 content_type = 'text/css'
             elif path.endswith('.js'):
                 content_type = 'application/javascript'
+            elif path.endswith('.mp4'):
+                content_type = 'video/mp4'
+            elif path.endswith('.webm'):
+                content_type = 'video/webm'
+            elif path.endswith('.mp3'):
+                content_type = 'audio/mpeg'
+            elif path.endswith('.wav'):
+                content_type = 'audio/wav'
+            elif path.endswith('.ogg'):
+                content_type = 'audio/ogg'
+            elif path.endswith('.png'):
+                content_type = 'image/png'
+            elif path.endswith('.jpg') or path.endswith('.jpeg'):
+                content_type = 'image/jpeg'
+            elif path.endswith('.gif'):
+                content_type = 'image/gif'
+            elif path.endswith('.svg'):
+                content_type = 'image/svg+xml'
+            elif path.endswith('.webp'):
+                content_type = 'image/webp'
+            elif path.endswith('.json'):
+                content_type = 'application/json'
+            elif path.endswith('.pdf'):
+                content_type = 'application/pdf'
             else:
                 content_type = 'application/octet-stream'
             resp = Response(content, mimetype=content_type)
