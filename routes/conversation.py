@@ -627,16 +627,17 @@ def _conversation_inner():
             from routes.music import get_music_files
             _lib_tracks = get_music_files('library')
             _gen_tracks = get_music_files('generated')
-            _track_names = []
-            for t in _lib_tracks:
-                _track_names.append(t.get('title') or t.get('name', ''))
-            for t in _gen_tracks:
-                _track_names.append(t.get('title') or t.get('name', ''))
-            _track_names = [n for n in _track_names if n]
-            if _track_names:
-                context_parts.append(
-                    f'[Available tracks: {", ".join(_track_names[:30])}]'
-                )
+            _lib_names = [t.get('title') or t.get('name', '') for t in _lib_tracks]
+            _gen_names = [t.get('title') or t.get('name', '') for t in _gen_tracks]
+            _lib_names = [n for n in _lib_names if n]
+            _gen_names = [n for n in _gen_names if n]
+            _parts = []
+            if _lib_names:
+                _parts.append(f'Library ({len(_lib_names)}): {", ".join(_lib_names)}')
+            if _gen_names:
+                _parts.append(f'Generated ({len(_gen_names)}): {", ".join(_gen_names)}')
+            if _parts:
+                context_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
         except Exception:
             pass
 

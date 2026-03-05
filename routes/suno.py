@@ -133,10 +133,19 @@ def _add_song_to_metadata(filename: str, title: str, prompt: str, style: str,
     _save_generated_metadata(metadata)
 
 
+def _is_uuid(s: str) -> bool:
+    """Check if string looks like a UUID (hex-hex-hex-hex-hex pattern)."""
+    import re
+    return bool(re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', s.strip(), re.IGNORECASE))
+
+
 def _slugify_title(title: str) -> str:
     """Convert a song title to a safe filename slug (no extension)."""
     import re
     import unicodedata
+    # If the title is a UUID (Suno sometimes returns song ID as title), reject it
+    if _is_uuid(title):
+        return 'generated-track'
     # Normalize unicode (e.g., smart quotes → ascii)
     s = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('ascii')
     # Lowercase, replace non-alnum with hyphens, collapse multiples, strip edges
@@ -407,7 +416,12 @@ def _action_status(job_id: str):
                         if not audio_url:
                             continue
                         song_id = song.get('id', task_id)
-                        song_title = song.get('title') or job.get('title') or 'Generated Track'
+                        _raw_title = song.get('title') or ''
+                        # Suno API sometimes returns song ID as title — reject UUIDs
+                        if _raw_title and not _is_uuid(_raw_title):
+                            song_title = _raw_title
+                        else:
+                            song_title = job.get('title') or job.get('prompt', '')[:60] or 'Generated Track'
                         duration = song.get('duration', 0)
                         slug = _slugify_title(song_title)
                         filename = _unique_filename(GENERATED_MUSIC_DIR, slug)
@@ -550,7 +564,11 @@ def suno_callback():
                     if not audio_url:
                         continue  # "text" callback — lyrics only, no audio yet
                     song_id = song.get('id', task_id)
-                    song_title = song.get('title', 'Generated Track')
+                    _raw_cb_title = song.get('title', '')
+                    if _raw_cb_title and not _is_uuid(_raw_cb_title):
+                        song_title = _raw_cb_title
+                    else:
+                        song_title = 'Generated Track'
                     duration = song.get('duration', 0)
                     slug = _slugify_title(song_title)
                     filename = _unique_filename(GENERATED_MUSIC_DIR, slug)
