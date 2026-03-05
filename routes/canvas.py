@@ -626,7 +626,11 @@ def canvas_pages_proxy(path):
                 content_type = 'application/javascript'
             else:
                 content_type = 'application/octet-stream'
-            return Response(content, mimetype=content_type)
+            resp = Response(content, mimetype=content_type)
+            resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            resp.headers['Pragma'] = 'no-cache'
+            resp.headers['Expires'] = '0'
+            return resp
         return 'Page not found', 404
     except Exception as exc:
         logger.error(f'Canvas pages proxy error: {exc}')

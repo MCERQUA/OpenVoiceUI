@@ -5576,8 +5576,9 @@ inject();
 
             openPage(page) {
                 if (this.iframe) {
-                    this.iframe.src = `/pages/${page}`;
+                    this.iframe.src = `/pages/${page}?t=${Date.now()}`;
                     localStorage.setItem('canvas_last_page', page);
+                    this._lastMtime = null;  // reset mtime tracking on manual navigation
                 }
                 this.show();
             },
@@ -5595,8 +5596,9 @@ inject();
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
                     console.log('[Canvas] showPage direct:', filename);
                     if (this.iframe) {
-                        this.iframe.src = `/pages/${filename}`;
+                        this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
                         localStorage.setItem('canvas_last_page', filename);
+                        this._lastMtime = null;
                         this.show();
                     }
                     return;
@@ -5610,8 +5612,9 @@ inject();
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
                     console.log('[Canvas] showPage fallback:', filename);
                     if (this.iframe) {
-                        this.iframe.src = `/pages/${filename}`;
+                        this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
                         localStorage.setItem('canvas_last_page', filename);
+                        this._lastMtime = null;
                         this.show();
                     }
                 }
@@ -6203,7 +6206,7 @@ inject();
 
                 const iframe = document.getElementById('canvas-iframe');
                 if (iframe) {
-                    iframe.src = `/pages/${filename}`;
+                    iframe.src = `/pages/${filename}?t=${Date.now()}`;
                     // Reset mtime tracking so auto-refresh doesn't false-trigger on page switch
                     CanvasControl._lastMtime = null;
                     // Remember this page for next time
