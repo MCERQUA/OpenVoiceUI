@@ -25,16 +25,16 @@ const SHELL_HTML = `
                 <button class="cmm-close" title="Close">×</button>
             </div>
             <div class="cmm-quick-actions">
-                <button class="cmm-qa active" data-filter="all">All</button>
-                <button class="cmm-qa" data-filter="recent">🕐 Recent</button>
-                <button class="cmm-qa" data-filter="starred">⭐ Starred</button>
+                <button class="cmm-qa active" data-filter="all" title="Show all pages">All</button>
+                <button class="cmm-qa" data-filter="recent" title="Recently viewed">🕐 Recent</button>
+                <button class="cmm-qa" data-filter="starred" title="Starred pages">⭐ Starred</button>
             </div>
             <div class="cmm-categories" id="canvas-categories">
                 <div class="cmm-loading">Loading canvas pages...</div>
             </div>
             <div class="cmm-footer">
                 <span id="cmm-page-count">0 pages</span>
-                <button id="cmm-edit-mode">✏️ Edit</button>
+                <button id="cmm-edit-mode" title="Edit or archive pages">✏️ Edit</button>
             </div>
         </div>
     </div>
@@ -47,8 +47,8 @@ const SHELL_HTML = `
             <div class="cmm-confirm-message">This will remove the page from the menu and archive it. The file will be renamed to .bak for safety.</div>
             <div class="cmm-confirm-page-name" id="cmm-confirm-page-name">Page Name</div>
             <div class="cmm-confirm-buttons">
-                <button class="cmm-confirm-btn cancel" id="cmm-confirm-cancel">Cancel</button>
-                <button class="cmm-confirm-btn delete" id="cmm-confirm-delete">Archive</button>
+                <button class="cmm-confirm-btn cancel" id="cmm-confirm-cancel" title="Cancel">Cancel</button>
+                <button class="cmm-confirm-btn delete" id="cmm-confirm-delete" title="Archive this page">Archive</button>
             </div>
         </div>
     </div>
@@ -66,7 +66,7 @@ const SHELL_HTML = `
     </div>
 
     <!-- Action Console (bottom-left popup) -->
-    <button class="console-button" id="console-button" onclick="ActionConsole.toggle()">
+    <button class="console-button" id="console-button" onclick="ActionConsole.toggle()" title="Action Console">
         <span>&gt;_</span>
         <div class="unread-dot" id="console-unread"></div>
     </button>
@@ -76,22 +76,22 @@ const SHELL_HTML = `
             <div style="display:flex;gap:6px;align-items:center;">
                 <button class="ac-clear" onclick="ActionConsole.showSessionInfo()" title="Session Info" style="font-size:13px;">ℹ️ Session</button>
                 <button class="ac-clear" style="color:#f85149;" onclick="ActionConsole.resetSession()" title="Reset Session">🔄 Reset</button>
-                <button class="ac-clear" onclick="ActionConsole.clear()">Clear</button>
-                <button class="ac-close" onclick="ActionConsole.hide()">&times;</button>
+                <button class="ac-clear" onclick="ActionConsole.clear()" title="Clear console">Clear</button>
+                <button class="ac-close" onclick="ActionConsole.hide()" title="Close console">&times;</button>
             </div>
         </div>
         <div class="ac-entries" id="action-entries"></div>
     </div>
 
     <!-- Transcript Panel (bottom-right popup) -->
-    <button class="transcript-button" id="transcript-button" onclick="TranscriptPanel.toggle()">
+    <button class="transcript-button" id="transcript-button" onclick="TranscriptPanel.toggle()" title="Transcript">
         <span>💬</span>
         <div class="unread-dot" id="transcript-unread"></div>
     </button>
     <div id="transcript-panel">
         <div class="tp-header">
             <span>Transcript</span>
-            <button class="tp-close" onclick="TranscriptPanel.hide()">&times;</button>
+            <button class="tp-close" onclick="TranscriptPanel.hide()" title="Close transcript">&times;</button>
         </div>
         <div class="tp-messages" id="transcript-messages"></div>
         <div class="tp-input-bar">
@@ -103,7 +103,7 @@ const SHELL_HTML = `
             </label>
             <div class="tp-file-preview" id="tp-file-preview" style="display:none">
                 <span id="tp-file-name"></span>
-                <button class="tp-file-clear" onclick="TranscriptPanel.clearFile()">✕</button>
+                <button class="tp-file-clear" onclick="TranscriptPanel.clearFile()" title="Remove attachment">✕</button>
             </div>
             <input type="text" class="tp-text-input" id="tp-text-input"
                    placeholder="Type a message..."
@@ -116,7 +116,7 @@ const SHELL_HTML = `
     <div id="auth-section">
         <div id="user-button"></div>
         <div id="sign-in-button" style="display: none;">
-            <button id="login-btn">Login</button>
+            <button id="login-btn" title="Sign in to your account">Login</button>
         </div>
     </div>
 
@@ -156,8 +156,8 @@ const SHELL_HTML = `
                 <label>PTT Hotkey</label>
                 <div class="ptt-hotkey-row">
                     <span class="ptt-hotkey-label" id="ptt-hotkey-label">None</span>
-                    <button class="ptt-hotkey-btn" id="ptt-hotkey-set" onclick="window.PTTHotkey?.capture()">Set</button>
-                    <button class="ptt-hotkey-btn ptt-hotkey-clear" id="ptt-hotkey-clear" onclick="window.PTTHotkey?.clear()">✕</button>
+                    <button class="ptt-hotkey-btn" id="ptt-hotkey-set" onclick="window.PTTHotkey?.capture()" title="Press a key to set as PTT hotkey">Set</button>
+                    <button class="ptt-hotkey-btn ptt-hotkey-clear" id="ptt-hotkey-clear" onclick="window.PTTHotkey?.clear()" title="Remove PTT hotkey">✕</button>
                 </div>
                 <div class="provider-status" id="ptt-hotkey-status">Hold hotkey = hold PTT button</div>
             </div>
@@ -175,7 +175,7 @@ const SHELL_HTML = `
         </div>
         <div class="input-container">
             <input type="text" id="clawdbot-text-input" placeholder="Type your message to Clawdbot..." disabled>
-            <button id="clawdbot-send-btn" disabled>Send</button>
+            <button id="clawdbot-send-btn" disabled title="Send message">Send</button>
         </div>
     </div>
 
@@ -263,16 +263,16 @@ const SHELL_HTML = `
 
     <!-- Control buttons — Edge Tabs -->
     <div class="controls-left">
-        <button class="edge-tab left call-button" id="call-button" onclick="ModeManager.toggleVoice()">
+        <button class="edge-tab left call-button" id="call-button" onclick="ModeManager.toggleVoice()" title="Start / end voice call">
             <span id="call-icon">📞</span>
         </button>
-        <button class="edge-tab left call-button" id="stop-button" onclick="ModeManager.stopAll()" style="display: none; background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.6);">
+        <button class="edge-tab left call-button" id="stop-button" onclick="ModeManager.stopAll()" title="Stop call" style="display: none; background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.6);">
             <span id="stop-icon">⏹️</span>
         </button>
-        <button class="edge-tab left wake-button" id="wake-button" onclick="window.toggleWakeWord?.()">
+        <button class="edge-tab left wake-button" id="wake-button" onclick="window.toggleWakeWord?.()" title="Wake word listener">
             <span id="wake-icon">👂</span>
         </button>
-        <button class="edge-tab left mode-button" id="mode-button" onclick="window.ModeSelector?.toggle(event)">
+        <button class="edge-tab left mode-button" id="mode-button" onclick="window.ModeSelector?.toggle(event)" title="Conversation mode">
             <span id="mode-button-icon">🎛️</span>
         </button>
         <button class="edge-tab left ptt-button" id="ptt-button" title="Push to Talk — hold to speak">
@@ -281,16 +281,16 @@ const SHELL_HTML = `
     </div>
 
     <div class="controls-right">
-        <button class="edge-tab right music-button" id="music-button" onclick="window.musicPlayer?.togglePanel()">
+        <button class="edge-tab right music-button" id="music-button" onclick="window.musicPlayer?.togglePanel()" title="Music player">
             <span id="music-icon">🎵</span>
         </button>
-        <button class="edge-tab right canvas-button" id="canvas-button" onclick="CanvasControl.toggle()">
+        <button class="edge-tab right canvas-button" id="canvas-button" onclick="CanvasControl.toggle()" title="Canvas display">
             <span id="canvas-icon">🖥️</span>
         </button>
-        <button class="edge-tab right face-button" id="face-button" onclick="window.FacePanel?.toggle()">
+        <button class="edge-tab right face-button" id="face-button" onclick="window.FacePanel?.toggle()" title="Face recognition">
             <span id="face-icon">👥</span>
         </button>
-        <button class="edge-tab right camera-button" id="camera-button" onclick="window.cameraModule?.toggle()">
+        <button class="edge-tab right camera-button" id="camera-button" onclick="window.cameraModule?.toggle()" title="Camera">
             <span class="camera-icon">📷</span>
             <video id="camera-video" autoplay playsinline muted></video>
         </button>
@@ -300,20 +300,20 @@ const SHELL_HTML = `
     <div class="face-panel" id="face-panel">
         <div class="fp-header">
             <span>👥 Recognized Faces</span>
-            <button class="fp-close" onclick="window.FacePanel?.hide()">&times;</button>
+            <button class="fp-close" onclick="window.FacePanel?.hide()" title="Close">&times;</button>
         </div>
         <ul class="fp-face-list" id="fp-face-list">
             <!-- Populated by JS -->
         </ul>
         <div class="fp-actions">
-            <button class="fp-btn" id="fp-identify-btn" onclick="window.FacePanel?.identify()">📷 Identify Me</button>
+            <button class="fp-btn" id="fp-identify-btn" onclick="window.FacePanel?.identify()" title="Identify who you are">📷 Identify Me</button>
             <div class="fp-status" id="fp-status"></div>
         </div>
         <div class="fp-register" id="fp-register">
             <input type="text" id="fp-name-input" placeholder="Enter your name..." maxlength="30">
             <div class="fp-register-btns">
-                <button class="fp-btn" onclick="window.FacePanel?.capture()">📷 Capture</button>
-                <button class="fp-btn fp-upload" onclick="document.getElementById('fp-file-input').click()">📁 Upload</button>
+                <button class="fp-btn" onclick="window.FacePanel?.capture()" title="Take a photo with camera">📷 Capture</button>
+                <button class="fp-btn fp-upload" onclick="document.getElementById('fp-file-input').click()" title="Upload a photo">📁 Upload</button>
             </div>
             <input type="file" id="fp-file-input" accept="image/*" multiple style="display:none"
                    onchange="window.FacePanel?.handleUpload(this)">
@@ -324,7 +324,7 @@ const SHELL_HTML = `
     <!-- Mode Picker Popup — floats beside the mode button -->
     <div class="mode-picker" id="mode-picker">
         <div class="mode-picker-label">CONVERSATION MODE</div>
-        <button class="mode-option" id="mode-opt-normal" onclick="window.ModeSelector?.select('normal')">
+        <button class="mode-option" id="mode-opt-normal" onclick="window.ModeSelector?.select('normal')" title="Voice auto-detects speech">
             <span class="mode-opt-icon">🎙️</span>
             <span class="mode-opt-info">
                 <span class="mode-opt-name">Normal</span>
@@ -332,7 +332,7 @@ const SHELL_HTML = `
             </span>
             <span class="mode-opt-check" id="mode-check-normal">✓</span>
         </button>
-        <button class="mode-option" id="mode-opt-listen" onclick="window.ModeSelector?.select('listen')">
+        <button class="mode-option" id="mode-opt-listen" onclick="window.ModeSelector?.select('listen')" title="Transcribe speech, send manually">
             <span class="mode-opt-icon">👂</span>
             <span class="mode-opt-info">
                 <span class="mode-opt-name">Listen</span>
@@ -340,7 +340,7 @@ const SHELL_HTML = `
             </span>
             <span class="mode-opt-check" id="mode-check-listen"></span>
         </button>
-        <button class="mode-option" id="mode-opt-a2a" onclick="window.ModeSelector?.select('a2a')">
+        <button class="mode-option" id="mode-opt-a2a" onclick="window.ModeSelector?.select('a2a')" title="AI agents talk to each other">
             <span class="mode-opt-icon">🤝</span>
             <span class="mode-opt-info">
                 <span class="mode-opt-name">Agent to Agent</span>
@@ -354,13 +354,13 @@ const SHELL_HTML = `
     <div class="listen-panel" id="listen-panel">
         <div class="listen-header">
             <span>👂 Live Transcription</span>
-            <button class="listen-close" onclick="window.ModeSelector?.select('normal')">&times;</button>
+            <button class="listen-close" onclick="window.ModeSelector?.select('normal')" title="Close and return to normal mode">&times;</button>
         </div>
         <input class="listen-title-input" id="listen-title" type="text"
                placeholder="Session title (optional)" maxlength="80" />
         <div class="listen-meta">
             <span id="listen-word-count">0 words</span>
-            <button class="listen-clear-btn" onclick="window.ListenPanel?.clear()">Clear</button>
+            <button class="listen-clear-btn" onclick="window.ListenPanel?.clear()" title="Clear transcript">Clear</button>
         </div>
         <div class="listen-transcript" id="listen-transcript">
             <span id="listen-empty" style="color:#3d3d3d;font-style:italic">Start speaking — transcript will appear here</span>
@@ -384,7 +384,7 @@ const SHELL_HTML = `
     <div class="a2a-panel" id="a2a-panel">
         <div class="a2a-header">
             <span>🤝 Agent-to-Agent</span>
-            <button class="a2a-close" onclick="window.AgentToAgentPanel?.hide()">&times;</button>
+            <button class="a2a-close" onclick="window.AgentToAgentPanel?.hide()" title="Close">&times;</button>
         </div>
         <div class="a2a-config">
             <label class="a2a-label">This client is:</label>
@@ -402,8 +402,8 @@ const SHELL_HTML = `
             <div class="a2a-room-id" id="a2a-room-id"></div>
         </div>
         <div class="a2a-controls">
-            <button class="a2a-btn a2a-start" id="a2a-start-btn" onclick="window.AgentToAgentRoom?.start()">▶ Start Room</button>
-            <button class="a2a-btn a2a-stop" id="a2a-stop-btn" onclick="window.AgentToAgentRoom?.stop()" style="display:none">⏹ Stop</button>
+            <button class="a2a-btn a2a-start" id="a2a-start-btn" onclick="window.AgentToAgentRoom?.start()" title="Start agent-to-agent room">▶ Start Room</button>
+            <button class="a2a-btn a2a-stop" id="a2a-stop-btn" onclick="window.AgentToAgentRoom?.stop()" title="Stop room" style="display:none">⏹ Stop</button>
         </div>
         <div class="a2a-transcript" id="a2a-transcript">
             <div class="a2a-transcript-empty">Conversation will appear here</div>
@@ -446,9 +446,9 @@ const SHELL_HTML = `
                 <span class="mp-time" id="mp-time-dur">0:00</span>
             </div>
             <div class="mp-controls-row">
-                <button onclick="window.musicPlayer?.prev()">&#9198;</button>
-                <button class="mp-play" onclick="window.musicPlayer?.togglePlay()" id="play-pause-btn">&#9208;</button>
-                <button onclick="window.musicPlayer?.next()">&#9197;</button>
+                <button onclick="window.musicPlayer?.prev()" title="Previous track">&#9198;</button>
+                <button class="mp-play" onclick="window.musicPlayer?.togglePlay()" id="play-pause-btn" title="Play / Pause">&#9208;</button>
+                <button onclick="window.musicPlayer?.next()" title="Next track">&#9197;</button>
                 <input type="range" class="mp-vol" id="volume-slider" min="0" max="100" value="85"
                        onchange="window.musicPlayer?.setVolume(this.value)">
                 <div class="mp-toggle"><input type="checkbox" id="autoplay-checkbox"
@@ -459,9 +459,9 @@ const SHELL_HTML = `
         </div>
         <!-- MINI VIEW -->
         <div class="mp-mini" id="mp-mini" style="display:none">
-            <button onclick="window.musicPlayer?.prev()">&#9198;</button>
-            <button class="mp-play" onclick="window.musicPlayer?.togglePlay()" id="play-pause-btn-mini">&#9208;</button>
-            <button onclick="window.musicPlayer?.next()">&#9197;</button>
+            <button onclick="window.musicPlayer?.prev()" title="Previous track">&#9198;</button>
+            <button class="mp-play" onclick="window.musicPlayer?.togglePlay()" id="play-pause-btn-mini" title="Play / Pause">&#9208;</button>
+            <button onclick="window.musicPlayer?.next()" title="Next track">&#9197;</button>
             <input type="range" class="mp-vol mp-mini-vol" min="0" max="100" value="85"
                    onchange="window.musicPlayer?.setVolume(this.value)">
             <button class="mp-expand" onclick="window.musicPlayer?.expandPanel()" title="Expand">&#9650;</button>
