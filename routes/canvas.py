@@ -573,9 +573,10 @@ def canvas_pages_proxy(path):
         if resolved is None:
             return 'Invalid path', 400
         if resolved.exists():
-            with open(resolved, 'rb') as f:
-                content = f.read()
+            # HTML files need custom processing (script stripping, CSS/error injection)
             if path.endswith('.html'):
+                with open(resolved, 'rb') as f:
+                    content = f.read()
                 # Strip external CDN scripts (Tailwind CDN etc break in sandboxed iframes)
                 import re as _re
                 content_str = content.decode('utf-8', errors='replace')
@@ -619,42 +620,19 @@ def canvas_pages_proxy(path):
                     content = content.replace(b'</head>', _inject + b'</head>', 1)
                 else:
                     content = _inject + content
-                content_type = 'text/html'
-            elif path.endswith('.css'):
-                content_type = 'text/css'
-            elif path.endswith('.js'):
-                content_type = 'application/javascript'
-            elif path.endswith('.mp4'):
-                content_type = 'video/mp4'
-            elif path.endswith('.webm'):
-                content_type = 'video/webm'
-            elif path.endswith('.mp3'):
-                content_type = 'audio/mpeg'
-            elif path.endswith('.wav'):
-                content_type = 'audio/wav'
-            elif path.endswith('.ogg'):
-                content_type = 'audio/ogg'
-            elif path.endswith('.png'):
-                content_type = 'image/png'
-            elif path.endswith('.jpg') or path.endswith('.jpeg'):
-                content_type = 'image/jpeg'
-            elif path.endswith('.gif'):
-                content_type = 'image/gif'
-            elif path.endswith('.svg'):
-                content_type = 'image/svg+xml'
-            elif path.endswith('.webp'):
-                content_type = 'image/webp'
-            elif path.endswith('.json'):
-                content_type = 'application/json'
-            elif path.endswith('.pdf'):
-                content_type = 'application/pdf'
+                resp = Response(content, mimetype='text/html')
+                resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                resp.headers['Pragma'] = 'no-cache'
+                resp.headers['Expires'] = '0'
+                return resp
             else:
-                content_type = 'application/octet-stream'
-            resp = Response(content, mimetype=content_type)
-            resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-            resp.headers['Pragma'] = 'no-cache'
-            resp.headers['Expires'] = '0'
-            return resp
+                # Non-HTML files: use send_file for proper range request support
+                # (required for video/audio streaming playback)
+                return send_file(
+                    resolved,
+                    conditional=True,
+                    max_age=300,
+                )
         return 'Page not found', 404
     except Exception as exc:
         logger.error(f'Canvas pages proxy error: {exc}')
