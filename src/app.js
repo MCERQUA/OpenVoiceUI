@@ -2053,6 +2053,11 @@ inject();
                         this._hideAuthGate();
                         this.renderUserMenu();
                         document.getElementById('sign-in-button').style.display = 'none';
+                        // If redirected here from a canvas page (or other protected route), go back there
+                        const redirectTo = new URLSearchParams(window.location.search).get('redirect');
+                        if (redirectTo && redirectTo.startsWith('/')) {
+                            window.location.href = redirectTo;
+                        }
                     };
 
                     if (Clerk.user) {
