@@ -321,10 +321,18 @@ def serve_index():
     html = pathlib.Path("index.html").read_text()
     server_url = os.environ.get("AGENT_SERVER_URL", "").strip().rstrip("/")
     clerk_key = (os.environ.get("CLERK_PUBLISHABLE_KEY") or os.environ.get("VITE_CLERK_PUBLISHABLE_KEY", "")).strip()
+    import json as _json
+    devsite_map_raw = os.environ.get("DEVSITE_MAP", "{}").strip()
+    try:
+        devsite_map = _json.loads(devsite_map_raw)
+    except Exception:
+        devsite_map = {}
     config_parts = []
     config_parts.append(f'serverUrl:"{server_url}"' if server_url else 'serverUrl:window.location.origin')
     if clerk_key:
         config_parts.append(f'clerkPublishableKey:"{clerk_key}"')
+    if devsite_map:
+        config_parts.append(f'devsiteMap:{_json.dumps(devsite_map)}')
     config_block = f'<script>window.AGENT_CONFIG={{{",".join(config_parts)}}};</script>'
     html = html.replace("<head>", f"<head>\n  {config_block}", 1)
     resp = Response(html, mimetype="text/html")

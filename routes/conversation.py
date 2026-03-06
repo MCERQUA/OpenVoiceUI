@@ -981,30 +981,23 @@ def _conversation_inner():
                                 f"(tools={metrics['tool_count']})"
                             )
 
-                            yield json.dumps({
-                                'type': 'text_done',
-                                'response': full_response,
-                                'actions': captured_actions,
-                                'timing': {
-                                    'handshake_ms': metrics.get('handshake_ms'),
-                                    'llm_ms': metrics.get('llm_inference_ms'),
-                                }
-                            }) + '\n'
-
                             # ── Retry once on instant empty response ──
-                            # When the gateway returns empty in <500ms, the
-                            # LLM never ran (rate limit / stale state).
-                            # Retry once after a short pause before giving up.
-                            global _consecutive_empty_responses
+                            # IMPORTANT: check BEFORE yielding text_done.
+                            # If we yield empty text_done first, the client
+                            # shows "Sorry" and cancels its reader — the retry
+                            # result never reaches it.
+                            # Instead: yield {'type':'retrying'} to keep the
+                            # client alive, then swap the event queue.
                             _is_empty = not full_response or not full_response.strip()
                             if _is_empty and metrics.get('llm_inference_ms', 9999) < 500 \
                                     and not getattr(stream_response, '_retried', False):
                                 stream_response._retried = True
                                 logger.warning(
                                     f"### EMPTY RESPONSE in {metrics['llm_inference_ms']}ms "
-                                    f"— retrying once after 2s pause..."
+                                    f"— retrying once (client kept alive via 'retrying' event)"
                                 )
-                                yield json.dumps({'type': 'heartbeat'}) + '\n'
+                                # Tell the client to wait — don't show fallback
+                                yield json.dumps({'type': 'retrying'}) + '\n'
                                 time.sleep(2)
                                 # Re-send the same message through the gateway
                                 retry_queue = queue.Queue()
@@ -1021,11 +1014,19 @@ def _conversation_inner():
                                 )
                                 t_llm_start = time.time()
                                 retry_thread.start()
-                                # Swap the event queue so the main loop reads
-                                # from the retry queue from now on.
                                 event_queue = retry_queue
                                 logger.info("### RETRY: re-sent message to gateway")
-                                continue  # back to event loop
+                                continue  # back to event loop — text_done NOT sent yet
+
+                            yield json.dumps({
+                                'type': 'text_done',
+                                'response': full_response,
+                                'actions': captured_actions,
+                                'timing': {
+                                    'handshake_ms': metrics.get('handshake_ms'),
+                                    'llm_ms': metrics.get('llm_inference_ms'),
+                                }
+                            }) + '\n'
 
                             # Auto-reset removed — loop detection (Phase 1 config)
                             # handles stuck agents; consecutive empties no longer

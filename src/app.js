@@ -31,6 +31,23 @@ inject();
             }
         };
 
+        // ===== CANVAS URL RESOLVER =====
+        // Rewrites external dev-domain URLs to same-domain /devsite-*/ proxies,
+        // bypassing Cloudflare's cross-subdomain iframe blocking.
+        // Map is injected by Flask from DEVSITE_MAP env var (set per user in compose/.env).
+        // Example: {"dev-nick.jam-bot.com": "https://nick.jam-bot.com/devsite-printguys-web-2/"}
+        function resolveCanvasUrl(url) {
+            const map = window.AGENT_CONFIG?.devsiteMap || {};
+            for (const [from, to] of Object.entries(map)) {
+                const fromUrl = from.includes('://') ? from : 'https://' + from;
+                if (url.toLowerCase().startsWith(fromUrl.toLowerCase())) {
+                    const remainder = url.slice(fromUrl.length).replace(/^\//, '');
+                    return remainder ? to + remainder : to;
+                }
+            }
+            return url;
+        }
+
         // ===== PROVIDER MANAGER =====
         // Manages TTS provider selection (Supertonic, Hume, etc.)
         const ProviderManager = {
@@ -3122,10 +3139,11 @@ inject();
                         if (canvasUrlMatch && !canvasCommandsProcessed.has('CANVAS_URL')) {
                             canvasCommandsProcessed.add('CANVAS_URL');
                             const externalUrl = canvasUrlMatch[1].trim();
-                            console.log('[Canvas] External URL trigger:', externalUrl);
-                            ActionConsole.addEntry('system', `Canvas: loading ${externalUrl}`);
+                            const resolvedUrl = resolveCanvasUrl(externalUrl);
+                            console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
+                            ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
                             const iframe = document.getElementById('canvas-iframe');
-                            if (iframe) { iframe.src = externalUrl; CanvasControl.show(); }
+                            if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
                         }
                         // Check for [SLEEP] — agent-initiated return to wake-word mode
                         if (/\[SLEEP\]/i.test(text) && !canvasCommandsProcessed.has('SLEEP')) {
@@ -3221,6 +3239,12 @@ inject();
                                         StatusModule.update('thinking', `TOOL: ${toolLabel}`);
                                         TranscriptPanel.showToolStatus(toolLabel);
                                     }
+                                }
+
+                                // Server retrying empty response — keep stream alive, no fallback
+                                if (data.type === 'retrying') {
+                                    console.log('[Conversation] Server retrying empty response — waiting for result...');
+                                    continue;
                                 }
 
                                 // Text done: full response finalized
@@ -4407,10 +4431,11 @@ inject();
                 const canvasUrlMatch = text.match(/\[CANVAS_URL:([^\]]+)\]/i);
                 if (canvasUrlMatch) {
                     const externalUrl = canvasUrlMatch[1].trim();
-                    console.log('[Canvas] External URL trigger:', externalUrl);
-                    ActionConsole.addEntry('system', `Canvas: loading ${externalUrl}`);
+                    const resolvedUrl = resolveCanvasUrl(externalUrl);
+                    console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
+                    ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
                     const iframe = document.getElementById('canvas-iframe');
-                    if (iframe) { iframe.src = externalUrl; CanvasControl.show(); }
+                    if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
                 }
                 // [MUSIC_PLAY] or [MUSIC_PLAY:track]
                 const musicPlay = text.match(/\[MUSIC_PLAY(?::([^\]]+))?\]/i);
