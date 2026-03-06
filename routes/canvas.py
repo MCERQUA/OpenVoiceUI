@@ -640,7 +640,7 @@ def canvas_pages_proxy(path):
                     "img-src 'self' data: blob:; "
                     "media-src 'self' blob:; "
                     "font-src 'self'; "
-                    "connect-src 'none'; "
+                    "connect-src 'self'; "   # allow fetch back to same-origin API (e.g. /api/image-gen)
                     "frame-src 'none'"
                 )
                 return resp

@@ -128,6 +128,12 @@ app.register_blueprint(transcripts_bp)
 from routes.pi import pi_bp
 app.register_blueprint(pi_bp)
 
+from routes.onboarding import onboarding_bp
+app.register_blueprint(onboarding_bp)
+
+from routes.image_gen import image_gen_bp
+app.register_blueprint(image_gen_bp)
+
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.
 try:
@@ -550,10 +556,20 @@ def groq_stt():
         transcription = groq.audio.transcriptions.create(
             file=audio_tuple,
             model="whisper-large-v3-turbo",
-            response_format="json",
+            response_format="verbose_json",
             language="en",
+            temperature=0,
+            prompt="Voice command for AI assistant.",
         )
-        text = (transcription.text or "").strip()
+        # Filter segments with high no_speech_prob (Whisper hallucinations over silence)
+        if hasattr(transcription, 'segments') and transcription.segments:
+            text = ' '.join(
+                seg.text.strip()
+                for seg in transcription.segments
+                if seg.no_speech_prob < 0.6
+            ).strip()
+        else:
+            text = (transcription.text or "").strip()
         logger.info(f"Groq STT: {text!r}")
 
         # Filter known Whisper hallucinations (phantom text from silence/noise)
