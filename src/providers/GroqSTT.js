@@ -36,17 +36,20 @@ class GroqSTT {
         // VAD (Voice Activity Detection) settings
         this.silenceTimer = null;
         this.silenceDelayMs = 3500;     // 3.5s silence = end of speech (profile can override)
-        this.vadThreshold = 35;         // FFT average amplitude threshold (profile can override)
+        this.vadThreshold = 50;         // FFT average amplitude threshold (profile can override)
+        this.minSpeechMs = 300;         // Must sustain above threshold for this long before counting as speech
         this.maxRecordingMs = 45000;    // 45s max before auto-chunk (profile can override)
         this.maxRecordingTimer = null;
         this.isSpeaking = false;
         this.stoppingRecorder = false;
         this.hadSpeechInChunk = false;
+        this._speechStartTime = 0;     // When sustained speech started
 
         // Audio analysis for VAD
         this._audioCtx = null;
         this._analyser = null;
         this._vadAnimFrame = null;
+        this._accumulationTimer = null; // Accumulate transcripts across chunks before sending
     }
 
     isSupported() {
@@ -120,8 +123,8 @@ class GroqSTT {
             const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
             this.audioChunks = [];
 
-            // Skip if no speech detected or audio too small
-            if (!this.hadSpeechInChunk || audioBlob.size < 5000) {
+            // Skip if no speech detected or audio too small (10KB min filters out noise bursts)
+            if (!this.hadSpeechInChunk || audioBlob.size < 10000) {
                 console.log('Groq STT: skipping - no speech or too small (' + audioBlob.size + ' bytes)');
                 this.isProcessing = false;
                 this.stoppingRecorder = false;
@@ -148,9 +151,35 @@ class GroqSTT {
 
                 if (data.transcript && data.transcript.trim()) {
                     console.log('Groq STT transcript:', data.transcript);
-                    this.accumulatedText = data.transcript;
                     if (this.onListenFinal) this.onListenFinal(data.transcript);
-                    if (this.onResult) this.onResult(data.transcript);
+
+                    // PTT mode: send immediately (user released button = done talking)
+                    if (this._micMuted) {
+                        this.accumulatedText = data.transcript.trim();
+                        if (this.onResult) this.onResult(this.accumulatedText);
+                        this.accumulatedText = '';
+                    } else {
+                        // Listen mode: accumulate across chunks, send after silence
+                        this.accumulatedText = this.accumulatedText
+                            ? this.accumulatedText + ' ' + data.transcript.trim()
+                            : data.transcript.trim();
+
+                        // Clear any existing accumulation timer
+                        if (this._accumulationTimer) {
+                            clearTimeout(this._accumulationTimer);
+                            this._accumulationTimer = null;
+                        }
+                        // Send accumulated text after silence (no new chunks)
+                        this._accumulationTimer = setTimeout(() => {
+                            this._accumulationTimer = null;
+                            const fullText = this.accumulatedText.trim();
+                            if (fullText && this.onResult) {
+                                console.log('Groq STT accumulated result:', fullText);
+                                this.onResult(fullText);
+                            }
+                            this.accumulatedText = '';
+                        }, this.silenceDelayMs);
+                    }
                 }
             } catch (error) {
                 console.error('Groq STT error:', error);
@@ -200,9 +229,21 @@ class GroqSTT {
             const isSpeakingNow = average > this.vadThreshold;
 
             if (isSpeakingNow && !this.isSpeaking) {
-                // Speech started
+                // Potential speech — check minimum duration before confirming
+                const now = Date.now();
+                if (!this._speechStartTime) {
+                    this._speechStartTime = now;
+                }
+                if (now - this._speechStartTime < this.minSpeechMs) {
+                    // Still below minimum — don't confirm yet, just keep checking
+                    this._vadAnimFrame = requestAnimationFrame(checkLevel);
+                    return;
+                }
+
+                // Speech confirmed (sustained above threshold for minSpeechMs)
                 this.isSpeaking = true;
                 this.hadSpeechInChunk = true;
+                this._speechStartTime = 0;
 
                 if (this.silenceTimer) {
                     clearTimeout(this.silenceTimer);
@@ -224,8 +265,11 @@ class GroqSTT {
                         }
                     }, this.maxRecordingMs);
                 }
+            } else if (!isSpeakingNow && !this.isSpeaking) {
+                // Below threshold and not yet confirmed — reset speech start timer
+                this._speechStartTime = 0;
             } else if (!isSpeakingNow && this.isSpeaking && !this.isProcessing && !this.stoppingRecorder) {
-                // Silence after speech — start silence timer
+                // Silence after confirmed speech — start silence timer
                 if (!this.silenceTimer) {
                     this.silenceTimer = setTimeout(() => {
                         this.isSpeaking = false;
@@ -250,6 +294,7 @@ class GroqSTT {
 
         if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
         if (this.maxRecordingTimer) { clearTimeout(this.maxRecordingTimer); this.maxRecordingTimer = null; }
+        if (this._accumulationTimer) { clearTimeout(this._accumulationTimer); this._accumulationTimer = null; }
         if (this._vadAnimFrame) { cancelAnimationFrame(this._vadAnimFrame); this._vadAnimFrame = null; }
 
         if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
@@ -298,6 +343,10 @@ class GroqSTT {
         if (this.maxRecordingTimer) {
             clearTimeout(this.maxRecordingTimer);
             this.maxRecordingTimer = null;
+        }
+        if (this._accumulationTimer) {
+            clearTimeout(this._accumulationTimer);
+            this._accumulationTimer = null;
         }
         // Stop recording but keep stream alive
         if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
@@ -433,7 +482,7 @@ class GroqWakeWordDetector {
         // Faster settings for wake word detection
         this._stt.silenceDelayMs = 1500;    // 1.5s silence (faster response)
         this._stt.maxRecordingMs = 10000;   // 10s max chunks
-        this._stt.vadThreshold = 25;        // More sensitive
+        this._stt.vadThreshold = 40;        // Sensitive but not noise-triggering
 
         this._stt.onResult = (transcript) => {
             const lower = transcript.toLowerCase();

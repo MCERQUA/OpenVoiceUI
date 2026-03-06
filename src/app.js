@@ -2303,12 +2303,14 @@ inject();
                 // VAD (Voice Activity Detection) settings
                 this.silenceTimer = null;
                 this.silenceDelayMs = 3500; // 3.5s silence = end of speech (profile can override)
-                this.vadThreshold = 35;     // FFT average amplitude threshold (profile can override)
+                this.vadThreshold = 50;     // FFT average amplitude threshold (profile can override)
+                this.minSpeechMs = 300;     // Must sustain above threshold for this long before counting as speech
                 this.maxRecordingMs = 45000; // 45s max recording before auto-chunk (profile can override)
                 this.maxRecordingTimer = null;
                 this.isSpeaking = false;
                 this.stoppingRecorder = false;  // Flag to prevent duplicate stop attempts
                 this.hadSpeechInChunk = false;  // Track if real speech happened in this chunk
+                this._speechStartTime = 0; // When sustained speech started
             }
 
             isSupported() {
@@ -2354,7 +2356,7 @@ inject();
                         this.audioChunks = [];
 
                         // Skip if no real speech was detected in this chunk or audio too small
-                        if (!this.hadSpeechInChunk || audioBlob.size < 5000) {
+                        if (!this.hadSpeechInChunk || audioBlob.size < 10000) {
                             console.log('Skipping Whisper - no speech or audio too small (' + audioBlob.size + ' bytes)');
                             this.isProcessing = false;
                             this.stoppingRecorder = false;
@@ -2420,9 +2422,21 @@ inject();
                         const isSpeakingNow = average > this.vadThreshold;
 
                         if (isSpeakingNow && !this.isSpeaking) {
-                            // Started speaking
+                            // Potential speech — check minimum duration before confirming
+                            const now = Date.now();
+                            if (!this._speechStartTime) {
+                                this._speechStartTime = now;
+                            }
+                            if (now - this._speechStartTime < this.minSpeechMs) {
+                                // Still below minimum — keep checking
+                                requestAnimationFrame(checkAudioLevel);
+                                return;
+                            }
+
+                            // Speech confirmed (sustained above threshold for minSpeechMs)
                             this.isSpeaking = true;
                             this.hadSpeechInChunk = true;
+                            this._speechStartTime = 0;
                             console.log('🎤 Speech detected');
 
                             // Clear silence timer
@@ -2444,6 +2458,9 @@ inject();
                                     }
                                 }, this.maxRecordingMs);
                             }
+                        } else if (!isSpeakingNow && !this.isSpeaking) {
+                            // Below threshold and not yet confirmed — reset speech start timer
+                            this._speechStartTime = 0;
                         } else if (!isSpeakingNow && this.isSpeaking && !this.isProcessing && !this.stoppingRecorder) {
                             // Stopped speaking - start silence timer (ONLY if not already processing or stopping)
                             if (!this.silenceTimer) {
