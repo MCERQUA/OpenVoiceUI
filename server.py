@@ -562,11 +562,12 @@ def groq_stt():
             prompt="Voice command for AI assistant.",
         )
         # Filter segments with high no_speech_prob (Whisper hallucinations over silence)
-        if hasattr(transcription, 'segments') and transcription.segments:
+        segments = getattr(transcription, 'segments', None)
+        if segments:
             text = ' '.join(
-                seg.text.strip()
-                for seg in transcription.segments
-                if seg.no_speech_prob < 0.6
+                (seg.get('text', '') if isinstance(seg, dict) else seg.text).strip()
+                for seg in segments
+                if (seg.get('no_speech_prob', 0) if isinstance(seg, dict) else seg.no_speech_prob) < 0.6
             ).strip()
         else:
             text = (transcription.text or "").strip()
