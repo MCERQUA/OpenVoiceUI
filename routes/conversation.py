@@ -1132,7 +1132,7 @@ def _conversation_inner():
                                         if _sid:
                                             _sf = _sessions_dir / f'{_sid}.jsonl'
                                             if _sf.exists():
-                                                _sf.write_text('[]')
+                                                _sf.write_text('{"type":"session","version":3,"id":"' + _sid + '","timestamp":"' + __import__('datetime').datetime.utcnow().isoformat() + 'Z","cwd":"/home/node/.openclaw/workspace"}\n')
                                                 logger.info(f'### RETRY session_start: cleared stale session {_sid}')
                                     except Exception as _e:
                                         logger.warning(f'### RETRY session_start: could not clear session: {_e}')
@@ -1494,7 +1494,8 @@ def session_reset():
             if session_id:
                 session_file = sessions_dir / f'{session_id}.jsonl'
                 if session_file.exists():
-                    session_file.write_text('[]')
+                    _ts = __import__('datetime').datetime.utcnow().isoformat() + 'Z'
+                    session_file.write_text('{"type":"session","version":3,"id":"' + session_id + '","timestamp":"' + _ts + '","cwd":"/home/node/.openclaw/workspace"}\n')
                     logger.info(f'### SESSION RESET: cleared openclaw session file {session_id}.jsonl')
     except Exception as e:
         logger.warning(f'### SESSION RESET: could not clear openclaw session file: {e}')

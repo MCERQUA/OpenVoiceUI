@@ -654,16 +654,17 @@ class GatewayConnection:
                 if payload.get('stream') == 'tool':
                     tool_data = payload.get('data', {})
                     phase = tool_data.get('phase', '')
+                    args = tool_data.get('args', {})
                     action = {
                         'type': 'tool',
                         'phase': phase,
                         'name': tool_data.get('name', 'unknown'),
                         'toolCallId': tool_data.get('toolCallId', ''),
-                        'input': tool_data.get('input', {}),
+                        'input': args,
                         'ts': time.time()
                     }
                     if phase == 'result':
-                        action['result'] = str(tool_data.get('result', ''))[:200]
+                        action['result'] = str(tool_data.get('result', tool_data.get('meta', '')))[:200]
                     captured_actions.append(action)
                     event_queue.put({'type': 'action', 'action': action})
                     if phase == 'start':

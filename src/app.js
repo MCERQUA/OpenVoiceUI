@@ -6982,13 +6982,14 @@ inject();
                         const phase = action.phase === 'result' ? '✓' : '→';
                         // Build a readable detail line from the input parameters
                         let detail = '';
-                        if (action.phase !== 'result' && action.input) {
-                            const inp = action.input;
-                            detail = inp.path || inp.command || inp.query || inp.url ||
-                                     inp.file_path || inp.pattern || inp.content?.slice?.(0, 60) ||
-                                     JSON.stringify(inp).slice(0, 80);
-                        } else if (action.phase === 'result') {
+                        if (action.phase === 'result') {
                             detail = action.result || '';
+                        } else if (action.input && Object.keys(action.input).length) {
+                            const inp = action.input;
+                            detail = inp.command || inp.path || inp.file_path ||
+                                     inp.query || inp.url || inp.pattern ||
+                                     inp.content?.slice?.(0, 60) ||
+                                     Object.values(inp)[0]?.toString?.()?.slice(0, 80) || '';
                         }
                         this.addEntry('tool', `${phase} Tool: ${action.name}`, detail, action.ts);
                     } else if (action.type === 'lifecycle') {
