@@ -1,0 +1,14 @@
+# skill-runner — shared heavy-dependency service for all JamBot users
+# All packages live here so the openvoiceui/openclaw containers stay lean.
+
+flask>=3.0.0
+
+# Document text extraction
+pypdf>=4.0.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+python-pptx>=0.6.23
+
+# CSV / data analysis
+pandas>=2.0.0
+matplotlib>=3.7.0

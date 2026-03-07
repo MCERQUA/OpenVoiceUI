@@ -1,0 +1,9 @@
+# Optional: document text extraction for /api/upload
+# Install this to enable PDF/DOCX/XLSX/PPTX content preview in the transcript panel.
+# Without it, those file types still upload successfully — the AI just can't read their contents.
+#
+# Install: pip install -r requirements-docs.txt
+pypdf>=4.0.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+python-pptx>=0.6.23

@@ -5732,6 +5732,7 @@ inject();
                     localStorage.setItem('canvas_last_page', page);
                     this._lastMtime = null;  // reset mtime tracking on manual navigation
                 }
+                console.log('Canvas opening:', page);
                 this.show();
             },
 

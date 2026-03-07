@@ -10,10 +10,14 @@ Registers routes:
   GET  /api/dj-sound                   — DJ soundboard API (list/play)
 """
 
+import logging
 import random
+import re
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request, send_file
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Blueprint
@@ -120,10 +124,136 @@ def serve_sound(filepath):
     return jsonify({"error": "Sound not found"}), 404
 
 
+# ---------------------------------------------------------------------------
+# Upload constants & helpers
+# ---------------------------------------------------------------------------
+
+# Hard limit enforced before writing to disk (25 MB)
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+# Maximum characters returned to the AI as content_preview
+_MAX_PREVIEW_CHARS = 6000
+
+# Server-side allowlist — only these extensions are accepted
+_ALLOWED_EXTENSIONS = {
+    # Images
+    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff',
+    # Structured documents
+    '.pdf', '.docx', '.xlsx', '.pptx',
+    # Plain text / code
+    '.txt', '.md', '.csv', '.log',
+    '.py', '.js', '.ts', '.json', '.yaml', '.yml',
+    '.html', '.css',
+}
+
+# Control characters to strip from extracted text (keeps \t \n \r)
+_CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+
+def _sanitize_text(text: str) -> str:
+    """Strip control chars, collapse excessive blank lines, cap at _MAX_PREVIEW_CHARS."""
+    text = _CTRL_RE.sub('', text)
+    text = re.sub(r'\n{4,}', '\n\n\n', text)  # no more than 3 consecutive blank lines
+    return text[:_MAX_PREVIEW_CHARS].strip()
+
+
+def _extract_pdf(path: Path) -> str:
+    """Extract text from a PDF using pypdf. Returns sanitized string."""
+    from pypdf import PdfReader
+    reader = PdfReader(str(path))
+    pages = []
+    for i, page in enumerate(reader.pages):
+        try:
+            text = page.extract_text() or ''
+            pages.append(text)
+        except Exception:
+            pages.append(f'[Page {i + 1}: extraction failed]')
+    return _sanitize_text('\n\n'.join(pages))
+
+
+def _extract_docx(path: Path) -> str:
+    """Extract text from a .docx using python-docx. Returns sanitized string."""
+    from docx import Document
+    doc = Document(str(path))
+    parts = []
+    for para in doc.paragraphs:
+        t = para.text.strip()
+        if t:
+            parts.append(t)
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [c.text.strip() for c in row.cells if c.text.strip()]
+            if cells:
+                parts.append(' | '.join(cells))
+    return _sanitize_text('\n'.join(parts))
+
+
+def _extract_xlsx(path: Path) -> str:
+    """Extract cell values from a .xlsx using openpyxl. Returns sanitized string."""
+    import openpyxl
+    wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+    parts = []
+    try:
+        for sheet in wb.worksheets:
+            parts.append(f'[Sheet: {sheet.title}]')
+            for row in sheet.iter_rows(values_only=True):
+                cells = [str(c) for c in row if c is not None and str(c).strip()]
+                if cells:
+                    parts.append('\t'.join(cells))
+    finally:
+        wb.close()
+    return _sanitize_text('\n'.join(parts))
+
+
+def _extract_pptx(path: Path) -> str:
+    """Extract text from a .pptx using python-pptx. Returns sanitized string."""
+    from pptx import Presentation
+    prs = Presentation(str(path))
+    parts = []
+    for i, slide in enumerate(prs.slides, 1):
+        slide_texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for para in shape.text_frame.paragraphs:
+                    t = para.text.strip()
+                    if t:
+                        slide_texts.append(t)
+        if slide_texts:
+            parts.append(f'[Slide {i}]')
+            parts.extend(slide_texts)
+    return _sanitize_text('\n'.join(parts))
+
+
+def _call_skill_runner(path: Path, original_name: str) -> str | None:
+    """
+    Try to extract document text via the shared skill-runner service.
+    Returns extracted text on success, None if the service is unavailable.
+    Falls back gracefully so local extractors can take over.
+    """
+    try:
+        import requests
+        with open(path, 'rb') as fh:
+            resp = requests.post(
+                'http://skill-runner:8900/extract',
+                files={'file': (original_name, fh)},
+                data={'filename': original_name},
+                timeout=30,
+            )
+        if resp.ok:
+            data = resp.json()
+            return data.get('text', '')
+        logger.warning('skill-runner /extract returned %d for %s', resp.status_code, original_name)
+    except Exception as exc:
+        logger.debug('skill-runner unavailable, using local extractors: %s', exc)
+    return None
+
+
 @static_files_bp.route('/api/upload', methods=['POST'])
 def upload_file():
     """Accept a file upload from the text panel and save to uploads/."""
-    import uuid, mimetypes, os
+    import mimetypes
+    import uuid
+
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
 
@@ -131,16 +261,26 @@ def upload_file():
     if not f.filename:
         return jsonify({'error': 'Empty filename'}), 400
 
-    # Sanitize filename
+    # --- Sanitize filename, validate extension ---
     original_name = Path(f.filename).name
     ext = Path(original_name).suffix.lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        return jsonify({'error': f'File type "{ext}" is not allowed'}), 415
+
+    # --- Size check before writing to disk ---
+    # Seek to end to get byte length without reading into memory
+    f.stream.seek(0, 2)
+    file_size = f.stream.tell()
+    f.stream.seek(0)
+    if file_size > _MAX_UPLOAD_BYTES:
+        return jsonify({'error': 'File too large (25 MB max)'}), 413
+
+    # --- Save with UUID filename (no original name on disk) ---
     safe_name = f"{uuid.uuid4().hex}{ext}"
     dest = UPLOADS_DIR / safe_name
-
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     f.save(str(dest))
 
-    # Determine type
     mime = f.mimetype or mimetypes.guess_type(original_name)[0] or ''
     is_image = mime.startswith('image/')
 
@@ -153,15 +293,52 @@ def upload_file():
 
     if is_image:
         result['type'] = 'image'
-    else:
-        result['type'] = 'file'
-        # Preview first 3000 chars of text files
-        text_types = {'text/', 'application/json', 'application/xml', 'application/javascript'}
-        if any(mime.startswith(t) for t in text_types) or ext in {'.txt', '.md', '.csv', '.log', '.py', '.js', '.json', '.yaml', '.yml'}:
-            try:
-                result['content_preview'] = dest.read_text(errors='replace')[:3000]
-            except Exception:
-                pass
+        return jsonify(result)
+
+    result['type'] = 'file'
+
+    # --- Extract readable content by type ---
+    _BINARY_EXTS = {'.pdf', '.docx', '.xlsx', '.pptx'}
+
+    try:
+        if ext in _BINARY_EXTS:
+            # Try shared skill-runner first (preferred — keeps this container lean)
+            text = _call_skill_runner(dest, original_name)
+
+            # Fall back to local extractors if skill-runner unavailable
+            if text is None:
+                if ext == '.pdf':
+                    text = _extract_pdf(dest)
+                elif ext == '.docx':
+                    text = _extract_docx(dest)
+                elif ext == '.xlsx':
+                    text = _extract_xlsx(dest)
+                elif ext == '.pptx':
+                    text = _extract_pptx(dest)
+
+            if text:
+                result['content_preview'] = text
+                result['extracted_type'] = ext.lstrip('.')
+            else:
+                result['extraction_error'] = (
+                    f'Could not extract text from {ext} file. '
+                    'Install skill-runner or document packages to enable this.'
+                )
+
+        else:
+            # Plain text / code / CSV — read directly
+            text_types = {'text/', 'application/json', 'application/xml', 'application/javascript'}
+            if any(mime.startswith(t) for t in text_types) or ext in {
+                '.txt', '.md', '.csv', '.log',
+                '.py', '.js', '.ts', '.json', '.yaml', '.yml',
+                '.html', '.css',
+            }:
+                raw = dest.read_text(errors='replace')
+                result['content_preview'] = _sanitize_text(raw)
+
+    except Exception as exc:
+        logger.warning('Document extraction failed for %s: %s', original_name, exc)
+        result['extraction_error'] = f'Could not extract text from {ext} file'
 
     return jsonify(result)
 

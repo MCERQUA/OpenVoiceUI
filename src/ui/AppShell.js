@@ -98,7 +98,7 @@ const SHELL_HTML = `
             <label class="tp-upload-btn" title="Attach file">
                 📎
                 <input type="file" id="tp-file-input" style="display:none"
-                       accept="image/*,.pdf,.txt,.md,.json,.csv,.html,.js,.py,.ts,.css"
+                       accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.md,.json,.csv,.html,.js,.py,.ts,.css"
                        onchange="TranscriptPanel.handleUpload(this)">
             </label>
             <div class="tp-file-preview" id="tp-file-preview" style="display:none">
