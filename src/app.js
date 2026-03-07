@@ -2668,6 +2668,12 @@ inject();
                     context.componentsOpen.push('thought-bubbles');
                 }
 
+                // Recent canvas JS errors (last 5, auto-cleared after send)
+                const _now = Date.now();
+                const _recentErrors = (window._canvasErrorBuffer || [])
+                    .filter(e => _now - e.ts < 30000)
+                    .map(e => `${e.error} (line ${e.line})`);
+                if (_recentErrors.length > 0) context.canvasErrors = _recentErrors;
                 return context;
             }
 
@@ -2961,6 +2967,7 @@ inject();
                 window.HaloSmokeFace?.setThinking(true);
 
                 ActionConsole.addEntry('chat', `Sent: "${text.substring(0, 80)}${text.length > 80 ? '...' : ''}"`);
+                window._canvasErrorBuffer = []; // clear after send
 
                 let messageToSend = text.trim();
 
@@ -5641,11 +5648,15 @@ inject();
                 });
 
                 // Canvas error bridge: catch JS errors from sandboxed canvas pages
+                window._canvasErrorBuffer = [];
                 window.addEventListener('message', (event) => {
                     if (!event.data || event.data.type !== 'canvas-error') return;
                     const { error, source, line, col } = event.data;
                     console.error(`[Canvas JS Error] ${error} at ${source}:${line}:${col}`);
                     ActionConsole.addEntry('error', `Canvas JS: ${error} (line ${line})`);
+                    // Buffer for auto-injection into next agent message
+                    window._canvasErrorBuffer.push({ error, line, col, ts: Date.now() });
+                    if (window._canvasErrorBuffer.length > 5) window._canvasErrorBuffer.shift();
                 });
 
                 // Auto-refresh polling: detect when agent edits the current canvas page
