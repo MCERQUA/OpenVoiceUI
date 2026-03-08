@@ -1177,6 +1177,7 @@ function onIconTouchStart(e, item) {
 
 function onIconMouseDown(e, item) {
   if (e.button !== 0) return;
+  if (iconsLocked) { e.stopPropagation(); return; }
   e.stopPropagation();
   closeAllMenus();
   if (!e.ctrlKey) {
@@ -1605,8 +1606,9 @@ function showContextMenu(x, y, items) {
   contextMenuOpen = true;
 }
 
-let clipboard = null; // {action:'cut'|'copy', id:string}
+let clipboard = null; // {action:'cut'|'copy', id:string, pageId?:string}
 let showDesktopIcons = true;
+let iconsLocked = false;
 
 function getDesktopContextItems() {
   const isMac = currentTheme === 'mac';
@@ -1617,18 +1619,19 @@ function getDesktopContextItems() {
   if (isMac || isUbuntu) {
     return [
       {label:'New Folder', action:()=>createNewFolder()},
+      {label:'New Shortcut\u2026', action:()=>createShortcut()},
+      '---',
       {label:isMac?'Get Info':'Properties', action:()=>showDesktopProperties()},
-      {label:isMac?'Change Desktop Background...':'Change Background...', action:()=>openThemeSettings()},
+      {label:isMac?'Change Desktop Background\u2026':'Change Background\u2026', action:()=>openThemeSettings()},
       '---',
       {label:'Clean Up', action:()=>arrangeIcons()},
       {label:'Sort By', sub:[
         {label:'Name', action:()=>sortIcons('name')},
         {label:'Kind', action:()=>sortIcons('type')},
-        {label:'Date Modified', action:()=>sortIcons('name')},
       ]},
       '---',
-      ...(clipboard ? [{label:'Paste', action:()=>pasteItem()},'---'] : []),
-      {label:isMac?'Show View Options':'Desktop Settings', action:()=>openThemeSettings()},
+      ...(clipboard ? [{label:'Paste Shortcut', action:()=>pasteItem()},'---'] : []),
+      {label:(iconsLocked?'\u2713 ':'')+'Lock Icon Positions', action:()=>toggleLockIcons()},
     ];
   }
 
@@ -1639,27 +1642,22 @@ function getDesktopContextItems() {
       {label:'Small Icons', action:()=>setIconSize('small')},
       '---',
       {label:(showDesktopIcons?'\u2713 ':'')+'Show Desktop Icons', action:()=>toggleDesktopIcons()},
-      {label:'Lock Web Items on Desktop', action:()=>{}},
+      {label:(iconsLocked?'\u2713 ':'')+'Lock Icon Positions', action:()=>toggleLockIcons()},
     ]},
     {label:(is95||is31)?'Arrange Icons':'Arrange Icons By', sub:[
       {label:'Name', action:()=>sortIcons('name')},
-      {label:'Size', action:()=>sortIcons('type')},
       {label:'Type', action:()=>sortIcons('type')},
-      {label:'Modified', action:()=>sortIcons('name')},
       '---',
       {label:'Auto Arrange', action:()=>arrangeIcons()},
       {label:'Align to Grid', action:()=>arrangeIcons()},
     ]},
     '---',
-    ...(clipboard ? [{label:'Paste', action:()=>pasteItem()},{label:'Paste Shortcut', action:()=>pasteItem()},'---'] : []),
-    {label:'Refresh', action:()=>buildDesktopIcons()},
+    ...(clipboard ? [{label:'Paste Shortcut', action:()=>pasteItem()},'---'] : []),
+    {label:'Refresh', action:()=>{rebuildDesktopItems();buildDesktopIcons();}},
     '---',
     {label:'New', sub:[
-      {label:'Folder', action:()=>createNewFolder()},
-      {label:'Shortcut', action:()=>{}},
-      '---',
-      {label:'Text Document', action:()=>{}},
-      {label:'Bitmap Image', action:()=>{}},
+      {label:'Folder\u2026', action:()=>createNewFolder()},
+      {label:'Shortcut\u2026', action:()=>createShortcut()},
     ]},
     '---',
     {label:is95||is31?'Properties':(currentTheme==='xp'?'Properties':'Display Properties'), action:()=>openThemeSettings()},
@@ -1693,31 +1691,12 @@ function getIconContextItems(item) {
     ];
   }
 
-  // System icons (My Computer, My Documents, Internet, Settings)
-  if (!item.id.startsWith('cat-') && item.action !== 'folder') {
-    if (isMac || isUbuntu) {
-      return [
-        {label:'Open', action:()=>onIconDblClick(item)},
-        {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
-        '---',
-        {label:'Rename', action:()=>renameIcon(item)},
-      ];
-    }
-    return [
-      {label:'Open', action:()=>onIconDblClick(item)},
-      {label:'Explore', action:()=>onIconDblClick(item)},
-      '---',
-      {label:'Create Shortcut', action:()=>{}},
-      {label:'Rename', action:()=>renameIcon(item)},
-      '---',
-      {label:'Properties', action:()=>showProperties(item)},
-    ];
-  }
-
-  // Loose page icons
+  // ── Loose page icons (check BEFORE system icon catch-all) ──
   if (item.action === 'openPage' && item.pageId) {
+    const isSystem = SYSTEM_ITEMS.some(s => s.id === item.id); // e.g. game-library-shortcut
     const moveToSub = buildMoveToSubmenu(item);
     const doDelete = () => showConfirmModal('Move "'+item.name+'" to the Recycle Bin?', (ok)=>{ if(ok) sendToRecycle(item); });
+    const doRename = () => showPromptModal('Rename "'+item.name+'" to:', item.name, (n)=>{ if(n&&n.trim()&&PAGES[item.pageId]){PAGES[item.pageId].name=n.trim();item.name=n.trim();rebuildDesktopItems();buildDesktopIcons();} });
     if (isMac || isUbuntu) {
       return [
         {label:'Open', action:()=>onIconDblClick(item)},
@@ -1725,65 +1704,74 @@ function getIconContextItems(item) {
         '---',
         {label:isMac?'Get Info':'Properties', action:()=>showPageProperties(item.pageId)},
         '---',
-        {label:'Move to...', sub: moveToSub},
-        {label:isMac?'Move to Trash':'Move to Trash', action:doDelete},
+        {label:'Rename', action:doRename},
+        {label:'Move to\u2026', sub: moveToSub},
+        ...(!isSystem ? [{label:isMac?'Move to Trash':'Move to Trash', action:doDelete}] : []),
       ];
     }
     return [
       {label:'Open', action:()=>onIconDblClick(item)},
       {label:'Open in New Tab', action:()=>openCanvasPage(item.pageId, true)},
       '---',
-      {label:'Move to...', sub: moveToSub},
+      {label:'Rename', action:doRename},
+      {label:'Move to\u2026', sub: moveToSub},
       '---',
-      {label:'Delete', action:doDelete},
-      '---',
+      ...(!isSystem ? [{label:'Delete', action:doDelete},'---'] : []),
       {label:'Properties', action:()=>showPageProperties(item.pageId)},
     ];
   }
 
-  // Custom folder icons
+  // ── Custom folder icons ──
   if (item.action === 'customFolder') {
+    const doDeleteFolder = () => showConfirmModal('Delete folder "'+item.name+'"?', (ok)=>{ if(ok){delete customFolders[item.folderId];saveState();rebuildDesktopItems();buildDesktopIcons();} });
     if (isMac || isUbuntu) {
       return [
         {label:'Open', action:()=>onIconDblClick(item)},
+        {label:'Add Pages\u2026', action:()=>addPagesToFolder(item.folderId)},
+        '---',
         {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
         '---',
         {label:'Rename', action:()=>renameCustomFolder(item)},
-        {label:isMac?'Move to Trash':'Move to Trash', action:()=>{delete customFolders[item.folderId];saveState();rebuildDesktopItems();buildDesktopIcons();}},
+        {label:isMac?'Move to Trash':'Move to Trash', action:doDeleteFolder},
       ];
     }
     return [
       {label:'Open', action:()=>onIconDblClick(item)},
+      {label:'Add Pages\u2026', action:()=>addPagesToFolder(item.folderId)},
       '---',
       {label:'Rename', action:()=>renameCustomFolder(item)},
-      {label:'Delete', action:()=>{delete customFolders[item.folderId];saveState();rebuildDesktopItems();buildDesktopIcons();}},
+      {label:'Delete', action:doDeleteFolder},
       '---',
       {label:'Properties', action:()=>showProperties(item)},
     ];
   }
 
-  // Folder / category icons
+  // ── System icons (My Computer, My Documents, Internet, Settings) ──
+  if (!item.id.startsWith('cat-') && item.action !== 'folder') {
+    if (isMac || isUbuntu) {
+      return [
+        {label:'Open', action:()=>onIconDblClick(item)},
+        {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
+      ];
+    }
+    return [
+      {label:'Open', action:()=>onIconDblClick(item)},
+      {label:'Explore', action:()=>onIconDblClick(item)},
+      '---',
+      {label:'Properties', action:()=>showProperties(item)},
+    ];
+  }
+
+  // ── Category folder icons ──
   if (isMac || isUbuntu) {
     return [
       {label:'Open', action:()=>onIconDblClick(item)},
       {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
-      '---',
-      {label:'Copy', action:()=>{clipboard={action:'copy',id:item.id}}},
-      '---',
-      {label:'Rename', action:()=>renameIcon(item)},
-      {label:isMac?'Move to Trash':'Move to Trash', action:()=>deleteItem(item.id)},
     ];
   }
   return [
     {label:'Open', action:()=>onIconDblClick(item)},
     {label:'Explore', action:()=>onIconDblClick(item)},
-    '---',
-    {label:'Cut', action:()=>{clipboard={action:'cut',id:item.id}}},
-    {label:'Copy', action:()=>{clipboard={action:'copy',id:item.id}}},
-    '---',
-    {label:'Create Shortcut', action:()=>{}},
-    {label:'Delete', action:()=>deleteItem(item.id)},
-    {label:'Rename', action:()=>renameIcon(item)},
     '---',
     {label:'Properties', action:()=>showProperties(item)},
   ];
@@ -1876,13 +1864,65 @@ function createNewFolder() {
     saveState();
     rebuildDesktopItems();
     buildDesktopIcons();
+    // Open the folder immediately so user can add pages
+    openCustomFolder(id);
   });
 }
 
 function pasteItem() {
   if (!clipboard) return;
-  // For cut, we'd need to move the icon — for now just clear clipboard
-  clipboard = null;
+  const {action, id, pageId} = clipboard;
+  const pid = pageId || id; // support both clipboard shapes
+  if (pid && PAGES[pid]) {
+    if (!desktopPages.includes(pid)) desktopPages.push(pid);
+    if (!knownPages.includes(pid)) knownPages.push(pid);
+    saveState();
+    rebuildDesktopItems();
+    buildDesktopIcons();
+  }
+  if (action === 'cut') clipboard = null;
+}
+
+function toggleLockIcons() {
+  iconsLocked = !iconsLocked;
+  const app = document.getElementById('app');
+  app.style.cursor = iconsLocked ? 'default' : '';
+}
+
+function createShortcut() {
+  const available = Object.entries(PAGES).filter(([id]) =>
+    !recycleBin.includes(id)
+  );
+  if (!available.length) { showConfirmModal('No canvas pages available.', ()=>{}); return; }
+  let html = '<div style="padding:12px;font-size:12px;display:flex;flex-direction:column;height:100%">';
+  html += '<div style="font-weight:bold;margin-bottom:8px">Select a page to add to desktop:</div>';
+  html += '<div style="flex:1;overflow-y:auto;border:1px solid #bbb;border-radius:2px">';
+  available.sort((a,b)=>a[1].name.localeCompare(b[1].name)).forEach(([id, p]) => {
+    const onDesktop = desktopPages.includes(id);
+    html += `<div style="padding:5px 8px;cursor:pointer;display:flex;align-items:center;gap:8px;border-bottom:1px solid #eee${onDesktop?' opacity:.5':''}" onclick="if(!${onDesktop})addShortcutToDesktop('${id}',this)">
+      <span style="font-size:16px">${getIcon(getPageIconType(p.cat,id,p.name)).replace(/<[^>]+>/g,'') ? '📄' : '📄'}</span>
+      <span style="flex:1">${p.name}</span>
+      ${onDesktop ? '<span style="color:#999;font-size:10px">on desktop</span>' : ''}
+    </div>`;
+  });
+  html += '</div></div>';
+  createWindow({title:'Add Shortcut to Desktop', content:html, width:340, height:380});
+}
+
+function addShortcutToDesktop(pageId, el) {
+  if (!PAGES[pageId]) return;
+  if (!desktopPages.includes(pageId)) desktopPages.push(pageId);
+  if (!knownPages.includes(pageId)) knownPages.push(pageId);
+  saveState();
+  rebuildDesktopItems();
+  buildDesktopIcons();
+  // Mark as "on desktop" in the picker
+  el.style.opacity = '0.5';
+  const badge = document.createElement('span');
+  badge.style.cssText = 'color:#999;font-size:10px';
+  badge.textContent = 'on desktop';
+  el.appendChild(badge);
+  el.onclick = null;
 }
 
 function renameIcon(item) {
@@ -2109,26 +2149,10 @@ function openCustomFolder(folderId) {
   const folder = customFolders[folderId];
   if (!folder) return;
   const explorerTitle = currentTheme === 'mac' ? 'Finder' : (currentTheme === 'ubuntu' ? 'Files' : 'Explorer');
-  let gridHtml = '';
-  const pages = (folder.pages || []).filter(id => PAGES[id] && !recycleBin.includes(id));
-  if (pages.length === 0) {
-    gridHtml = '<div style="padding:20px;color:#888">Empty folder — drag items here from the desktop</div>';
-  } else {
-    gridHtml = '<div class="explorer-grid">';
-    pages.forEach(id => {
-      const p = PAGES[id];
-      if (!p) return;
-      gridHtml += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showExplorerItemMenu(event,'${id}')">
-        <div class="ei-icon">${getIcon(getPageIconType(p.cat, '${id}', p.name))}</div>
-        <div class="ei-name">${p.name}</div>
-      </div>`;
-    });
-    gridHtml += '</div>';
-  }
+  const gridHtml = buildCustomFolderGrid(folderId);
   const content = `
     <div class="explorer-toolbar">
-      <button onclick="history.length">Back</button>
-      <button onclick="">Forward</button>
+      <button onclick="addPagesToFolder('${folderId}')">Add Pages\u2026</button>
     </div>
     <div class="explorer-addr"><span>Folder:</span> ${folder.name}</div>
     <div style="display:flex;flex:1;overflow:hidden">
@@ -2136,9 +2160,122 @@ function openCustomFolder(folderId) {
     </div>
   `;
   createWindow({
-    title: explorerTitle + ' - ' + folder.name,
+    title: explorerTitle + ' \u2013 ' + folder.name,
     content, width: 600, height: 400,
   });
+}
+
+function buildCustomFolderGrid(folderId) {
+  const folder = customFolders[folderId];
+  if (!folder) return '';
+  const pages = (folder.pages || []).filter(id => PAGES[id] && !recycleBin.includes(id));
+  if (pages.length === 0) {
+    return `<div style="padding:30px;text-align:center;color:#888">
+      <div style="font-size:32px;margin-bottom:10px">📁</div>
+      <div>Folder is empty</div>
+      <div style="margin-top:8px"><button onclick="addPagesToFolder('${folderId}')" style="padding:4px 12px;cursor:pointer">Add Pages\u2026</button></div>
+    </div>`;
+  }
+  let html = '<div class="explorer-grid">';
+  pages.forEach(id => {
+    const p = PAGES[id];
+    if (!p) return;
+    html += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showFolderItemMenu(event,'${id}','${folderId}')">
+      <div class="ei-icon">${getIcon(getPageIconType(p.cat, id, p.name))}</div>
+      <div class="ei-name">${p.name}</div>
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function showFolderItemMenu(e, pageId, folderId) {
+  const page = PAGES[pageId];
+  const pageName = page ? page.name : pageId;
+  const isMac = currentTheme === 'mac';
+  showContextMenu(e.clientX, e.clientY, [
+    {label:'Open', action:()=>openCanvasPage(pageId)},
+    {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
+    '---',
+    {label:'Remove from Folder', action:()=>{
+      if (customFolders[folderId]) {
+        customFolders[folderId].pages = customFolders[folderId].pages.filter(id => id !== pageId);
+        desktopPages.push(pageId); // put back on desktop
+        saveState();
+        rebuildDesktopItems();
+        buildDesktopIcons();
+        // Refresh the folder window
+        document.querySelectorAll('.window').forEach(w => {
+          const t = w.querySelector('.titlebar-title');
+          if (t && t.textContent.includes(customFolders[folderId]?.name || '')) {
+            const g = w.querySelector('#explorer-grid-area');
+            if (g) g.innerHTML = buildCustomFolderGrid(folderId);
+          }
+        });
+      }
+    }},
+    '---',
+    {label:isMac?'Move to Trash':'Delete', action:()=>{
+      showConfirmModal('Move "'+pageName+'" to Recycle Bin?', (ok)=>{
+        if (!ok) return;
+        if (customFolders[folderId]) customFolders[folderId].pages = customFolders[folderId].pages.filter(id => id !== pageId);
+        deleteItem(pageId);
+        saveState();
+        rebuildDesktopItems();
+        buildDesktopIcons();
+        document.querySelectorAll('.window').forEach(w => {
+          const t = w.querySelector('.titlebar-title');
+          if (t && t.textContent.includes(customFolders[folderId]?.name || '')) {
+            const g = w.querySelector('#explorer-grid-area');
+            if (g) g.innerHTML = buildCustomFolderGrid(folderId);
+          }
+        });
+      });
+    }},
+    '---',
+    {label:'Properties', action:()=>showPageProperties(pageId)},
+  ]);
+}
+
+function addPagesToFolder(folderId) {
+  const folder = customFolders[folderId];
+  if (!folder) return;
+  const available = Object.entries(PAGES).filter(([id]) =>
+    !recycleBin.includes(id) && !folder.pages.includes(id)
+  );
+  if (!available.length) { showConfirmModal('All available pages are already in this folder.', ()=>{}); return; }
+  let html = '<div style="padding:12px;font-size:12px;display:flex;flex-direction:column;height:100%">';
+  html += `<div style="font-weight:bold;margin-bottom:8px">Add pages to "${folder.name}":</div>`;
+  html += '<div style="flex:1;overflow-y:auto;border:1px solid #bbb;border-radius:2px;margin-bottom:10px">';
+  available.sort((a,b)=>a[1].name.localeCompare(b[1].name)).forEach(([id, p]) => {
+    html += `<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;border-bottom:1px solid #eee">
+      <input type="checkbox" value="${id}" style="flex-shrink:0">
+      <span>${p.name}</span>
+    </label>`;
+  });
+  html += '</div>';
+  html += `<div style="display:flex;gap:6px;justify-content:flex-end">
+    <button onclick="confirmAddToFolder('${folderId}',this)" style="padding:4px 14px;cursor:pointer;font-size:12px">Add Selected</button>
+    <button onclick="closeWindow(parseInt(this.closest('.window').dataset.winId))" style="padding:4px 14px;cursor:pointer;font-size:12px">Cancel</button>
+  </div></div>`;
+  createWindow({title: 'Add Pages to "' + folder.name + '"', content: html, width: 360, height: 380});
+}
+
+function confirmAddToFolder(folderId, btn) {
+  const win = btn.closest('.window');
+  const folder = customFolders[folderId];
+  if (!folder) return;
+  win.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {
+    const pid = cb.value;
+    if (!folder.pages.includes(pid)) folder.pages.push(pid);
+    desktopPages = desktopPages.filter(id => id !== pid);
+  });
+  saveState();
+  rebuildDesktopItems();
+  buildDesktopIcons();
+  closeWindow(parseInt(win.dataset.winId));
+  // Refresh any open folder windows and reopen
+  openCustomFolder(folderId);
 }
 
 function buildExplorerGrid(catId) {
@@ -2212,8 +2349,8 @@ function showExplorerItemMenu(e, pageId) {
       {label:'Open', action:()=>openCanvasPage(pageId)},
       {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
       '---',
-      {label:'Cut', action:()=>{clipboard={action:'cut',id:pageId}}},
-      {label:'Copy', action:()=>{clipboard={action:'copy',id:pageId}}},
+      {label:'Cut', action:()=>{clipboard={action:'cut',id:pageId,pageId:pageId}}},
+      {label:'Copy', action:()=>{clipboard={action:'copy',id:pageId,pageId:pageId}}},
       '---',
       {label:'Delete', action:()=>{showConfirmModal('Move "'+pageName+'" to the Recycle Bin?',(ok)=>{if(ok){deleteItem(pageId);refreshExplorers();refreshRecycleBin();}});}},
       {label:'Rename', action:()=>{
