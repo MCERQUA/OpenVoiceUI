@@ -14,6 +14,7 @@ EMAIL="your@email.com"           # ← EDIT: for Let's Encrypt notifications
 SERVICE_NAME="openvoiceui"
 RUN_USER="${SUDO_USER:-$(whoami)}"
 WWW_DIR="/var/www/${SERVICE_NAME}"          # canvas pages + any web assets
+OPENCLAW_TESTED_VERSION="2026.3.2"         # pinned: the openclaw version tested with this release
 # ────────────────────────────────────────────────────────────────────────────
 
 # Guard: refuse to run with placeholder values
@@ -31,7 +32,7 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
     exit 1
 fi
 
-# ── OpenClaw gateway detection ────────────────────────────────────────────────
+# ── OpenClaw gateway setup ────────────────────────────────────────────────────
 # Helper: is OpenClaw currently listening on its default port?
 _openclaw_running() {
     ss -tlnp 2>/dev/null | grep -q ':18791'
@@ -44,122 +45,302 @@ _openclaw_installed() {
         || [ -f "${HOME}/.local/bin/openclaw" ]
 }
 
-# Helper: try to start openclaw and wait up to 5s for port to open
-_openclaw_start() {
-    echo "  Attempting to start OpenClaw..."
+# Helper: get installed openclaw version string (e.g. "2026.3.2")
+_openclaw_version() {
+    local ver=""
     if command -v openclaw >/dev/null 2>&1; then
-        openclaw start 2>/dev/null &
+        ver=$(openclaw --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     elif [ -f "/usr/local/bin/openclaw" ]; then
-        /usr/local/bin/openclaw start 2>/dev/null &
-    else
-        return 1
+        ver=$(/usr/local/bin/openclaw --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    elif [ -f "${HOME}/.local/bin/openclaw" ]; then
+        ver=$(${HOME}/.local/bin/openclaw --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     fi
-    local i=0
-    while [ $i -lt 5 ]; do
-        sleep 1
-        _openclaw_running && return 0
-        i=$((i+1))
-    done
-    return 1
+    echo "$ver"
+}
+
+# Helper: compare two version strings (format: YYYY.M.D)
+# Returns: 0 = match, 1 = first is newer, 2 = first is older
+_version_compare() {
+    local a="$1" b="$2"
+    if [ "$a" = "$b" ]; then return 0; fi
+    local older
+    older=$(printf '%s\n%s' "$a" "$b" | sort -V | head -n1)
+    if [ "$older" = "$a" ]; then return 2; else return 1; fi
+}
+
+# Helper: display the requirements checklist for existing openclaw installs
+_show_requirements() {
+    echo ""
+    echo "  ┌────────────────────────────────────────────────────────────────────┐"
+    echo "  │  OpenVoiceUI Gateway Requirements                                  │"
+    echo "  │                                                                    │"
+    echo "  │  Your openclaw.json must include these settings for voice to work. │"
+    echo "  │  OpenVoiceUI will NOT modify your config — these are for you to    │"
+    echo "  │  review and apply manually.                                        │"
+    echo "  │                                                                    │"
+    echo "  │  VERSION                                                           │"
+    echo "  │    Tested: openclaw@${OPENCLAW_TESTED_VERSION}                               │"
+    echo "  │    Other versions may work but are not guaranteed.                  │"
+    echo "  │                                                                    │"
+    echo "  │  GATEWAY (global — affects all agents on this instance)            │"
+    echo "  │    gateway.auth.mode: \"token\"                                      │"
+    echo "  │    gateway.controlUi.dangerouslyDisableDeviceAuth: true            │"
+    echo "  │                                                                    │"
+    echo "  │  AGENT (can be scoped to the openvoiceui agent only)              │"
+    echo "  │    agents.defaults.thinkingDefault: \"off\"                          │"
+    echo "  │    agents.defaults.blockStreamingDefault: \"on\"                     │"
+    echo "  │    agents.defaults.timeoutSeconds: 300                             │"
+    echo "  │    agents.defaults.compaction.reserveTokensFloor: 120000           │"
+    echo "  │                                                                    │"
+    echo "  │  Full details: docs/openclaw-requirements.md                       │"
+    echo "  └────────────────────────────────────────────────────────────────────┘"
+    echo ""
 }
 
 echo ""
 echo "── OpenClaw Gateway ──────────────────────────────────────────────────────"
+echo ""
+echo "  OpenVoiceUI uses OpenClaw as its AI gateway for voice conversations."
+echo "  Tested version: openclaw@${OPENCLAW_TESTED_VERSION}"
+echo ""
 
 OPENCLAW_GATEWAY_URL=$(grep -E "^CLAWDBOT_GATEWAY_URL=" "${INSTALL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'")
 OPENCLAW_GATEWAY_URL="${OPENCLAW_GATEWAY_URL:-ws://127.0.0.1:18791}"
 OPENCLAW_TOKEN=$(grep -E "^CLAWDBOT_AUTH_TOKEN=" "${INSTALL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'")
 OPENCLAW_CONFIGURED=false
 
-if _openclaw_running; then
-    echo "  ✓ OpenClaw is running (port 18791 active)"
-    printf "    Use this OpenClaw instance for OpenVoiceUI? [Y/n] "
-    read -r REPLY
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        printf "    Enter your gateway WebSocket URL [${OPENCLAW_GATEWAY_URL}]: "
-        read -r CUSTOM_URL
-        if [ -n "$CUSTOM_URL" ]; then
-            sed -i "s|^CLAWDBOT_GATEWAY_URL=.*|CLAWDBOT_GATEWAY_URL=${CUSTOM_URL}|" "${INSTALL_DIR}/.env"
-            OPENCLAW_GATEWAY_URL="$CUSTOM_URL"
-            echo "    Updated CLAWDBOT_GATEWAY_URL in .env"
-        fi
-    fi
-    OPENCLAW_CONFIGURED=true
+# Detect current state
+HAS_RUNNING=false
+HAS_INSTALLED=false
+INSTALLED_VERSION=""
+if _openclaw_running; then HAS_RUNNING=true; HAS_INSTALLED=true; fi
+if _openclaw_installed; then HAS_INSTALLED=true; fi
+if [ "$HAS_INSTALLED" = "true" ]; then
+    INSTALLED_VERSION=$(_openclaw_version)
+fi
 
-elif _openclaw_installed; then
-    echo "  OpenClaw is installed but not running."
-    printf "  Start OpenClaw now? [Y/n] "
-    read -r REPLY
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        if _openclaw_start; then
-            echo "  ✓ OpenClaw started successfully."
-            OPENCLAW_CONFIGURED=true
-        else
-            echo "  ⚠  Could not start OpenClaw automatically."
-            echo "     Start it manually (e.g. 'openclaw start' or restart its service),"
-            echo "     then re-run this script — or continue and start it later."
-            printf "  Continue anyway? [y/N] "
-            read -r REPLY
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                echo "Stopping. Start OpenClaw and re-run this script."
-                exit 1
-            fi
-        fi
-    else
-        OPENCLAW_CONFIGURED=false
-    fi
-
+# Show options based on current state
+if [ "$HAS_RUNNING" = "true" ] || [ "$HAS_INSTALLED" = "true" ]; then
+    echo "  Detected: OpenClaw is installed on this system."
+    [ -n "$INSTALLED_VERSION" ] && echo "  Installed version: ${INSTALLED_VERSION}"
+    [ "$HAS_RUNNING" = "true" ] && echo "  Status: running (port 18791 active)"
+    echo ""
+    echo "  How would you like to set up the gateway?"
+    echo ""
+    echo "    1) Install a fresh OpenClaw for OpenVoiceUI (recommended)"
+    echo "       Installs openclaw@${OPENCLAW_TESTED_VERSION} alongside your existing install."
+    echo "       This will replace the globally installed version."
+    echo ""
+    echo "    2) Use my existing OpenClaw"
+    echo "       You must configure it yourself to meet OpenVoiceUI's requirements."
+    echo "       Voice features may not work if settings don't match."
+    echo ""
+    echo "    3) Skip — I'll set up the gateway later"
+    echo ""
+    printf "  Choice [1]: "
+    read -r CHOICE
+    CHOICE="${CHOICE:-1}"
 else
     echo "  OpenClaw is not installed on this system."
-    echo "  OpenClaw is the AI gateway that processes all voice conversations."
     echo ""
-    printf "  Install OpenClaw now? [Y/n] "
-    read -r REPLY
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+    echo "  How would you like to set up the gateway?"
+    echo ""
+    echo "    1) Install OpenClaw now (recommended)"
+    echo "       Installs openclaw@${OPENCLAW_TESTED_VERSION} configured for voice conversations."
+    echo ""
+    echo "    2) Skip — I'll install and configure OpenClaw later"
+    echo ""
+    printf "  Choice [1]: "
+    read -r CHOICE
+    CHOICE="${CHOICE:-1}"
+    # Map choice 2 to "skip" (choice 3 in the full menu)
+    if [ "$CHOICE" = "2" ]; then CHOICE="3"; fi
+fi
+
+case "$CHOICE" in
+    1)
+        # ── Fresh install ──────────────────────────────────────────────────
         echo ""
-        echo "  ── OpenClaw Installation ─────────────────────────────────────"
-        echo "  1. Visit https://openclaw.ai and follow the install guide"
-        echo "  2. Run the installer for your OS"
-        echo "  3. Start OpenClaw (it will listen on ws://127.0.0.1:18791)"
-        echo "  4. Create an agent workspace and copy your auth token"
-        echo "  ──────────────────────────────────────────────────────────────"
-        echo ""
-        printf "  Press Enter once OpenClaw is installed and running (Ctrl+C to abort)... "
-        read -r
-        if _openclaw_running; then
-            echo "  ✓ OpenClaw detected — continuing."
-            OPENCLAW_CONFIGURED=true
+        echo "  Installing openclaw@${OPENCLAW_TESTED_VERSION}..."
+
+        # Check for npm/pnpm
+        if command -v pnpm >/dev/null 2>&1; then
+            PKG_MGR="pnpm"
+            INSTALL_CMD="pnpm add -g openclaw@${OPENCLAW_TESTED_VERSION}"
+        elif command -v npm >/dev/null 2>&1; then
+            PKG_MGR="npm"
+            INSTALL_CMD="npm i -g openclaw@${OPENCLAW_TESTED_VERSION}"
         else
-            echo "  ⚠  OpenClaw port 18791 is still not responding."
-            printf "  Continue anyway and configure OpenClaw later? [y/N] "
+            echo "  ⚠  Neither npm nor pnpm found. Install Node.js 22+ first:"
+            echo "     curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"
+            echo "     sudo apt install -y nodejs"
+            echo "  Then re-run this script."
+            exit 1
+        fi
+
+        echo "  Using ${PKG_MGR}..."
+        if $INSTALL_CMD; then
+            echo "  ✓ openclaw@${OPENCLAW_TESTED_VERSION} installed."
+        else
+            echo "  ⚠  Installation failed. Check the output above for errors."
+            echo "     You can install manually: ${INSTALL_CMD}"
+            printf "  Continue setup without the gateway? [y/N] "
             read -r REPLY
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                echo "Stopping. Install and start OpenClaw, then re-run this script."
-                exit 1
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then exit 1; fi
+        fi
+
+        if _openclaw_installed; then
+            # Run onboard wizard if no config exists yet
+            OPENCLAW_HOME="$(eval echo "~${RUN_USER}")/.openclaw"
+            if [ ! -f "${OPENCLAW_HOME}/openclaw.json" ]; then
+                echo ""
+                echo "  ── OpenClaw First-Time Setup ───────────────────────────────────"
+                echo "  OpenClaw needs to know which AI model to use."
+                echo "  The setup wizard will ask for your LLM provider and API key."
+                echo "  ────────────────────────────────────────────────────────────────"
+                echo ""
+                # Run onboard as the service user, not root
+                sudo -u "${RUN_USER}" openclaw onboard 2>&1 || true
+            fi
+
+            # Start the gateway
+            echo ""
+            echo "  Starting OpenClaw gateway..."
+            if ! _openclaw_running; then
+                sudo -u "${RUN_USER}" openclaw gateway &
+                WAIT_I=0
+                while [ $WAIT_I -lt 10 ]; do
+                    sleep 1
+                    _openclaw_running && break
+                    WAIT_I=$((WAIT_I+1))
+                done
+            fi
+
+            if _openclaw_running; then
+                echo "  ✓ OpenClaw gateway is running on port 18791."
+                OPENCLAW_CONFIGURED=true
+            else
+                echo "  ⚠  Gateway did not start. You can start it manually later:"
+                echo "     openclaw gateway"
             fi
         fi
-    else
+        ;;
+
+    2)
+        # ── Use existing install ───────────────────────────────────────────
+        echo ""
+        echo "  Using your existing OpenClaw installation."
+
+        # Version check
+        if [ -n "$INSTALLED_VERSION" ]; then
+            _version_compare "$INSTALLED_VERSION" "$OPENCLAW_TESTED_VERSION"
+            VERSION_CMP=$?
+            if [ $VERSION_CMP -ne 0 ]; then
+                echo ""
+                echo "  ┌────────────────────────────────────────────────────────────────┐"
+                echo "  │  ⚠  VERSION MISMATCH                                          │"
+                echo "  │                                                                │"
+                printf "  │  %-62s │\n" "Your version:   openclaw@${INSTALLED_VERSION}"
+                printf "  │  %-62s │\n" "Tested version: openclaw@${OPENCLAW_TESTED_VERSION}"
+                echo "  │                                                                │"
+                if [ $VERSION_CMP -eq 1 ]; then
+                    echo "  │  Your version is NEWER and may include breaking changes       │"
+                    echo "  │  (especially around auth and config validation).              │"
+                else
+                    echo "  │  Your version is OLDER and may be missing required features.  │"
+                fi
+                echo "  │  Voice conversations may not work correctly.                  │"
+                echo "  │                                                                │"
+                printf "  │  %-62s │\n" "To install the tested version:"
+                printf "  │  %-62s │\n" "  npm i -g openclaw@${OPENCLAW_TESTED_VERSION}"
+                echo "  └────────────────────────────────────────────────────────────────┘"
+                echo ""
+                printf "  Continue with openclaw@${INSTALLED_VERSION} anyway? [y/N] "
+                read -r REPLY
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    echo "  Stopping. Install the tested version and re-run this script."
+                    exit 1
+                fi
+            else
+                echo "  ✓ Version matches (${INSTALLED_VERSION})."
+            fi
+        fi
+
+        # Show requirements checklist
+        _show_requirements
+
+        echo "  Please review the requirements above and confirm your OpenClaw"
+        echo "  is configured to meet them. OpenVoiceUI will NOT modify your"
+        echo "  OpenClaw config."
+        echo ""
+        printf "  I've reviewed the requirements and my OpenClaw is configured [y/N]: "
+        read -r REPLY
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo ""
+            echo "  No problem. Configure your OpenClaw to meet the requirements,"
+            echo "  then re-run this script. Or choose option 1 for a fresh install."
+            exit 1
+        fi
+
+        # Try to use it
+        if [ "$HAS_RUNNING" = "true" ]; then
+            OPENCLAW_CONFIGURED=true
+        elif _openclaw_installed; then
+            echo "  OpenClaw is not currently running."
+            printf "  Start it now? [Y/n] "
+            read -r REPLY
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                echo "  Starting..."
+                sudo -u "${RUN_USER}" openclaw gateway &
+                sleep 5
+                if _openclaw_running; then
+                    echo "  ✓ OpenClaw started."
+                    OPENCLAW_CONFIGURED=true
+                else
+                    echo "  ⚠  Could not start. Start it manually, then restart OpenVoiceUI."
+                fi
+            fi
+        fi
+
+        # Custom gateway URL
+        if [ "$OPENCLAW_CONFIGURED" = "true" ]; then
+            printf "  Gateway URL [${OPENCLAW_GATEWAY_URL}]: "
+            read -r CUSTOM_URL
+            if [ -n "$CUSTOM_URL" ]; then
+                sed -i "s|^CLAWDBOT_GATEWAY_URL=.*|CLAWDBOT_GATEWAY_URL=${CUSTOM_URL}|" "${INSTALL_DIR}/.env"
+                OPENCLAW_GATEWAY_URL="$CUSTOM_URL"
+                echo "  Updated CLAWDBOT_GATEWAY_URL in .env"
+            fi
+        fi
+        ;;
+
+    3|*)
+        # ── Skip ───────────────────────────────────────────────────────────
         echo ""
         echo "  ┌────────────────────────────────────────────────────────────────┐"
-        echo "  │  OpenVoiceUI requires a gateway framework to process voice     │"
-        echo "  │  conversations. Without one the server will start but the      │"
-        echo "  │  voice agent will not respond to any input.                    │"
+        echo "  │  OpenVoiceUI needs an AI gateway for voice conversations.      │"
+        echo "  │  Without one the server will start but the voice agent will    │"
+        echo "  │  not respond to any input.                                     │"
         echo "  │                                                                │"
-        echo "  │  You can install a compatible gateway later and point .env at  │"
-        echo "  │  it via CLAWDBOT_GATEWAY_URL + CLAWDBOT_AUTH_TOKEN.            │"
-        echo "  │  See plugins/README.md for building a custom gateway plugin.   │"
+        echo "  │  To set up later:                                              │"
+        echo "  │    1. Install: npm i -g openclaw@${OPENCLAW_TESTED_VERSION}              │"
+        echo "  │    2. Run: openclaw onboard                                    │"
+        echo "  │    3. Set CLAWDBOT_AUTH_TOKEN in .env                          │"
+        echo "  │    4. Restart: sudo systemctl restart openvoiceui              │"
+        echo "  │                                                                │"
+        echo "  │  Or use Docker instead (includes everything):                  │"
+        echo "  │    docker compose up --build                                   │"
         echo "  └────────────────────────────────────────────────────────────────┘"
         echo ""
         printf "  Continue setup without a gateway? [y/N] "
         read -r REPLY
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Stopping. Visit https://openclaw.ai to get started."
+            echo "Stopping."
             exit 1
         fi
-        echo "  Continuing — the server will be installed but conversations will not work"
-        echo "  until a gateway is configured."
-    fi
-fi
+        echo "  Continuing — voice conversations will not work until a gateway is configured."
+        ;;
+esac
 
 # Check auth token is set and not placeholder
 if [ "$OPENCLAW_CONFIGURED" = "true" ]; then

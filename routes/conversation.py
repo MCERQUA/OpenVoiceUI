@@ -221,6 +221,24 @@ def _is_vision_request(msg: str) -> bool:
     lower = msg.lower()
     return any(kw in lower for kw in _VISION_KEYWORDS)
 
+
+def _cap_list(items, max_chars=2000, label="items"):
+    """Join items with ', ' but cap at max_chars. Add '... and N more' if truncated."""
+    if not items:
+        return "none"
+    result = []
+    total = 0
+    for item in items:
+        addition = len(item) + (2 if result else 0)  # ', ' separator
+        if total + addition > max_chars and result:
+            remaining = len(items) - len(result)
+            result.append(f"... and {remaining} more")
+            break
+        result.append(item)
+        total += addition
+    return ', '.join(result)
+
+
 # ---------------------------------------------------------------------------
 # DB write queue — background thread so DB writes don't block HTTP responses
 # (FIND-01 / FIND-08 fix from performance audit)
@@ -326,7 +344,14 @@ def get_voice_session_key() -> str:
 
 
 def bump_voice_session() -> str:
-    """Increment the session counter and return the new session key."""
+    """Increment the session counter and invalidate the cache so the key
+    is re-read from GATEWAY_SESSION_KEY on next call.
+
+    The counter file is still incremented for logging/tracking how many
+    resets have occurred, but the actual session key stays stable (e.g.
+    'main') so it matches the heartbeat session and keeps the Z.AI prompt
+    cache warm.
+    """
     global _consecutive_empty_responses, _session_key_cache
     try:
         with open(VOICE_SESSION_FILE, 'r') as f:
@@ -336,11 +361,11 @@ def bump_voice_session() -> str:
     counter += 1
     _save_session_counter(counter)
     _consecutive_empty_responses = 0
-    new_key = f'{os.getenv("VOICE_SESSION_PREFIX", "voice-main")}-{counter}'
     with _session_key_lock:
-        _session_key_cache = new_key  # invalidate + update cache
-    logger.info(f'### SESSION RESET: bumped to {new_key}')
-    return new_key
+        _session_key_cache = None  # invalidate cache; next call re-reads env var
+    stable_key = get_voice_session_key()
+    logger.info(f'### SESSION RESET #{counter}: cache invalidated, key stays stable as "{stable_key}"')
+    return stable_key
 
 # ---------------------------------------------------------------------------
 # Helper: notify Brain (non-critical fire-and-forget)
@@ -769,9 +794,9 @@ def _conversation_inner():
             _gen_names = [n for n in _gen_names if n]
             _parts = []
             if _lib_names:
-                _parts.append(f'Library ({len(_lib_names)}): {", ".join(_lib_names)}')
+                _parts.append(f'Library ({len(_lib_names)}): {_cap_list(_lib_names, max_chars=2000)}')
             if _gen_names:
-                _parts.append(f'Generated ({len(_gen_names)}): {", ".join(_gen_names)}')
+                _parts.append(f'Generated ({len(_gen_names)}): {_cap_list(_gen_names, max_chars=2000)}')
             if _parts:
                 context_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
         except Exception:
@@ -782,7 +807,7 @@ def _conversation_inner():
             from routes.canvas import load_canvas_manifest
             _manifest = load_canvas_manifest()
             _page_ids = sorted(_manifest.get('pages', {}).keys())
-            _page_list = ', '.join(_page_ids) if _page_ids else 'none'
+            _page_list = _cap_list(_page_ids, max_chars=1000)
         except Exception:
             _page_list = 'unknown'
         context_parts.append(f'[Canvas pages: {_page_list}]')
@@ -793,6 +818,8 @@ def _conversation_inner():
             'crowd_cheer, crowd_hype, yeah, lets_go, gunshot, bruh, sad_trombone]'
         )
     # Inject active profile's custom system_prompt (admin editor → runtime)
+    # Also read min_sentence_chars for TTS sentence extraction.
+    _min_sentence_chars = 40  # default — prevents choppy short TTS fragments
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
@@ -800,6 +827,8 @@ def _conversation_inner():
         _prof = _mgr.get_profile(_active_profile_id)
         if _prof and _prof.system_prompt and _prof.system_prompt.strip():
             context_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
+        if _prof and hasattr(_prof, 'voice') and _prof.voice and _prof.voice.min_sentence_chars:
+            _min_sentence_chars = _prof.voice.min_sentence_chars
     except Exception:
         pass  # Profile system not available — skip gracefully
 
@@ -1002,7 +1031,7 @@ def _conversation_inner():
                             ) or _buf_stripped.startswith('HEARTBEAT')
                             # Fire TTS for complete sentences as they arrive
                             if not _is_system_text and not _has_open_tag(_tts_buf):
-                                sentence, _tts_buf = _extract_sentence(_tts_buf)
+                                sentence, _tts_buf = _extract_sentence(_tts_buf, min_len=_min_sentence_chars)
                                 if sentence:
                                     logger.info(f"### TTS sentence (streaming): {sentence[:80]}")
                                     _tts_pending.append(_fire_tts(sentence))
@@ -1084,7 +1113,7 @@ def _conversation_inner():
                             # with ONLY action tags and no spoken words, prepend
                             # a brief acknowledgment so TTS has something to say.
                             if full_response and re.match(
-                                r'^\s*(\[[\w_:.-]+\]\s*)+$', full_response
+                                r'^\s*(\[[^\]]+\]\s*)+$', full_response
                             ):
                                 logger.info(
                                     f"### Tag-only response detected, prepending "
@@ -1176,7 +1205,7 @@ def _conversation_inner():
                                             json={
                                                 'model': 'glm-4.7',
                                                 'max_tokens': 400,
-                                                'messages': [{'role': 'user', 'content': user_message}],
+                                                'messages': [{'role': 'user', 'content': message_with_context}],
                                             },
                                             timeout=20,
                                         )

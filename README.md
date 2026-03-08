@@ -191,9 +191,11 @@ Define agents in JSON — each profile configures:
 
 ## Prerequisites
 
-- **OpenClaw gateway** — [openclaw.ai](https://openclaw.ai)
+- **OpenClaw gateway `2026.3.2`** — [openclaw.ai](https://openclaw.ai) · [version requirements](docs/openclaw-requirements.md)
 - **Groq API key** for TTS — [console.groq.com](https://console.groq.com) (free tier available)
 - Optional: Suno API key (music generation), Clerk (auth for multi-user deployments)
+
+> OpenVoiceUI is tested with **openclaw@2026.3.2**. The Docker setup installs this version automatically. If you're using an existing OpenClaw install, see [OpenClaw Requirements](docs/openclaw-requirements.md) — other versions may have breaking changes that prevent voice conversations from working.
 
 ---
 

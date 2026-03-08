@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenClaw Dashboard</title>
+<style>
+:root {
+  --bg: #0a0a0a;
+  --surface: #111113;
+  --surface-hover: #18181b;
+  --border: #1e1e22;
+  --border-light: #27272a;
+  --accent: #06b6d4;
+  --accent-dim: rgba(6,182,212,0.12);
+  --accent-border: rgba(6,182,212,0.25);
+  --blue: #3b82f6;
+  --blue-dim: rgba(59,130,246,0.12);
+  --success: #22c55e;
+  --success-dim: rgba(34,197,94,0.12);
+  --warning: #f59e0b;
+  --warning-dim: rgba(245,158,11,0.12);
+  --danger: #ef4444;
+  --danger-dim: rgba(239,68,68,0.12);
+  --text: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.header-icon {
+  width: 44px;
+  height: 44px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.header-info { flex: 1; }
+.header-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.header-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.btn-icon {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-icon:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-light); }
+.refresh-indicator {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Status Cards */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+@media (max-width: 700px) { .status-grid { grid-template-columns: repeat(2, 1fr); } }
+.status-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.status-card-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.status-card-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+.status-card-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.dot.green { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.dot.red { background: var(--danger); }
+.dot.yellow { background: var(--warning); }
+.dot.grey { background: var(--text-muted); }
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+.status-badge.connected { color: var(--success); }
+.status-badge.disconnected { color: var(--danger); }
+.status-badge.unknown { color: var(--text-muted); }
+
+/* Two-column layout */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+@media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+
+/* Section cards */
+.section-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title-icon { font-size: 14px; }
+
+/* Info rows */
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.info-row:last-child { border-bottom: none; padding-bottom: 0; }
+.info-label { color: var(--text-muted); }
+.info-value {
+  color: var(--text);
+  font-weight: 500;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  text-align: right;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.info-value.normal { font-family: inherit; font-size: 13px; }
+
+/* Resource bars */
+.resource-row {
+  margin-bottom: 12px;
+}
+.resource-row:last-child { margin-bottom: 0; }
+.resource-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+.resource-label { color: var(--text-secondary); }
+.resource-value { color: var(--text-muted); }
+.resource-bar {
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.resource-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.resource-fill.low { background: var(--success); }
+.resource-fill.medium { background: var(--warning); }
+.resource-fill.high { background: var(--danger); }
+
+/* Quick Actions */
+.actions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+@media (max-width: 500px) { .actions-grid { grid-template-columns: repeat(2, 1fr); } }
+.action-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+  line-height: 1.4;
+}
+.action-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+  color: var(--accent);
+}
+.action-btn-icon { font-size: 16px; display: block; margin-bottom: 4px; }
+.action-btn.danger:hover { color: var(--danger); border-color: rgba(239,68,68,0.3); }
+.action-btn.success:hover { color: var(--success); border-color: rgba(34,197,94,0.3); }
+
+/* Activity feed */
+.activity-list { display: flex; flex-direction: column; gap: 8px; }
+.activity-item {
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.activity-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.activity-role {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.activity-role.user { background: var(--blue-dim); color: var(--blue); }
+.activity-role.assistant { background: var(--accent-dim); color: var(--accent); }
+.activity-time { color: var(--text-muted); font-size: 11px; }
+.activity-text {
+  color: var(--text-secondary);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Skeleton loader */
+.skeleton {
+  background: linear-gradient(90deg, var(--border) 25%, var(--border-light) 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+  height: 14px;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Pill badge */
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.pill.green { background: var(--success-dim); color: var(--success); }
+.pill.cyan { background: var(--accent-dim); color: var(--accent); }
+.pill.yellow { background: var(--warning-dim); color: var(--warning); }
+.pill.red { background: var(--danger-dim); color: var(--danger); }
+.pill.grey { background: rgba(100,116,139,0.15); color: var(--text-muted); }
+
+/* Canvas stats */
+.canvas-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* Full-width section */
+.full-section {
+  margin-bottom: 12px;
+}
+
+/* Error state */
+.error-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 12px;
+}
+
+/* Divider */
+.divider { height: 1px; background: var(--border); margin: 14px 0; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="page-header">
+  <div class="header-icon">⚙️</div>
+  <div class="header-info">
+    <div class="header-title">OpenClaw Dashboard</div>
+    <div class="header-sub" id="last-refresh">Loading…</div>
+  </div>
+  <div class="header-actions">
+    <span class="refresh-indicator" id="next-refresh"></span>
+    <button class="btn-icon" onclick="refreshAll()" title="Refresh now">↻</button>
+    <button class="btn-icon" onclick="nav('desktop')" title="Back to desktop">✕</button>
+  </div>
+</div>
+
+<!-- Status Cards -->
+<div class="status-grid">
+  <div class="status-card">
+    <div class="status-card-label">Gateway</div>
+    <div class="status-card-value" id="gw-status">
+      <span class="skeleton" style="width:80px;display:inline-block"></span>
+    </div>
+    <div class="status-card-sub" id="gw-url">—</div>
+  </div>
+  <div class="status-card">
+    <div class="status-card-label">Session</div>
+    <div class="status-card-value" id="session-key" style="font-size:12px;font-family:monospace;padding-top:4px">
+      <span class="skeleton" style="width:100px;display:inline-block"></span>
+    </div>
+    <div class="status-card-sub" id="session-sub">—</div>
+  </div>
+  <div class="status-card">
+    <div class="status-card-label">Canvas Pages</div>
+    <div class="status-card-value" id="canvas-count">
+      <span class="skeleton" style="width:40px;display:inline-block"></span>
+    </div>
+    <div class="status-card-sub" id="canvas-sub">—</div>
+  </div>
+  <div class="status-card">
+    <div class="status-card-label">Health</div>
+    <div class="status-card-value" id="health-status">
+      <span class="skeleton" style="width:70px;display:inline-block"></span>
+    </div>
+    <div class="status-card-sub" id="health-sub">—</div>
+  </div>
+</div>
+
+<!-- Row 2: Diagnostics + Server Resources -->
+<div class="two-col">
+  <!-- Session & Diagnostics -->
+  <div class="section-card">
+    <div class="section-title">
+      <span class="section-title-icon">🔌</span> Gateway & Session
+    </div>
+    <div class="info-row">
+      <span class="info-label">Gateway URL</span>
+      <span class="info-value" id="d-gw-url">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Session Key</span>
+      <span class="info-value" id="d-session-key">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Empty Responses</span>
+      <span class="info-value normal" id="d-empty">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Last Hour Calls</span>
+      <span class="info-value normal" id="d-calls">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Avg Response Time</span>
+      <span class="info-value normal" id="d-avg-time">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Config Profile</span>
+      <span class="info-value normal" id="d-profile">—</span>
+    </div>
+  </div>
+
+  <!-- Server Resources -->
+  <div class="section-card">
+    <div class="section-title">
+      <span class="section-title-icon">📊</span> Server Resources
+    </div>
+    <div id="server-resources">
+      <div class="resource-row">
+        <div class="resource-header">
+          <span class="resource-label">Memory</span>
+          <span class="resource-value" id="mem-label">—</span>
+        </div>
+        <div class="resource-bar"><div class="resource-fill low" id="mem-bar" style="width:0%"></div></div>
+      </div>
+      <div class="resource-row">
+        <div class="resource-header">
+          <span class="resource-label">CPU</span>
+          <span class="resource-value" id="cpu-label">—</span>
+        </div>
+        <div class="resource-bar"><div class="resource-fill low" id="cpu-bar" style="width:0%"></div></div>
+      </div>
+      <div class="resource-row">
+        <div class="resource-header">
+          <span class="resource-label">Disk</span>
+          <span class="resource-value" id="disk-label">—</span>
+        </div>
+        <div class="resource-bar"><div class="resource-fill low" id="disk-bar" style="width:0%"></div></div>
+      </div>
+      <div class="divider"></div>
+      <div class="info-row" style="padding-top:0">
+        <span class="info-label">Process Memory</span>
+        <span class="info-value normal" id="proc-mem">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Container CPU</span>
+        <span class="info-value normal" id="cont-cpu">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Container Mem</span>
+        <span class="info-value normal" id="cont-mem">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="full-section">
+  <div class="section-card">
+    <div class="section-title">
+      <span class="section-title-icon">⚡</span> Quick Actions
+    </div>
+    <div class="actions-grid">
+      <button class="action-btn" onclick="speak('What is my current session status and approximately how many tokens are in our conversation?')">
+        <span class="action-btn-icon">📋</span>Session Status
+      </button>
+      <button class="action-btn" onclick="speak('Please compact our conversation context to free up token space.')">
+        <span class="action-btn-icon">🗜️</span>Compact Context
+      </button>
+      <button class="action-btn" onclick="speak('List all of my active skills and their current status.')">
+        <span class="action-btn-icon">🧩</span>List Skills
+      </button>
+      <button class="action-btn" onclick="speak('What is stored in my memory files? Give me a summary of MEMORY.md.')">
+        <span class="action-btn-icon">🧠</span>Check Memory
+      </button>
+      <button class="action-btn" onclick="speak('Run a system health check and tell me if anything needs attention.')">
+        <span class="action-btn-icon">🩺</span>Health Check
+      </button>
+      <button class="action-btn" onclick="speak('What tools and capabilities do you currently have access to?')">
+        <span class="action-btn-icon">🔧</span>List Tools
+      </button>
+      <button class="action-btn success" onclick="speak('Please run the cache warm routine to warm up our session context.')">
+        <span class="action-btn-icon">🔥</span>Warm Cache
+      </button>
+      <button class="action-btn" onclick="speak('Save a snapshot of the current agent state to memory.')">
+        <span class="action-btn-icon">💾</span>Save State
+      </button>
+      <button class="action-btn danger" onclick="confirmReset()">
+        <span class="action-btn-icon">♻️</span>Reset Session
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Row 3: Canvas Stats + Recent Activity -->
+<div class="two-col">
+  <!-- Canvas Stats -->
+  <div class="section-card">
+    <div class="section-title">
+      <span class="section-title-icon">🖼️</span> Canvas Pages
+    </div>
+    <div class="info-row">
+      <span class="info-label">Total Pages</span>
+      <span class="info-value normal" id="cs-total">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Categories</span>
+      <span class="info-value normal" id="cs-cats">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Recently Viewed</span>
+      <span class="info-value normal" id="cs-recent">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Public Pages</span>
+      <span class="info-value normal" id="cs-public">—</span>
+    </div>
+    <div id="canvas-cats" class="canvas-cats"></div>
+  </div>
+
+  <!-- Recent Activity -->
+  <div class="section-card">
+    <div class="section-title">
+      <span class="section-title-icon">💬</span> Recent Conversations
+    </div>
+    <div class="activity-list" id="activity-list">
+      <div class="error-note">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function nav(page) {
+  window.parent.postMessage({type:'canvas-action', action:'navigate', page: page}, '*');
+}
+function speak(text) {
+  window.parent.postMessage({type:'canvas-action', action:'speak', text: text}, '*');
+}
+
+function confirmReset() {
+  if (confirm('Reset the OpenClaw session? This will clear conversation history.')) {
+    fetch('/api/session/reset', {method:'POST'})
+      .then(r => r.json())
+      .then(d => {
+        speak('Session has been reset. New session key is active.');
+        setTimeout(refreshAll, 1500);
+      })
+      .catch(() => speak('Please reset my conversation session.'));
+  }
+}
+
+let refreshTimer = null;
+let countdown = 30;
+
+function startCountdown() {
+  clearInterval(refreshTimer);
+  countdown = 30;
+  const el = document.getElementById('next-refresh');
+  refreshTimer = setInterval(() => {
+    countdown--;
+    el.textContent = `↻ ${countdown}s`;
+    if (countdown <= 0) {
+      refreshAll();
+    }
+  }, 1000);
+}
+
+function setVal(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function colorBar(id, pct) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.width = Math.min(pct, 100) + '%';
+  el.className = 'resource-fill ' + (pct > 80 ? 'high' : pct > 50 ? 'medium' : 'low');
+}
+
+async function fetchGatewayStatus() {
+  try {
+    const r = await fetch('/api/admin/gateway/status');
+    const d = await r.json();
+    const connected = d.connected;
+    const gwUrl = d.gateway_url || '—';
+
+    const statusEl = document.getElementById('gw-status');
+    if (statusEl) {
+      statusEl.innerHTML = `<span class="status-badge ${connected ? 'connected' : 'disconnected'}"><span class="dot ${connected ? 'green' : 'red'}"></span>${connected ? 'Connected' : 'Disconnected'}</span>`;
+    }
+    setVal('gw-url', gwUrl.replace('ws://','').replace('/ws',''));
+    setVal('d-gw-url', gwUrl);
+  } catch {
+    const statusEl = document.getElementById('gw-status');
+    if (statusEl) statusEl.innerHTML = '<span class="status-badge unknown"><span class="dot grey"></span>Unknown</span>';
+    setVal('gw-url', 'Unavailable');
+  }
+}
+
+async function fetchSession() {
+  try {
+    const r = await fetch('/api/session');
+    const d = await r.json();
+    const key = d.sessionKey || '—';
+    const empty = d.consecutiveEmpty || 0;
+
+    setVal('session-key', key.length > 18 ? key.slice(0, 18) + '…' : key);
+    setVal('session-sub', `${empty} empty${empty === 1 ? '' : 's'}`);
+    setVal('d-session-key', key);
+    setVal('d-empty', empty === 0 ? '✓ None' : `⚠ ${empty} consecutive`);
+  } catch {
+    setVal('session-key', 'Unavailable');
+  }
+}
+
+async function fetchHealth() {
+  try {
+    const r = await fetch('/health/live');
+    const d = await r.json();
+    const healthy = d.healthy;
+    const statusEl = document.getElementById('health-status');
+    if (statusEl) {
+      statusEl.innerHTML = `<span class="pill ${healthy ? 'green' : 'red'}">${healthy ? 'Healthy' : 'Unhealthy'}</span>`;
+    }
+    setVal('health-sub', d.message || '—');
+  } catch {
+    const statusEl = document.getElementById('health-status');
+    if (statusEl) statusEl.innerHTML = '<span class="pill grey">Unknown</span>';
+  }
+}
+
+async function fetchDiagnostics() {
+  try {
+    const r = await fetch('/api/diagnostics');
+    if (!r.ok) throw new Error('restricted');
+    const d = await r.json();
+
+    // Last hour stats
+    const stats = d.last_hour_stats || {};
+    setVal('d-calls', stats.total_calls != null ? `${stats.total_calls} calls` : '—');
+    if (stats.avg_response_time_ms != null) {
+      setVal('d-avg-time', `${Math.round(stats.avg_response_time_ms)}ms`);
+    }
+
+    // Config profile
+    const cfg = d.config || {};
+    setVal('d-profile', cfg.profile || cfg.name || 'default');
+
+    // Recent conversations
+    const convs = d.recent_conversations || [];
+    renderActivity(convs);
+  } catch {
+    setVal('d-calls', 'Restricted');
+    setVal('d-avg-time', '—');
+    setVal('d-profile', '—');
+    renderActivity([]);
+  }
+}
+
+async function fetchServerStats() {
+  try {
+    const r = await fetch('/api/server-stats');
+    if (!r.ok) throw new Error('restricted');
+    const d = await r.json();
+
+    // Memory
+    if (d.memory) {
+      const memPct = d.memory.percent || 0;
+      setVal('mem-label', `${d.memory.used_gb?.toFixed(1) || '?'} / ${d.memory.total_gb?.toFixed(1) || '?'} GB (${Math.round(memPct)}%)`);
+      colorBar('mem-bar', memPct);
+    }
+
+    // CPU
+    if (d.cpu != null) {
+      const cpu = typeof d.cpu === 'object' ? d.cpu.percent : d.cpu;
+      setVal('cpu-label', `${Math.round(cpu)}%`);
+      colorBar('cpu-bar', cpu);
+    }
+
+    // Disk
+    if (d.disk) {
+      const diskPct = d.disk.percent || 0;
+      setVal('disk-label', `${d.disk.used_gb?.toFixed(1) || '?'} / ${d.disk.total_gb?.toFixed(1) || '?'} GB (${Math.round(diskPct)}%)`);
+      colorBar('disk-bar', diskPct);
+    }
+
+    // Container stats
+    if (d.container) {
+      setVal('cont-cpu', d.container.cpu_percent != null ? `${d.container.cpu_percent.toFixed(1)}%` : '—');
+      setVal('cont-mem', d.container.memory_mb != null ? `${Math.round(d.container.memory_mb)} MB` : '—');
+    }
+  } catch {
+    setVal('mem-label', 'Unavailable');
+    setVal('cpu-label', '—');
+    setVal('disk-label', '—');
+  }
+}
+
+async function fetchMemoryStatus() {
+  try {
+    const r = await fetch('/api/memory-status');
+    const d = await r.json();
+    const mb = d.process?.current_mb;
+    if (mb != null) setVal('proc-mem', `${mb.toFixed(1)} MB`);
+  } catch {}
+}
+
+async function fetchCanvas() {
+  try {
+    const r = await fetch('/api/canvas/manifest');
+    const d = await r.json();
+
+    const pages = d.pages || {};
+    const cats = d.categories || {};
+    const recent = d.recently_viewed || [];
+
+    const total = Object.keys(pages).length;
+    const catCount = Object.keys(cats).length;
+    const publicCount = Object.values(pages).filter(p => p.is_public).length;
+
+    setVal('canvas-count', total);
+    setVal('canvas-sub', `${catCount} categor${catCount === 1 ? 'y' : 'ies'}`);
+    setVal('cs-total', total);
+    setVal('cs-cats', catCount);
+    setVal('cs-recent', recent.length ? recent.slice(0,3).join(', ') : 'None');
+    setVal('cs-public', publicCount || 'None');
+
+    // Category pills
+    const catsEl = document.getElementById('canvas-cats');
+    if (catsEl) {
+      catsEl.innerHTML = '';
+      const colors = ['cyan', 'green', 'yellow', 'grey'];
+      let i = 0;
+      for (const [id, cat] of Object.entries(cats)) {
+        const count = (cat.pages || []).length;
+        const pill = document.createElement('span');
+        pill.className = `pill ${colors[i % colors.length]}`;
+        pill.textContent = `${cat.icon || ''} ${cat.name || id} (${count})`;
+        catsEl.appendChild(pill);
+        i++;
+      }
+    }
+  } catch {
+    setVal('canvas-count', '—');
+  }
+}
+
+function renderActivity(convs) {
+  const el = document.getElementById('activity-list');
+  if (!el) return;
+  if (!convs || convs.length === 0) {
+    el.innerHTML = '<div class="error-note">No recent conversations</div>';
+    return;
+  }
+  el.innerHTML = '';
+  const items = convs.slice(0, 5);
+  for (const c of items) {
+    const role = c.role || 'unknown';
+    const text = (c.content || c.message || c.text || '').slice(0, 120);
+    const ts = c.timestamp ? new Date(c.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '—';
+    const item = document.createElement('div');
+    item.className = 'activity-item';
+    item.innerHTML = `
+      <div class="activity-meta">
+        <span class="activity-role ${role}">${role}</span>
+        <span class="activity-time">${ts}</span>
+      </div>
+      <div class="activity-text">${text || '(empty)'}</div>
+    `;
+    el.appendChild(item);
+  }
+}
+
+async function refreshAll() {
+  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  setVal('last-refresh', `Last updated ${now}`);
+  startCountdown();
+
+  await Promise.all([
+    fetchGatewayStatus(),
+    fetchSession(),
+    fetchHealth(),
+    fetchDiagnostics(),
+    fetchServerStats(),
+    fetchMemoryStatus(),
+    fetchCanvas(),
+  ]);
+}
+
+// Init
+refreshAll();
+</script>
+</body>
+</html>

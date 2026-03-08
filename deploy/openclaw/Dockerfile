@@ -1,7 +1,24 @@
-FROM node:22-slim
+FROM node:22-bookworm-slim
 
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-RUN npm i -g openclaw@latest
+# System packages for native Node modules (canvas, sharp, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3 \
+    git \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use pnpm via corepack (handles native modules better than npm)
+RUN corepack enable && corepack prepare pnpm@latest --activate
+ENV PNPM_HOME=/usr/local/share/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN mkdir -p $PNPM_HOME
+
+# OpenClaw version — pinned to the version tested with this OpenVoiceUI release.
+# Override at build time: docker compose build --build-arg OPENCLAW_VERSION=2026.3.7
+ARG OPENCLAW_VERSION=2026.3.2
+RUN pnpm add -g openclaw@${OPENCLAW_VERSION} && pnpm approve-builds -g
 
 # Optional: install a coding CLI so the coding-agent skill is available.
 # Set CODING_CLI at build time:  docker compose build --build-arg CODING_CLI=codex
@@ -15,13 +32,13 @@ RUN npm i -g openclaw@latest
 #   none     — skip (coding-agent skill will be inactive)
 ARG CODING_CLI=none
 RUN if [ "$CODING_CLI" = "codex" ]; then \
-        npm i -g @openai/codex; \
+        pnpm add -g @openai/codex; \
     elif [ "$CODING_CLI" = "claude" ]; then \
-        npm i -g @anthropic-ai/claude-code; \
+        pnpm add -g @anthropic-ai/claude-code; \
     elif [ "$CODING_CLI" = "opencode" ]; then \
-        npm i -g opencode-ai; \
+        pnpm add -g opencode-ai; \
     elif [ "$CODING_CLI" = "pi" ]; then \
-        npm i -g @mariozechner/pi-coding-agent; \
+        pnpm add -g @mariozechner/pi-coding-agent; \
     fi
 
 EXPOSE 18791

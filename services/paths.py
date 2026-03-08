@@ -22,3 +22,4 @@ ACTIVE_PROFILE_FILE = RUNTIME_DIR / ".active-profile"
 # Bundled assets (git-tracked, stay at root)
 SOUNDS_DIR = APP_ROOT / "sounds"
 STATIC_DIR = APP_ROOT / "static"
+DEFAULT_PAGES_DIR = APP_ROOT / "default-pages"

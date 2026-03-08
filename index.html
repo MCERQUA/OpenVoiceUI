@@ -53,13 +53,13 @@
             s.async = true;
             s.crossOrigin = 'anonymous';
             s.dataset.clerkPublishableKey = window.AGENT_CONFIG.clerkPublishableKey;
-            s.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js';
+            s.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
             document.head.appendChild(s);
         }
     </script>
 </head>
 <body>
     <!-- App entry point: injects DOM shell + initializes all modules -->
-    <script type="module" src="src/app.js?v=16"></script>
+    <script type="module" src="src/app.js?v=17"></script>
 </body>
 </html>

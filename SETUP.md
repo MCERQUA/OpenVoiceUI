@@ -11,12 +11,12 @@ This guide covers three install paths:
 
 | Requirement | Notes |
 |---|---|
-| **OpenClaw** | The AI gateway that powers conversations. Required. [Download here](https://openclaw.ai) |
+| **OpenClaw `2026.3.2`** | The AI gateway that powers conversations. Required. [Download here](https://openclaw.ai) |
 | **Groq API key** | For Orpheus TTS (fast, high quality). Free tier available. [Get key](https://console.groq.com) |
 | Python 3.10+ | For local / VPS installs |
 | Docker + Compose | For Docker install only |
 
-> **OpenClaw is the most important dependency.** Without it the server starts but cannot respond to any voice input. Install and start OpenClaw before running OpenVoiceUI.
+> **OpenClaw is the most important dependency.** Without it the server starts but cannot respond to any voice input. OpenVoiceUI is tested with **openclaw@2026.3.2** — other versions may have breaking changes. See [OpenClaw Requirements](docs/openclaw-requirements.md) for full compatibility details.
 
 ---
 
@@ -50,10 +50,18 @@ Docker users: `docker compose down`, pull the latest code, then `docker compose 
 
 ## OpenClaw Setup
 
-1. Download and install OpenClaw from [https://openclaw.ai](https://openclaw.ai)
-2. Start the OpenClaw service — it listens on `ws://127.0.0.1:18791` by default
-3. Create an agent workspace and configure it with the voice system prompt from `prompts/voice-system-prompt.md`
+> **Docker users:** Skip this section — `docker compose up` installs and configures
+> OpenClaw automatically with the correct version and settings.
+
+1. Install the tested version: `npm i -g openclaw@2026.3.2`
+2. Run the setup wizard: `openclaw onboard` (choose your LLM provider and API key)
+3. Start the gateway: `openclaw gateway` (listens on `ws://127.0.0.1:18791`)
 4. Copy your auth token — you'll need it for `CLAWDBOT_AUTH_TOKEN` in `.env`
+
+**Using an existing OpenClaw install?** See [OpenClaw Requirements](docs/openclaw-requirements.md)
+for the full list of version and configuration requirements. OpenVoiceUI needs
+specific gateway settings to work — don't skip this if you already have OpenClaw
+running with other agents.
 
 ---
 
@@ -109,14 +117,23 @@ docker compose up --build
 
 #### Yes — connect to your existing OpenClaw
 
+> **Important:** OpenVoiceUI is tested with **openclaw@2026.3.2**. If your existing
+> install is a different version, voice features may not work. See
+> [OpenClaw Requirements](docs/openclaw-requirements.md) for the full compatibility
+> checklist.
+
 Point openvoiceui at your running OpenClaw gateway instead of starting a new one.
 
 1. Make sure your existing openclaw gateway has `bind: "lan"` (not `"loopback"`) so it
-   accepts connections from other containers, and `controlUi.dangerouslyAllowHostHeaderOriginFallback: true`:
+   accepts connections from other containers, and the required auth settings:
    ```json
    "gateway": {
      "bind": "lan",
-     "controlUi": { "dangerouslyAllowHostHeaderOriginFallback": true }
+     "auth": { "mode": "token" },
+     "controlUi": {
+       "dangerouslyDisableDeviceAuth": true,
+       "dangerouslyAllowHostHeaderOriginFallback": true
+     }
    }
    ```
 
@@ -256,6 +273,7 @@ All configuration is via `.env`. Key variables:
 |---|---|---|---|
 | `CLAWDBOT_AUTH_TOKEN` | **Yes** | — | OpenClaw gateway auth token |
 | `CLAWDBOT_GATEWAY_URL` | No | `ws://127.0.0.1:18791` | OpenClaw WebSocket URL |
+| `OPENCLAW_VERSION` | No | `2026.3.2` | Docker build arg: OpenClaw version to install |
 | `GROQ_API_KEY` | Recommended | — | Groq Orpheus TTS |
 | `SECRET_KEY` | Recommended | random | Flask session key |
 | `PORT` | No | `5001` | Server port |

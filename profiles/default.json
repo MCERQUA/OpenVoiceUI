@@ -28,7 +28,7 @@
     "voice_id": "autumn",
     "speed": 1.1,
     "parallel_sentences": true,
-    "min_sentence_chars": 20,
+    "min_sentence_chars": 40,
     "inter_sentence_gap_ms": null
   },
 

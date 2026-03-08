@@ -1,0 +1,2577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Desktop</title>
+<style>
+/* ══════════════════════════════════════════════════════════════
+   BASE STYLES
+   ══════════════════════════════════════════════════════════════ */
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%!important;height:100%!important;overflow:hidden!important;background:#111!important;font-family:Tahoma,sans-serif!important;padding:0!important;color:#fff!important}
+
+#os-container{
+  position:absolute;
+  top:40px;left:40px;right:40px;bottom:40px;
+  border-radius:12px;
+  overflow:hidden;
+  box-shadow:0 0 40px rgba(0,0,0,0.6);
+}
+
+#app{width:100%;height:100%;position:relative}
+
+#desktop{
+  width:100%;height:100%;position:relative;
+  user-select:none;-webkit-user-select:none;
+  overflow:hidden;
+}
+
+/* ── Desktop Icons ── */
+.desktop-icon{
+  position:absolute;
+  width:75px;
+  display:flex;flex-direction:column;align-items:center;
+  cursor:pointer;padding:4px;border-radius:4px;
+  gap:2px;
+}
+.desktop-icon:hover{background:rgba(255,255,255,0.1)}
+.desktop-icon.selected{background:rgba(51,105,197,0.4);outline:1px dotted rgba(255,255,255,0.6)}
+.desktop-icon .icon-img{width:48px;height:48px;pointer-events:none}
+.desktop-icon .icon-img svg{width:100%;height:100%}
+.desktop-icon .icon-label{
+  font-size:11px;text-align:center;
+  color:var(--icon-text,#fff);
+  text-shadow:var(--icon-shadow,1px 1px 2px rgba(0,0,0,0.9));
+  word-wrap:break-word;max-width:72px;
+  line-height:1.2;margin-top:1px;
+  pointer-events:none;
+}
+
+/* ── Taskbar ── */
+#taskbar{
+  position:absolute;bottom:0;left:0;right:0;
+  height:var(--taskbar-h,30px);
+  display:flex;align-items:center;
+  z-index:9000;
+}
+#start-btn{
+  border:none;cursor:pointer;display:flex;align-items:center;gap:4px;
+  height:100%;padding:0 10px;
+}
+.win-flag{display:inline-grid;grid-template-columns:1fr 1fr;width:14px;height:14px;gap:1px}
+.win-flag span{border-radius:1px}
+#taskbar-windows{flex:1;display:flex;align-items:center;padding:0 4px;gap:2px;overflow:hidden}
+.taskbar-btn{
+  height:22px;border:none;cursor:pointer;
+  font-size:11px;padding:0 8px;max-width:160px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  text-align:left;display:flex;align-items:center;gap:4px;
+}
+.taskbar-btn.active{font-weight:bold}
+#tray{display:flex;align-items:center;gap:6px;padding:0 8px;font-size:11px;height:100%}
+#clock{white-space:nowrap}
+
+/* ── Windows ── */
+.window{
+  position:absolute;
+  min-width:300px;min-height:200px;
+  display:flex;flex-direction:column;
+  z-index:100;
+}
+.window.minimized{display:none!important}
+.window.maximized{
+  left:0!important;top:0!important;
+  width:100%!important;
+  border-radius:0!important;
+}
+.titlebar{
+  display:flex;align-items:center;
+  cursor:move;flex-shrink:0;
+  padding:0 4px;gap:4px;
+}
+.titlebar-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;pointer-events:none}
+.titlebar-btns{display:flex;gap:2px;flex-shrink:0}
+.tb-btn{
+  border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  font-size:10px;line-height:1;padding:0;
+}
+.win-body{flex:1;overflow:auto;position:relative}
+
+/* ── Window Resize Handles ── */
+.win-resize{position:absolute;z-index:2}
+.win-resize.n{top:-3px;left:6px;right:6px;height:6px;cursor:n-resize}
+.win-resize.s{bottom:-3px;left:6px;right:6px;height:6px;cursor:s-resize}
+.win-resize.e{right:-3px;top:6px;bottom:6px;width:6px;cursor:e-resize}
+.win-resize.w{left:-3px;top:6px;bottom:6px;width:6px;cursor:w-resize}
+.win-resize.nw{top:-3px;left:-3px;width:10px;height:10px;cursor:nw-resize}
+.win-resize.ne{top:-3px;right:-3px;width:10px;height:10px;cursor:ne-resize}
+.win-resize.sw{bottom:-3px;left:-3px;width:10px;height:10px;cursor:sw-resize}
+.win-resize.se{bottom:-3px;right:-3px;width:10px;height:10px;cursor:se-resize}
+
+/* ── Context Menu ── */
+#context-menu{
+  position:fixed;z-index:10000;
+  min-width:180px;
+  display:none;
+}
+#context-menu.show{display:block}
+.ctx-item{
+  padding:4px 24px 4px 28px;cursor:pointer;
+  font-size:12px;white-space:nowrap;position:relative;
+}
+.ctx-separator{margin:3px 0;border:none}
+.ctx-item.has-sub::after{content:'\25B6';position:absolute;right:8px;font-size:8px}
+.ctx-submenu{
+  position:absolute;left:100%;top:-2px;
+  min-width:160px;display:none;
+}
+.ctx-item:hover>.ctx-submenu{display:block}
+
+/* ── Start Menu ── */
+#start-menu{
+  position:absolute;z-index:9500;
+  display:none;
+  max-height:calc(100% - 40px);
+  overflow:hidden;
+  display:none;
+}
+#start-menu.show{display:flex;flex-direction:column}
+.sm-header{padding:8px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.sm-avatar{width:40px;height:40px;border-radius:6px;background:#ddd;border:2px solid rgba(255,255,255,0.3)}
+.sm-user{font-weight:bold;font-size:13px}
+.sm-body{display:flex;flex:1;overflow:hidden;min-height:0}
+.sm-left,.sm-right{padding:4px 0;overflow-y:auto}
+.sm-item{
+  padding:5px 12px;cursor:pointer;
+  font-size:12px;display:flex;align-items:center;gap:8px;
+  white-space:nowrap;
+}
+.sm-item .sm-icon{width:24px;height:24px;flex-shrink:0}
+.sm-item .sm-icon svg{width:100%;height:100%}
+.sm-separator{margin:2px 0;border:none}
+.sm-footer{padding:4px 0;display:flex;justify-content:flex-end;gap:4px;padding-right:8px;flex-shrink:0}
+.sm-footer-btn{font-size:12px;border:none;cursor:pointer;padding:4px 12px;display:flex;align-items:center;gap:4px}
+
+/* ── macOS Menu Bar ── */
+#mac-menubar{
+  position:absolute;top:0;left:0;right:0;
+  height:25px;z-index:9000;
+  display:none;align-items:center;
+  padding:0 8px;gap:16px;
+  font-size:13px;font-weight:500;
+}
+#mac-menubar .apple-logo{font-size:16px;cursor:pointer;opacity:0.9}
+#mac-menubar .menu-item{cursor:pointer;opacity:0.85}
+#mac-menubar .menu-item:hover{opacity:1}
+#mac-menubar .menu-right{margin-left:auto;display:flex;gap:12px;font-size:12px;font-weight:400}
+
+/* ── macOS Dock ── */
+#dock{
+  position:absolute;bottom:4px;left:50%;transform:translateX(-50%);
+  display:none;align-items:flex-end;
+  padding:4px 8px;gap:2px;border-radius:16px;
+  z-index:9000;
+}
+#dock .dock-icon{
+  width:48px;height:48px;cursor:pointer;
+  transition:transform 0.15s;
+  display:flex;flex-direction:column;align-items:center;
+  position:relative;
+}
+#dock .dock-icon:hover{transform:scale(1.3) translateY(-8px)}
+#dock .dock-icon svg{width:44px;height:44px}
+#dock .dock-icon .dock-dot{
+  width:4px;height:4px;border-radius:50%;
+  background:rgba(255,255,255,0.6);
+  position:absolute;bottom:-2px;
+  display:none;
+}
+#dock .dock-icon.has-window .dock-dot{display:block}
+#dock .dock-sep{width:1px;height:44px;background:rgba(255,255,255,0.2);margin:0 4px;align-self:center}
+
+/* ── Explorer Content ── */
+.explorer-sidebar{
+  width:180px;border-right:1px solid #ccc;
+  overflow-y:auto;flex-shrink:0;
+  padding:4px 0;
+}
+.explorer-sidebar .cat-item{
+  padding:5px 12px;cursor:pointer;
+  font-size:11px;display:flex;align-items:center;gap:6px;
+}
+.explorer-sidebar .cat-item:hover{background:rgba(0,0,0,0.05)}
+.explorer-sidebar .cat-item.active{background:rgba(51,105,197,0.15);font-weight:bold}
+.explorer-content{flex:1;padding:8px;overflow-y:auto}
+.explorer-grid{
+  display:flex;flex-wrap:wrap;gap:4px;
+  align-content:flex-start;
+}
+.explorer-item{
+  width:80px;padding:6px 4px;
+  display:flex;flex-direction:column;align-items:center;
+  cursor:pointer;border-radius:4px;gap:2px;
+}
+.explorer-item:hover{background:rgba(51,105,197,0.1)}
+.explorer-item.selected{background:rgba(51,105,197,0.25);outline:1px dotted #316ac5}
+.explorer-item .ei-icon{width:32px;height:32px}
+.explorer-item .ei-icon svg{width:100%;height:100%}
+.explorer-item .ei-name{font-size:10px;text-align:center;word-wrap:break-word;max-width:76px;line-height:1.2}
+.explorer-addr{
+  padding:3px 8px;border-bottom:1px solid #ccc;
+  font-size:11px;display:flex;align-items:center;gap:4px;
+  background:rgba(255,255,255,0.6);
+}
+.explorer-addr span{font-weight:bold}
+.explorer-toolbar{
+  padding:2px 4px;border-bottom:1px solid #ccc;
+  display:flex;gap:2px;
+}
+.explorer-toolbar button{
+  font-size:11px;border:none;cursor:pointer;
+  padding:2px 6px;background:transparent;
+}
+.explorer-toolbar button:hover{background:rgba(0,0,0,0.08)}
+
+/* ── Recycle Bin Content ── */
+.recycle-empty{text-align:center;padding:40px;color:#888;font-size:14px}
+.recycle-toolbar{padding:4px 8px;border-bottom:1px solid #ccc;display:flex;gap:8px}
+.recycle-toolbar button{font-size:11px;border:1px solid #999;padding:2px 10px;cursor:pointer;background:#f0f0f0;border-radius:2px}
+.recycle-toolbar button:hover{background:#e0e0e0}
+
+/* ── Theme Settings Window ── */
+.theme-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:16px}
+.theme-card{
+  border:2px solid #ccc;border-radius:8px;cursor:pointer;
+  overflow:hidden;transition:border-color 0.2s;
+}
+.theme-card:hover{border-color:#666}
+.theme-card.active{border-color:#3399ff;box-shadow:0 0 0 2px rgba(51,153,255,0.3)}
+.theme-card .preview{height:80px;position:relative}
+.theme-card .label{padding:6px;text-align:center;font-size:12px;font-weight:bold;background:#f5f5f5}
+
+/* Icon size overrides */
+.icons-small .desktop-icon .icon-img{width:24px!important;height:24px!important}
+.icons-small .desktop-icon{width:60px!important}
+.icons-small .desktop-icon .icon-label{font-size:9px!important;max-width:58px!important}
+
+/* Disabled context item */
+.ctx-item.disabled{opacity:0.4;pointer-events:none}
+/* Checkmark in context item */
+.ctx-check::before{content:'\2713';position:absolute;left:10px;font-size:11px}
+
+/* Animations */
+@keyframes windowOpen{from{transform:scale(0.8);opacity:0}to{transform:scale(1);opacity:1}}
+.window{animation:windowOpen 0.15s ease-out}
+
+/* ── Modal Dialog (replaces prompt/confirm — works inside iframes) ── */
+#modal-overlay{
+  position:fixed;inset:0;z-index:99999;
+  background:rgba(0,0,0,0.45);
+  display:none;align-items:center;justify-content:center;
+}
+#modal-overlay.show{display:flex}
+#modal-box{
+  background:#fff;border-radius:6px;padding:20px;
+  min-width:280px;max-width:380px;width:90%;
+  box-shadow:0 8px 30px rgba(0,0,0,0.5);
+  font-size:13px;color:#222;
+}
+.theme-95 #modal-box,.theme-31 #modal-box{
+  background:#c0c0c0;border:2px outset #c0c0c0;border-radius:0;
+}
+.theme-mac #modal-box,.theme-ubuntu #modal-box{
+  background:#f0f0f0;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.5);
+}
+#modal-message{margin:0 0 10px;line-height:1.4;font-size:13px}
+#modal-input{
+  width:100%;padding:5px 8px;border:1px solid #aaa;border-radius:3px;
+  font-size:13px;box-sizing:border-box;margin-bottom:2px;
+}
+.modal-btns{margin-top:14px;display:flex;justify-content:flex-end;gap:8px}
+.modal-btn{
+  padding:4px 16px;border:1px solid #aaa;border-radius:3px;
+  cursor:pointer;font-size:12px;background:#f0f0f0;
+}
+.modal-btn:hover{background:#e0e0e0}
+.modal-btn.primary{background:#316ac5;color:#fff;border-color:#316ac5}
+.modal-btn.primary:hover{background:#2558b0}
+.theme-95 .modal-btn,.theme-31 .modal-btn{border:2px outset #c0c0c0;background:#c0c0c0;border-radius:0}
+.theme-95 .modal-btn:active,.theme-31 .modal-btn:active{border-style:inset}
+.theme-95 .modal-btn.primary,.theme-31 .modal-btn.primary{background:#c0c0c0;color:#000;border:2px outset #c0c0c0}
+
+/* ── Wallpaper preview ── */
+.wallpaper-section{padding:12px 16px;border-top:1px solid #ddd;font-size:12px}
+.theme-95 .wallpaper-section,.theme-31 .wallpaper-section{border-top:1px solid #808080}
+.wallpaper-section label{font-weight:bold;display:block;margin-bottom:8px}
+.wallpaper-row{display:flex;align-items:center;gap:10px}
+.wallpaper-thumb{
+  width:80px;height:50px;border:1px solid #ccc;border-radius:3px;
+  object-fit:cover;flex-shrink:0;
+}
+.wallpaper-empty{
+  width:80px;height:50px;border:1px dashed #aaa;border-radius:3px;
+  display:flex;align-items:center;justify-content:center;
+  color:#999;font-size:10px;flex-shrink:0;text-align:center;
+}
+.wallpaper-btns{display:flex;flex-direction:column;gap:6px}
+.wallpaper-btn{
+  padding:4px 10px;cursor:pointer;font-size:11px;
+  border:1px solid #aaa;border-radius:3px;background:#f0f0f0;
+  white-space:nowrap;
+}
+.wallpaper-btn:hover{background:#e0e0e0}
+.theme-95 .wallpaper-btn,.theme-31 .wallpaper-btn{border:2px outset #c0c0c0;background:#c0c0c0;border-radius:0}
+
+/* ── Drop target highlight ── */
+.desktop-icon.drop-target{
+  background:rgba(51,153,255,0.35)!important;
+  outline:2px dashed rgba(51,153,255,0.8)!important;
+  border-radius:6px;
+}
+
+/* ── Mobile / small container responsive ── */
+@media (max-width:600px) {
+  /* Desktop icons — smaller grid */
+  .desktop-icon{width:56px!important}
+  .desktop-icon .icon-img{width:32px!important;height:32px!important}
+  .desktop-icon .icon-label{font-size:9px!important;max-width:54px!important}
+  /* Windows — fit to screen */
+  .window{min-width:180px!important;min-height:120px!important}
+  .titlebar{height:20px!important;padding:0 3px!important}
+  .titlebar-title{font-size:10px!important}
+  .tb-btn{width:16px!important;height:16px!important;font-size:8px!important}
+  .win-body{font-size:11px!important}
+  /* Taskbar — compact */
+  #taskbar{height:24px!important}
+  #start-btn{font-size:10px!important;padding:0 6px!important}
+  #start-btn .win-flag{width:10px!important;height:10px!important}
+  .taskbar-btn{height:18px!important;font-size:9px!important;padding:0 4px!important}
+  #tray{font-size:9px!important;padding:0 4px!important}
+  /* Start menu — proportionate */
+  .theme-xp #start-menu{width:280px!important;bottom:24px!important}
+  .theme-xp .sm-right{width:120px!important}
+  .theme-95 #start-menu{width:170px!important;bottom:24px!important}
+  .sm-header{padding:4px 8px!important}
+  .sm-avatar{width:28px!important;height:28px!important}
+  .sm-user{font-size:11px!important}
+  .sm-item{font-size:10px!important;padding:3px 8px!important}
+  .sm-item .sm-icon{width:16px!important;height:16px!important}
+  .sm-footer-btn{font-size:10px!important;padding:3px 8px!important}
+  /* macOS menu bar */
+  #mac-menubar{height:20px!important;font-size:11px!important}
+  /* Explorer — compact */
+  .explorer-sidebar{width:100px!important}
+  .explorer-sidebar .cat-item{font-size:9px!important;padding:3px 6px!important}
+  .explorer-item{width:56px!important}
+  .explorer-item .ei-icon{width:24px!important;height:24px!important}
+  .explorer-item .ei-name{font-size:8px!important}
+  .explorer-toolbar button{font-size:9px!important}
+  .explorer-addr{font-size:9px!important}
+  /* Context menu */
+  .ctx-item{font-size:11px!important;padding:3px 16px 3px 20px!important}
+  /* Theme grid */
+  .theme-grid{grid-template-columns:1fr 1fr!important;gap:6px!important;padding:8px!important}
+  .theme-card .preview{height:50px!important}
+  .theme-card .label{font-size:10px!important;padding:4px!important}
+  /* Dock */
+  #dock .dock-icon{width:32px!important;height:32px!important}
+  #dock .dock-icon svg{width:28px!important;height:28px!important}
+  #dock{padding:2px 4px!important;gap:1px!important;border-radius:10px!important}
+}
+@media (max-width:400px) {
+  .desktop-icon{width:48px!important}
+  .desktop-icon .icon-img{width:26px!important;height:26px!important}
+  .desktop-icon .icon-label{font-size:8px!important;max-width:46px!important}
+  .theme-xp #start-menu{width:220px!important}
+  .theme-xp .sm-right{display:none!important}
+  .theme-95 #start-menu{width:150px!important}
+  .explorer-sidebar{display:none!important}
+  #dock{display:none!important}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   WINDOWS XP THEME
+   ══════════════════════════════════════════════════════════════ */
+.theme-xp #desktop{
+  background:
+    radial-gradient(ellipse 250px 80px at 15% 22%,rgba(255,255,255,0.8) 0%,transparent 70%),
+    radial-gradient(ellipse 350px 100px at 55% 15%,rgba(255,255,255,0.7) 0%,transparent 70%),
+    radial-gradient(ellipse 150px 50px at 82% 25%,rgba(255,255,255,0.65) 0%,transparent 70%),
+    radial-gradient(ellipse 130% 60% at 50% 135%,#4aad31 0%,#55bd3e 25%,transparent 55%),
+    radial-gradient(ellipse 80% 40% at 20% 115%,#3a9928 0%,#49ab34 20%,transparent 40%),
+    radial-gradient(ellipse 70% 35% at 80% 118%,#42a52e 0%,#52b53e 20%,transparent 35%),
+    radial-gradient(ellipse 60% 25% at 40% 100%,#55a845 0%,transparent 25%),
+    linear-gradient(180deg,#1b58d0 0%,#2568dc 10%,#3a82e6 25%,#5a9eec 40%,#7db8f0 55%,#9acff5 65%,#b5e0f8 75%,#d4eefb 85%);
+}
+.theme-xp{--icon-text:#fff;--icon-shadow:1px 1px 2px rgba(0,0,0,0.9);--taskbar-h:30px}
+.theme-xp #mac-menubar,.theme-xp #dock{display:none!important}
+.theme-xp #taskbar{
+  display:flex;
+  background:linear-gradient(180deg,#3168d5 0%,#4e8ee9 3%,#2157d7 6%,#2663e0 14%,#1941a5 20%,#1941a5 80%,#1c44a9 86%,#1b3c97 90%,#163295 95%,#122b86 100%);
+  border-top:1px solid #5c8fee;
+}
+.theme-xp #start-btn{
+  background:linear-gradient(180deg,#3d9c38 0%,#3ea83a 8%,#4dbb49 15%,#3fa83b 50%,#3b9d37 85%,#2d8a29 100%);
+  border-radius:0 8px 8px 0;color:#fff;
+  font:italic bold 13px 'Franklin Gothic Medium',Tahoma,sans-serif;
+  text-shadow:1px 1px 1px rgba(0,0,0,0.4);
+  letter-spacing:.5px;padding:0 14px 0 6px;
+}
+.theme-xp #start-btn:hover{filter:brightness(1.1)}
+.theme-xp #start-btn:active{filter:brightness(0.95)}
+.theme-xp .taskbar-btn{
+  background:linear-gradient(180deg,#3b7be3 0%,#2f6cd3 50%,#245dc3 100%);
+  color:#fff;border:1px solid #1a3f85;border-radius:2px;
+  font-size:11px;
+}
+.theme-xp .taskbar-btn.active{
+  background:linear-gradient(180deg,#1c4599 0%,#1a3f89 50%,#163579 100%);
+  border:1px inset #102a5e;
+}
+.theme-xp #tray{
+  background:linear-gradient(180deg,#0f8ced 0%,#0c6cc3 50%,#0c5caa 100%);
+  border-left:2px solid #1561a9;color:#fff;
+}
+.theme-xp .window{
+  border:3px solid #0055ea;border-radius:8px;
+  box-shadow:2px 2px 10px rgba(0,0,0,0.3);
+}
+.theme-xp .titlebar{
+  background:linear-gradient(180deg,#0058ee 0%,#3593ff 4%,#2b71d3 8%,#0058ee 50%,#0046d5 92%,#0036af 100%);
+  height:25px;border-radius:5px 5px 0 0;color:#fff;
+  font-weight:bold;font-size:12px;
+  text-shadow:1px 1px 1px rgba(0,0,0,0.3);
+  padding:0 4px 0 6px;
+}
+.theme-xp .window.inactive .titlebar{
+  background:linear-gradient(180deg,#7a96df 0%,#97aede 50%,#7a96df 100%);
+}
+.theme-xp .win-body{background:#fff;color:#000}
+.theme-xp .tb-btn{width:21px;height:21px;border-radius:3px;border:1px solid rgba(0,0,0,0.3)}
+.theme-xp .tb-btn.close{
+  background:linear-gradient(180deg,#e07f55 0%,#d1503e 50%,#c03a2a 100%);
+  color:#fff;font-weight:bold;
+}
+.theme-xp .tb-btn.close:hover{background:linear-gradient(180deg,#f09070 0%,#e05540 50%,#d04030 100%)}
+.theme-xp .tb-btn.min,.theme-xp .tb-btn.max{
+  background:linear-gradient(180deg,#3a7bea 0%,#2965d5 50%,#1850c0 100%);
+  color:#fff;
+}
+.theme-xp .tb-btn.min:hover,.theme-xp .tb-btn.max:hover{
+  background:linear-gradient(180deg,#5090f0 0%,#3a7bea 50%,#2965d5 100%);
+}
+.theme-xp #context-menu{
+  background:#fff;border:1px solid #868686;
+  box-shadow:2px 2px 4px rgba(0,0,0,0.25);border-radius:2px;
+  padding:2px 0;
+}
+.theme-xp .ctx-item{color:#000}
+.theme-xp .ctx-item:hover{background:#316ac5;color:#fff}
+.theme-xp .ctx-separator{height:1px;background:#ccc}
+.theme-xp .ctx-submenu{background:#fff;border:1px solid #868686;box-shadow:2px 2px 4px rgba(0,0,0,0.25);padding:2px 0}
+.theme-xp #start-menu{
+  bottom:30px;left:0;width:380px;
+  background:#fff;border:2px solid #0055ea;border-radius:6px 6px 0 0;
+  box-shadow:2px 2px 8px rgba(0,0,0,0.4);
+}
+.theme-xp .sm-header{
+  background:linear-gradient(180deg,#0058ee 0%,#3593ff 4%,#0058ee 50%,#0036af 100%);
+  color:#fff;border-radius:4px 4px 0 0;
+}
+.theme-xp .sm-body{border-top:1px solid #ccc}
+.theme-xp .sm-left{flex:1;background:#fff;border-right:1px solid #ddd;color:#000}
+.theme-xp .sm-right{width:170px;background:#d3e5fa;color:#000}
+.theme-xp .sm-item{color:#000}
+.theme-xp .sm-item:hover{background:rgba(49,106,197,0.15)}
+.theme-xp .sm-right .sm-item:hover{background:rgba(49,106,197,0.25)}
+.theme-xp .sm-footer{
+  background:linear-gradient(180deg,#3168d5 0%,#1941a5 100%);
+  border-radius:0 0 4px 4px;
+}
+.theme-xp .sm-footer-btn{background:transparent;color:#fff;border-radius:3px}
+.theme-xp .sm-footer-btn:hover{background:rgba(255,255,255,0.2)}
+.theme-xp .sm-separator{height:1px;background:#ddd}
+.theme-xp .explorer-sidebar{background:#d3e5fa}
+.theme-xp .explorer-toolbar{background:#f1f1f1}
+.theme-xp .window.maximized{height:calc(100% - 30px)!important}
+.theme-xp .window.maximized .titlebar{border-radius:0}
+
+/* ══════════════════════════════════════════════════════════════
+   macOS THEME
+   ══════════════════════════════════════════════════════════════ */
+.theme-mac #desktop{
+  background:
+    radial-gradient(ellipse at 25% 40%,#5c2d82 0%,transparent 50%),
+    radial-gradient(ellipse at 75% 40%,#1a5276 0%,transparent 50%),
+    radial-gradient(ellipse at 50% 80%,#1a3c5e 0%,transparent 60%),
+    radial-gradient(ellipse at 50% 10%,#2c1654 0%,transparent 40%),
+    linear-gradient(180deg,#0d1117 0%,#1a1a3e 30%,#1a2a4e 60%,#0f1a3e 100%);
+  font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
+}
+.theme-mac{--icon-text:#fff;--icon-shadow:0 1px 3px rgba(0,0,0,0.7);--taskbar-h:0px}
+.theme-mac #taskbar{display:none!important}
+.theme-mac #mac-menubar{
+  display:flex;
+  background:rgba(38,38,38,0.75);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid rgba(255,255,255,0.1);
+  color:rgba(255,255,255,0.9);
+  font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
+}
+.theme-mac #dock{
+  display:flex;
+  background:rgba(255,255,255,0.12);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,0.15);
+}
+.theme-mac .window{
+  border-radius:10px;
+  box-shadow:0 8px 30px rgba(0,0,0,0.35),0 2px 8px rgba(0,0,0,0.2);
+  border:0.5px solid rgba(0,0,0,0.2);
+}
+.theme-mac .titlebar{
+  background:linear-gradient(180deg,#e8e6e3 0%,#d6d2ce 100%);
+  height:28px;border-radius:10px 10px 0 0;
+  padding:0 12px;
+  border-bottom:1px solid #b0aca7;
+}
+.theme-mac .window.inactive .titlebar{background:#f0eeeb}
+.theme-mac .titlebar-title{text-align:center;color:#4a4a4a;font-size:13px;font-weight:500}
+.theme-mac .titlebar-btns{order:-1;gap:6px}
+.theme-mac .tb-btn{width:12px;height:12px;border-radius:50%;border:none;font-size:0}
+.theme-mac .tb-btn.close{background:#ff5f57;border:0.5px solid #e33e32}
+.theme-mac .tb-btn.min{background:#febc2e;border:0.5px solid #e0a016}
+.theme-mac .tb-btn.max{background:#28c840;border:0.5px solid #1ea832}
+.theme-mac .window:hover .tb-btn.close{background:#ff5f57}
+.theme-mac .tb-btn.close:hover::after{content:'\00d7';font-size:10px;color:#4a0000;display:block;text-align:center;line-height:12px}
+.theme-mac .tb-btn.min:hover::after{content:'\2013';font-size:9px;color:#6a4500;display:block;text-align:center;line-height:11px}
+.theme-mac .tb-btn.max:hover::after{content:'+';font-size:11px;color:#006500;display:block;text-align:center;line-height:12px}
+.theme-mac .win-body{background:#fff;color:#000}
+.theme-mac #context-menu{
+  background:rgba(40,40,40,0.85);
+  backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);
+  border:0.5px solid rgba(255,255,255,0.15);border-radius:6px;
+  padding:4px 0;
+  box-shadow:0 8px 30px rgba(0,0,0,0.35);
+}
+.theme-mac .ctx-item{color:rgba(255,255,255,0.9);font-size:13px;padding:4px 16px;border-radius:3px;margin:0 4px}
+.theme-mac .ctx-item:hover{background:#3478f6;color:#fff}
+.theme-mac .ctx-separator{height:0.5px;background:rgba(255,255,255,0.15);margin:4px 8px}
+.theme-mac .ctx-submenu{background:rgba(40,40,40,0.85);backdrop-filter:blur(30px);border:0.5px solid rgba(255,255,255,0.15);border-radius:6px;padding:4px 0;box-shadow:0 8px 30px rgba(0,0,0,0.35)}
+.theme-mac .desktop-icon .icon-img{width:64px;height:64px}
+.theme-mac .desktop-icon{width:90px}
+.theme-mac .desktop-icon .icon-label{font-size:12px;max-width:88px;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif}
+.theme-mac .explorer-sidebar{background:#f5f5f5}
+.theme-mac .window.maximized{height:calc(100% - 25px)!important;top:25px!important}
+
+/* ══════════════════════════════════════════════════════════════
+   WINDOWS 95 THEME
+   ══════════════════════════════════════════════════════════════ */
+.theme-95 #desktop{background:#008080}
+.theme-95{--icon-text:#fff;--icon-shadow:1px 1px 1px #000;--taskbar-h:28px}
+.theme-95 #mac-menubar,.theme-95 #dock{display:none!important}
+.theme-95 #taskbar{
+  display:flex;
+  background:#c0c0c0;
+  border-top:2px solid #fff;
+  box-shadow:inset 0 1px 0 #dfdfdf;
+}
+.theme-95 #start-btn{
+  background:#c0c0c0;
+  border:2px outset #c0c0c0;
+  font:bold 11px 'MS Sans Serif',Tahoma,sans-serif;
+  color:#000;padding:0 6px;margin:2px;
+  height:22px;
+}
+.theme-95 #start-btn:active{border-style:inset}
+.theme-95 .taskbar-btn{
+  background:#c0c0c0;border:2px outset #c0c0c0;
+  font-size:11px;color:#000;margin:2px 0;
+}
+.theme-95 .taskbar-btn.active{border-style:inset;background:#b0b0b0}
+.theme-95 #tray{
+  border:2px inset #c0c0c0;margin:2px;
+  background:#c0c0c0;color:#000;font-size:11px;
+}
+.theme-95 .window{
+  background:#c0c0c0;border:2px outset #c0c0c0;
+  box-shadow:1px 1px 0 #000;
+}
+.theme-95 .titlebar{
+  background:#000080;height:20px;padding:0 2px;
+  color:#fff;font-size:11px;font-weight:bold;
+}
+.theme-95 .window.inactive .titlebar{background:#808080}
+.theme-95 .win-body{background:#fff;color:#000;border:2px inset #c0c0c0;margin:2px}
+.theme-95 .tb-btn{
+  width:16px;height:14px;background:#c0c0c0;
+  border:2px outset #c0c0c0;font-size:8px;color:#000;
+}
+.theme-95 .tb-btn:active{border-style:inset}
+.theme-95 .tb-btn.close{font-weight:bold}
+.theme-95 #context-menu{
+  background:#c0c0c0;border:2px outset #c0c0c0;
+  padding:2px 0;
+}
+.theme-95 .ctx-item{color:#000;font-size:11px}
+.theme-95 .ctx-item:hover{background:#000080;color:#fff}
+.theme-95 .ctx-separator{height:1px;border-top:1px solid #808080;border-bottom:1px solid #fff}
+.theme-95 .ctx-submenu{background:#c0c0c0;border:2px outset #c0c0c0;padding:2px 0}
+.theme-95 #start-menu{
+  bottom:28px;left:0;width:200px;
+  background:#c0c0c0;border:2px outset #c0c0c0;
+  box-shadow:2px 2px 0 #000;
+}
+.theme-95 .sm-header{display:none}
+.theme-95 .sm-body{flex-direction:column}
+.theme-95 .sm-left{border-right:none;background:#c0c0c0;border-left:22px solid #808080}
+.theme-95 .sm-right{display:none}
+.theme-95 .sm-item{font-size:11px;color:#000}
+.theme-95 .sm-item:hover{background:#000080;color:#fff}
+.theme-95 .sm-separator{height:1px;border-top:1px solid #808080;border-bottom:1px solid #fff}
+.theme-95 .sm-footer{background:#c0c0c0;border-top:1px solid #808080}
+.theme-95 .sm-footer-btn{background:#c0c0c0;border:2px outset #c0c0c0;color:#000;font-size:11px}
+.theme-95 .sm-footer-btn:active{border-style:inset}
+.theme-95 .desktop-icon .icon-img{width:32px;height:32px}
+.theme-95 .desktop-icon{width:68px}
+.theme-95 .desktop-icon .icon-label{font-size:10px;max-width:66px}
+.theme-95 .explorer-sidebar{background:#c0c0c0;border-right:2px solid #808080}
+.theme-95 .explorer-toolbar{background:#c0c0c0;border-bottom:2px solid #808080}
+.theme-95 .explorer-toolbar button{font-size:10px}
+.theme-95 .window.maximized{height:calc(100% - 28px)!important}
+.theme-95 .window.maximized .titlebar{border-radius:0}
+
+/* ══════════════════════════════════════════════════════════════
+   WINDOWS 3.1 THEME
+   ══════════════════════════════════════════════════════════════ */
+.theme-31 #desktop{background:#00807f}
+.theme-31{--icon-text:#fff;--icon-shadow:1px 1px 1px #000;--taskbar-h:0px}
+.theme-31 #taskbar{display:none!important}
+.theme-31 #dock{display:none!important}
+.theme-31 #mac-menubar{
+  display:flex;
+  background:#c0c0c0;
+  border-bottom:2px solid #808080;
+  color:#000;font-size:12px;
+  font-family:'Fixedsys','Courier New',monospace;
+  height:22px;
+}
+.theme-31 #mac-menubar .apple-logo{display:none}
+.theme-31 #mac-menubar .menu-item{font-weight:normal;color:#000;opacity:1}
+.theme-31 #mac-menubar .menu-item:hover{background:#000080;color:#fff}
+.theme-31 #mac-menubar .menu-right{color:#000}
+.theme-31 .window{
+  background:#c0c0c0;border:2px solid #000;
+  box-shadow:2px 2px 0 #000;
+}
+.theme-31 .titlebar{
+  background:#000080;height:20px;padding:0 2px;
+  color:#fff;font-size:12px;font-weight:bold;
+  font-family:'Fixedsys','Courier New',monospace;
+}
+.theme-31 .window.inactive .titlebar{background:#808080}
+.theme-31 .win-body{background:#fff;color:#000;border:1px solid #000;margin:2px}
+.theme-31 .tb-btn{
+  width:18px;height:16px;background:#c0c0c0;
+  border:2px outset #c0c0c0;font-size:9px;color:#000;
+  font-family:'Fixedsys','Courier New',monospace;
+}
+.theme-31 #context-menu{
+  background:#c0c0c0;border:2px solid #000;padding:2px 0;
+  font-family:'Fixedsys','Courier New',monospace;
+}
+.theme-31 .ctx-item{color:#000;font-size:12px}
+.theme-31 .ctx-item:hover{background:#000080;color:#fff}
+.theme-31 .ctx-separator{height:1px;border-top:1px solid #808080;border-bottom:1px solid #fff}
+.theme-31 .ctx-submenu{background:#c0c0c0;border:2px solid #000;padding:2px 0}
+.theme-31 .desktop-icon .icon-img{width:32px;height:32px}
+.theme-31 .desktop-icon{width:68px}
+.theme-31 .desktop-icon .icon-label{font-size:10px;max-width:66px;font-family:'Fixedsys','Courier New',monospace}
+.theme-31 .explorer-sidebar{background:#c0c0c0;border-right:1px solid #000}
+.theme-31 .explorer-toolbar{background:#c0c0c0;border-bottom:1px solid #000}
+.theme-31 .window.maximized{height:calc(100% - 22px)!important;top:22px!important}
+
+/* ══════════════════════════════════════════════════════════════
+   UBUNTU THEME
+   ══════════════════════════════════════════════════════════════ */
+.theme-ubuntu #desktop{
+  background:
+    radial-gradient(ellipse at 30% 60%,#77216f 0%,transparent 50%),
+    radial-gradient(ellipse at 70% 30%,#5e2750 0%,transparent 50%),
+    radial-gradient(ellipse at 50% 80%,#2c001e 0%,transparent 60%),
+    radial-gradient(ellipse at 20% 20%,#e95420 0%,transparent 30%),
+    linear-gradient(180deg,#2c001e 0%,#44133a 30%,#5e2750 50%,#2c001e 100%);
+  font-family:'Ubuntu','Segoe UI',sans-serif;
+}
+.theme-ubuntu{--icon-text:#fff;--icon-shadow:0 1px 3px rgba(0,0,0,0.7);--taskbar-h:0px}
+.theme-ubuntu #taskbar{display:none!important}
+.theme-ubuntu #mac-menubar{
+  display:flex;
+  background:rgba(44,0,30,0.85);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid rgba(255,255,255,0.08);
+  color:rgba(255,255,255,0.85);
+  font-family:'Ubuntu','Segoe UI',sans-serif;
+  font-size:13px;
+}
+.theme-ubuntu #mac-menubar .apple-logo{display:none}
+.theme-ubuntu #mac-menubar .menu-item:first-of-type{font-weight:bold}
+.theme-ubuntu #dock{
+  display:flex;
+  background:rgba(44,0,30,0.7);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,0.1);
+  border-radius:12px;
+}
+.theme-ubuntu .window{
+  border-radius:8px;
+  box-shadow:0 6px 24px rgba(0,0,0,0.4);
+  border:1px solid rgba(255,255,255,0.08);
+}
+.theme-ubuntu .titlebar{
+  background:#303030;
+  height:32px;border-radius:8px 8px 0 0;
+  padding:0 10px;
+  border-bottom:1px solid #222;
+}
+.theme-ubuntu .titlebar-title{text-align:center;color:#ddd;font-size:13px;font-weight:500}
+.theme-ubuntu .window.inactive .titlebar{background:#3c3c3c}
+.theme-ubuntu .win-body{background:#fff;color:#000}
+.theme-ubuntu .titlebar-btns{order:-1;gap:6px}
+.theme-ubuntu .tb-btn{width:14px;height:14px;border-radius:50%;border:none;font-size:0}
+.theme-ubuntu .tb-btn.close{background:#e95420}
+.theme-ubuntu .tb-btn.min{background:#5c616c}
+.theme-ubuntu .tb-btn.max{background:#5c616c}
+.theme-ubuntu .tb-btn.close:hover{background:#f07846}
+.theme-ubuntu .tb-btn.min:hover{background:#7c818c}
+.theme-ubuntu .tb-btn.max:hover{background:#7c818c}
+.theme-ubuntu .tb-btn.close:hover::after{content:'\00d7';font-size:11px;color:#fff;display:block;text-align:center;line-height:14px}
+.theme-ubuntu .tb-btn.min:hover::after{content:'\2013';font-size:9px;color:#fff;display:block;text-align:center;line-height:13px}
+.theme-ubuntu .tb-btn.max:hover::after{content:'+';font-size:12px;color:#fff;display:block;text-align:center;line-height:14px}
+.theme-ubuntu #context-menu{
+  background:rgba(48,48,48,0.95);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,0.1);border-radius:8px;
+  padding:4px 0;
+  box-shadow:0 6px 24px rgba(0,0,0,0.4);
+}
+.theme-ubuntu .ctx-item{color:rgba(255,255,255,0.9);font-size:13px;padding:6px 16px;border-radius:4px;margin:0 4px}
+.theme-ubuntu .ctx-item:hover{background:#e95420;color:#fff}
+.theme-ubuntu .ctx-separator{height:0.5px;background:rgba(255,255,255,0.1);margin:4px 8px}
+.theme-ubuntu .ctx-submenu{background:rgba(48,48,48,0.95);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px 0;box-shadow:0 6px 24px rgba(0,0,0,0.4)}
+.theme-ubuntu .desktop-icon .icon-img{width:56px;height:56px}
+.theme-ubuntu .desktop-icon{width:85px}
+.theme-ubuntu .desktop-icon .icon-label{font-size:11px;max-width:82px;font-family:'Ubuntu','Segoe UI',sans-serif}
+.theme-ubuntu .explorer-sidebar{background:#f5f5f5}
+.theme-ubuntu .window.maximized{height:calc(100% - 25px)!important;top:25px!important}
+</style>
+</head>
+<body>
+<style>html,body{padding:0!important;margin:0!important;background:#111!important;overflow:hidden!important}</style>
+<div id="os-container">
+<div id="app" class="theme-xp">
+  <div id="desktop"></div>
+  <div id="context-menu"></div>
+  <div id="start-menu"></div>
+  <div id="mac-menubar">
+    <span class="apple-logo" onclick="toggleStartMenu()">&#63743;</span>
+    <span class="menu-item" style="font-weight:bold">Finder</span>
+    <span class="menu-item">File</span>
+    <span class="menu-item">Edit</span>
+    <span class="menu-item">View</span>
+    <span class="menu-item">Go</span>
+    <span class="menu-item">Window</span>
+    <span class="menu-item">Help</span>
+    <span class="menu-right"><span id="mac-clock"></span></span>
+  </div>
+  <div id="taskbar">
+    <button id="start-btn" onclick="toggleStartMenu()">
+      <span class="win-flag"><span style="background:#ea3323"></span><span style="background:#49a942"></span><span style="background:#1e81d3"></span><span style="background:#eea621"></span></span>
+      <span>start</span>
+    </button>
+    <div id="taskbar-windows"></div>
+    <div id="tray"><span id="clock"></span></div>
+  </div>
+  <div id="dock"></div>
+</div>
+</div>
+
+<!-- Modal dialog (works inside iframes, replaces prompt/confirm) -->
+<div id="modal-overlay">
+  <div id="modal-box">
+    <div id="modal-message"></div>
+    <input type="text" id="modal-input" autocomplete="off">
+    <div class="modal-btns">
+      <button class="modal-btn" id="modal-cancel" onclick="closeModal()">Cancel</button>
+      <button class="modal-btn primary" id="modal-ok" onclick="submitModal()">OK</button>
+    </div>
+  </div>
+</div>
+<!-- Hidden wallpaper file picker -->
+<input type="file" id="wallpaper-file-input" accept="image/*" style="display:none" onchange="handleWallpaperFile(this)">
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   DATA
+   ══════════════════════════════════════════════════════════════ */
+// Populated dynamically by fetchManifest()
+let CATEGORIES = {};
+let PAGES = {};
+
+/* ══════════════════════════════════════════════════════════════
+   SVG ICONS
+   ══════════════════════════════════════════════════════════════ */
+const ICONS = {
+  computer:`<svg viewBox="0 0 48 48"><rect x="6" y="4" width="36" height="26" rx="3" fill="#2c3e50"/><rect x="8" y="6" width="32" height="22" rx="1" fill="#5dade2"/><rect x="10" y="8" width="28" height="18" fill="#3498db"/><rect x="18" y="30" width="12" height="5" fill="#95a5a6"/><rect x="12" y="35" width="24" height="3" rx="1.5" fill="#bdc3c7"/><rect x="14" y="36" width="20" height="1" fill="#a0a0a0"/></svg>`,
+  folder:`<svg viewBox="0 0 48 48"><rect x="4" y="16" width="40" height="26" rx="2" fill="#f5c842"/><path d="M4 16V14a2 2 0 0 1 2-2h14l4 4h18a2 2 0 0 1 2 2v2H4z" fill="#e8b84b"/><rect x="4" y="18" width="40" height="2" fill="rgba(0,0,0,0.05)"/></svg>`,
+  'folder-open':`<svg viewBox="0 0 48 48"><path d="M4 14V12a2 2 0 012-2h14l4 4h18a2 2 0 012 2v2H4z" fill="#e8b84b"/><path d="M2 18h36a2 2 0 012 2l-4 22H6L2 20a2 2 0 012-2z" fill="#f5c842"/><rect x="4" y="16" width="40" height="2" fill="#e8b84b"/></svg>`,
+  recycle:`<svg viewBox="0 0 48 48"><rect x="14" y="6" width="20" height="4" rx="2" fill="#7f8c8d"/><rect x="20" y="4" width="8" height="4" rx="1" fill="#95a5a6"/><rect x="10" y="10" width="28" height="3" rx="1" fill="#95a5a6"/><path d="M13 13h22l-2 31H15z" fill="#bdc3c7"/><path d="M13 13h22l-1 4H14z" fill="#aab4be"/><line x1="20" y1="20" x2="19" y2="40" stroke="#95a5a6" stroke-width="1.5"/><line x1="24" y1="20" x2="24" y2="40" stroke="#95a5a6" stroke-width="1.5"/><line x1="28" y1="20" x2="29" y2="40" stroke="#95a5a6" stroke-width="1.5"/></svg>`,
+  'recycle-full':`<svg viewBox="0 0 48 48"><rect x="14" y="6" width="20" height="4" rx="2" fill="#7f8c8d"/><rect x="20" y="4" width="8" height="4" rx="1" fill="#95a5a6"/><rect x="10" y="10" width="28" height="3" rx="1" fill="#95a5a6"/><path d="M13 13h22l-2 31H15z" fill="#bdc3c7"/><path d="M13 13h22l-1 4H14z" fill="#aab4be"/><rect x="17" y="15" width="5" height="8" rx="1" fill="#e8e8e8" transform="rotate(-10 19 19)"/><rect x="25" y="14" width="5" height="9" rx="1" fill="#d0d0d0" transform="rotate(5 27 18)"/><rect x="20" y="17" width="4" height="7" rx="1" fill="#f0f0f0" transform="rotate(-3 22 20)"/></svg>`,
+  document:`<svg viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><line x1="16" y1="22" x2="34" y2="22" stroke="#ddd" stroke-width="1.5"/><line x1="16" y1="28" x2="34" y2="28" stroke="#ddd" stroke-width="1.5"/><line x1="16" y1="34" x2="28" y2="34" stroke="#ddd" stroke-width="1.5"/></svg>`,
+  internet:`<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="20" fill="#3498db"/><circle cx="24" cy="24" r="20" fill="none" stroke="#2980b9" stroke-width="1"/><ellipse cx="24" cy="24" rx="10" ry="20" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><line x1="4" y1="24" x2="44" y2="24" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><ellipse cx="24" cy="15" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/><ellipse cx="24" cy="33" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/></svg>`,
+  music:`<svg viewBox="0 0 48 48"><circle cx="14" cy="36" r="6" fill="#e74c3c"/><circle cx="14" cy="36" r="2" fill="#c0392b"/><circle cx="34" cy="32" r="6" fill="#e74c3c"/><circle cx="34" cy="32" r="2" fill="#c0392b"/><rect x="18" y="8" width="3" height="28" fill="#2c3e50" rx="1"/><rect x="38" y="4" width="3" height="28" fill="#2c3e50" rx="1"/><rect x="18" y="6" width="23" height="5" fill="#2c3e50" rx="1"/></svg>`,
+  game:`<svg viewBox="0 0 48 48"><rect x="4" y="14" width="40" height="22" rx="11" fill="#2c3e50"/><rect x="4" y="14" width="40" height="11" rx="11" fill="#34495e"/><circle cx="14" cy="25" r="3.5" fill="#ecf0f1"/><rect x="11.5" y="23.5" width="5" height="1.5" rx=".5" fill="#bdc3c7"/><rect x="13.2" y="21.5" width="1.5" height="5" rx=".5" fill="#bdc3c7"/><circle cx="34" cy="22" r="2.5" fill="#e74c3c"/><circle cx="38" cy="26" r="2.5" fill="#3498db"/><circle cx="30" cy="26" r="2.5" fill="#2ecc71"/><circle cx="34" cy="30" r="2.5" fill="#f39c12"/></svg>`,
+  tools:`<svg viewBox="0 0 48 48"><path d="M30 8a10 10 0 00-9 14L8 35a4 4 0 005.5 5.5L27 27a10 10 0 0013-5 10 10 0 00-2-11l-5 5-4-1-1-4 5-5a10 10 0 00-3 1z" fill="#95a5a6" stroke="#7f8c8d" stroke-width="1"/><circle cx="10.5" cy="37.5" r="1.5" fill="#7f8c8d"/></svg>`,
+  book:`<svg viewBox="0 0 48 48"><rect x="8" y="6" width="32" height="36" rx="2" fill="#3498db"/><rect x="8" y="6" width="6" height="36" rx="2" fill="#2980b9"/><rect x="14" y="6" width="26" height="36" rx="1" fill="#ecf0f1"/><line x1="18" y1="14" x2="36" y2="14" stroke="#bdc3c7" stroke-width="1.5"/><line x1="18" y1="20" x2="36" y2="20" stroke="#bdc3c7" stroke-width="1.5"/><line x1="18" y1="26" x2="30" y2="26" stroke="#bdc3c7" stroke-width="1.5"/></svg>`,
+  settings:`<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="7" fill="none" stroke="#7f8c8d" stroke-width="4"/><circle cx="24" cy="24" r="3" fill="#7f8c8d"/><g stroke="#7f8c8d" stroke-width="4" stroke-linecap="round"><line x1="24" y1="4" x2="24" y2="11"/><line x1="24" y1="37" x2="24" y2="44"/><line x1="4" y1="24" x2="11" y2="24"/><line x1="37" y1="24" x2="44" y2="24"/><line x1="9.9" y1="9.9" x2="14.8" y2="14.8"/><line x1="33.2" y1="33.2" x2="38.1" y2="38.1"/><line x1="9.9" y1="38.1" x2="14.8" y2="33.2"/><line x1="33.2" y1="14.8" x2="38.1" y2="9.9"/></g></svg>`,
+};
+
+function getIcon(type) { return ICONS[type] || ICONS.document; }
+
+/* ══════════════════════════════════════════════════════════════
+   STATE — persisted server-side via manifest API
+   ══════════════════════════════════════════════════════════════ */
+let currentTheme = 'xp';
+let windows = new Map();
+let nextWinId = 1;
+let nextZ = 100;
+let recycleBin = [];
+let iconPositions = {};
+let dragState = null;
+let selectedIcons = new Set();
+let startMenuOpen = false;
+let contextMenuOpen = false;
+let _saveTimer = null;
+let customFolders = {};    // { 'custom-xyz': { name:'Folder', pages:['p1','p2'] } }
+let desktopPages = [];     // page IDs shown as loose desktop icons
+let knownPages = [];       // all page IDs we've ever seen
+let _manifestTimer = null;
+let wallpaperUrl = null;   // server URL of custom desktop wallpaper
+
+// Save state to server (debounced)
+function saveState() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(_doSaveState, 500);
+}
+function _doSaveState() {
+  const state = JSON.stringify({
+    theme: currentTheme, iconPositions, recycleBin,
+    customFolders, desktopPages, knownPages, wallpaperUrl,
+  });
+  fetch('/api/canvas/manifest/page/desktop', {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({description: state}),
+  }).catch(() => {});
+}
+
+// Load state from server
+async function loadState() {
+  try {
+    const resp = await fetch('/api/canvas/manifest/page/desktop');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.description) {
+      try {
+        const state = JSON.parse(data.description);
+        if (state.theme) currentTheme = state.theme;
+        if (state.iconPositions) iconPositions = state.iconPositions;
+        if (state.recycleBin) recycleBin = state.recycleBin;
+        if (state.customFolders) customFolders = state.customFolders;
+        if (state.desktopPages) desktopPages = state.desktopPages;
+        if (state.knownPages) knownPages = state.knownPages;
+        if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
+      } catch(e) {}
+    }
+  } catch(e) {}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MANIFEST SYNC — fetch pages dynamically from server
+   ══════════════════════════════════════════════════════════════ */
+async function fetchManifest() {
+  try {
+    const resp = await fetch('/api/canvas/manifest');
+    if (!resp.ok) return;
+    const data = await resp.json();
+
+    // Categories to hide from desktop (system UI, empty, etc.)
+    const HIDDEN_CATS = ['system','test-dev','uncategorized'];
+
+    // Rebuild CATEGORIES from manifest
+    const newCats = {};
+    if (data.categories) {
+      Object.keys(data.categories).forEach(catId => {
+        if (HIDDEN_CATS.includes(catId)) return;
+        const mc = data.categories[catId];
+        // Skip empty categories with no pages
+        if (!mc.pages || mc.pages.length === 0) return;
+        const iconMap = {'ai-office':'folder','dashboard-mockups':'folder','tts-voice':'music',
+          'openclaw-reviews':'folder','onboarding':'folder','api-developer':'tools',
+          'openvoiceui':'folder','entertainment':'game','reference':'book',
+          'business-tools':'tools','jambot-platform':'folder','uncategorized':'folder'};
+        newCats[catId] = {
+          name: mc.name || catId,
+          icon: iconMap[catId] || 'folder',
+          color: mc.color || '#6b7280',
+        };
+      });
+    }
+    CATEGORIES = newCats;
+
+    // Rebuild PAGES from manifest (skip system/hidden pages, but keep uncategorized)
+    const HIDDEN_PAGES = ['desktop','home','inbox','create','office'];
+    // Only hide system-internal categories from the page list — uncategorized pages
+    // should still appear as loose desktop icons so newly created pages are visible
+    const PAGE_HIDDEN_CATS = ['system','test-dev'];
+    const newPages = {};
+    if (data.pages) {
+      Object.keys(data.pages).forEach(pageId => {
+        if (HIDDEN_PAGES.includes(pageId)) return;
+        const mp = data.pages[pageId];
+        if (PAGE_HIDDEN_CATS.includes(mp.category)) return;
+        newPages[pageId] = {
+          name: mp.display_name || pageId,
+          cat: mp.category || 'uncategorized',
+        };
+      });
+    }
+    PAGES = newPages;
+
+    // Detect new pages
+    const currentIds = Object.keys(PAGES);
+    if (knownPages.length === 0) {
+      // First run — seed knownPages without flooding desktop
+      knownPages = currentIds.slice();
+      saveState();
+    } else {
+      const newFound = currentIds.filter(id => !knownPages.includes(id));
+      if (newFound.length > 0) {
+        newFound.forEach(id => {
+          desktopPages.push(id);
+          knownPages.push(id);
+        });
+        saveState();
+      }
+    }
+
+    rebuildDesktopItems();
+    buildDesktopIcons();
+  } catch(e) {}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THEME
+   ══════════════════════════════════════════════════════════════ */
+function setTheme(theme) {
+  currentTheme = theme;
+  saveState();
+  document.getElementById('app').className = 'theme-' + theme;
+  updateClock();
+  buildDesktopIcons();
+  buildDock();
+  updateTaskbar();
+  closeAllMenus();
+  if (wallpaperUrl) applyWallpaper(wallpaperUrl); // re-apply after class change
+  // Update maximized windows height
+  windows.forEach((w) => {
+    if (w.el.classList.contains('maximized')) {
+      let h = getDesktopHeight();
+      w.el.style.height = h + 'px';
+    }
+  });
+}
+
+function getDesktopHeight() {
+  const c = document.getElementById('os-container');
+  const th = currentTheme;
+  if (th === 'xp') return c.offsetHeight - 30;
+  if (th === '95') return c.offsetHeight - 28;
+  if (th === 'mac' || th === 'ubuntu') return c.offsetHeight - 25;
+  if (th === '31') return c.offsetHeight - 22;
+  return c.offsetHeight;
+}
+function getDesktopTop() {
+  if (currentTheme === 'mac' || currentTheme === 'ubuntu') return 25;
+  if (currentTheme === '31') return 22;
+  return 0;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CLOCK
+   ══════════════════════════════════════════════════════════════ */
+function updateClock() {
+  const now = new Date();
+  const t = now.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit',hour12:true});
+  const el = document.getElementById('clock');
+  if (el) el.textContent = t;
+  const mel = document.getElementById('mac-clock');
+  if (mel) {
+    const d = now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+    mel.textContent = d + '  ' + t;
+  }
+}
+setInterval(updateClock, 30000);
+
+/* ══════════════════════════════════════════════════════════════
+   DESKTOP ICONS
+   ══════════════════════════════════════════════════════════════ */
+const SYSTEM_ITEMS = [
+  {id:'my-computer',name:'My Computer',icon:'computer',action:'explorer',macName:'Macintosh HD',w31Name:'File Manager',ubuntuName:'Files'},
+  {id:'recycle-bin',name:'Recycle Bin',icon:'recycle',action:'recycle',macName:'Trash',ubuntuName:'Trash'},
+  {id:'my-documents',name:'My Documents',icon:'folder',action:'docs',ubuntuName:'Documents'},
+  {id:'internet',name:'Internet',icon:'internet',action:'internet',ubuntuName:'Web Browser'},
+  {id:'settings',name:'Display Properties',icon:'settings',action:'settings',macName:'System Preferences',w31Name:'Control Panel',ubuntuName:'Settings'},
+];
+let DESKTOP_ITEMS = [];
+
+function rebuildDesktopItems() {
+  DESKTOP_ITEMS = SYSTEM_ITEMS.slice();
+  // Category folders
+  Object.keys(CATEGORIES).forEach(catId => {
+    DESKTOP_ITEMS.push({
+      id: 'cat-' + catId,
+      name: CATEGORIES[catId].name,
+      icon: CATEGORIES[catId].icon === 'folder' ? 'folder' : CATEGORIES[catId].icon,
+      action: 'folder',
+      category: catId,
+    });
+  });
+  // Custom folders
+  Object.keys(customFolders).forEach(fid => {
+    if (DESKTOP_ITEMS.find(i => i.id === fid)) return;
+    DESKTOP_ITEMS.push({
+      id: fid,
+      name: customFolders[fid].name,
+      icon: 'folder',
+      action: 'customFolder',
+      folderId: fid,
+    });
+  });
+  // Loose desktop page icons (new/unassigned pages)
+  desktopPages.forEach(pageId => {
+    if (!PAGES[pageId]) return;
+    if (DESKTOP_ITEMS.find(i => i.id === 'page-' + pageId)) return;
+    DESKTOP_ITEMS.push({
+      id: 'page-' + pageId,
+      name: PAGES[pageId].name,
+      icon: getPageIconType(PAGES[pageId].cat),
+      action: 'openPage',
+      pageId: pageId,
+    });
+  });
+}
+rebuildDesktopItems();
+
+function getIconName(item) {
+  if (currentTheme === 'mac' && item.macName) return item.macName;
+  if (currentTheme === 'ubuntu' && item.ubuntuName) return item.ubuntuName;
+  if (currentTheme === '31' && item.w31Name) return item.w31Name;
+  return item.name;
+}
+
+function buildDesktopIcons() {
+  const desktop = document.getElementById('desktop');
+  desktop.querySelectorAll('.desktop-icon').forEach(el => el.remove());
+  const isRightToLeft = currentTheme === 'mac';
+  const container = document.getElementById('os-container');
+  const isSmall = container && container.offsetWidth < 500;
+  const startX = isRightToLeft ? desktop.offsetWidth - (isSmall ? 65 : 90) : 10;
+  const startY = getDesktopTop() + 10;
+  const colH = getDesktopHeight() - 20;
+  const cellW = isSmall ? 60 : (currentTheme === 'mac' ? 95 : 80);
+  const cellH = isSmall ? 60 : (currentTheme === 'mac' ? 95 : 80);
+  const maxPerCol = Math.max(1, Math.floor(colH / cellH));
+
+  DESKTOP_ITEMS.forEach((item, i) => {
+    if (recycleBin.includes(item.id) && item.action !== 'recycle') return;
+    const col = Math.floor(i / maxPerCol);
+    const row = i % maxPerCol;
+    const saved = iconPositions[item.id];
+    const x = saved ? saved.x : (isRightToLeft ? startX - col * cellW : startX + col * cellW);
+    const y = saved ? saved.y : startY + row * cellH;
+
+    const el = document.createElement('div');
+    el.className = 'desktop-icon';
+    el.dataset.id = item.id;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+
+    const recycleIcon = item.id === 'recycle-bin'
+      ? (recycleBin.length > 0 ? 'recycle-full' : 'recycle')
+      : item.icon;
+
+    el.innerHTML = `<div class="icon-img">${getIcon(recycleIcon)}</div><div class="icon-label">${getIconName(item)}</div>`;
+    el.addEventListener('mousedown', (e) => onIconMouseDown(e, item));
+    el.addEventListener('touchstart', (e) => onIconTouchStart(e, item), {passive:false});
+    el.addEventListener('dblclick', (e) => { e.stopPropagation(); onIconDblClick(item); });
+    desktop.appendChild(el);
+  });
+}
+
+function onIconTouchStart(e, item) {
+  e.preventDefault();
+  const touch = e.touches[0];
+  const el = e.currentTarget;
+  const startX = touch.clientX, startY = touch.clientY;
+  const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
+  let moved = false;
+  let lastDropTarget = null;
+  let tapTimer = setTimeout(() => { moved = true; }, 300); // long press enables drag
+
+  function onMove(ev) {
+    const t = ev.touches[0];
+    const dx = t.clientX - startX, dy = t.clientY - startY;
+    if (!moved && Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+    moved = true;
+    clearTimeout(tapTimer);
+    ev.preventDefault();
+    el.style.left = (origLeft + dx) + 'px';
+    el.style.top = (origTop + dy) + 'px';
+    const target = findDropTarget(el, item);
+    if (target !== lastDropTarget) {
+      if (lastDropTarget) lastDropTarget.classList.remove('drop-target');
+      if (target) target.classList.add('drop-target');
+      lastDropTarget = target;
+    }
+  }
+  function onEnd() {
+    clearTimeout(tapTimer);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onEnd);
+    if (lastDropTarget) lastDropTarget.classList.remove('drop-target');
+    if (moved) {
+      const target = findDropTarget(el, item);
+      if (target) {
+        dropIntoFolder(item, target.dataset.id);
+        el.style.left = origLeft + 'px';
+        el.style.top = origTop + 'px';
+      } else {
+        iconPositions[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
+        saveState();
+      }
+    } else {
+      onIconDblClick(item);
+    }
+  }
+  document.addEventListener('touchmove', onMove, {passive:false});
+  document.addEventListener('touchend', onEnd);
+}
+
+function onIconMouseDown(e, item) {
+  if (e.button !== 0) return;
+  e.stopPropagation();
+  closeAllMenus();
+  if (!e.ctrlKey) {
+    selectedIcons.clear();
+  }
+  selectedIcons.add(item.id);
+  updateIconSelection();
+
+  const el = e.currentTarget;
+  const startX = e.clientX, startY = e.clientY;
+  const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
+  let moved = false;
+  let lastDropTarget = null;
+
+  function onMove(ev) {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    moved = true;
+    el.style.left = (origLeft + dx) + 'px';
+    el.style.top = (origTop + dy) + 'px';
+    // Highlight drop targets (folders)
+    const target = findDropTarget(el, item);
+    if (target !== lastDropTarget) {
+      if (lastDropTarget) lastDropTarget.classList.remove('drop-target');
+      if (target) target.classList.add('drop-target');
+      lastDropTarget = target;
+    }
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    if (lastDropTarget) lastDropTarget.classList.remove('drop-target');
+    if (moved) {
+      const target = findDropTarget(el, item);
+      if (target) {
+        dropIntoFolder(item, target.dataset.id);
+        // Reset position since it's going into a folder
+        el.style.left = origLeft + 'px';
+        el.style.top = origTop + 'px';
+      } else {
+        iconPositions[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
+        saveState();
+      }
+    }
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function findDropTarget(draggedEl, draggedItem) {
+  const dragRect = draggedEl.getBoundingClientRect();
+  const cx = dragRect.left + dragRect.width / 2;
+  const cy = dragRect.top + dragRect.height / 2;
+  const icons = document.querySelectorAll('.desktop-icon');
+  for (const icon of icons) {
+    if (icon === draggedEl) continue;
+    const id = icon.dataset.id;
+    // Only folders are valid drop targets
+    const targetItem = DESKTOP_ITEMS.find(i => i.id === id);
+    if (!targetItem) continue;
+    if (targetItem.action !== 'folder' && targetItem.action !== 'customFolder') continue;
+    const r = icon.getBoundingClientRect();
+    if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
+      return icon;
+    }
+  }
+  return null;
+}
+
+function dropIntoFolder(draggedItem, targetId) {
+  // Determine what page/item is being dragged
+  let pageId = null;
+  if (draggedItem.action === 'openPage' && draggedItem.pageId) {
+    pageId = draggedItem.pageId;
+  } else if (draggedItem.id.startsWith('page-')) {
+    pageId = draggedItem.id.replace('page-', '');
+  }
+  if (!pageId || !PAGES[pageId]) return;
+
+  const targetItem = DESKTOP_ITEMS.find(i => i.id === targetId);
+  if (!targetItem) return;
+
+  // Move into category folder
+  if (targetItem.action === 'folder' && targetItem.category) {
+    PAGES[pageId].cat = targetItem.category;
+  }
+  // Move into custom folder
+  if (targetItem.action === 'customFolder' && targetItem.folderId) {
+    if (!customFolders[targetItem.folderId]) return;
+    if (!customFolders[targetItem.folderId].pages.includes(pageId)) {
+      customFolders[targetItem.folderId].pages.push(pageId);
+    }
+  }
+
+  // Remove from desktopPages
+  desktopPages = desktopPages.filter(id => id !== pageId);
+  delete iconPositions[draggedItem.id];
+  saveState();
+  rebuildDesktopItems();
+  buildDesktopIcons();
+}
+
+function updateIconSelection() {
+  document.querySelectorAll('.desktop-icon').forEach(el => {
+    el.classList.toggle('selected', selectedIcons.has(el.dataset.id));
+  });
+}
+
+function onIconDblClick(item) {
+  if (item.action === 'explorer') openExplorer();
+  else if (item.action === 'recycle') openRecycleBin();
+  else if (item.action === 'docs') openExplorer('ai-office');
+  else if (item.action === 'internet') openExplorer('api-developer');
+  else if (item.action === 'settings') openThemeSettings();
+  else if (item.action === 'folder') openExplorer(item.category);
+  else if (item.action === 'customFolder') openCustomFolder(item.folderId);
+  else if (item.action === 'openPage') openCanvasPage(item.pageId);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   WINDOW MANAGER
+   ══════════════════════════════════════════════════════════════ */
+function createWindow(opts) {
+  const id = nextWinId++;
+  const el = document.createElement('div');
+  el.className = 'window';
+  el.dataset.winId = id;
+  el.style.zIndex = nextZ++;
+  const container = document.getElementById('os-container');
+  const cw = container.offsetWidth;
+  const ch = getDesktopHeight();
+  const wantW = opts.width || 600;
+  const wantH = opts.height || 400;
+  el.style.width = Math.min(wantW, cw - 20) + 'px';
+  el.style.height = Math.min(wantH, ch - 20) + 'px';
+  const maxW = cw - 50;
+  const maxH = ch - 50;
+  const winW = parseInt(el.style.width);
+  const winH = parseInt(el.style.height);
+  el.style.left = Math.max(0, Math.floor((cw - winW) / 2)) + 'px';
+  el.style.top = Math.max(getDesktopTop(), Math.floor(getDesktopTop() + (ch - winH) / 2)) + 'px';
+
+  const isMacLike = currentTheme === 'mac' || currentTheme === 'ubuntu';
+  const btnSymbols = isMacLike
+    ? {close:'', min:'', max:''}
+    : {close:'\u00D7', min:'\u2013', max:'\u25A1'};
+
+  el.innerHTML = `
+    <div class="titlebar" onmousedown="startWindowDrag(event,${id})">
+      <div class="titlebar-btns">
+        <button class="tb-btn close" onclick="closeWindow(${id})" title="Close">${btnSymbols.close}</button>
+        <button class="tb-btn min" onclick="minimizeWindow(${id})" title="Minimize">${btnSymbols.min}</button>
+        <button class="tb-btn max" onclick="maximizeWindow(${id})" title="Maximize">${btnSymbols.max}</button>
+      </div>
+      <div class="titlebar-title">${opts.title || 'Window'}</div>
+      ${!isMacLike ? '<div class="titlebar-btns"><button class="tb-btn min" onclick="minimizeWindow('+id+')" title="Minimize">\u2013</button><button class="tb-btn max" onclick="maximizeWindow('+id+')" title="Maximize">\u25A1</button><button class="tb-btn close" onclick="closeWindow('+id+')" title="Close">\u00D7</button></div>' : ''}
+    </div>
+    <div class="win-body">${opts.content || ''}</div>
+  `;
+
+  // For non-mac-like themes, remove the first set of buttons (left-side ones)
+  if (!isMacLike) {
+    const firstBtns = el.querySelector('.titlebar-btns');
+    if (firstBtns) firstBtns.remove();
+  } else {
+    // For mac-like, remove the second set (right-side)
+    const allBtns = el.querySelectorAll('.titlebar-btns');
+    if (allBtns.length > 1) allBtns[1].remove();
+  }
+
+  // Add resize handles
+  ['n','s','e','w','nw','ne','sw','se'].forEach(dir => {
+    const handle = document.createElement('div');
+    handle.className = 'win-resize ' + dir;
+    handle.addEventListener('mousedown', (ev) => startWindowResize(ev, id, dir));
+    el.appendChild(handle);
+  });
+
+  const desktop = document.getElementById('desktop');
+  desktop.appendChild(el);
+  el.addEventListener('mousedown', () => focusWindow(id));
+
+  const win = {id, el, title: opts.title, minimized: false, maximized: false, origRect: null};
+  windows.set(id, win);
+  focusWindow(id);
+  updateTaskbar();
+  buildDock();
+  return id;
+}
+
+function closeWindow(id) {
+  const win = windows.get(id);
+  if (!win) return;
+  win.el.remove();
+  windows.delete(id);
+  updateTaskbar();
+  buildDock();
+}
+
+function minimizeWindow(id) {
+  const win = windows.get(id);
+  if (!win) return;
+  win.minimized = true;
+  win.el.classList.add('minimized');
+  updateTaskbar();
+}
+
+function maximizeWindow(id) {
+  const win = windows.get(id);
+  if (!win) return;
+  if (win.maximized) {
+    // Restore
+    win.maximized = false;
+    win.el.classList.remove('maximized');
+    if (win.origRect) {
+      win.el.style.left = win.origRect.left;
+      win.el.style.top = win.origRect.top;
+      win.el.style.width = win.origRect.width;
+      win.el.style.height = win.origRect.height;
+    }
+  } else {
+    win.origRect = {
+      left: win.el.style.left, top: win.el.style.top,
+      width: win.el.style.width, height: win.el.style.height
+    };
+    win.maximized = true;
+    win.el.classList.add('maximized');
+    const container = document.getElementById('os-container');
+    win.el.style.width = container.offsetWidth + 'px';
+    win.el.style.height = getDesktopHeight() + 'px';
+    win.el.style.top = getDesktopTop() + 'px';
+    win.el.style.left = '0px';
+  }
+}
+
+function focusWindow(id) {
+  const win = windows.get(id);
+  if (!win) return;
+  if (win.minimized) {
+    win.minimized = false;
+    win.el.classList.remove('minimized');
+  }
+  win.el.style.zIndex = nextZ++;
+  // Mark all inactive
+  windows.forEach((w) => w.el.classList.toggle('inactive', w.id !== id));
+  updateTaskbar();
+}
+
+function startWindowDrag(e, id) {
+  if (e.target.closest('.tb-btn')) return;
+  e.preventDefault();
+  const win = windows.get(id);
+  if (!win || win.maximized) return;
+  focusWindow(id);
+  const el = win.el;
+  const startX = e.clientX, startY = e.clientY;
+  const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
+  const container = document.getElementById('os-container');
+
+  function onMove(ev) {
+    let newLeft = origLeft + ev.clientX - startX;
+    let newTop = origTop + ev.clientY - startY;
+    // Clamp to desktop bounds (keep at least 40px visible)
+    const maxLeft = container.offsetWidth - 40;
+    const maxTop = getDesktopHeight() + getDesktopTop() - 30;
+    newLeft = Math.max(-el.offsetWidth + 40, Math.min(newLeft, maxLeft));
+    newTop = Math.max(getDesktopTop(), Math.min(newTop, maxTop));
+    el.style.left = newLeft + 'px';
+    el.style.top = newTop + 'px';
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function startWindowResize(e, id, dir) {
+  e.preventDefault();
+  e.stopPropagation();
+  const win = windows.get(id);
+  if (!win || win.maximized) return;
+  focusWindow(id);
+  const el = win.el;
+  const startX = e.clientX, startY = e.clientY;
+  const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
+  const origW = el.offsetWidth, origH = el.offsetHeight;
+  const container = document.getElementById('os-container');
+  const minW = 200, minH = 120;
+
+  function onMove(ev) {
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    let newLeft = origLeft, newTop = origTop, newW = origW, newH = origH;
+    const maxW = container.offsetWidth;
+    const maxH = getDesktopHeight();
+    const dTop = getDesktopTop();
+
+    if (dir.includes('e')) newW = Math.min(Math.max(minW, origW + dx), maxW - origLeft);
+    if (dir.includes('w')) {
+      const dw = Math.min(dx, origW - minW);
+      newLeft = Math.max(0, origLeft + dw);
+      newW = origW - (newLeft - origLeft);
+      if (newW + newLeft > maxW) newW = maxW - newLeft;
+    }
+    if (dir.includes('s')) newH = Math.min(Math.max(minH, origH + dy), maxH + dTop - origTop);
+    if (dir.includes('n')) {
+      const dh = Math.min(dy, origH - minH);
+      newTop = Math.max(dTop, origTop + dh);
+      newH = origH - (newTop - origTop);
+      if (newH + newTop > maxH + dTop) newH = maxH + dTop - newTop;
+    }
+
+    el.style.left = newLeft + 'px';
+    el.style.top = newTop + 'px';
+    el.style.width = newW + 'px';
+    el.style.height = newH + 'px';
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TASKBAR
+   ══════════════════════════════════════════════════════════════ */
+function updateTaskbar() {
+  const container = document.getElementById('taskbar-windows');
+  if (!container) return;
+  container.innerHTML = '';
+  windows.forEach((win) => {
+    const btn = document.createElement('button');
+    btn.className = 'taskbar-btn' + (win.minimized ? '' : ' active');
+    btn.textContent = win.title;
+    btn.onclick = () => {
+      if (win.minimized) focusWindow(win.id);
+      else if (parseInt(win.el.style.zIndex) === nextZ - 1) minimizeWindow(win.id);
+      else focusWindow(win.id);
+    };
+    container.appendChild(btn);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DOCK (macOS)
+   ══════════════════════════════════════════════════════════════ */
+function buildDock() {
+  if (currentTheme !== 'mac' && currentTheme !== 'ubuntu') return;
+  const dock = document.getElementById('dock');
+  dock.innerHTML = '';
+  // System icons
+  const dockItems = [
+    {icon:'computer',label:'Finder',action:()=>openExplorer()},
+    {icon:'settings',label:'Preferences',action:()=>openThemeSettings()},
+    {icon:'internet',label:'Internet',action:()=>openExplorer('api-developer')},
+    {icon:'music',label:'Music',action:()=>openExplorer('entertainment')},
+    {icon:'book',label:'Reference',action:()=>openExplorer('reference')},
+    {icon:'folder',label:'Documents',action:()=>openExplorer('ai-office')},
+  ];
+  dockItems.forEach(item => {
+    const d = document.createElement('div');
+    d.className = 'dock-icon';
+    d.innerHTML = `${getIcon(item.icon)}<div class="dock-dot"></div>`;
+    d.title = item.label;
+    d.onclick = item.action;
+    dock.appendChild(d);
+  });
+  // Separator
+  dock.innerHTML += '<div class="dock-sep"></div>';
+  // Trash
+  const trash = document.createElement('div');
+  trash.className = 'dock-icon';
+  trash.innerHTML = `${getIcon(recycleBin.length > 0 ? 'recycle-full' : 'recycle')}<div class="dock-dot"></div>`;
+  trash.title = 'Trash';
+  trash.onclick = () => openRecycleBin();
+  dock.appendChild(trash);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CONTEXT MENU
+   ══════════════════════════════════════════════════════════════ */
+function showContextMenu(x, y, items) {
+  const menu = document.getElementById('context-menu');
+  menu.innerHTML = '';
+  items.forEach(item => {
+    if (item === '---') {
+      menu.innerHTML += '<div class="ctx-separator"></div>';
+      return;
+    }
+    const div = document.createElement('div');
+    div.className = 'ctx-item' + (item.sub ? ' has-sub' : '');
+    div.textContent = item.label;
+    if (item.action) div.onclick = (e) => { e.stopPropagation(); item.action(); closeAllMenus(); };
+    if (item.sub) {
+      const subMenu = document.createElement('div');
+      subMenu.className = 'ctx-submenu';
+      item.sub.forEach(si => {
+        if (si === '---') { subMenu.innerHTML += '<div class="ctx-separator"></div>'; return; }
+        const sd = document.createElement('div');
+        sd.className = 'ctx-item';
+        sd.textContent = si.label;
+        if (si.action) sd.onclick = (e) => { e.stopPropagation(); si.action(); closeAllMenus(); };
+        subMenu.appendChild(sd);
+      });
+      div.appendChild(subMenu);
+    }
+    menu.appendChild(div);
+  });
+
+  const container = document.getElementById('os-container');
+  const rect = container.getBoundingClientRect();
+  menu.style.left = Math.min(x, rect.right - 200) + 'px';
+  menu.style.top = Math.min(y, rect.bottom - items.length * 28) + 'px';
+  menu.classList.add('show');
+  contextMenuOpen = true;
+}
+
+let clipboard = null; // {action:'cut'|'copy', id:string}
+let showDesktopIcons = true;
+
+function getDesktopContextItems() {
+  const isMac = currentTheme === 'mac';
+  const isUbuntu = currentTheme === 'ubuntu';
+  const is95 = currentTheme === '95';
+  const is31 = currentTheme === '31';
+
+  if (isMac || isUbuntu) {
+    return [
+      {label:'New Folder', action:()=>createNewFolder()},
+      {label:isMac?'Get Info':'Properties', action:()=>showDesktopProperties()},
+      {label:isMac?'Change Desktop Background...':'Change Background...', action:()=>openThemeSettings()},
+      '---',
+      {label:'Clean Up', action:()=>arrangeIcons()},
+      {label:'Sort By', sub:[
+        {label:'Name', action:()=>sortIcons('name')},
+        {label:'Kind', action:()=>sortIcons('type')},
+        {label:'Date Modified', action:()=>sortIcons('name')},
+      ]},
+      '---',
+      ...(clipboard ? [{label:'Paste', action:()=>pasteItem()},'---'] : []),
+      {label:isMac?'Show View Options':'Desktop Settings', action:()=>openThemeSettings()},
+    ];
+  }
+
+  // Windows XP / 95 / 3.1
+  return [
+    {label:'View', sub:[
+      {label:'Large Icons', action:()=>setIconSize('large')},
+      {label:'Small Icons', action:()=>setIconSize('small')},
+      '---',
+      {label:(showDesktopIcons?'\u2713 ':'')+'Show Desktop Icons', action:()=>toggleDesktopIcons()},
+      {label:'Lock Web Items on Desktop', action:()=>{}},
+    ]},
+    {label:(is95||is31)?'Arrange Icons':'Arrange Icons By', sub:[
+      {label:'Name', action:()=>sortIcons('name')},
+      {label:'Size', action:()=>sortIcons('type')},
+      {label:'Type', action:()=>sortIcons('type')},
+      {label:'Modified', action:()=>sortIcons('name')},
+      '---',
+      {label:'Auto Arrange', action:()=>arrangeIcons()},
+      {label:'Align to Grid', action:()=>arrangeIcons()},
+    ]},
+    '---',
+    ...(clipboard ? [{label:'Paste', action:()=>pasteItem()},{label:'Paste Shortcut', action:()=>pasteItem()},'---'] : []),
+    {label:'Refresh', action:()=>buildDesktopIcons()},
+    '---',
+    {label:'New', sub:[
+      {label:'Folder', action:()=>createNewFolder()},
+      {label:'Shortcut', action:()=>{}},
+      '---',
+      {label:'Text Document', action:()=>{}},
+      {label:'Bitmap Image', action:()=>{}},
+    ]},
+    '---',
+    {label:is95||is31?'Properties':(currentTheme==='xp'?'Properties':'Display Properties'), action:()=>openThemeSettings()},
+  ];
+}
+
+function getIconContextItems(item) {
+  const isMac = currentTheme === 'mac';
+  const isUbuntu = currentTheme === 'ubuntu';
+
+  // Recycle bin / Trash
+  if (item.action === 'recycle') {
+    if (isMac || isUbuntu) {
+      return [
+        {label:'Open', action:()=>onIconDblClick(item)},
+        '---',
+        {label:'Empty Trash', action:()=>{showConfirmModal('Permanently delete all items in the Trash?',(ok)=>{if(ok)emptyRecycleBin()})}},
+        '---',
+        {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
+      ];
+    }
+    return [
+      {label:'Open', action:()=>onIconDblClick(item)},
+      {label:'Explore', action:()=>onIconDblClick(item)},
+      '---',
+      {label:'Empty Recycle Bin', action:()=>{showConfirmModal('Are you sure you want to delete all items in the Recycle Bin?',(ok)=>{if(ok)emptyRecycleBin()})}},
+      '---',
+      {label:'Create Shortcut', action:()=>{}},
+      '---',
+      {label:'Properties', action:()=>showProperties(item)},
+    ];
+  }
+
+  // System icons (My Computer, My Documents, Internet, Settings)
+  if (!item.id.startsWith('cat-') && item.action !== 'folder') {
+    if (isMac || isUbuntu) {
+      return [
+        {label:'Open', action:()=>onIconDblClick(item)},
+        {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
+        '---',
+        {label:'Rename', action:()=>renameIcon(item)},
+      ];
+    }
+    return [
+      {label:'Open', action:()=>onIconDblClick(item)},
+      {label:'Explore', action:()=>onIconDblClick(item)},
+      '---',
+      {label:'Create Shortcut', action:()=>{}},
+      {label:'Rename', action:()=>renameIcon(item)},
+      '---',
+      {label:'Properties', action:()=>showProperties(item)},
+    ];
+  }
+
+  // Loose page icons
+  if (item.action === 'openPage' && item.pageId) {
+    const moveToSub = buildMoveToSubmenu(item);
+    if (isMac || isUbuntu) {
+      return [
+        {label:'Open', action:()=>onIconDblClick(item)},
+        {label:'Open in New Tab', action:()=>openCanvasPage(item.pageId, true)},
+        '---',
+        {label:isMac?'Get Info':'Properties', action:()=>showPageProperties(item.pageId)},
+        '---',
+        {label:'Move to...', sub: moveToSub},
+        {label:isMac?'Move to Trash':'Move to Trash', action:()=>{desktopPages=desktopPages.filter(id=>id!==item.pageId);deleteItem(item.pageId);rebuildDesktopItems();buildDesktopIcons();}},
+      ];
+    }
+    return [
+      {label:'Open', action:()=>onIconDblClick(item)},
+      {label:'Open in New Tab', action:()=>openCanvasPage(item.pageId, true)},
+      '---',
+      {label:'Move to...', sub: moveToSub},
+      '---',
+      {label:'Delete', action:()=>{desktopPages=desktopPages.filter(id=>id!==item.pageId);deleteItem(item.pageId);rebuildDesktopItems();buildDesktopIcons();}},
+      '---',
+      {label:'Properties', action:()=>showPageProperties(item.pageId)},
+    ];
+  }
+
+  // Custom folder icons
+  if (item.action === 'customFolder') {
+    if (isMac || isUbuntu) {
+      return [
+        {label:'Open', action:()=>onIconDblClick(item)},
+        {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
+        '---',
+        {label:'Rename', action:()=>renameCustomFolder(item)},
+        {label:isMac?'Move to Trash':'Move to Trash', action:()=>{delete customFolders[item.folderId];saveState();rebuildDesktopItems();buildDesktopIcons();}},
+      ];
+    }
+    return [
+      {label:'Open', action:()=>onIconDblClick(item)},
+      '---',
+      {label:'Rename', action:()=>renameCustomFolder(item)},
+      {label:'Delete', action:()=>{delete customFolders[item.folderId];saveState();rebuildDesktopItems();buildDesktopIcons();}},
+      '---',
+      {label:'Properties', action:()=>showProperties(item)},
+    ];
+  }
+
+  // Folder / category icons
+  if (isMac || isUbuntu) {
+    return [
+      {label:'Open', action:()=>onIconDblClick(item)},
+      {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
+      '---',
+      {label:'Copy', action:()=>{clipboard={action:'copy',id:item.id}}},
+      '---',
+      {label:'Rename', action:()=>renameIcon(item)},
+      {label:isMac?'Move to Trash':'Move to Trash', action:()=>deleteItem(item.id)},
+    ];
+  }
+  return [
+    {label:'Open', action:()=>onIconDblClick(item)},
+    {label:'Explore', action:()=>onIconDblClick(item)},
+    '---',
+    {label:'Cut', action:()=>{clipboard={action:'cut',id:item.id}}},
+    {label:'Copy', action:()=>{clipboard={action:'copy',id:item.id}}},
+    '---',
+    {label:'Create Shortcut', action:()=>{}},
+    {label:'Delete', action:()=>deleteItem(item.id)},
+    {label:'Rename', action:()=>renameIcon(item)},
+    '---',
+    {label:'Properties', action:()=>showProperties(item)},
+  ];
+}
+
+function buildMoveToSubmenu(item) {
+  const subs = [];
+  Object.keys(CATEGORIES).forEach(catId => {
+    subs.push({
+      label: CATEGORIES[catId].name,
+      action: () => {
+        if (item.pageId) {
+          PAGES[item.pageId].cat = catId;
+          desktopPages = desktopPages.filter(id => id !== item.pageId);
+          saveState();
+          rebuildDesktopItems();
+          buildDesktopIcons();
+        }
+      }
+    });
+  });
+  if (Object.keys(customFolders).length > 0) {
+    subs.push('---');
+    Object.keys(customFolders).forEach(fid => {
+      subs.push({
+        label: customFolders[fid].name,
+        action: () => {
+          if (item.pageId && !customFolders[fid].pages.includes(item.pageId)) {
+            customFolders[fid].pages.push(item.pageId);
+            desktopPages = desktopPages.filter(id => id !== item.pageId);
+            saveState();
+            rebuildDesktopItems();
+            buildDesktopIcons();
+          }
+        }
+      });
+    });
+  }
+  return subs;
+}
+
+function renameCustomFolder(item) {
+  const folder = customFolders[item.folderId];
+  if (!folder) return;
+  showPromptModal('Rename "' + folder.name + '" to:', folder.name, (newName) => {
+    if (!newName || !newName.trim() || newName.trim() === folder.name) return;
+    folder.name = newName.trim();
+    saveState();
+    rebuildDesktopItems();
+    buildDesktopIcons();
+  });
+}
+
+/* ── Context menu helper actions ── */
+
+function setIconSize(size) {
+  // Toggle icon size via CSS class
+  document.getElementById('app').classList.remove('icons-small','icons-large');
+  if (size === 'small') document.getElementById('app').classList.add('icons-small');
+  else document.getElementById('app').classList.add('icons-large');
+}
+
+function toggleDesktopIcons() {
+  showDesktopIcons = !showDesktopIcons;
+  document.querySelectorAll('.desktop-icon').forEach(el => {
+    el.style.display = showDesktopIcons ? '' : 'none';
+  });
+}
+
+function sortIcons(by) {
+  iconPositions = {};
+  // Sort DESKTOP_ITEMS in-place
+  DESKTOP_ITEMS.sort((a, b) => {
+    if (by === 'name') return getIconName(a).localeCompare(getIconName(b));
+    if (by === 'type') {
+      const typeOrder = {explorer:0,recycle:1,docs:2,internet:3,settings:4,folder:5};
+      return (typeOrder[a.action]||9) - (typeOrder[b.action]||9);
+    }
+    return 0;
+  });
+  saveState();
+  buildDesktopIcons();
+}
+
+function createNewFolder() {
+  showPromptModal('New folder name:', 'New Folder', (name) => {
+    if (!name || !name.trim()) return;
+    const id = 'custom-' + Date.now() + '-' + name.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-');
+    customFolders[id] = { name: name.trim(), pages: [] };
+    saveState();
+    rebuildDesktopItems();
+    buildDesktopIcons();
+  });
+}
+
+function pasteItem() {
+  if (!clipboard) return;
+  // For cut, we'd need to move the icon — for now just clear clipboard
+  clipboard = null;
+}
+
+function renameIcon(item) {
+  showPromptModal('Rename "' + getIconName(item) + '" to:', getIconName(item), (newName) => {
+    if (!newName || !newName.trim() || newName.trim() === getIconName(item)) return;
+    item.name = newName.trim();
+    if (item.macName) item.macName = newName.trim();
+    if (item.ubuntuName) item.ubuntuName = newName.trim();
+    if (item.w31Name) item.w31Name = newName.trim();
+    buildDesktopIcons();
+  });
+}
+
+function showProperties(item) {
+  const isMac = currentTheme === 'mac';
+  const isUbuntu = currentTheme === 'ubuntu';
+  const title = (isMac||isUbuntu) ? getIconName(item) + ' Info' : getIconName(item) + ' Properties';
+
+  let type = 'System Folder';
+  if (item.action === 'recycle') type = 'Recycle Bin';
+  else if (item.action === 'explorer') type = 'System Folder';
+  else if (item.action === 'folder' && item.category) {
+    const cat = CATEGORIES[item.category];
+    type = 'Folder (' + (cat ? Object.values(PAGES).filter(p=>p.cat===item.category).length : 0) + ' items)';
+  }
+  else if (item.action === 'customFolder' && item.folderId) {
+    const cf = customFolders[item.folderId];
+    type = 'Custom Folder (' + (cf ? cf.pages.length : 0) + ' items)';
+  }
+  else if (item.action === 'settings') type = 'Application';
+  else if (item.action === 'internet') type = 'Application';
+  else type = 'System Item';
+
+  const now = new Date().toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'});
+  const content = `
+    <div style="padding:16px;font-size:12px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid #ccc">
+        <div style="width:48px;height:48px">${getIcon(item.icon)}</div>
+        <div>
+          <div style="font-weight:bold;font-size:14px">${getIconName(item)}</div>
+          <div style="color:#666;margin-top:2px">${type}</div>
+        </div>
+      </div>
+      <table style="border-collapse:collapse;width:100%">
+        <tr><td style="padding:3px 12px 3px 0;color:#666;white-space:nowrap">Type:</td><td style="padding:3px 0">${type}</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666;white-space:nowrap">Location:</td><td style="padding:3px 0">Desktop</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666;white-space:nowrap">Created:</td><td style="padding:3px 0">${now}</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666;white-space:nowrap">Modified:</td><td style="padding:3px 0">${now}</td></tr>
+        ${item.category ? '<tr><td style="padding:3px 12px 3px 0;color:#666;white-space:nowrap">Contains:</td><td style="padding:3px 0">'+Object.values(PAGES).filter(p=>p.cat===item.category).length+' items</td></tr>' : ''}
+      </table>
+    </div>`;
+
+  createWindow({title, content, width:340, height:280});
+}
+
+function showDesktopProperties() {
+  const total = Object.keys(PAGES).length;
+  const deleted = recycleBin.length;
+  const content = `
+    <div style="padding:16px;font-size:12px;display:flex;flex-direction:column;gap:12px">
+      <div style="font-weight:bold;font-size:14px;padding-bottom:8px;border-bottom:1px solid #ccc">Desktop Information</div>
+      <table style="border-collapse:collapse;width:100%">
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Theme:</td><td style="padding:3px 0">${{xp:'Windows XP',mac:'macOS','95':'Windows 95','31':'Windows 3.1',ubuntu:'Ubuntu'}[currentTheme]}</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Canvas Pages:</td><td style="padding:3px 0">${total} total</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Desktop Icons:</td><td style="padding:3px 0">${DESKTOP_ITEMS.length}</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">In Recycle Bin:</td><td style="padding:3px 0">${deleted}</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Categories:</td><td style="padding:3px 0">${Object.keys(CATEGORIES).length}</td></tr>
+      </table>
+    </div>`;
+  createWindow({title:'Desktop Properties', content, width:320, height:260});
+}
+
+function closeAllMenus() {
+  document.getElementById('context-menu').classList.remove('show');
+  document.getElementById('start-menu').classList.remove('show');
+  contextMenuOpen = false;
+  startMenuOpen = false;
+}
+
+function arrangeIcons() {
+  iconPositions = {};
+  saveState();
+  buildDesktopIcons();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   START MENU
+   ══════════════════════════════════════════════════════════════ */
+function toggleStartMenu() {
+  const menu = document.getElementById('start-menu');
+  if (startMenuOpen) {
+    closeAllMenus();
+    return;
+  }
+  closeAllMenus();
+  buildStartMenu();
+  menu.classList.add('show');
+  startMenuOpen = true;
+}
+
+function buildStartMenu() {
+  const menu = document.getElementById('start-menu');
+  const isXP = currentTheme === 'xp';
+  const is95 = currentTheme === '95';
+  const isMac = currentTheme === 'mac';
+  const isUbuntu = currentTheme === 'ubuntu';
+  const is31 = currentTheme === '31';
+
+  if (isMac || is31 || isUbuntu) {
+    // Dropdown menu style
+    menu.style.cssText = '';
+    if (isMac) {
+      menu.style.cssText = 'top:25px;left:0;width:240px;background:rgba(40,40,40,0.85);backdrop-filter:blur(20px);border:0.5px solid rgba(255,255,255,0.15);border-radius:0 0 6px 6px;box-shadow:0 8px 30px rgba(0,0,0,0.35);padding:4px 0;color:rgba(255,255,255,0.9);';
+    } else if (isUbuntu) {
+      menu.style.cssText = 'top:25px;left:0;width:240px;background:rgba(48,48,48,0.95);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.1);border-radius:0 0 8px 8px;box-shadow:0 6px 24px rgba(0,0,0,0.4);padding:4px 0;color:rgba(255,255,255,0.9);font-family:Ubuntu,sans-serif;';
+    } else {
+      menu.style.cssText = 'top:22px;left:0;width:200px;background:#c0c0c0;border:2px solid #000;padding:2px 0;font-family:"Fixedsys","Courier New",monospace;';
+    }
+    let html = '';
+    if (isMac) {
+      html += '<div class="ctx-item" onclick="closeAllMenus()">About This Mac</div>';
+      html += '<div class="ctx-separator"></div>';
+    }
+    if (isUbuntu) {
+      html += '<div class="ctx-item" onclick="closeAllMenus()">About Ubuntu</div>';
+      html += '<div class="ctx-separator"></div>';
+    }
+    html += '<div class="ctx-item" onclick="openThemeSettings();closeAllMenus()">'+(isMac?'System Preferences...':(isUbuntu?'Settings...':'Control Panel'))+'</div>';
+    html += '<div class="ctx-separator"></div>';
+    Object.keys(CATEGORIES).forEach(catId => {
+      html += `<div class="ctx-item" onclick="openExplorer('${catId}');closeAllMenus()">${CATEGORIES[catId].name}</div>`;
+    });
+    html += '<div class="ctx-separator"></div>';
+    html += '<div class="ctx-item" onclick="openExplorer();closeAllMenus()">'+(isMac?'Open Finder':(isUbuntu?'Files':'File Manager'))+'</div>';
+    menu.innerHTML = html;
+    return;
+  }
+
+  // Windows XP / 95 start menu
+  if (is95) {
+    menu.style.cssText = '';
+  } else {
+    menu.style.cssText = '';
+  }
+
+  let html = '';
+  if (isXP) {
+    html += `<div class="sm-header"><div class="sm-avatar" style="background:linear-gradient(135deg,#4a9eff,#1a5276)"></div><div class="sm-user">Mike</div></div>`;
+  }
+
+  html += '<div class="sm-body">';
+  html += '<div class="sm-left">';
+  // Recent/pinned pages
+  const pinned = ['bored-arcade','civ-sim','music-library','wolf3d-engine','office-hub'];
+  pinned.forEach(pid => {
+    const p = PAGES[pid];
+    if (!p) return;
+    html += `<div class="sm-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><div class="sm-icon">${getIcon('document')}</div>${p.name}</div>`;
+  });
+  html += '<div class="sm-separator"></div>';
+  // All Programs submenu - show categories
+  Object.keys(CATEGORIES).forEach(catId => {
+    html += `<div class="sm-item" onclick="openExplorer('${catId}');closeAllMenus()"><div class="sm-icon">${getIcon('folder')}</div>${CATEGORIES[catId].name}</div>`;
+  });
+  html += '</div>';
+
+  if (isXP) {
+    html += '<div class="sm-right">';
+    html += `<div class="sm-item" onclick="openExplorer();closeAllMenus()"><div class="sm-icon">${getIcon('computer')}</div>My Computer</div>`;
+    html += `<div class="sm-item" onclick="openExplorer('ai-office');closeAllMenus()"><div class="sm-icon">${getIcon('folder')}</div>My Documents</div>`;
+    html += `<div class="sm-item" onclick="openThemeSettings();closeAllMenus()"><div class="sm-icon">${getIcon('settings')}</div>Control Panel</div>`;
+    html += '<div class="sm-separator"></div>';
+    html += `<div class="sm-item" onclick="openRecycleBin();closeAllMenus()"><div class="sm-icon">${getIcon('recycle')}</div>Recycle Bin</div>`;
+    html += '</div>';
+  }
+
+  html += '</div>';
+  html += '<div class="sm-footer">';
+  html += `<button class="sm-footer-btn" onclick="closeAllMenus()">Log Off</button>`;
+  html += `<button class="sm-footer-btn" onclick="closeAllMenus()">Shut Down</button>`;
+  html += '</div>';
+
+  menu.innerHTML = html;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   FILE EXPLORER
+   ══════════════════════════════════════════════════════════════ */
+function openExplorer(activeCat) {
+  activeCat = activeCat || Object.keys(CATEGORIES)[0];
+  const explorerTitle = currentTheme === 'mac' ? 'Finder' : (currentTheme === 'ubuntu' ? 'Files' : (currentTheme === '31' ? 'File Manager' : 'My Computer'));
+
+  let sidebarHtml = '<div class="explorer-sidebar">';
+  sidebarHtml += `<div class="cat-item${!activeCat ? ' active' : ''}" onclick="switchExplorerCat(this, '__all__')">All Pages</div>`;
+  Object.keys(CATEGORIES).forEach(catId => {
+    const c = CATEGORIES[catId];
+    const cnt = Object.values(PAGES).filter(p => p.cat === catId && !recycleBin.includes(catId)).length;
+    sidebarHtml += `<div class="cat-item${catId===activeCat?' active':''}" onclick="switchExplorerCat(this, '${catId}')">${c.name} (${cnt})</div>`;
+  });
+  sidebarHtml += '</div>';
+
+  const gridHtml = buildExplorerGrid(activeCat);
+
+  const content = `
+    <div class="explorer-toolbar">
+      <button onclick="history.length">Back</button>
+      <button onclick="">Forward</button>
+      <button onclick="">Up</button>
+    </div>
+    <div class="explorer-addr"><span>Address:</span> ${CATEGORIES[activeCat]?.name || 'All'}</div>
+    <div style="display:flex;flex:1;overflow:hidden">
+      ${sidebarHtml}
+      <div class="explorer-content" id="explorer-grid-area">${gridHtml}</div>
+    </div>
+  `;
+
+  createWindow({
+    title: explorerTitle + ' - ' + (CATEGORIES[activeCat]?.name || 'All'),
+    content, width: 700, height: 450,
+  });
+}
+
+function openCustomFolder(folderId) {
+  const folder = customFolders[folderId];
+  if (!folder) return;
+  const explorerTitle = currentTheme === 'mac' ? 'Finder' : (currentTheme === 'ubuntu' ? 'Files' : 'Explorer');
+  let gridHtml = '';
+  const pages = (folder.pages || []).filter(id => PAGES[id] && !recycleBin.includes(id));
+  if (pages.length === 0) {
+    gridHtml = '<div style="padding:20px;color:#888">Empty folder — drag items here from the desktop</div>';
+  } else {
+    gridHtml = '<div class="explorer-grid">';
+    pages.forEach(id => {
+      const p = PAGES[id];
+      if (!p) return;
+      gridHtml += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showExplorerItemMenu(event,'${id}')">
+        <div class="ei-icon">${getIcon(getPageIconType(p.cat))}</div>
+        <div class="ei-name">${p.name}</div>
+      </div>`;
+    });
+    gridHtml += '</div>';
+  }
+  const content = `
+    <div class="explorer-toolbar">
+      <button onclick="history.length">Back</button>
+      <button onclick="">Forward</button>
+    </div>
+    <div class="explorer-addr"><span>Folder:</span> ${folder.name}</div>
+    <div style="display:flex;flex:1;overflow:hidden">
+      <div class="explorer-content" id="explorer-grid-area">${gridHtml}</div>
+    </div>
+  `;
+  createWindow({
+    title: explorerTitle + ' - ' + folder.name,
+    content, width: 600, height: 400,
+  });
+}
+
+function buildExplorerGrid(catId) {
+  let pages;
+  if (catId === '__all__') {
+    pages = Object.entries(PAGES).filter(([id]) => !recycleBin.includes(id));
+  } else {
+    pages = Object.entries(PAGES).filter(([id, p]) => p.cat === catId && !recycleBin.includes(id));
+  }
+
+  if (pages.length === 0) return '<div style="padding:20px;color:#888">No items</div>';
+
+  let html = '<div class="explorer-grid">';
+  pages.forEach(([id, p]) => {
+    const iconType = getPageIconType(p.cat);
+    html += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showExplorerItemMenu(event,'${id}')">
+      <div class="ei-icon">${getIcon(iconType)}</div>
+      <div class="ei-name">${p.name}</div>
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function getPageIconType(cat) {
+  const map = {
+    'entertainment':'game','tts-voice':'music','reference':'book',
+    'api-developer':'tools','business-tools':'tools',
+  };
+  return map[cat] || 'document';
+}
+
+function switchExplorerCat(el, catId) {
+  const sidebar = el.parentElement;
+  sidebar.querySelectorAll('.cat-item').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const grid = el.closest('.win-body').querySelector('#explorer-grid-area') ||
+               el.closest('.win-body').querySelector('.explorer-content');
+  if (grid) grid.innerHTML = buildExplorerGrid(catId);
+  // Update address bar
+  const addr = el.closest('.win-body').querySelector('.explorer-addr span');
+  if (addr) addr.nextSibling.textContent = ' ' + (CATEGORIES[catId]?.name || 'All');
+}
+
+function showExplorerItemMenu(e, pageId) {
+  const isMac = currentTheme === 'mac';
+  const isUbuntu = currentTheme === 'ubuntu';
+  const page = PAGES[pageId];
+  const pageName = page ? page.name : pageId;
+
+  if (isMac || isUbuntu) {
+    showContextMenu(e.clientX, e.clientY, [
+      {label:'Open', action:()=>openCanvasPage(pageId)},
+      {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
+      '---',
+      {label:isMac?'Get Info':'Properties', action:()=>showPageProperties(pageId)},
+      '---',
+      {label:'Copy', action:()=>{clipboard={action:'copy',id:pageId}}},
+      '---',
+      {label:'Move to Trash', action:()=>{deleteItem(pageId); refreshExplorers();}},
+    ]);
+  } else {
+    showContextMenu(e.clientX, e.clientY, [
+      {label:'Open', action:()=>openCanvasPage(pageId)},
+      {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
+      '---',
+      {label:'Cut', action:()=>{clipboard={action:'cut',id:pageId}}},
+      {label:'Copy', action:()=>{clipboard={action:'copy',id:pageId}}},
+      '---',
+      {label:'Delete', action:()=>{deleteItem(pageId); refreshExplorers();}},
+      {label:'Rename', action:()=>{
+        showPromptModal('Rename "'+pageName+'" to:', pageName, (n)=>{
+          if(n && n.trim() && PAGES[pageId]) { PAGES[pageId].name = n.trim(); refreshExplorers(); }
+        });
+      }},
+      '---',
+      {label:'Properties', action:()=>showPageProperties(pageId)},
+    ]);
+  }
+}
+
+function showPageProperties(pageId) {
+  const page = PAGES[pageId];
+  if (!page) return;
+  const isMac = currentTheme === 'mac' || currentTheme === 'ubuntu';
+  const title = (isMac ? page.name + ' Info' : page.name + ' Properties');
+  const cat = CATEGORIES[page.cat];
+  const now = new Date().toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'});
+
+  const content = `
+    <div style="padding:16px;font-size:12px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;border-bottom:1px solid #ccc">
+        <div style="width:32px;height:32px">${getIcon(getPageIconType(page.cat))}</div>
+        <div>
+          <div style="font-weight:bold;font-size:14px">${page.name}</div>
+          <div style="color:#666;margin-top:2px">Canvas Page</div>
+        </div>
+      </div>
+      <table style="border-collapse:collapse;width:100%">
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Type:</td><td style="padding:3px 0">HTML Canvas Page</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Opens with:</td><td style="padding:3px 0">Canvas Viewer</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Location:</td><td style="padding:3px 0">/pages/${pageId}.html</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Category:</td><td style="padding:3px 0">${cat ? cat.name : 'Uncategorized'}</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Modified:</td><td style="padding:3px 0">${now}</td></tr>
+      </table>
+      <div style="padding-top:8px;border-top:1px solid #ccc">
+        <button onclick="openCanvasPage('${pageId}')" style="padding:4px 16px;cursor:pointer;font-size:12px">Open</button>
+        <button onclick="openCanvasPage('${pageId}',true)" style="padding:4px 16px;cursor:pointer;font-size:12px;margin-left:4px">Open in New Tab</button>
+      </div>
+    </div>`;
+
+  createWindow({title, content, width:380, height:300});
+}
+
+function refreshExplorers() {
+  // Re-render any open explorer windows
+  buildDesktopIcons();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   OPEN CANVAS PAGE
+   ══════════════════════════════════════════════════════════════ */
+function openCanvasPage(pageId, newWindow) {
+  const page = PAGES[pageId];
+  if (!page) return;
+  if (newWindow) {
+    window.open('/pages/' + pageId + '.html', '_blank');
+    return;
+  }
+  // Use the parent app's postMessage bridge to navigate to the canvas page.
+  // The desktop runs inside the OpenVoiceUI canvas iframe — sending a
+  // 'navigate' action tells the parent to load the target page in this
+  // same iframe, which is the standard canvas navigation mechanism.
+  window.parent.postMessage({
+    type: 'canvas-action',
+    action: 'navigate',
+    page: pageId,
+  }, '*');
+}
+
+/* ══════════════════════════════════════════════════════════════
+   RECYCLE BIN
+   ══════════════════════════════════════════════════════════════ */
+function openRecycleBin() {
+  const title = currentTheme === 'mac' ? 'Trash' : 'Recycle Bin';
+  let content = '<div class="recycle-toolbar">';
+  content += '<button onclick="emptyRecycleBin();this.closest(\'.win-body\').querySelector(\'.explorer-content\').innerHTML=buildRecycleContent()">Empty</button>';
+  content += '<button onclick="restoreAll();this.closest(\'.win-body\').querySelector(\'.explorer-content\').innerHTML=buildRecycleContent()">Restore All</button>';
+  content += '</div>';
+  content += '<div class="explorer-content">' + buildRecycleContent() + '</div>';
+
+  createWindow({title, content, width: 500, height: 350});
+}
+
+function buildRecycleContent() {
+  if (recycleBin.length === 0) return '<div class="recycle-empty">Recycle Bin is empty</div>';
+  let html = '<div class="explorer-grid">';
+  recycleBin.forEach(id => {
+    const page = PAGES[id];
+    const name = page ? page.name : CATEGORIES[id.replace('cat-','')]?.name || id;
+    html += `<div class="explorer-item" ondblclick="restoreItem('${id}')">
+      <div class="ei-icon">${getIcon('document')}</div>
+      <div class="ei-name">${name}</div>
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function deleteItem(id) {
+  if (!recycleBin.includes(id)) {
+    recycleBin.push(id);
+    saveState();
+    buildDesktopIcons();
+  }
+}
+
+function restoreItem(id) {
+  recycleBin = recycleBin.filter(i => i !== id);
+  saveState();
+  buildDesktopIcons();
+  // Refresh recycle bin windows
+  document.querySelectorAll('.window').forEach(w => {
+    const title = w.querySelector('.titlebar-title');
+    if (title && (title.textContent === 'Recycle Bin' || title.textContent === 'Trash')) {
+      const content = w.querySelector('.explorer-content');
+      if (content) content.innerHTML = buildRecycleContent();
+    }
+  });
+}
+
+function restoreAll() {
+  recycleBin = [];
+  saveState();
+  buildDesktopIcons();
+}
+
+function emptyRecycleBin() {
+  if (recycleBin.length === 0) return;
+  recycleBin = [];
+  saveState();
+  buildDesktopIcons();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THEME SETTINGS WINDOW
+   ══════════════════════════════════════════════════════════════ */
+function openThemeSettings() {
+  const themes = [
+    {id:'xp',name:'Windows XP',preview:'linear-gradient(180deg,#1b58d0 0%,#3a82e6 40%,#5a9eec 60%,#4aad31 70%,#55bd3e 100%)'},
+    {id:'mac',name:'macOS',preview:'linear-gradient(180deg,#0d1117 0%,#2c1654 30%,#1a5276 60%,#0f1a3e 100%)'},
+    {id:'95',name:'Windows 95',preview:'linear-gradient(180deg,#008080 0%,#008080 70%,#c0c0c0 70%,#c0c0c0 100%)'},
+    {id:'31',name:'Windows 3.1',preview:'linear-gradient(180deg,#00807f 0%,#00807f 80%,#c0c0c0 80%,#c0c0c0 100%)'},
+    {id:'ubuntu',name:'Ubuntu',preview:'linear-gradient(180deg,#2c001e 0%,#77216f 30%,#5e2750 60%,#2c001e 80%,#303030 90%,#303030 100%)'},
+  ];
+
+  let html = '<div class="theme-grid">';
+  themes.forEach(t => {
+    html += `<div class="theme-card ${t.id===currentTheme?'active':''}" onclick="setTheme('${t.id}');document.querySelectorAll('.theme-card').forEach(c=>c.classList.remove('active'));this.classList.add('active')">
+      <div class="preview" style="background:${t.preview}"></div>
+      <div class="label">${t.name}</div>
+    </div>`;
+  });
+  html += '</div>';
+
+  // Wallpaper section
+  const thumbHtml = wallpaperUrl
+    ? `<img class="wallpaper-thumb" src="${wallpaperUrl}" onerror="this.style.display='none'">`
+    : `<div class="wallpaper-empty">No<br>wallpaper</div>`;
+  html += `<div class="wallpaper-section">
+    <label>Desktop Wallpaper</label>
+    <div class="wallpaper-row">
+      ${thumbHtml}
+      <div class="wallpaper-btns">
+        <button class="wallpaper-btn" onclick="document.getElementById('wallpaper-file-input').click()">Choose Image&hellip;</button>
+        ${wallpaperUrl ? `<button class="wallpaper-btn" onclick="removeWallpaper();this.closest('.win-body').querySelector('.wallpaper-section').innerHTML=buildWallpaperSection()">Remove Wallpaper</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+
+  createWindow({
+    title: currentTheme === 'mac' ? 'System Preferences' : 'Display Properties',
+    content: html, width: 520, height: 420,
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EVENT HANDLERS
+   ══════════════════════════════════════════════════════════════ */
+document.getElementById('desktop').addEventListener('mousedown', (e) => {
+  if (e.target === e.currentTarget || e.target.id === 'desktop') {
+    selectedIcons.clear();
+    updateIconSelection();
+    closeAllMenus();
+  }
+});
+
+document.getElementById('desktop').addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const iconEl = e.target.closest('.desktop-icon');
+  if (iconEl) {
+    const item = DESKTOP_ITEMS.find(i => i.id === iconEl.dataset.id);
+    if (item) showContextMenu(e.clientX, e.clientY, getIconContextItems(item));
+  } else if (e.target.closest('.window')) {
+    // Don't show desktop context menu on windows
+    return;
+  } else {
+    showContextMenu(e.clientX, e.clientY, getDesktopContextItems());
+  }
+});
+
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('#context-menu') && contextMenuOpen) {
+    document.getElementById('context-menu').classList.remove('show');
+    contextMenuOpen = false;
+  }
+  if (!e.target.closest('#start-menu') && !e.target.closest('#start-btn') && !e.target.closest('.apple-logo') && startMenuOpen) {
+    document.getElementById('start-menu').classList.remove('show');
+    startMenuOpen = false;
+  }
+});
+
+// Resize handler — reflow icons and clamp windows on screen resize
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    buildDesktopIcons();
+    const container = document.getElementById('os-container');
+    const cw = container.offsetWidth;
+    const dh = getDesktopHeight();
+    const dTop = getDesktopTop();
+    windows.forEach(w => {
+      if (w.el.classList.contains('maximized')) {
+        w.el.style.width = cw + 'px';
+        w.el.style.height = dh + 'px';
+        w.el.style.top = dTop + 'px';
+        w.el.style.left = '0px';
+      } else {
+        // Clamp non-maximized windows to stay within desktop
+        let ww = w.el.offsetWidth;
+        let wh = w.el.offsetHeight;
+        let wl = parseInt(w.el.style.left) || 0;
+        let wt = parseInt(w.el.style.top) || 0;
+        if (ww > cw) { w.el.style.width = cw + 'px'; ww = cw; }
+        if (wh > dh) { w.el.style.height = dh + 'px'; wh = dh; }
+        if (wl + ww > cw) w.el.style.left = Math.max(0, cw - ww) + 'px';
+        if (wt + wh > dh + dTop) w.el.style.top = Math.max(dTop, dh + dTop - wh) + 'px';
+        if (wt < dTop) w.el.style.top = dTop + 'px';
+      }
+    });
+  }, 100);
+});
+
+/* ══════════════════════════════════════════════════════════════
+   MODAL DIALOG — replaces prompt/confirm (blocked in iframes)
+   ══════════════════════════════════════════════════════════════ */
+let _modalCb = null;
+let _modalType = 'prompt';
+
+function showPromptModal(message, defaultVal, callback) {
+  _modalCb = callback;
+  _modalType = 'prompt';
+  document.getElementById('modal-message').textContent = message;
+  const inp = document.getElementById('modal-input');
+  inp.style.display = 'block';
+  inp.value = defaultVal || '';
+  document.getElementById('modal-cancel').style.display = '';
+  document.getElementById('modal-ok').textContent = 'OK';
+  document.getElementById('modal-overlay').classList.add('show');
+  setTimeout(() => { inp.focus(); inp.select(); }, 50);
+}
+
+function showConfirmModal(message, callback) {
+  _modalCb = callback;
+  _modalType = 'confirm';
+  document.getElementById('modal-message').textContent = message;
+  document.getElementById('modal-input').style.display = 'none';
+  document.getElementById('modal-cancel').style.display = '';
+  document.getElementById('modal-ok').textContent = 'OK';
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('show');
+  const cb = _modalCb; _modalCb = null;
+  if (cb) cb(null);
+}
+
+function submitModal() {
+  document.getElementById('modal-overlay').classList.remove('show');
+  const cb = _modalCb; _modalCb = null;
+  if (!cb) return;
+  if (_modalType === 'prompt') {
+    cb(document.getElementById('modal-input').value);
+  } else {
+    cb(true);
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay || !overlay.classList.contains('show')) return;
+  if (e.key === 'Enter') { e.preventDefault(); submitModal(); }
+  if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+});
+
+/* ══════════════════════════════════════════════════════════════
+   WALLPAPER
+   ══════════════════════════════════════════════════════════════ */
+function applyWallpaper(url) {
+  wallpaperUrl = url || null;
+  const desktop = document.getElementById('desktop');
+  if (url) {
+    desktop.style.background = 'url(' + url + ') center/cover no-repeat';
+  } else {
+    desktop.style.background = '';
+  }
+}
+
+async function uploadWallpaper(file) {
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const url = data.url || data.path;
+    if (!url) throw new Error('No URL in response');
+    applyWallpaper(url);
+    saveState();
+    // Refresh wallpaper section in any open Display Properties window
+    document.querySelectorAll('.win-body .wallpaper-section').forEach(el => {
+      el.outerHTML = buildWallpaperSection();
+    });
+  } catch (err) {
+    showConfirmModal('Wallpaper upload failed: ' + err.message, () => {});
+  }
+}
+
+function removeWallpaper() {
+  applyWallpaper(null);
+  saveState();
+}
+
+function handleWallpaperFile(input) {
+  if (input.files && input.files[0]) {
+    uploadWallpaper(input.files[0]);
+    input.value = ''; // reset so same file can be re-selected
+  }
+}
+
+function buildWallpaperSection() {
+  const thumbHtml = wallpaperUrl
+    ? `<img class="wallpaper-thumb" src="${wallpaperUrl}" onerror="this.style.display='none'">`
+    : `<div class="wallpaper-empty">No<br>wallpaper</div>`;
+  return `<div class="wallpaper-section">
+    <label>Desktop Wallpaper</label>
+    <div class="wallpaper-row">
+      ${thumbHtml}
+      <div class="wallpaper-btns">
+        <button class="wallpaper-btn" onclick="document.getElementById('wallpaper-file-input').click()">Choose Image&hellip;</button>
+        ${wallpaperUrl ? `<button class="wallpaper-btn" onclick="removeWallpaper();this.closest('.wallpaper-section').outerHTML=buildWallpaperSection()">Remove Wallpaper</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════════ */
+async function init() {
+  await loadState();
+  await fetchManifest();
+  // Ensure DOM is fully laid out before measuring
+  requestAnimationFrame(() => {
+    setTheme(currentTheme);
+    updateClock();
+  });
+  // Poll for new pages every 30 seconds
+  _manifestTimer = setInterval(fetchManifest, 30000);
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+</script>
+</body>
+</html>

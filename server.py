@@ -92,6 +92,20 @@ from routes.canvas import (
 )
 app.register_blueprint(canvas_bp)
 
+# Seed default pages into canvas-pages on startup (ships with the app image)
+# Default pages are app infrastructure (e.g. desktop menu) — auth is skipped in canvas.py.
+from services.paths import DEFAULT_PAGES_DIR
+if DEFAULT_PAGES_DIR.is_dir():
+    CANVAS_PAGES_DIR.mkdir(parents=True, exist_ok=True)
+    import shutil
+    for src in DEFAULT_PAGES_DIR.iterdir():
+        if not src.is_file():
+            continue
+        dest = CANVAS_PAGES_DIR / src.name
+        if not dest.exists():
+            shutil.copy2(src, dest)
+            logger.info("Seeded default page: %s", src.name)
+
 from routes.static_files import static_files_bp, DJ_SOUNDS, SOUNDS_DIR
 app.register_blueprint(static_files_bp)
 
@@ -1150,11 +1164,18 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, _handle_sigterm)
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
+    try:
+        from services.gateways.openclaw import OPENCLAW_TESTED_VERSION
+        _oc_ver = OPENCLAW_TESTED_VERSION
+    except ImportError:
+        _oc_ver = "unknown"
+
     logger.info(f"OpenVoiceUI starting on port {port}")
     logger.info(f"  Frontend  → http://localhost:{port}/")
     logger.info(f"  Health    → http://localhost:{port}/health/ready")
     logger.info(f"  Admin     → http://localhost:{port}/src/admin.html")
     logger.info(f"  Gateway   → {os.getenv('CLAWDBOT_GATEWAY_URL', 'ws://127.0.0.1:18791')}")
+    logger.info(f"  Tested OpenClaw version: {_oc_ver}")
 
     host = os.getenv("HOST", "127.0.0.1")  # Docker sets HOST=0.0.0.0; VPS stays loopback
     app.run(host=host, port=port, debug=False, threaded=True)

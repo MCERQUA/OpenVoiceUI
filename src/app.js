@@ -2070,6 +2070,10 @@ inject();
                         this._hideAuthGate();
                         this.renderUserMenu();
                         document.getElementById('sign-in-button').style.display = 'none';
+                        // Sync Clerk token to __session cookie so iframe navigations
+                        // and direct page URLs are authenticated (browser only sends
+                        // cookies with navigation requests, not Authorization headers).
+                        this._syncSessionCookie();
                         // If redirected here from a canvas page (or other protected route), go back there
                         const redirectTo = new URLSearchParams(window.location.search).get('redirect');
                         if (redirectTo && redirectTo.startsWith('/')) {
@@ -2195,6 +2199,22 @@ inject();
 
             async getToken() {
                 return Clerk.session?.getToken() ?? null;
+            },
+
+            async _syncSessionCookie() {
+                // Clerk tokens expire every ~60s. Sync to __session cookie so
+                // iframe navigations and direct /pages/ URLs carry auth.
+                const _sync = async () => {
+                    try {
+                        const token = await Clerk.session?.getToken();
+                        if (token) {
+                            document.cookie = `__session=${token}; path=/; SameSite=Lax; Secure`;
+                        }
+                    } catch (e) { /* session may be gone */ }
+                };
+                await _sync();
+                // Refresh cookie every 50s (Clerk tokens last ~60s)
+                this._sessionCookieInterval = setInterval(_sync, 50000);
             },
 
             renderUserMenu() {
@@ -2348,6 +2368,7 @@ inject();
                 this.stoppingRecorder = false;  // Flag to prevent duplicate stop attempts
                 this.hadSpeechInChunk = false;  // Track if real speech happened in this chunk
                 this._speechStartTime = 0; // When sustained speech started
+                this._resumedSpeechStart = 0; // When resumed speech started (for clearing silence timer)
             }
 
             isSupported() {
@@ -2495,11 +2516,26 @@ inject();
                                     }
                                 }, this.maxRecordingMs);
                             }
+                        } else if (isSpeakingNow && this.isSpeaking) {
+                            // Continued speech — user still talking after brief dip.
+                            // Only clear silence timer after sustained speech (minSpeechMs) to
+                            // prevent ambient noise blips from keeping recording open forever.
+                            const now2 = Date.now();
+                            if (!this._resumedSpeechStart) {
+                                this._resumedSpeechStart = now2;
+                            }
+                            if (now2 - this._resumedSpeechStart >= this.minSpeechMs && this.silenceTimer) {
+                                clearTimeout(this.silenceTimer);
+                                this.silenceTimer = null;
+                                this._resumedSpeechStart = 0;
+                            }
                         } else if (!isSpeakingNow && !this.isSpeaking) {
                             // Below threshold and not yet confirmed — reset speech start timer
                             this._speechStartTime = 0;
+                            this._resumedSpeechStart = 0;
                         } else if (!isSpeakingNow && this.isSpeaking && !this.isProcessing && !this.stoppingRecorder) {
                             // Stopped speaking - start silence timer (ONLY if not already processing or stopping)
+                            this._resumedSpeechStart = 0;
                             if (!this.silenceTimer) {
                                 this.silenceTimer = setTimeout(() => {
                                     console.log('🔇 Silence detected, processing audio');
@@ -3055,6 +3091,7 @@ inject();
                         if (/\[CANVAS_MENU\]/i.test(text) && !canvasCommandsProcessed.has('CANVAS_MENU')) {
                             canvasCommandsProcessed.add('CANVAS_MENU');
                             console.log('[Canvas] CANVAS_MENU trigger detected');
+                            ActionConsole.addEntry('system', 'Canvas: opening menu');
                             CanvasControl.showMenu?.() || document.getElementById('canvas-menu-button')?.click();
                         }
                         // Check for [CANVAS:pagename]
@@ -3076,6 +3113,7 @@ inject();
                         if (musicPlay && !canvasCommandsProcessed.has('MUSIC_PLAY')) {
                             canvasCommandsProcessed.add('MUSIC_PLAY');
                             const trackName = musicPlay[1]?.trim();
+                            ActionConsole.addEntry('system', trackName ? `Music: playing "${trackName}"` : 'Music: playing');
                             // Always open the panel regardless of whether tracks exist
                             if (window.musicPlayer?.panelState === 'closed') window.musicPlayer.openPanel();
                             if (trackName) {
@@ -3087,11 +3125,13 @@ inject();
                         // Check for [MUSIC_STOP]
                         if (/\[MUSIC_STOP\]/i.test(text) && !canvasCommandsProcessed.has('MUSIC_STOP')) {
                             canvasCommandsProcessed.add('MUSIC_STOP');
+                            ActionConsole.addEntry('system', 'Music: stopped');
                             window.musicPlayer?.stop();
                         }
                         // Check for [MUSIC_NEXT]
                         if (/\[MUSIC_NEXT\]/i.test(text) && !canvasCommandsProcessed.has('MUSIC_NEXT')) {
                             canvasCommandsProcessed.add('MUSIC_NEXT');
+                            ActionConsole.addEntry('system', 'Music: next track');
                             window.musicPlayer?.next();
                         }
                         // Check for [SUNO_GENERATE:prompt]
@@ -3099,6 +3139,7 @@ inject();
                         if (sunoMatch && !canvasCommandsProcessed.has('SUNO_GENERATE')) {
                             canvasCommandsProcessed.add('SUNO_GENERATE');
                             const sunoPrompt = sunoMatch[1].trim();
+                            ActionConsole.addEntry('system', `Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
                             window.sunoModule?.generate(sunoPrompt);
                         }
                         // Check for [SPOTIFY:track name|artist] — switches player to Spotify mode
@@ -3107,6 +3148,7 @@ inject();
                             canvasCommandsProcessed.add('SPOTIFY');
                             const spotifyTrack = spotifyMatch[1].trim();
                             const spotifyArtist = spotifyMatch[2]?.trim() || '';
+                            ActionConsole.addEntry('system', `Spotify: "${spotifyTrack}"${spotifyArtist ? ` by ${spotifyArtist}` : ''}`);
                             window.musicPlayer?.playSpotify(spotifyTrack, spotifyArtist);
                         }
                         // Check for [REGISTER_FACE:name] — agent registers current camera frame
@@ -3114,6 +3156,7 @@ inject();
                         if (registerFaceMatch && !canvasCommandsProcessed.has('REGISTER_FACE')) {
                             canvasCommandsProcessed.add('REGISTER_FACE');
                             const personName = registerFaceMatch[1].trim();
+                            ActionConsole.addEntry('system', `Face: registering "${personName}"`);
                             const cam = window.cameraModule;
                             if (cam && cam.stream) {
                                 const ctx = cam.canvas.getContext('2d');
@@ -3139,6 +3182,7 @@ inject();
                             canvasCommandsProcessed.add('SOUND');
                             const soundName = soundMatch[1].trim();
                             console.log('[Sound] DJ sound trigger:', soundName);
+                            ActionConsole.addEntry('system', `Sound: ${soundName}`);
                             DJSoundboard.play(soundName);
                         }
                         // Check for [CANVAS_URL:https://example.com] — load external URL in iframe
@@ -3156,6 +3200,7 @@ inject();
                         if (/\[SLEEP\]/i.test(text) && !canvasCommandsProcessed.has('SLEEP')) {
                             canvasCommandsProcessed.add('SLEEP');
                             console.log('[Sleep] Agent requested sleep — will disconnect after audio');
+                            ActionConsole.addEntry('system', 'Sleep: going to standby');
                             window._sleepAfterResponse = true;
                         }
                         // Early HTML canvas: as soon as </html> lands in the stream, save and show
@@ -3167,6 +3212,7 @@ inject();
                             if (htmlEarlyMatch) {
                                 canvasCommandsProcessed.add('HTML_CANVAS');
                                 console.log('[Canvas] Complete HTML detected in stream, saving early...');
+                                ActionConsole.addEntry('system', 'Canvas: building page from HTML');
                                 this._saveAndShowHtml(htmlEarlyMatch[1].trim());
                             }
                         }
@@ -5635,7 +5681,13 @@ inject();
                             // Load external URL in the iframe
                             if (url) {
                                 const iframe = document.getElementById('canvas-iframe');
+                                const container = document.getElementById('canvas-container');
                                 if (iframe) iframe.src = url;
+                                if (container && event.data.padded) {
+                                    container.classList.add('canvas-padded');
+                                } else if (container) {
+                                    container.classList.remove('canvas-padded');
+                                }
                             }
                             break;
                         case 'menu':
@@ -6381,6 +6433,9 @@ inject();
                 const iframe = document.getElementById('canvas-iframe');
                 if (iframe) {
                     iframe.src = `/pages/${filename}?t=${Date.now()}`;
+                    // Clear padded mode when navigating to a canvas page
+                    const container = document.getElementById('canvas-container');
+                    if (container) container.classList.remove('canvas-padded');
                     // Reset mtime tracking so auto-refresh doesn't false-trigger on page switch
                     CanvasControl._lastMtime = null;
                     // Remember this page for next time
@@ -6995,13 +7050,17 @@ inject();
                         // Build a readable detail line from the input parameters
                         let detail = '';
                         if (action.phase === 'result') {
-                            detail = action.result || '';
-                        } else if (action.input && Object.keys(action.input).length) {
+                            // For results, show first meaningful line of output
+                            const raw = action.result || '';
+                            detail = raw.split('\n').filter(l => l.trim())[0]?.slice(0, 120) || raw.slice(0, 120);
+                        } else if (action.input && typeof action.input === 'object' && Object.keys(action.input).length) {
                             const inp = action.input;
-                            detail = inp.command || inp.path || inp.file_path ||
+                            // Extract the most useful field for display
+                            detail = inp.command || inp.path || inp.file_path || inp.filePath ||
                                      inp.query || inp.url || inp.pattern ||
+                                     inp.oldText?.slice?.(0, 60) ||
                                      inp.content?.slice?.(0, 60) ||
-                                     Object.values(inp)[0]?.toString?.()?.slice(0, 80) || '';
+                                     Object.values(inp)[0]?.toString?.()?.slice(0, 120) || '';
                         }
                         this.addEntry('tool', `${phase} Tool: ${action.name}`, detail, action.ts);
                     } else if (action.type === 'lifecycle') {
@@ -7933,6 +7992,11 @@ inject();
                     stt.maxRecordingMs = maxRec * 1000;
                     console.log(`[Profile] stt.maxRecordingMs = ${maxRec * 1000}ms`);
                 }
+                const accMs = profile?.stt?.accumulation_delay_ms;
+                if (accMs != null) {
+                    stt.accumulationDelayMs = accMs;
+                    console.log(`[Profile] stt.accumulationDelayMs = ${accMs}ms`);
+                }
                 // PTT default — auto-enable if profile says so
                 if (profile?.stt?.ptt_default === true && window.PTTButton && !window.PTTButton.pttMode) {
                     window.PTTButton._setPTT(true);
@@ -7989,7 +8053,7 @@ inject();
                 console.log(`[Profile] wakeWords = ${JSON.stringify(window.wakeDetector.wakeWords)}`);
             }
 
-            console.log(`[Profile] applied: ${profile?.id} | silence=${profile?.stt?.silence_timeout_ms ?? 'default'}ms | interruption=${window._interruptionEnabled} | wakeWords=${JSON.stringify(profile?.stt?.wake_words)} | modes=${JSON.stringify(profile?.modes)}`);
+            console.log(`[Profile] applied: ${profile?.id} | silence=${profile?.stt?.silence_timeout_ms ?? 'default'}ms | accumulation=${profile?.stt?.accumulation_delay_ms ?? 'default'}ms | interruption=${window._interruptionEnabled} | wakeWords=${JSON.stringify(profile?.stt?.wake_words)} | modes=${JSON.stringify(profile?.modes)}`);
         };
 
         // Expose STT instance — lives at ModeManager.clawdbotMode.stt
@@ -8018,6 +8082,11 @@ inject();
                     if (maxRec != null) {
                         stt.maxRecordingMs = maxRec * 1000;
                         console.log(`[Profile] deferred stt.maxRecordingMs = ${maxRec * 1000}ms`);
+                    }
+                    const accMs = window._activeProfileData?.stt?.accumulation_delay_ms;
+                    if (accMs != null) {
+                        stt.accumulationDelayMs = accMs;
+                        console.log(`[Profile] deferred stt.accumulationDelayMs = ${accMs}ms`);
                     }
                     if (window._activeProfileData?.stt?.ptt_default === true && window.PTTButton && !window.PTTButton.pttMode) {
                         window.PTTButton._setPTT(true);

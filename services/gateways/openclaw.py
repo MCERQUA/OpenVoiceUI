@@ -40,6 +40,11 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
+# OpenClaw version compatibility — the version this code was tested against.
+# Used for startup warnings when a mismatched gateway is detected.
+OPENCLAW_TESTED_VERSION = "2026.3.2"
+OPENCLAW_MIN_VERSION = "2026.3.1"
+
 # System/internal response strings that must never be surfaced to the user.
 _SYSTEM_RESPONSE_PATTERNS = frozenset({
     'HEARTBEAT_OK',
@@ -394,6 +399,7 @@ class GatewayConnection:
         self._start_lock = threading.Lock()
         self._backoff_idx = 0
         self._last_disconnect_time = 0.0
+        self._server_version: str | None = None
 
     @property
     def url(self):
@@ -471,13 +477,20 @@ class GatewayConnection:
         hello_data = json.loads(hello_response)
         if hello_data.get('type') != 'res' or hello_data.get('error'):
             raise RuntimeError(f"Gateway auth failed: {hello_data.get('error')}")
-        return hello_data
+        # Try to extract server version from hello response
+        result = hello_data.get('result', {}) or {}
+        server_version = (
+            result.get('serverVersion')
+            or result.get('version')
+            or (result.get('server', {}) or {}).get('version')
+        )
+        return hello_data, server_version
 
     async def _connect(self):
         t_start = time.time()
         ws = await websockets.connect(self.url)
         try:
-            await self._handshake(ws)
+            hello_data, server_version = await self._handshake(ws)
         except Exception:
             await ws.close()
             raise
@@ -486,7 +499,19 @@ class GatewayConnection:
         self._connected = True
         self._backoff_idx = 0
         self._dispatcher.start(ws)
-        logger.info(f"### Persistent WS connected + handshake done in {t_ms}ms")
+        if server_version:
+            self._server_version = server_version
+            logger.info(
+                f"### Persistent WS connected in {t_ms}ms (openclaw {server_version})"
+            )
+            if server_version != OPENCLAW_TESTED_VERSION:
+                logger.warning(
+                    f"### OpenClaw version mismatch: gateway is {server_version}, "
+                    f"OpenVoiceUI tested with {OPENCLAW_TESTED_VERSION}. "
+                    f"Voice features may not work correctly."
+                )
+        else:
+            logger.info(f"### Persistent WS connected + handshake done in {t_ms}ms")
 
     async def _disconnect(self):
         self._connected = False

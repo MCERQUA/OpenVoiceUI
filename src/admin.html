@@ -1220,18 +1220,35 @@ const CanvasPages = {
     el.innerHTML = '<table style="width:100%;border-collapse:collapse">' +
       '<thead><tr style="border-bottom:1px solid var(--border);color:var(--dim);font-size:12px">' +
       '<th style="padding:8px 12px;text-align:left">Page</th>' +
+      '<th style="padding:8px 12px;text-align:left">URL</th>' +
       '<th style="padding:8px 12px;text-align:left">Category</th>' +
+      '<th style="padding:8px 12px;text-align:center">Lock</th>' +
       '<th style="padding:8px 12px;text-align:right">Visibility</th>' +
       '</tr></thead><tbody>' +
       ids.map(id => {
         const p = this.pages[id];
         const pub = p.is_public || false;
+        const locked = p.is_locked || false;
         return '<tr style="border-bottom:1px solid var(--border2)">' +
           '<td style="padding:10px 12px">' +
           '<div style="font-weight:500;color:var(--bright)">'+esc(p.display_name||id)+'</div>' +
           '<div style="font-size:11px;color:var(--dim);margin-top:2px">'+esc(id)+'</div>' +
           '</td>' +
+          '<td style="padding:10px 12px">' +
+          '<div style="display:flex;align-items:center;gap:6px">' +
+          '<span style="font-size:11px;color:var(--dim);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(location.origin+'/pages/'+id+'.html')+'">/pages/'+esc(id)+'.html</span>' +
+          '<button onclick="CanvasPages.copyUrl(\''+esc(id)+'\')" title="Copy URL" style="' +
+          'border:none;background:none;cursor:pointer;padding:2px;font-size:14px;color:var(--dim);opacity:0.7">' +
+          '📋</button></div></td>' +
           '<td style="padding:10px 12px;color:var(--dim);font-size:12px">'+esc(p.category||'—')+'</td>' +
+          '<td style="padding:10px 12px;text-align:center">' +
+          '<button onclick="CanvasPages.toggleLock(\''+esc(id)+'\')" title="'+(locked?'Locked — agent cannot change visibility':'Unlocked — agent can change visibility')+'" style="' +
+          'border:1px solid '+(locked?'var(--yellow, #f5a623)':'var(--border)')+';' +
+          'background:'+(locked?'rgba(245,166,35,0.1)':'transparent')+';' +
+          'color:'+(locked?'var(--yellow, #f5a623)':'var(--dim)')+';' +
+          'padding:4px 10px;border-radius:20px;cursor:pointer;font-size:12px;transition:all .15s">' +
+          (locked ? '🔐' : '🔓') +
+          '</button></td>' +
           '<td style="padding:10px 12px;text-align:right">' +
           '<button onclick="CanvasPages.toggle(\''+esc(id)+'\')" style="' +
           'border:1px solid '+(pub?'var(--green)':'var(--border)')+';' +
@@ -1257,6 +1274,36 @@ const CanvasPages = {
       this.pages[id].is_public = newPublic;
       this.render();
       toast((newPublic ? '🌐 Public: ' : '🔒 Private: ') + esc(page.display_name||id), newPublic?'green':'blue');
+    } catch(e) {
+      toast('Failed: '+e.message, 'red');
+    }
+  },
+  copyUrl(id) {
+    const url = location.origin + '/pages/' + id + '.html';
+    navigator.clipboard.writeText(url).then(() => {
+      toast('Copied: ' + url, 'blue');
+    }).catch(() => {
+      // Fallback for non-HTTPS contexts
+      const ta = document.createElement('textarea');
+      ta.value = url; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+      toast('Copied: ' + url, 'blue');
+    });
+  },
+  async toggleLock(id) {
+    const page = this.pages[id];
+    if (!page) return;
+    const newLocked = !(page.is_locked || false);
+    try {
+      const r = await fetch('/api/canvas/manifest/page/'+id, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({is_locked: newLocked})
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      this.pages[id].is_locked = newLocked;
+      this.render();
+      toast((newLocked ? '🔐 Locked: ' : '🔓 Unlocked: ') + esc(page.display_name||id), newLocked?'yellow':'blue');
     } catch(e) {
       toast('Failed: '+e.message, 'red');
     }
