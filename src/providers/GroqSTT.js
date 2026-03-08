@@ -36,9 +36,9 @@ class GroqSTT {
 
         // VAD (Voice Activity Detection) settings
         this.silenceTimer = null;
-        this.silenceDelayMs = 2500;     // 2.5s silence = end of speech (profile can override)
-        this.accumulationDelayMs = config.accumulationDelayMs || 4500; // Window to merge consecutive chunks before sending to AI (profile can override)
-        this.vadThreshold = 50;         // FFT average amplitude threshold (profile can override)
+        this.silenceDelayMs = 800;      // 0.8s silence = end of speech (profile can override)
+        this.accumulationDelayMs = config.accumulationDelayMs || 0; // No accumulation delay — send immediately (profile can override)
+        this.vadThreshold = 25;         // FFT average amplitude threshold (profile can override)
         this.minSpeechMs = 300;         // Must sustain above threshold for this long before counting as speech
         this.maxRecordingMs = 45000;    // 45s max before auto-chunk (profile can override)
         this.maxRecordingTimer = null;
@@ -136,9 +136,11 @@ class GroqSTT {
 
             const audioBlob = new Blob(chunks, { type: 'audio/webm' });
 
-            // Skip if no speech detected or audio too small (10KB min filters out noise bursts)
-            if (!hadSpeech || audioBlob.size < 10000) {
-                console.log('Groq STT: skipping - no speech or too small (' + audioBlob.size + ' bytes)');
+            // Skip if no VAD speech detected AND audio is small — prevents Whisper
+            // hallucinations on silence. But if VAD missed speech (quiet mic), still
+            // send larger chunks and let Whisper decide.
+            if (!hadSpeech && audioBlob.size < 50000) {
+                console.log('Groq STT: skipping - no speech detected (' + audioBlob.size + ' bytes)');
                 this.isProcessing = false;
                 return;
             }

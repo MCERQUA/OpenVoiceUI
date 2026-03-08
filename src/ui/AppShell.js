@@ -261,6 +261,12 @@ const SHELL_HTML = `
     <!-- Error message -->
     <div class="error-message" id="error-message"></div>
 
+    <!-- Agent activity chip — live replacing state indicator (bottom-right) -->
+    <div class="agent-activity-chip" id="agent-activity-chip" style="display:none">
+        <span class="chip-icon" id="chip-icon">🔄</span>
+        <span class="chip-text" id="chip-text">Agent working...</span>
+    </div>
+
     <!-- Control buttons — Edge Tabs -->
     <div class="controls-left">
         <button class="edge-tab left call-button" id="call-button" onclick="ModeManager.toggleVoice()" title="Start / end voice call">
