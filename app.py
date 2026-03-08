@@ -196,7 +196,7 @@ def create_app(config_override: dict = None):
             "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com; "
             "media-src 'self' blob:; "
             "connect-src 'self' wss: https:; "
-            "frame-src 'self' https://*.clerk.accounts.dev https://*.jam-bot.com; "
+            "frame-src 'self' https://*.clerk.accounts.dev https://*.jam-bot.com https:; "
             "worker-src 'self' blob:"
         )
         return response

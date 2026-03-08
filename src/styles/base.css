@@ -3,6 +3,18 @@
    Controls, panels, music, party effects, settings, auth, canvas
    ============================================================= */
 
+/* Canvas padded mode — OS-style inset for external URLs */
+#canvas-container.canvas-padded {
+    background: #111 !important;
+}
+#canvas-container.canvas-padded #canvas-iframe {
+    position: absolute !important;
+    top: 40px !important; left: 40px !important; right: 40px !important; bottom: 40px !important;
+    width: auto !important; height: auto !important;
+    border-radius: 12px !important;
+    box-shadow: 0 0 40px rgba(0,0,0,0.6) !important;
+}
+
 /* Control buttons — Edge Tabs (Concept A) */
         .controls-left, .controls-right {
             position: fixed;
@@ -564,7 +576,7 @@
         #action-console .ac-entry.chat { border-left-color: var(--cyan); color: #8b949e; }
         #action-console .ac-ts { color: #484f58; margin-right: 6px; }
         #action-console .ac-icon { margin-right: 4px; }
-        #action-console .ac-detail { color: #6e7681; font-size: 11px; margin-left: 20px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 350px; }
+        #action-console .ac-detail { color: #8b949e; font-size: 11px; margin-left: 24px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 30px); font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; }
         /* Action console edge tabs — right side of panel */
         .ac-side-tabs {
             position: absolute;

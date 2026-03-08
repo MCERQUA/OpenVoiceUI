@@ -574,8 +574,13 @@ def canvas_pages_proxy(path):
             if not is_public:
                 from services.auth import get_token_from_request, verify_clerk_token
                 token = get_token_from_request()
+                has_cookie = bool(request.cookies.get('__session'))
+                has_header = bool(request.headers.get('Authorization', '').startswith('Bearer '))
+                logger.info('[canvas-auth] page=%s cookie=%s header=%s token=%s',
+                            path, has_cookie, has_header, bool(token))
                 user_id = verify_clerk_token(token) if token else None
                 if not user_id:
+                    logger.warning('[canvas-auth] DENIED page=%s (no valid token)', path)
                     if request.headers.get('Accept', '').startswith('text/html'):
                         return redirect('/?redirect=/pages/' + path)
                     return 'Unauthorized', 401

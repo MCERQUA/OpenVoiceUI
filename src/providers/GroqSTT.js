@@ -36,8 +36,8 @@ class GroqSTT {
 
         // VAD (Voice Activity Detection) settings
         this.silenceTimer = null;
-        this.silenceDelayMs = 3500;     // 3.5s silence = end of speech (profile can override)
-        this.accumulationDelayMs = 300; // Short window to merge consecutive chunks before sending
+        this.silenceDelayMs = 2500;     // 2.5s silence = end of speech (profile can override)
+        this.accumulationDelayMs = 2000; // Window to merge consecutive chunks before sending to AI
         this.vadThreshold = 50;         // FFT average amplitude threshold (profile can override)
         this.minSpeechMs = 300;         // Must sustain above threshold for this long before counting as speech
         this.maxRecordingMs = 45000;    // 45s max before auto-chunk (profile can override)
@@ -46,6 +46,7 @@ class GroqSTT {
         this.stoppingRecorder = false;
         this.hadSpeechInChunk = false;
         this._speechStartTime = 0;     // When sustained speech started
+        this._resumedSpeechStart = 0;  // When resumed speech started (for clearing silence timer)
 
         // Audio analysis for VAD
         this._audioCtx = null;
@@ -100,13 +101,24 @@ class GroqSTT {
         };
 
         this.mediaRecorder.onstop = async () => {
-            if (this.audioChunks.length === 0) return;
+            // Snapshot and clear chunks immediately
+            const chunks = this.audioChunks;
+            const hadSpeech = this.hadSpeechInChunk;
+            this.audioChunks = [];
+            this.hadSpeechInChunk = false;
+            this.stoppingRecorder = false;
 
-            // If muted (TTS playing), discard audio and don't restart
+            // Restart recording IMMEDIATELY to minimize the gap where audio is lost.
+            // The API call below runs in parallel — no words dropped at chunk boundaries.
+            if (this.isListening && !this._micMuted && !this._muteActive && !this._pttHolding) {
+                this.isSpeaking = false;
+                this.mediaRecorder.start();
+            }
+
+            if (chunks.length === 0) return;
+
+            // If muted (TTS playing), discard audio
             if ((this.isProcessing || this._muteActive) && !this._pttHolding) {
-                this.audioChunks = [];
-                this.stoppingRecorder = false;
-                this.hadSpeechInChunk = false;
                 return;
             }
 
@@ -122,22 +134,14 @@ class GroqSTT {
                 this.maxRecordingTimer = null;
             }
 
-            const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
-            this.audioChunks = [];
+            const audioBlob = new Blob(chunks, { type: 'audio/webm' });
 
             // Skip if no speech detected or audio too small (10KB min filters out noise bursts)
-            if (!this.hadSpeechInChunk || audioBlob.size < 10000) {
+            if (!hadSpeech || audioBlob.size < 10000) {
                 console.log('Groq STT: skipping - no speech or too small (' + audioBlob.size + ' bytes)');
                 this.isProcessing = false;
-                this.stoppingRecorder = false;
-                this.hadSpeechInChunk = false;
-                if (this.isListening && !this._micMuted) {
-                    this.audioChunks = [];
-                    this.mediaRecorder.start();
-                }
                 return;
             }
-            this.hadSpeechInChunk = false;
 
             try {
                 console.log('Groq STT: sending audio (' + audioBlob.size + ' bytes)');
@@ -188,14 +192,6 @@ class GroqSTT {
                 if (this.onError) this.onError(error);
             } finally {
                 this.isProcessing = false;
-                this.stoppingRecorder = false;
-
-                // Restart recording if still listening and not muted
-                // Check _muteActive: if mute() was called while this API call ran, don't restart
-                if (this.isListening && !this._micMuted && !this._muteActive) {
-                    this.audioChunks = [];
-                    this.mediaRecorder.start();
-                }
             }
         };
     }
@@ -230,6 +226,13 @@ class GroqSTT {
             this._analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((a, b) => a + b) / bufferLength;
             const isSpeakingNow = average > this.vadThreshold;
+
+            // Skip VAD processing while muted (TTS playing) — prevents speaker
+            // audio from being detected as speech and queuing phantom transcripts
+            if (this._muteActive) {
+                this._vadAnimFrame = requestAnimationFrame(checkLevel);
+                return;
+            }
 
             if (isSpeakingNow && !this.isSpeaking) {
                 // Potential speech — check minimum duration before confirming
@@ -268,11 +271,26 @@ class GroqSTT {
                         }
                     }, this.maxRecordingMs);
                 }
+            } else if (isSpeakingNow && this.isSpeaking) {
+                // Continued speech — user still talking after a brief dip.
+                // Only clear silence timer after sustained speech (minSpeechMs) to
+                // prevent ambient noise blips from keeping the recording open forever.
+                const now = Date.now();
+                if (!this._resumedSpeechStart) {
+                    this._resumedSpeechStart = now;
+                }
+                if (now - this._resumedSpeechStart >= this.minSpeechMs && this.silenceTimer) {
+                    clearTimeout(this.silenceTimer);
+                    this.silenceTimer = null;
+                    this._resumedSpeechStart = 0;
+                }
             } else if (!isSpeakingNow && !this.isSpeaking) {
                 // Below threshold and not yet confirmed — reset speech start timer
                 this._speechStartTime = 0;
+                this._resumedSpeechStart = 0;
             } else if (!isSpeakingNow && this.isSpeaking && !this.isProcessing && !this.stoppingRecorder) {
                 // Silence after confirmed speech — start silence timer
+                this._resumedSpeechStart = 0;
                 if (!this.silenceTimer) {
                     this.silenceTimer = setTimeout(() => {
                         this.isSpeaking = false;

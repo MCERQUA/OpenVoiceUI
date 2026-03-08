@@ -2368,6 +2368,7 @@ inject();
                 this.stoppingRecorder = false;  // Flag to prevent duplicate stop attempts
                 this.hadSpeechInChunk = false;  // Track if real speech happened in this chunk
                 this._speechStartTime = 0; // When sustained speech started
+                this._resumedSpeechStart = 0; // When resumed speech started (for clearing silence timer)
             }
 
             isSupported() {
@@ -2515,11 +2516,26 @@ inject();
                                     }
                                 }, this.maxRecordingMs);
                             }
+                        } else if (isSpeakingNow && this.isSpeaking) {
+                            // Continued speech — user still talking after brief dip.
+                            // Only clear silence timer after sustained speech (minSpeechMs) to
+                            // prevent ambient noise blips from keeping recording open forever.
+                            const now2 = Date.now();
+                            if (!this._resumedSpeechStart) {
+                                this._resumedSpeechStart = now2;
+                            }
+                            if (now2 - this._resumedSpeechStart >= this.minSpeechMs && this.silenceTimer) {
+                                clearTimeout(this.silenceTimer);
+                                this.silenceTimer = null;
+                                this._resumedSpeechStart = 0;
+                            }
                         } else if (!isSpeakingNow && !this.isSpeaking) {
                             // Below threshold and not yet confirmed — reset speech start timer
                             this._speechStartTime = 0;
+                            this._resumedSpeechStart = 0;
                         } else if (!isSpeakingNow && this.isSpeaking && !this.isProcessing && !this.stoppingRecorder) {
                             // Stopped speaking - start silence timer (ONLY if not already processing or stopping)
+                            this._resumedSpeechStart = 0;
                             if (!this.silenceTimer) {
                                 this.silenceTimer = setTimeout(() => {
                                     console.log('🔇 Silence detected, processing audio');
@@ -5655,7 +5671,13 @@ inject();
                             // Load external URL in the iframe
                             if (url) {
                                 const iframe = document.getElementById('canvas-iframe');
+                                const container = document.getElementById('canvas-container');
                                 if (iframe) iframe.src = url;
+                                if (container && event.data.padded) {
+                                    container.classList.add('canvas-padded');
+                                } else if (container) {
+                                    container.classList.remove('canvas-padded');
+                                }
                             }
                             break;
                         case 'menu':
@@ -6401,6 +6423,9 @@ inject();
                 const iframe = document.getElementById('canvas-iframe');
                 if (iframe) {
                     iframe.src = `/pages/${filename}?t=${Date.now()}`;
+                    // Clear padded mode when navigating to a canvas page
+                    const container = document.getElementById('canvas-container');
+                    if (container) container.classList.remove('canvas-padded');
                     // Reset mtime tracking so auto-refresh doesn't false-trigger on page switch
                     CanvasControl._lastMtime = null;
                     // Remember this page for next time
