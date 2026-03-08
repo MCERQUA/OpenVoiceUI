@@ -1033,6 +1033,7 @@ const SYSTEM_ITEMS = [
   {id:'my-documents',name:'My Documents',icon:'folder',action:'docs',ubuntuName:'Documents'},
   {id:'internet',name:'Internet',icon:'internet',action:'internet',ubuntuName:'Web Browser'},
   {id:'settings',name:'Display Properties',icon:'settings',action:'settings',macName:'System Preferences',w31Name:'Control Panel',ubuntuName:'Settings'},
+  {id:'game-library-shortcut',name:'Game Library',icon:'game',action:'openPage',pageId:'game-library',macName:'Game Library',ubuntuName:'Games'},
 ];
 let DESKTOP_ITEMS = [];
 
@@ -1066,7 +1067,7 @@ function rebuildDesktopItems() {
     DESKTOP_ITEMS.push({
       id: 'page-' + pageId,
       name: PAGES[pageId].name,
-      icon: getPageIconType(PAGES[pageId].cat),
+      icon: getPageIconType(PAGES[pageId].cat, pageId, PAGES[pageId].name),
       action: 'openPage',
       pageId: pageId,
     });
@@ -1529,7 +1530,8 @@ function buildDock() {
     {icon:'computer',label:'Finder',action:()=>openExplorer()},
     {icon:'settings',label:'Preferences',action:()=>openThemeSettings()},
     {icon:'internet',label:'Internet',action:()=>openExplorer('api-developer')},
-    {icon:'music',label:'Music',action:()=>openExplorer('entertainment')},
+    {icon:'game',label:'Games',action:()=>openCanvasPage('game-library')},
+    {icon:'music',label:'Music',action:()=>openExplorer('tts-voice')},
     {icon:'book',label:'Reference',action:()=>openExplorer('reference')},
     {icon:'folder',label:'Documents',action:()=>openExplorer('ai-office')},
   ];
@@ -2104,7 +2106,7 @@ function openCustomFolder(folderId) {
       const p = PAGES[id];
       if (!p) return;
       gridHtml += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showExplorerItemMenu(event,'${id}')">
-        <div class="ei-icon">${getIcon(getPageIconType(p.cat))}</div>
+        <div class="ei-icon">${getIcon(getPageIconType(p.cat, '${id}', p.name))}</div>
         <div class="ei-name">${p.name}</div>
       </div>`;
     });
@@ -2138,7 +2140,7 @@ function buildExplorerGrid(catId) {
 
   let html = '<div class="explorer-grid">';
   pages.forEach(([id, p]) => {
-    const iconType = getPageIconType(p.cat);
+    const iconType = getPageIconType(p.cat, id, p.name);
     html += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showExplorerItemMenu(event,'${id}')">
       <div class="ei-icon">${getIcon(iconType)}</div>
       <div class="ei-name">${p.name}</div>
@@ -2148,7 +2150,14 @@ function buildExplorerGrid(catId) {
   return html;
 }
 
-function getPageIconType(cat) {
+function getPageIconType(cat, pageId, pageName) {
+  // Page-name overrides take priority — avoids all entertainment pages getting same icon
+  const n = (pageName || pageId || '').toLowerCase();
+  if (/music|song|audio|tts|voice.clone|suno/.test(n)) return 'music';
+  if (/game|arcade|wolf|doom|quake|duke|play|shooter|civ.sim|bored/.test(n)) return 'game';
+  if (/video|film|remotion/.test(n)) return 'folder';
+  if (/book|doc|ref|guide|manual/.test(n)) return 'book';
+  if (/tool|build|code|dev|api/.test(n)) return 'tools';
   const map = {
     'entertainment':'game','tts-voice':'music','reference':'book',
     'api-developer':'tools','business-tools':'tools',

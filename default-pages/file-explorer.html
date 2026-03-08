@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>File Explorer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%!important;height:100%!important;overflow:hidden!important;font-family:Tahoma,'Segoe UI',sans-serif!important;font-size:12px;color:#222!important;background:#111!important;padding:0!important;display:flex;flex-direction:column}
+
+/* ── OS Container (matches desktop.html) ── */
+#os-container{
+  position:absolute;
+  top:40px;left:40px;right:40px;bottom:40px;
+  border-radius:12px;
+  overflow:hidden;
+  box-shadow:0 0 40px rgba(0,0,0,0.6);
+  display:flex;flex-direction:column;
+  background:#244893;
+}
+
+/* ── Window area (file explorer fills this) ── */
+#window-area{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Title bar ── */
+#title-bar{
+  height:28px;flex-shrink:0;
+  background:linear-gradient(to bottom, #3A6EA5 0%, #0A246A 100%)!important;
+  display:flex;align-items:center;padding:0 8px;gap:8px;
+  color:#fff!important;font-size:12px;font-weight:bold;
+  border-bottom:1px solid #002266;
+}
+#title-bar .tb-icon{font-size:16px}
+#title-bar .tb-title{flex:1}
+
+/* ── Toolbar ── */
+#toolbar{
+  height:28px;flex-shrink:0;
+  background:#ECE9D8!important;border-bottom:1px solid #ADB2B5;
+  display:flex;align-items:center;padding:0 4px;gap:2px;color:#222!important;
+}
+.nav-btn{
+  height:22px;padding:0 6px;background:transparent;
+  border:1px solid transparent;cursor:pointer;font-size:11px;
+  display:flex;align-items:center;gap:3px;border-radius:2px;white-space:nowrap;
+  color:#222!important;
+}
+.nav-btn:hover{background:#E0DFD5;border-color:#ADB2B5}
+.nav-btn:active{background:#C8C7C0}
+.nav-btn:disabled{opacity:0.4;cursor:default;pointer-events:none}
+.tb-sep{width:1px;height:18px;background:#ADB2B5;margin:0 2px;flex-shrink:0}
+#addr-wrap{flex:1;display:flex;align-items:center;gap:4px;padding:0 4px}
+#addr-label{color:#666!important;font-size:11px;white-space:nowrap}
+#addr-bar{
+  flex:1;height:20px;background:#fff!important;border:1px solid #7F9DB9;
+  padding:0 6px;display:flex;align-items:center;overflow:hidden;
+}
+.bc-part{color:#003399!important;cursor:pointer;white-space:nowrap;font-size:11px}
+.bc-part:hover{text-decoration:underline}
+.bc-sep{color:#666!important;margin:0 2px;font-size:11px}
+#search-box{
+  width:130px;height:20px;border:1px solid #7F9DB9;
+  padding:0 6px;font-size:11px;font-family:Tahoma,sans-serif;
+  background:#fff!important;color:#222!important;
+}
+#search-box::placeholder{color:#aaa!important}
+
+/* ── Main layout ── */
+#main{display:flex;flex:1;overflow:hidden}
+
+/* ── Sidebar ── */
+#sidebar{
+  width:190px;flex-shrink:0;
+  background:#F5F4EE!important;border-right:1px solid #ADB2B5;
+  display:flex;flex-direction:column;color:#222!important;
+  overflow:hidden;
+}
+/* Top zone: Quick Access/Media/Agent — never squishes, scrolls independently if needed */
+#sb-top{flex-shrink:0;overflow-y:auto;max-height:60%}
+/* Bottom zone: Folders tree — takes remaining space, scrolls on its own */
+#sb-bottom{flex:1;min-height:80px;overflow-y:auto;border-top:2px solid #C8C7C0}
+.sb-section{
+  font-size:10px;font-weight:bold;color:#316AC5!important;
+  padding:6px 10px 3px;text-transform:uppercase;letter-spacing:0.5px;
+  border-bottom:1px solid #E0DFD8;margin-top:2px;flex-shrink:0;
+}
+.sb-item{
+  padding:4px 8px 4px 14px;cursor:pointer;
+  display:flex;align-items:center;gap:7px;
+  font-size:11px;color:#222!important;white-space:nowrap;overflow:hidden;
+}
+.sb-item:hover{background:rgba(49,106,197,0.12)}
+.sb-item.active{background:#316AC5;color:#fff!important}
+.sb-item .sb-icon{font-size:15px;flex-shrink:0}
+.sb-item .sb-label{overflow:hidden;text-overflow:ellipsis}
+
+/* ── Tree ── */
+.tree-node{user-select:none}
+.tn-row{
+  padding:3px 4px 3px 6px;display:flex;align-items:center;gap:2px;
+  cursor:pointer;font-size:11px;color:#222!important;
+}
+.tn-row:hover{background:rgba(49,106,197,0.12)}
+.tn-row.active{background:#316AC5;color:#fff!important}
+.tn-toggle{
+  width:12px;height:12px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;color:#666!important;
+}
+.tn-row.active .tn-toggle{color:#cce!important}
+.tn-icon{font-size:13px;flex-shrink:0}
+.tn-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.tn-children{display:none}
+.tn-children.open{display:block}
+
+/* ── Right pane ── */
+#right-pane{flex:1;display:flex;flex-direction:column;overflow:hidden;background:#fff!important;color:#222!important}
+
+/* ── Column headers ── */
+#col-hdr{
+  display:flex;flex-shrink:0;
+  background:#F0EFE7!important;border-bottom:1px solid #ADB2B5;
+}
+.ch{
+  padding:3px 8px;font-size:11px;font-weight:bold;
+  border-right:1px solid #ADB2B5;cursor:pointer;user-select:none;
+  white-space:nowrap;overflow:hidden;color:#222!important;
+}
+.ch:hover{background:#E0DFD8}
+.ch-name{flex:1;min-width:160px}
+.ch-type{width:80px}
+.ch-size{width:68px;text-align:right}
+.ch-date{width:106px}
+
+/* ── File list ── */
+#file-list-area{flex:1;overflow-y:auto;background:#fff!important}
+#file-table{width:100%;border-collapse:collapse}
+#file-table tbody tr{border-bottom:1px solid #F2F1EC;cursor:pointer}
+#file-table tbody tr:nth-child(even){background:#F8F8F4!important}
+#file-table tbody tr:hover{background:#EEF3FD!important}
+#file-table tbody tr.sel{background:#316AC5!important;color:#fff!important}
+#file-table td{padding:3px 8px;font-size:11px;white-space:nowrap;color:#222!important}
+#file-table tbody tr.sel td{color:#fff!important}
+.fi-cell{display:flex;align-items:center;gap:7px}
+.fi-icon{font-size:16px;flex-shrink:0}
+.fi-name{overflow:hidden;text-overflow:ellipsis;max-width:280px}
+.fi-size{text-align:right;color:#555!important}
+.fi-date{color:#555!important}
+tr.sel .fi-size,tr.sel .fi-date{color:#cce!important}
+
+/* ── Preview pane ── */
+#preview-wrap{flex-shrink:0;display:none;flex-direction:column;height:300px;border-top:2px solid #316AC5}
+#preview-wrap.open{display:flex}
+#preview-hdr{
+  background:#F0EFE7!important;border-bottom:1px solid #ADB2B5;
+  padding:3px 8px;display:flex;align-items:center;gap:8px;
+  flex-shrink:0;font-size:11px;color:#222!important;
+}
+#preview-hdr .ph-name{flex:1;font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#preview-hdr .ph-size{color:#666!important;white-space:nowrap}
+#ph-close{border:1px solid #ADB2B5;background:#F0EFE7!important;cursor:pointer;padding:1px 10px;font-size:11px;color:#222!important}
+#ph-close:hover{background:#E0DFD8!important}
+#preview-body{flex:1;overflow:auto;padding:14px 18px;background:#fff!important;color:#222!important}
+#preview-body.raw{font-family:Consolas,'Courier New',monospace;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all;color:#222!important}
+#preview-body.img-preview{display:flex;align-items:center;justify-content:center;background:#f0f0f0!important;padding:8px}
+#preview-body.img-preview img{max-width:100%;max-height:100%;object-fit:contain;border:1px solid #ddd;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.1)}
+#preview-body.img-preview .img-error{color:#c00!important;font-size:12px;text-align:center}
+#preview-body.audio-preview{display:flex;align-items:center;justify-content:center;padding:20px}
+#preview-body.audio-preview audio{width:90%;max-width:400px}
+#preview-body.video-preview{display:flex;align-items:center;justify-content:center;background:#000!important;padding:0}
+#preview-body.video-preview video{max-width:100%;max-height:100%}
+
+/* ── Markdown styles ── */
+#preview-body.md{font-family:Tahoma,'Segoe UI',sans-serif;font-size:12px;line-height:1.6;color:#222!important}
+#preview-body.md h1{font-size:17px;border-bottom:2px solid #316AC5;padding-bottom:5px;margin:6px 0 10px;color:#0A246A!important}
+#preview-body.md h2{font-size:14px;border-bottom:1px solid #ddd;padding-bottom:3px;margin:12px 0 6px;color:#1a3a6a!important}
+#preview-body.md h3{font-size:12px;margin:10px 0 4px;color:#244893!important}
+#preview-body.md h4,#preview-body.md h5,#preview-body.md h6{font-size:11px;margin:6px 0 2px;font-weight:bold}
+#preview-body.md p{margin-bottom:6px}
+#preview-body.md ul,#preview-body.md ol{padding-left:22px;margin:4px 0 8px}
+#preview-body.md li{margin-bottom:2px}
+#preview-body.md code{background:#f0f0f0;border:1px solid #ddd;padding:0 3px;border-radius:2px;font-family:Consolas,'Courier New',monospace;font-size:10px;color:#333!important}
+#preview-body.md pre{background:#f5f5f5!important;border:1px solid #ddd;padding:10px;overflow-x:auto;margin:6px 0;border-radius:3px}
+#preview-body.md pre code{background:none;border:none;padding:0;font-size:11px}
+#preview-body.md blockquote{border-left:3px solid #316AC5;padding-left:10px;color:#555!important;margin:6px 0}
+#preview-body.md a{color:#003399!important}
+#preview-body.md hr{border:none;border-top:1px solid #ddd;margin:10px 0}
+#preview-body.md strong{font-weight:bold}
+#preview-body.md em{font-style:italic}
+#preview-body.md del{text-decoration:line-through;color:#888!important}
+#preview-body.md table{border-collapse:collapse;font-size:11px;margin:6px 0}
+#preview-body.md th{background:#F0EFE7!important;border:1px solid #bbb;padding:4px 8px;text-align:left;color:#222!important}
+#preview-body.md td{border:1px solid #ddd;padding:3px 8px;color:#222!important}
+#preview-body.md .md-img{color:#888!important;font-style:italic}
+
+/* ── Status bar ── */
+#status-bar{
+  height:22px;flex-shrink:0;
+  background:#ECE9D8!important;border-top:1px solid #ADB2B5;
+  display:flex;align-items:center;padding:0 10px;gap:12px;font-size:11px;color:#333!important;
+}
+#st-count{flex:1}
+#st-path{color:#666!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px}
+
+/* ── Taskbar (matches desktop.html) ── */
+#taskbar{
+  height:30px;flex-shrink:0;
+  background:linear-gradient(to bottom, #3A6EA5 0%, #245DAB 3%, #245DAB 97%, #18438B 100%)!important;
+  display:flex;align-items:center;
+  border-top:1px solid #5B9BD5;
+  color:#fff!important;
+}
+#start-btn{
+  border:none;cursor:pointer;display:flex;align-items:center;gap:5px;
+  height:100%;padding:0 10px;
+  background:linear-gradient(to bottom, #3C9A40 0%, #328E36 50%, #277D2A 100%)!important;
+  color:#fff!important;font-size:12px;font-weight:bold;
+  border-right:1px solid #18438B;
+  border-radius:0 8px 8px 0;
+}
+#start-btn:hover{filter:brightness(1.1)}
+#start-btn:active{filter:brightness(0.9)}
+.win-flag{display:inline-grid;grid-template-columns:1fr 1fr;width:14px;height:14px;gap:1px}
+.win-flag span{border-radius:1px}
+#taskbar-active{
+  flex:1;display:flex;align-items:center;padding:0 8px;gap:4px;
+  font-size:11px;color:#fff!important;
+}
+#taskbar-active .active-btn{
+  height:22px;border:1px solid rgba(255,255,255,0.3);
+  background:rgba(255,255,255,0.15);color:#fff!important;
+  font-size:11px;padding:0 10px;cursor:default;
+  display:flex;align-items:center;gap:4px;border-radius:2px;
+  font-weight:bold;
+}
+#tray{display:flex;align-items:center;gap:6px;padding:0 8px;font-size:11px;color:#fff!important;height:100%}
+#clock{white-space:nowrap}
+
+/* ── Sidebar condensed mode (titles only when tree is large) ── */
+#sb-top.condensed .sb-item{display:none}
+#sb-top.condensed #qa-sites{display:none}
+
+/* ── Utility ── */
+.empty-state{padding:40px;text-align:center;color:#888!important;font-size:12px}
+.loading-state{padding:24px;text-align:center;color:#316AC5!important;font-size:11px}
+.err-state{padding:24px;text-align:center;color:#c00!important;font-size:11px}
+.unavail-state{padding:40px;text-align:center;color:#888!important}
+.unavail-state h3{font-size:14px;color:#555!important;margin-bottom:8px}
+</style>
+</head>
+<body>
+
+<!-- OS Container with padding -->
+<div id="os-container">
+
+  <!-- File Explorer Window -->
+  <div id="window-area">
+    <!-- Title bar -->
+    <div id="title-bar">
+      <span class="tb-icon">📁</span>
+      <span class="tb-title">File Explorer</span>
+    </div>
+
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <button class="nav-btn" id="btn-back" onclick="navBack()" disabled>&#9664; Back</button>
+      <button class="nav-btn" id="btn-fwd" onclick="navFwd()" disabled>Forward &#9654;</button>
+      <button class="nav-btn" id="btn-up" onclick="navUp()">&#8593; Up</button>
+      <div class="tb-sep"></div>
+      <div id="addr-wrap">
+        <span id="addr-label">Address:</span>
+        <div id="addr-bar"><div id="breadcrumb"></div></div>
+      </div>
+      <input type="text" id="search-box" placeholder="Search..." oninput="filterFiles(this.value)">
+    </div>
+
+    <!-- Main -->
+    <div id="main">
+      <!-- Sidebar -->
+      <div id="sidebar">
+        <!-- Top zone: Quick Access / Media / Agent — condenses to icons when tree is large -->
+        <div id="sb-top">
+          <div class="sb-section">Quick Access</div>
+          <div class="sb-item" onclick="navigate('')" data-qa="root"><span class="sb-icon">&#128421;</span><span class="sb-label">My Files</span></div>
+          <div class="sb-item" onclick="navigate('Websites')" data-qa="Websites"><span class="sb-icon">&#127760;</span><span class="sb-label">Websites</span></div>
+          <div class="sb-item" onclick="navigate('Uploads')" data-qa="Uploads"><span class="sb-icon">&#128193;</span><span class="sb-label">Uploads</span></div>
+          <div class="sb-item" onclick="navigate('Canvas')" data-qa="Canvas"><span class="sb-icon">&#127912;</span><span class="sb-label">Canvas Pages</span></div>
+          <div id="qa-sites"></div>
+          <div class="sb-section">Media</div>
+          <div class="sb-item" onclick="navigate('Music')" data-qa="Music"><span class="sb-icon">&#127925;</span><span class="sb-label">Music</span></div>
+          <div class="sb-item" onclick="navigate('AI-Music')" data-qa="AI-Music"><span class="sb-icon">&#127926;</span><span class="sb-label">AI Music</span></div>
+          <div class="sb-item" onclick="navigate('Transcripts')" data-qa="Transcripts"><span class="sb-icon">&#128220;</span><span class="sb-label">Transcripts</span></div>
+          <div class="sb-section">Agent</div>
+          <div class="sb-item" onclick="navigate('Agent/memory')" data-qa="Agent/memory"><span class="sb-icon">&#129504;</span><span class="sb-label">Memory</span></div>
+          <div class="sb-item" onclick="navigate('Agent/business')" data-qa="Agent/business"><span class="sb-icon">&#128188;</span><span class="sb-label">Business</span></div>
+          <div class="sb-item" onclick="navigate('Agent')" data-qa="Agent"><span class="sb-icon">&#129302;</span><span class="sb-label">All Agent Files</span></div>
+        </div>
+        <!-- Bottom zone: Folders tree — takes remaining space, scrolls independently -->
+        <div id="sb-bottom">
+          <div class="sb-section">Folders</div>
+          <div id="tree"></div>
+        </div>
+      </div>
+
+      <!-- Right pane -->
+      <div id="right-pane">
+        <!-- Column headers -->
+        <div id="col-hdr">
+          <div class="ch ch-name" onclick="sortBy('name')">Name <span id="sort-name"></span></div>
+          <div class="ch ch-type" onclick="sortBy('type')">Type <span id="sort-type"></span></div>
+          <div class="ch ch-size" onclick="sortBy('size')">Size <span id="sort-size"></span></div>
+          <div class="ch ch-date" onclick="sortBy('modified')">Date Modified <span id="sort-modified"></span></div>
+        </div>
+
+        <!-- File list -->
+        <div id="file-list-area">
+          <table id="file-table">
+            <tbody id="file-tbody"></tbody>
+          </table>
+          <div id="list-msg" class="loading-state">Loading...</div>
+        </div>
+
+        <!-- Preview pane -->
+        <div id="preview-wrap">
+          <div id="preview-hdr">
+            <span class="ph-name" id="ph-name"></span>
+            <span class="ph-size" id="ph-size"></span>
+            <button id="ph-close" onclick="closePreview()">&#10005;</button>
+          </div>
+          <div id="preview-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div id="status-bar">
+      <span id="st-count">Ready</span>
+      <span id="st-path"></span>
+    </div>
+  </div>
+
+  <!-- Taskbar -->
+  <div id="taskbar">
+    <button id="start-btn" onclick="goDesktop()">
+      <span class="win-flag"><span style="background:#F25022"></span><span style="background:#7FBA00"></span><span style="background:#00A4EF"></span><span style="background:#FFB900"></span></span>
+      Start
+    </button>
+    <div id="taskbar-active">
+      <div class="active-btn">&#128193; File Explorer</div>
+    </div>
+    <div id="tray">
+      <span id="clock"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* STATE */
+let currentPath = '';
+let history = [];
+let histIdx = -1;
+let currentEntries = [];
+let sortCol = 'name';
+let sortDir = 1;
+let treeExpanded = new Set();
+let selectedRow = null;
+let searchQuery = '';
+
+/* CLOCK */
+function updateClock() {
+  const d = new Date();
+  let h = d.getHours(), m = d.getMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  document.getElementById('clock').textContent = h + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+}
+updateClock();
+setInterval(updateClock, 30000);
+
+/* NAVIGATION */
+function navigate(path, addHistory = true) {
+  if (addHistory) {
+    if (histIdx < history.length - 1) history = history.slice(0, histIdx + 1);
+    history.push(path);
+    histIdx = history.length - 1;
+  }
+  currentPath = path;
+  selectedRow = null;
+  searchQuery = '';
+  document.getElementById('search-box').value = '';
+  document.getElementById('btn-back').disabled = histIdx <= 0;
+  document.getElementById('btn-fwd').disabled = histIdx >= history.length - 1;
+  document.getElementById('btn-up').disabled = !path;
+  updateBreadcrumb(path);
+  loadDir(path);
+  updateSidebarActive(path);
+}
+
+function navBack() { if (histIdx > 0) { histIdx--; navigate(history[histIdx], false); } }
+function navFwd() { if (histIdx < history.length - 1) { histIdx++; navigate(history[histIdx], false); } }
+function navUp() {
+  if (!currentPath) return;
+  const parts = currentPath.split('/').filter(Boolean);
+  parts.pop();
+  navigate(parts.join('/'));
+}
+function goDesktop() {
+  window.parent.postMessage({type:'canvas-action', action:'navigate', pageId:'desktop'}, '*');
+}
+
+/* BREADCRUMB */
+function updateBreadcrumb(path) {
+  const bc = document.getElementById('breadcrumb');
+  const parts = path ? path.split('/').filter(Boolean) : [];
+  let html = '<span class="bc-part" onclick="navigate(\'\')">My Files</span>';
+  let built = '';
+  for (let i = 0; i < parts.length; i++) {
+    built += (built ? '/' : '') + parts[i];
+    const p = built;
+    html += '<span class="bc-sep">\u203A</span>';
+    html += '<span class="bc-part" onclick="navigate(\'' + esc(p) + '\')">' + escHtml(parts[i]) + '</span>';
+  }
+  bc.innerHTML = html;
+  document.getElementById('st-path').textContent = 'My Files' + (path ? '/' + path : '');
+}
+
+/* LOAD DIRECTORY */
+async function loadDir(path) {
+  showListMsg('loading', 'Loading...');
+  try {
+    const r = await fetch('/api/workspace/browse?path=' + encodeURIComponent(path));
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('json')) {
+      showListMsg('err', r.status === 403 ? 'Permission denied' : 'Folder not available (HTTP ' + r.status + ')');
+      return;
+    }
+    const data = await r.json();
+    if (data.unavailable) { showUnavail(); return; }
+    if (data.error) { showListMsg('err', 'Error: ' + data.error); return; }
+    currentEntries = data.entries || [];
+    renderFileList();
+  } catch(e) {
+    showListMsg('err', 'Failed to load: ' + e.message);
+  }
+}
+
+function showListMsg(type, msg) {
+  document.getElementById('file-tbody').innerHTML = '';
+  const el = document.getElementById('list-msg');
+  el.style.display = 'block';
+  el.className = type === 'loading' ? 'loading-state' : (type === 'err' ? 'err-state' : 'empty-state');
+  el.textContent = msg;
+}
+function hideListMsg() { document.getElementById('list-msg').style.display = 'none'; }
+
+function showUnavail() {
+  document.getElementById('file-tbody').innerHTML = '';
+  const el = document.getElementById('list-msg');
+  el.style.display = 'block';
+  el.className = 'unavail-state';
+  el.innerHTML = '<h3>Workspace Not Mounted</h3><p>The workspace volume is not yet connected to this container.</p><p style="margin-top:8px;font-size:10px;color:#aaa">Container restart with updated compose file required.</p>';
+}
+
+/* RENDER FILE LIST */
+function renderFileList() {
+  let entries = currentEntries.slice();
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    entries = entries.filter(e => e.name.toLowerCase().includes(q));
+  }
+  entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+    let av, bv;
+    if (sortCol === 'name') { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
+    else if (sortCol === 'size') { av = a.size; bv = b.size; }
+    else if (sortCol === 'modified') { av = a.modified; bv = b.modified; }
+    else if (sortCol === 'type') { av = a.ext || ''; bv = b.ext || ''; }
+    else { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
+    return av < bv ? -sortDir : av > bv ? sortDir : 0;
+  });
+
+  ['name','type','size','modified'].forEach(c => {
+    const el = document.getElementById('sort-' + c);
+    if (el) el.textContent = sortCol === c ? (sortDir === 1 ? ' \u25B2' : ' \u25BC') : '';
+  });
+
+  const tbody = document.getElementById('file-tbody');
+  tbody.innerHTML = '';
+
+  if (entries.length === 0) {
+    showListMsg('empty', searchQuery ? 'No results for "' + searchQuery + '"' : 'This folder is empty.');
+    document.getElementById('st-count').textContent = '0 items';
+    return;
+  }
+  hideListMsg();
+
+  const dirCount = entries.filter(e => e.type === 'dir').length;
+  const fileCount = entries.filter(e => e.type === 'file').length;
+  document.getElementById('st-count').textContent =
+    (dirCount ? dirCount + ' folder' + (dirCount !== 1 ? 's' : '') : '') +
+    (dirCount && fileCount ? ', ' : '') +
+    (fileCount ? fileCount + ' file' + (fileCount !== 1 ? 's' : '') : '');
+
+  entries.forEach(entry => {
+    const tr = document.createElement('tr');
+    tr.dataset.name = entry.name;
+    tr.dataset.type = entry.type;
+    const icon = getIcon(entry);
+    const typeLabel = entry.type === 'dir'
+      ? (entry.children !== undefined ? 'Folder (' + entry.children + ')' : 'Folder')
+      : getTypeLabel(entry.ext);
+    const sizeStr = entry.type === 'file' ? formatSize(entry.size) : '';
+    const dateStr = formatDate(entry.modified);
+    tr.innerHTML =
+      '<td><div class="fi-cell"><span class="fi-icon">' + icon + '</span><span class="fi-name">' + escHtml(entry.name) + '</span></div></td>' +
+      '<td class="fi-type">' + escHtml(typeLabel) + '</td>' +
+      '<td class="fi-size">' + escHtml(sizeStr) + '</td>' +
+      '<td class="fi-date">' + escHtml(dateStr) + '</td>';
+    tr.addEventListener('click', function() { selectRow(tr, entry); });
+    tr.addEventListener('dblclick', function() { openEntry(entry); });
+    tbody.appendChild(tr);
+  });
+}
+
+function selectRow(tr, entry) {
+  document.querySelectorAll('#file-tbody tr.sel').forEach(function(r) { r.classList.remove('sel'); });
+  tr.classList.add('sel');
+  selectedRow = entry;
+  if (entry.type === 'file') previewFile(currentPath ? currentPath + '/' + entry.name : entry.name, entry);
+}
+function openEntry(entry) {
+  if (entry.type === 'dir') navigate(currentPath ? currentPath + '/' + entry.name : entry.name);
+}
+function filterFiles(q) { searchQuery = q.trim(); renderFileList(); }
+function sortBy(col) {
+  if (sortCol === col) sortDir = -sortDir;
+  else { sortCol = col; sortDir = 1; }
+  renderFileList();
+}
+
+/* FILE PREVIEW */
+var IMAGE_EXTS = ['.jpg','.jpeg','.png','.gif','.webp','.svg','.ico','.bmp'];
+var AUDIO_EXTS = ['.mp3','.wav','.ogg','.m4a'];
+var VIDEO_EXTS = ['.mp4','.webm','.mov'];
+
+async function previewFile(path, entry) {
+  var wrap = document.getElementById('preview-wrap');
+  var body = document.getElementById('preview-body');
+  wrap.classList.add('open');
+  document.getElementById('ph-name').textContent = entry.name;
+  document.getElementById('ph-size').textContent = formatSize(entry.size);
+  body.className = '';
+  body.innerHTML = '';
+  body.textContent = 'Loading...';
+
+  var ext = (entry.ext || '').toLowerCase();
+  var rawUrl = '/api/workspace/raw?path=' + encodeURIComponent(path);
+
+  // Image preview
+  if (IMAGE_EXTS.indexOf(ext) >= 0) {
+    body.className = 'img-preview';
+    body.innerHTML = '';
+    var img = document.createElement('img');
+    img.src = rawUrl;
+    img.alt = entry.name;
+    img.onerror = function() {
+      body.innerHTML = '<div class="img-error">Failed to load image</div>';
+    };
+    body.appendChild(img);
+    return;
+  }
+
+  // Audio preview
+  if (AUDIO_EXTS.indexOf(ext) >= 0) {
+    body.className = 'audio-preview';
+    body.innerHTML = '<audio controls src="' + escHtml(rawUrl) + '">Audio not supported</audio>';
+    return;
+  }
+
+  // Video preview
+  if (VIDEO_EXTS.indexOf(ext) >= 0) {
+    body.className = 'video-preview';
+    body.innerHTML = '<video controls src="' + escHtml(rawUrl) + '">Video not supported</video>';
+    return;
+  }
+
+  // PDF — link to open in new tab
+  if (ext === '.pdf') {
+    body.className = 'raw';
+    body.innerHTML = '<a href="' + escHtml(rawUrl) + '" target="_blank" style="color:#003399;font-size:13px">Open PDF in new tab</a>';
+    return;
+  }
+
+  // Text file preview
+  try {
+    var r = await fetch('/api/workspace/file?path=' + encodeURIComponent(path));
+    var ct = r.headers.get('content-type') || '';
+    if (!ct.includes('json')) {
+      body.className = 'raw';
+      body.textContent = r.status === 403 ? 'Permission denied' : 'File not available (HTTP ' + r.status + ')';
+      return;
+    }
+    var data = await r.json();
+    if (data.too_large) {
+      body.className = 'raw';
+      body.textContent = 'File too large for preview (' + Math.round(data.size / 1024) + ' KB). Max is 500 KB.';
+      return;
+    }
+    if (data.binary) { body.className = 'raw'; body.textContent = 'Binary file -- no preview available.'; return; }
+    if (data.error) { body.className = 'raw'; body.textContent = 'Error: ' + data.error; return; }
+    if (ext === '.md') { body.className = 'md'; body.innerHTML = renderMarkdown(data.content); }
+    else if (ext === '.json') {
+      body.className = 'raw';
+      try { body.textContent = JSON.stringify(JSON.parse(data.content), null, 2); }
+      catch(e2) { body.textContent = data.content; }
+    } else { body.className = 'raw'; body.textContent = data.content; }
+  } catch(e) { body.className = 'raw'; body.textContent = 'Failed to load: ' + e.message; }
+}
+function closePreview() {
+  document.getElementById('preview-wrap').classList.remove('open');
+  document.querySelectorAll('#file-tbody tr.sel').forEach(function(r) { r.classList.remove('sel'); });
+  selectedRow = null;
+}
+
+/* SIDEBAR TREE */
+async function buildTree() {
+  const treeEl = document.getElementById('tree');
+  treeEl.innerHTML = '<div class="loading-state" style="padding:8px">Loading...</div>';
+  const data = await fetchTree('');
+  treeEl.innerHTML = '';
+  data.dirs.forEach(function(d) { treeEl.appendChild(buildTreeNode(d, 0)); });
+}
+async function fetchTree(path) {
+  try {
+    const r = await fetch('/api/workspace/tree?path=' + encodeURIComponent(path));
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('json')) return {dirs:[]};
+    return await r.json();
+  } catch(e) { return {dirs:[]}; }
+}
+function buildTreeNode(dir, depth) {
+  const node = document.createElement('div');
+  node.className = 'tree-node';
+  const row = document.createElement('div');
+  row.className = 'tn-row';
+  row.style.paddingLeft = (8 + depth * 12) + 'px';
+  row.dataset.path = dir.path;
+  const toggle = document.createElement('span');
+  toggle.className = 'tn-toggle';
+  toggle.textContent = dir.has_subdirs ? '\u25B6' : ' ';
+  const icon = document.createElement('span');
+  icon.className = 'tn-icon';
+  icon.textContent = '\uD83D\uDCC1';
+  const label = document.createElement('span');
+  label.className = 'tn-label';
+  label.textContent = dir.name;
+  row.appendChild(toggle);
+  row.appendChild(icon);
+  row.appendChild(label);
+  node.appendChild(row);
+  const children = document.createElement('div');
+  children.className = 'tn-children';
+  node.appendChild(children);
+  row.addEventListener('click', async function(e) {
+    e.stopPropagation();
+    navigate(dir.path);
+    if (!dir.has_subdirs) return;
+    if (treeExpanded.has(dir.path)) {
+      treeExpanded.delete(dir.path);
+      children.classList.remove('open');
+      toggle.textContent = '\u25B6';
+    } else {
+      treeExpanded.add(dir.path);
+      toggle.textContent = '\u25BC';
+      if (!children.children.length) {
+        children.innerHTML = '<div class="loading-state" style="padding:4px 4px 4px 24px;font-size:10px">...</div>';
+        const data = await fetchTree(dir.path);
+        children.innerHTML = '';
+        data.dirs.forEach(function(sub) { children.appendChild(buildTreeNode(sub, depth + 1)); });
+        if (!children.children.length) toggle.textContent = ' ';
+      }
+      children.classList.add('open');
+    }
+  });
+  return node;
+}
+function updateSidebarActive(path) {
+  document.querySelectorAll('.sb-item').forEach(function(el) {
+    const qa = el.dataset.qa;
+    if (!qa) { el.classList.remove('active'); return; }
+    if (qa === 'root') el.classList.toggle('active', path === '');
+    else el.classList.toggle('active', path === qa || path.startsWith(qa + '/'));
+  });
+  document.querySelectorAll('.tn-row').forEach(function(el) {
+    el.classList.toggle('active', el.dataset.path === path);
+  });
+}
+
+/* QUICK ACCESS — auto-discover website image/ai folders */
+async function buildQuickAccess() {
+  var container = document.getElementById('qa-sites');
+  try {
+    var r = await fetch('/api/workspace/browse?path=Websites');
+    var ct = r.headers.get('content-type') || '';
+    if (!ct.includes('json')) return;
+    var data = await r.json();
+    if (data.unavailable || data.error || !data.entries) return;
+    var sites = data.entries.filter(function(e) { return e.type === 'dir' && !e.name.endsWith('.old') && !e.name.endsWith('.old-starter'); });
+    if (!sites.length) return;
+    var html = '';
+    for (var i = 0; i < Math.min(sites.length, 4); i++) {
+      var s = sites[i];
+      var shortName = s.name.replace(/-website$/, '').replace(/-web-\d+$/, '').replace(/-/g, ' ');
+      // Add images shortcut
+      html += '<div class="sb-item" onclick="navigate(\'' + esc('Websites/' + s.name + '/public/images') + '\')" style="padding-left:18px"><span class="sb-icon">\uD83D\uDDBC\uFE0F</span><span class="sb-label">' + escHtml(shortName) + ' images</span></div>';
+      // Add /ai/ shortcut
+      html += '<div class="sb-item" onclick="navigate(\'' + esc('Websites/' + s.name + '/ai') + '\')" style="padding-left:18px"><span class="sb-icon">\uD83E\uDD16</span><span class="sb-label">' + escHtml(shortName) + ' /ai</span></div>';
+    }
+    container.innerHTML = html;
+  } catch(e) {}
+}
+
+/* MARKDOWN RENDERER */
+function renderMarkdown(text) {
+  var lines = text.split('\n');
+  var html = '';
+  var inCode = false, codeLang = '', codeLines = [];
+  var inList = false, listType = '';
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    if (line.startsWith('```')) {
+      if (inCode) {
+        if (inList) { html += '</' + listType + '>'; inList = false; }
+        html += '<pre><code>' + escHtml(codeLines.join('\n')) + '</code></pre>';
+        inCode = false; codeLines = []; codeLang = '';
+      } else {
+        if (inList) { html += '</' + listType + '>'; inList = false; }
+        inCode = true; codeLang = line.slice(3).trim();
+      }
+      continue;
+    }
+    if (inCode) { codeLines.push(line); continue; }
+    var ulMatch = line.match(/^(\s*)[-*+]\s(.+)$/);
+    var olMatch = line.match(/^(\s*)\d+\.\s(.+)$/);
+    if (!ulMatch && !olMatch && inList) { html += '</' + listType + '>'; inList = false; }
+    if (/^---+$|^\*\*\*+$|^___+$/.test(line.trim())) { html += '<hr>'; continue; }
+    var hm = line.match(/^(#{1,6})\s(.+)$/);
+    if (hm) { html += '<h' + hm[1].length + '>' + inlineMd(hm[2]) + '</h' + hm[1].length + '>'; continue; }
+    if (line.startsWith('> ')) { html += '<blockquote>' + inlineMd(line.slice(2)) + '</blockquote>'; continue; }
+    if (ulMatch) {
+      if (!inList) { html += '<ul>'; inList = true; listType = 'ul'; }
+      html += '<li>' + inlineMd(ulMatch[2]) + '</li>'; continue;
+    }
+    if (olMatch) {
+      if (!inList) { html += '<ol>'; inList = true; listType = 'ol'; }
+      html += '<li>' + inlineMd(olMatch[2]) + '</li>'; continue;
+    }
+    if (line.startsWith('|') && line.endsWith('|')) {
+      if (/^\|[-| :]+\|$/.test(line)) continue;
+      var cells = line.slice(1, -1).split('|').map(function(c) { return c.trim(); });
+      if (!html.endsWith('</tr>') && !html.endsWith('<table>')) {
+        if (!html.endsWith('</thead>')) html += '<table><thead><tr>' + cells.map(function(c) { return '<th>' + inlineMd(c) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      } else {
+        html += '<tr>' + cells.map(function(c) { return '<td>' + inlineMd(c) + '</td>'; }).join('') + '</tr>';
+      }
+      continue;
+    }
+    if (html.includes('<tbody>') && !html.endsWith('</table>') && !line.startsWith('|')) html += '</tbody></table>';
+    if (line.trim() === '') { html += '<br>'; continue; }
+    html += '<p>' + inlineMd(line) + '</p>';
+  }
+  if (inList) html += '</' + listType + '>';
+  if (inCode) html += '<pre><code>' + escHtml(codeLines.join('\n')) + '</code></pre>';
+  return html;
+}
+function inlineMd(text) {
+  return text
+    .replace(/`([^`]+)`/g, function(_, c) { return '<code>' + escHtml(c) + '</code>'; })
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.+?)__/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/_([^_]+)_/g, '<em>$1</em>')
+    .replace(/~~(.+?)~~/g, '<del>$1</del>')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '<span class="md-img">[img: $1]</span>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+
+/* ICON & FORMAT HELPERS */
+function getIcon(entry) {
+  if (entry.type === 'dir') return '\uD83D\uDCC1';
+  var ext = (entry.ext || '').toLowerCase();
+  if (ext === '.md') return '\uD83D\uDCDD';
+  if (ext === '.json') return '\uD83D\uDDC2\uFE0F';
+  if (ext === '.csv') return '\uD83D\uDCCA';
+  if (ext === '.py') return '\uD83D\uDC0D';
+  if (ext === '.js' || ext === '.ts') return '\u2699\uFE0F';
+  if (ext === '.html') return '\uD83C\uDF10';
+  if (ext === '.sh') return '\u26A1';
+  if (ext === '.pdf') return '\uD83D\uDCC4';
+  if (['.jpg','.jpeg','.png','.gif','.webp','.svg'].indexOf(ext) >= 0) return '\uD83D\uDDBC\uFE0F';
+  if (['.mp3','.wav','.ogg','.m4a'].indexOf(ext) >= 0) return '\uD83C\uDFB5';
+  if (['.mp4','.webm','.mov'].indexOf(ext) >= 0) return '\uD83C\uDFAC';
+  if (['.zip','.tar','.gz','.bz2'].indexOf(ext) >= 0) return '\uD83D\uDCE6';
+  return '\uD83D\uDCC4';
+}
+function getTypeLabel(ext) {
+  if (!ext) return 'File';
+  var labels = {'.md':'Markdown','.txt':'Text','.json':'JSON','.csv':'CSV','.py':'Python',
+    '.js':'JavaScript','.ts':'TypeScript','.html':'HTML','.sh':'Shell Script','.pdf':'PDF',
+    '.jpg':'JPEG Image','.jpeg':'JPEG Image','.png':'PNG Image','.gif':'GIF Image',
+    '.mp3':'Audio','.mp4':'Video','.zip':'Archive','.yaml':'YAML','.yml':'YAML',
+    '.log':'Log File','.sql':'SQL','.toml':'TOML','.xml':'XML'};
+  return labels[ext] || (ext.slice(1).toUpperCase() + ' File');
+}
+function formatSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+function formatDate(ts) {
+  if (!ts) return '';
+  var d = new Date(ts * 1000);
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+}
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function esc(s) { return String(s).replace(/'/g,"\\'"); }
+
+/* SIDEBAR CONDENSED MODE — toggle icon-only when tree needs to scroll */
+function updateSidebarCondensed() {
+  var sbTop = document.getElementById('sb-top');
+  var sbBottom = document.getElementById('sb-bottom');
+  var tree = document.getElementById('tree');
+  if (!sbTop || !sbBottom || !tree) return;
+  // Condense when tree content height exceeds the available bottom zone height
+  sbTop.classList.toggle('condensed', tree.scrollHeight > sbBottom.clientHeight);
+}
+new MutationObserver(updateSidebarCondensed).observe(
+  document.getElementById('tree'),
+  { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] }
+);
+
+/* INIT */
+async function init() {
+  await Promise.all([buildTree(), buildQuickAccess()]);
+  updateSidebarCondensed();
+  navigate('');
+}
+init();
+</script>
+</body>
+</html>
