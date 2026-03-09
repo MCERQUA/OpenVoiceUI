@@ -266,11 +266,11 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
 
 /* ── Modal Dialog (replaces prompt/confirm — works inside iframes) ── */
 #modal-overlay{
-  position:fixed;inset:0;z-index:99999;
-  background:rgba(0,0,0,0.45);
+  position:fixed;inset:0;z-index:2147483647;
+  background:rgba(0,0,0,0.55);
   display:none;align-items:center;justify-content:center;
 }
-#modal-overlay.show{display:flex}
+#modal-overlay.show{display:flex!important}
 #modal-box{
   background:#fff;border-radius:6px;padding:20px;
   min-width:280px;max-width:380px;width:90%;
@@ -798,7 +798,7 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
 </div>
 
 <!-- Modal dialog (works inside iframes, replaces prompt/confirm) -->
-<div id="modal-overlay">
+<div id="modal-overlay" onclick="if(event.target===this)closeModal()">
   <div id="modal-box">
     <div id="modal-message"></div>
     <input type="text" id="modal-input" autocomplete="off">
@@ -1581,7 +1581,15 @@ function showContextMenu(x, y, items) {
     const div = document.createElement('div');
     div.className = 'ctx-item' + (item.sub ? ' has-sub' : '');
     div.textContent = item.label;
-    if (item.action) div.onclick = (e) => { e.stopPropagation(); item.action(); closeAllMenus(); };
+    if (item.action) {
+      const act = item.action;
+      div.addEventListener('mousedown', (e) => e.stopPropagation());
+      div.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeAllMenus();
+        try { act(); } catch(err) { showConfirmModal('Error: ' + err.message, ()=>{}); }
+      });
+    }
     if (item.sub) {
       const subMenu = document.createElement('div');
       subMenu.className = 'ctx-submenu';
@@ -1590,7 +1598,11 @@ function showContextMenu(x, y, items) {
         const sd = document.createElement('div');
         sd.className = 'ctx-item';
         sd.textContent = si.label;
-        if (si.action) sd.onclick = (e) => { e.stopPropagation(); si.action(); closeAllMenus(); };
+        if (si.action) {
+          const sact = si.action;
+          sd.addEventListener('mousedown', (e) => e.stopPropagation());
+          sd.addEventListener('click', (e) => { e.stopPropagation(); closeAllMenus(); try { sact(); } catch(err) { showConfirmModal('Error: ' + err.message, ()=>{}); } });
+        }
         subMenu.appendChild(sd);
       });
       div.appendChild(subMenu);
