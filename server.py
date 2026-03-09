@@ -673,6 +673,93 @@ def groq_stt():
         return jsonify({"error": "Speech-to-text failed"}), 500
 
 
+@app.route("/api/stt/deepgram", methods=["POST"])
+def deepgram_stt():
+    """Transcribe audio using Deepgram Nova-2 API (reliable, low-cost)."""
+    import re as _re
+
+    if "audio" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    api_key = os.environ.get("DEEPGRAM_API_KEY", "")
+    if not api_key:
+        return jsonify({"error": "DEEPGRAM_API_KEY not configured"}), 500
+
+    audio_file = request.files["audio"]
+    try:
+        audio_bytes = audio_file.read()
+        content_type = audio_file.content_type or "audio/webm"
+
+        import requests as _requests
+        resp = _requests.post(
+            "https://api.deepgram.com/v1/listen",
+            params={
+                "model": "nova-2",
+                "language": "en",
+                "smart_format": "true",
+                "punctuate": "true",
+            },
+            headers={
+                "Authorization": f"Token {api_key}",
+                "Content-Type": content_type,
+            },
+            data=audio_bytes,
+            timeout=15,
+        )
+
+        if resp.status_code != 200:
+            logger.error(f"Deepgram API error {resp.status_code}: {resp.text[:300]}")
+            return jsonify({"error": f"Deepgram API error: {resp.status_code}"}), 502
+
+        result = resp.json()
+        channels = result.get("results", {}).get("channels", [])
+        if not channels:
+            return jsonify({"transcript": "", "success": True})
+
+        alt = channels[0].get("alternatives", [{}])[0]
+        text = alt.get("transcript", "").strip()
+        confidence = alt.get("confidence", 0)
+
+        logger.info(f"Deepgram STT: {text!r} (confidence={confidence:.2f})")
+
+        # Low confidence filter
+        if confidence < 0.3 and text:
+            logger.info(f"Deepgram STT: FILTERED low confidence ({confidence:.2f}): {text!r}")
+            return jsonify({"transcript": "", "success": True, "filtered": True})
+
+        # Hallucination filtering (same as Groq)
+        _HALLUCINATIONS = {
+            "thank you", "thanks for watching", "thanks for listening",
+            "subscribe", "please subscribe", "like and subscribe",
+            "the end", "subtitles by", "translated by", "closed captioning",
+            "voice command for ai assistant", "voice command for ai",
+            "thanks", "thank you so much",
+        }
+        _HALLUCINATION_SUBSTRINGS = [
+            "voice command for ai", "thanks for watching", "thanks for listening",
+            "like and subscribe", "please subscribe",
+            "subtitles by", "translated by", "closed captioning",
+        ]
+        text_lower = text.lower().rstrip('.!?,;:')
+        meaningful = _re.sub(r'[^a-zA-Z0-9]', '', text)
+
+        if text_lower in _HALLUCINATIONS:
+            logger.info(f"Deepgram STT: FILTERED hallucination: {text!r}")
+            return jsonify({"transcript": "", "success": True, "filtered": True})
+        if len(meaningful) < 3:
+            logger.info(f"Deepgram STT: FILTERED too short: {text!r}")
+            return jsonify({"transcript": "", "success": True, "filtered": True})
+        for sub in _HALLUCINATION_SUBSTRINGS:
+            if sub in text_lower:
+                logger.info(f"Deepgram STT: FILTERED hallucination substring: {text!r}")
+                return jsonify({"transcript": "", "success": True, "filtered": True})
+
+        return jsonify({"transcript": text, "success": True, "confidence": confidence})
+    except Exception as e:
+        logger.error(f"Deepgram STT error: {e}")
+        return jsonify({"error": "Speech-to-text failed"}), 500
+
+
 @app.route("/api/stt/local", methods=["POST"])
 def local_stt():
     """Transcribe audio using local Faster-Whisper with Silero VAD.

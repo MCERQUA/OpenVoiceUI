@@ -13,6 +13,7 @@ inject();
 
         import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
+        import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js';
 
         // ===== CONFIGURATION =====
         const CONFIG = {
@@ -37,6 +38,13 @@ inject();
         // Map is injected by Flask from DEVSITE_MAP env var (set per user in compose/.env).
         // Example: {"dev-nick.jam-bot.com": "https://nick.jam-bot.com/devsite-printguys-web-2/"}
         function resolveCanvasUrl(url) {
+            // Block private/internal IPs — browser can never reach Docker internals
+            // Matches 10.x, 172.16-31.x, 192.168.x, localhost, 127.x
+            const privateIpPattern = /^https?:\/\/(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?\//i;
+            if (privateIpPattern.test(url)) {
+                console.warn('[resolveCanvasUrl] Blocked private/internal URL:', url);
+                return null;
+            }
             const map = window.AGENT_CONFIG?.devsiteMap || {};
             for (const [from, to] of Object.entries(map)) {
                 const fromUrl = from.includes('://') ? from : 'https://' + from;
@@ -3387,11 +3395,16 @@ inject();
                             canvasCommandsProcessed.add('CANVAS_URL');
                             const externalUrl = canvasUrlMatch[1].trim();
                             const resolvedUrl = resolveCanvasUrl(externalUrl);
-                            console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
-                            ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
-                            AgentActivityChip.handleTag('canvas_url', resolvedUrl);
-                            const iframe = document.getElementById('canvas-iframe');
-                            if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
+                            if (resolvedUrl) {
+                                console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
+                                ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
+                                AgentActivityChip.handleTag('canvas_url', resolvedUrl);
+                                const iframe = document.getElementById('canvas-iframe');
+                                if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
+                            } else {
+                                console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
+                                ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
+                            }
                         }
                         // Check for [SLEEP] — agent-initiated return to wake-word mode
                         if (/\[SLEEP\]/i.test(text) && !canvasCommandsProcessed.has('SLEEP')) {
@@ -4391,7 +4404,18 @@ inject();
                 this.config = config;
                 this.isConnected = false;
                 this.isProcessing = false;
-                this.stt = new WebSpeechSTT();
+                // Select STT provider from server profile (default: webspeech)
+                const sttProvider = window._serverProfile?.stt?.provider || 'webspeech';
+                if (sttProvider === 'deepgram') {
+                    this.stt = new DeepgramSTT();
+                    console.log('STT provider: Deepgram Nova-2');
+                } else if (sttProvider === 'groq') {
+                    this.stt = new GroqSTT();
+                    console.log('STT provider: Groq Whisper');
+                } else {
+                    this.stt = new WebSpeechSTT();
+                    console.log('STT provider: Chrome Web Speech');
+                }
                 this.ttsProvider = 'supertonic';
                 this.ttsVoice = 'F3';
                 this.audioContext = null;
@@ -4716,10 +4740,15 @@ inject();
                 if (canvasUrlMatch) {
                     const externalUrl = canvasUrlMatch[1].trim();
                     const resolvedUrl = resolveCanvasUrl(externalUrl);
-                    console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
-                    ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
-                    const iframe = document.getElementById('canvas-iframe');
-                    if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
+                    if (resolvedUrl) {
+                        console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
+                        ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
+                        const iframe = document.getElementById('canvas-iframe');
+                        if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
+                    } else {
+                        console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
+                        ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
+                    }
                 }
                 // [MUSIC_PLAY] or [MUSIC_PLAY:track]
                 const musicPlay = text.match(/\[MUSIC_PLAY(?::([^\]]+))?\]/i);
@@ -5629,9 +5658,12 @@ inject();
             // localStorage — do NOT override it here. voiceConversation.setTTSProvider()
             // below will apply it correctly.
 
-            // Initialize Wake Word Detector (Chrome Web Speech API — free, no hallucinations)
+            // Initialize Wake Word Detector — matches STT provider
             console.log('Initializing WakeWordDetector...');
-            const wakeDetector = new WakeWordDetector();
+            const _sttProv = window._serverProfile?.stt?.provider || 'webspeech';
+            const wakeDetector = _sttProv === 'deepgram' ? new DeepgramWakeWordDetector()
+                               : _sttProv === 'groq' ? new GroqWakeWordDetector()
+                               : new WakeWordDetector();
             window.wakeDetector = wakeDetector;
 
             // Set up wake word callback to auto-trigger call button
@@ -8288,7 +8320,8 @@ inject();
                 clearInterval(_sttExposePoll);
                 stt._exposed = true;
 
-                console.log('STT exposed (WebSpeechSTT — Chrome native)');
+                const _sttName = stt instanceof DeepgramSTT ? 'Deepgram Nova-2' : stt instanceof GroqSTT ? 'Groq Whisper' : 'Chrome Web Speech';
+                console.log(`STT exposed (${_sttName})`);
                 // Apply any profile settings that were deferred (profile loaded before STT existed)
                 if (window._activeProfileData) {
                     const ms = window._activeProfileData?.stt?.silence_timeout_ms;
