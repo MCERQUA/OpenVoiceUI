@@ -15,7 +15,7 @@ import random
 import re
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, Response, jsonify, request, send_file
 
 logger = logging.getLogger(__name__)
 
@@ -483,9 +483,18 @@ def handle_dj_sound():
 
 @static_files_bp.route('/manifest.json')
 def serve_manifest():
-    """PWA Web App Manifest"""
+    """PWA Web App Manifest — dynamically injects CLIENT_NAME for per-tenant PWA identity"""
+    import json as _json, os as _os
+    client_name = _os.environ.get("CLIENT_NAME", "").strip()
     path = STATIC_DIR / 'manifest.json'
-    resp = send_file(path, mimetype='application/manifest+json')
+    manifest = _json.loads(path.read_text())
+    if client_name:
+        manifest["name"] = client_name
+        manifest["short_name"] = client_name
+    resp = Response(
+        _json.dumps(manifest, indent=2),
+        mimetype='application/manifest+json'
+    )
     resp.headers['Cache-Control'] = 'public, max-age=86400'
     return resp
 

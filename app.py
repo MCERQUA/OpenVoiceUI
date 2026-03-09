@@ -129,6 +129,8 @@ def create_app(config_override: dict = None):
             '/favicon.ico',     # Browser favicon request — before auth
             '/ws/clawdbot',     # WebSocket — browsers can't send Clerk token in WS headers;
                                 # handler secures itself via CLAWDBOT_AUTH_TOKEN to the gateway
+            '/openclaw-ui',     # WebSocket upgrade for OpenClaw Control UI proxy;
+                                # handler does its own Clerk auth via __session cookie
         }
 
         # Detect whether Clerk auth is configured at startup.

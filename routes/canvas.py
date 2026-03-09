@@ -757,6 +757,50 @@ def website_dev_proxy(path=''):
         return 'Dev server unavailable', 503
 
 
+# ---------------------------------------------------------------------------
+# OpenClaw Control UI proxy — serves the built-in dashboard behind Clerk auth
+# ---------------------------------------------------------------------------
+
+@canvas_bp.route('/openclaw-ui/')
+@canvas_bp.route('/openclaw-ui/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+def openclaw_ui_proxy(path=''):
+    """Proxy the OpenClaw Control UI behind Clerk auth.
+
+    Routes all HTTP requests to the internal openclaw gateway container which
+    serves the built-in dashboard SPA at its basePath (/openclaw-ui).
+    Clerk auth is enforced by the require_auth() before_request handler —
+    this path is NOT in the public prefixes.
+    """
+    target_url = f'http://openclaw:18789/openclaw-ui/{path}'
+
+    try:
+        kwargs = dict(params=request.args, timeout=30, stream=True)
+        if request.method in ('POST', 'PUT', 'PATCH'):
+            kwargs['data'] = request.get_data()
+            if request.content_type:
+                kwargs['headers'] = {'Content-Type': request.content_type}
+
+        resp = getattr(http_requests, request.method.lower())(target_url, **kwargs)
+
+        def generate():
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+
+        # Strip headers that interfere with iframe/proxy rendering
+        excluded_headers = [
+            'content-encoding', 'content-length', 'transfer-encoding',
+            'connection', 'x-frame-options',
+        ]
+        headers = [(k, v) for k, v in resp.headers.items()
+                   if k.lower() not in excluded_headers]
+
+        return Response(generate(), status=resp.status_code, headers=headers)
+    except Exception as exc:
+        logger.error(f'OpenClaw UI proxy error: {exc}')
+        return 'OpenClaw Control UI unavailable', 503
+
+
 @canvas_bp.route('/canvas-session/<path:path>', methods=['GET', 'POST'])
 def canvas_session_proxy(path):
     """Proxy Canvas session API requests."""

@@ -341,6 +341,7 @@ def serve_index():
     html = pathlib.Path("index.html").read_text()
     server_url = os.environ.get("AGENT_SERVER_URL", "").strip().rstrip("/")
     clerk_key = (os.environ.get("CLERK_PUBLISHABLE_KEY") or os.environ.get("VITE_CLERK_PUBLISHABLE_KEY", "")).strip()
+    client_name = os.environ.get("CLIENT_NAME", "").strip()
     import json as _json
     devsite_map_raw = os.environ.get("DEVSITE_MAP", "{}").strip()
     try:
@@ -353,8 +354,14 @@ def serve_index():
         config_parts.append(f'clerkPublishableKey:"{clerk_key}"')
     if devsite_map:
         config_parts.append(f'devsiteMap:{_json.dumps(devsite_map)}')
+    if client_name:
+        config_parts.append(f'clientName:{_json.dumps(client_name)}')
     config_block = f'<script>window.AGENT_CONFIG={{{",".join(config_parts)}}};</script>'
     html = html.replace("<head>", f"<head>\n  {config_block}", 1)
+    # Replace PWA title and apple-mobile-web-app-title with client name
+    if client_name:
+        html = html.replace("<title>OpenVoiceUI</title>", f"<title>{client_name}</title>")
+        html = html.replace('content="OpenVoiceUI"', f'content="{client_name}"')
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
@@ -1145,6 +1152,86 @@ def clawdbot_websocket(ws):
         asyncio.run(_run())
     except Exception as e:
         logger.error(f"Fatal WebSocket error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw Control UI — WebSocket proxy
+# ---------------------------------------------------------------------------
+# Accepts browser WS (Clerk-authed via __session cookie), connects to the
+# internal openclaw gateway, and relays all frames bidirectionally.
+# Transparently injects the gateway auth token into the connect handshake
+# so the user never has to enter it.
+
+@sock.route("/openclaw-ui")
+def openclaw_ui_websocket(ws):
+    """WebSocket proxy for OpenClaw Control UI behind Clerk auth."""
+    from services.auth import verify_clerk_token, get_token_from_request
+    token = get_token_from_request()
+    user_id = verify_clerk_token(token) if token else None
+    if not user_id:
+        logger.warning("OpenClaw UI WebSocket rejected — no valid Clerk token")
+        ws.send(json.dumps({"type": "error", "message": "Unauthorized"}))
+        ws.close()
+        return
+    logger.info(f"OpenClaw UI WebSocket authenticated: user_id={user_id}")
+
+    gateway_url = os.getenv("CLAWDBOT_GATEWAY_URL", "ws://127.0.0.1:18789")
+    auth_token = os.getenv("CLAWDBOT_AUTH_TOKEN")
+
+    if not auth_token:
+        logger.error("CLAWDBOT_AUTH_TOKEN not set — OpenClaw UI WebSocket rejected")
+        ws.send(json.dumps({"type": "error", "message": "Server configuration error"}))
+        ws.close()
+        return
+
+    async def _run():
+        try:
+            async with websockets.connect(gateway_url) as gw:
+                logger.info(f"OpenClaw UI: connected to Gateway at {gateway_url}")
+
+                async def _from_client():
+                    """Relay browser → openclaw, injecting auth token on connect."""
+                    while True:
+                        msg = ws.receive()
+                        if not msg:
+                            break
+                        try:
+                            data = json.loads(msg)
+                            if data.get("type") == "req" and data.get("method") == "connect":
+                                if "params" not in data:
+                                    data["params"] = {}
+                                data["params"]["auth"] = {"token": auth_token}
+                                msg = json.dumps(data)
+                        except (json.JSONDecodeError, TypeError):
+                            pass  # Non-JSON frame — relay as-is
+                        await gw.send(msg)
+
+                async def _from_gateway():
+                    """Relay openclaw → browser (raw, no transformation)."""
+                    while True:
+                        try:
+                            msg = await asyncio.wait_for(gw.recv(), timeout=300.0)
+                            ws.send(msg)
+                        except asyncio.TimeoutError:
+                            logger.warning("OpenClaw UI: gateway recv() timed out")
+                            ws.send(json.dumps({"type": "error", "message": "Gateway timeout"}))
+                            return
+
+                await asyncio.gather(_from_client(), _from_gateway())
+
+        except (ConnectionRefusedError, OSError) as e:
+            logger.error(f"OpenClaw UI: cannot reach Gateway at {gateway_url}: {e}")
+            ws.send(json.dumps({"type": "error", "message": "Cannot connect to Gateway"}))
+            ws.close()
+        except Exception as e:
+            logger.error(f"OpenClaw UI WebSocket error: {e}")
+            ws.send(json.dumps({"type": "error", "message": "Connection error"}))
+            ws.close()
+
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        logger.error(f"OpenClaw UI: fatal WebSocket error: {e}")
 
 
 # ---------------------------------------------------------------------------
