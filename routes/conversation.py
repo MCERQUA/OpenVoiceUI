@@ -294,6 +294,7 @@ def _flush_db_writes(timeout: float = 5.0) -> None:
 
 _session_key_cache: str | None = None
 _session_key_lock = threading.Lock()
+_session_recovery_key: str | None = None  # Set after double-empty to escape poisoned session
 
 # ---------------------------------------------------------------------------
 # Conversation state (module-level singletons)
@@ -324,10 +325,16 @@ def get_voice_session_key() -> str:
     stays warm across session resets.  OpenClaw's daily reset handles context
     clearing — we don't need a new key for that.
 
-    Priority: GATEWAY_SESSION_KEY env → VOICE_SESSION_PREFIX env → 'voice-main'
+    If the session is poisoned (double-empty detected), returns a recovery key
+    to force openclaw onto a fresh session. Cleared on first successful response.
+
+    Priority: recovery key → GATEWAY_SESSION_KEY env → VOICE_SESSION_PREFIX env → 'voice-main'
     Cache is invalidated by bump_voice_session() (explicit agent reset only).
     """
     global _session_key_cache
+    # If session is poisoned, use recovery key to escape
+    if _session_recovery_key is not None:
+        return _session_recovery_key
     if _session_key_cache is not None:
         return _session_key_cache
     with _session_key_lock:
@@ -366,6 +373,29 @@ def bump_voice_session() -> str:
     stable_key = get_voice_session_key()
     logger.info(f'### SESSION RESET #{counter}: cache invalidated, key stays stable as "{stable_key}"')
     return stable_key
+
+
+def _enter_session_recovery():
+    """Switch to a temporary recovery session key after double-empty.
+    Openclaw will create a fresh session for this key, escaping the
+    poisoned state. The recovery key is cleared on the first successful
+    (non-empty, non-fallback) response."""
+    global _session_recovery_key
+    import datetime
+    _session_recovery_key = f'recovery-{int(datetime.datetime.utcnow().timestamp())}'
+    logger.warning(f'### SESSION RECOVERY: switching to key "{_session_recovery_key}" to escape poisoned session')
+
+
+def _exit_session_recovery():
+    """Clear the recovery key after a successful response.
+    Next request goes back to the stable key (cache-warm path)."""
+    global _session_recovery_key
+    if _session_recovery_key is not None:
+        old_recovery = _session_recovery_key
+        _session_recovery_key = None
+        stable = get_voice_session_key()
+        logger.info(f'### SESSION RECOVERY CLEARED: "{old_recovery}" → back to stable key "{stable}"')
+
 
 # ---------------------------------------------------------------------------
 # Helper: notify Brain (non-critical fire-and-forget)
@@ -1135,6 +1165,10 @@ def _conversation_inner():
                                 f"(tools={metrics['tool_count']})"
                             )
 
+                            # ── Clear recovery mode on successful gateway response ──
+                            if full_response and full_response.strip() and _session_recovery_key is not None:
+                                _exit_session_recovery()
+
                             # ── Retry once on instant empty response ──
                             # IMPORTANT: check BEFORE yielding text_done.
                             # If we yield empty text_done first, the client
@@ -1157,19 +1191,8 @@ def _conversation_inner():
                                 # Openclaw removed the orphaned message on the first attempt.
                                 # If this is session_start, also clear the session file to eliminate
                                 # any further stale state before the retry.
-                                if user_message == '__session_start__':
-                                    try:
-                                        _sessions_dir = Path('/home/node/.openclaw/agents/openvoiceui/sessions')
-                                        _sessions_map = json.loads((_sessions_dir / 'sessions.json').read_text())
-                                        _oclaw_key = f'agent:openvoiceui:{_session_key}'
-                                        _sid = _sessions_map.get(_oclaw_key, {}).get('sessionId')
-                                        if _sid:
-                                            _sf = _sessions_dir / f'{_sid}.jsonl'
-                                            if _sf.exists():
-                                                _sf.write_text('{"type":"session","version":3,"id":"' + _sid + '","timestamp":"' + __import__('datetime').datetime.utcnow().isoformat() + 'Z","cwd":"/home/node/.openclaw/workspace"}\n')
-                                                logger.info(f'### RETRY session_start: cleared stale session {_sid}')
-                                    except Exception as _e:
-                                        logger.warning(f'### RETRY session_start: could not clear session: {_e}')
+                                # Note: session file clearing moved to host watchdog
+                                # (session files are inside openclaw container, not accessible from here)
                                 retry_queue = queue.Queue()
                                 captured_actions.clear()
                                 def _retry_gateway():
@@ -1190,7 +1213,32 @@ def _conversation_inner():
 
                             # ── Z.AI direct fallback after double-empty ──
                             if _is_empty and getattr(stream_response, '_retried', False):
-                                logger.warning('### DOUBLE EMPTY — trying Z.AI direct fallback')
+                                logger.warning('### DOUBLE EMPTY — session poisoned, entering recovery mode')
+
+                                # 1. Switch to recovery session key so NEXT request
+                                #    goes to a fresh openclaw session (not the poisoned one)
+                                _enter_session_recovery()
+
+                                # 2. Force-disconnect gateway WS so it reconnects fresh
+                                try:
+                                    _gw = gateway_manager.get(gateway_id)
+                                    if _gw and hasattr(_gw, 'force_disconnect'):
+                                        _gw.force_disconnect()
+                                        logger.warning('### Force-disconnected gateway WS after double-empty')
+                                except Exception as _dfe:
+                                    logger.error(f'### Failed to disconnect gateway: {_dfe}')
+
+                                # 3. Write restart flag for host watchdog (background cleanup)
+                                try:
+                                    _flag_path = Path('/app/runtime/uploads/.restart-openclaw.flag')
+                                    _flag_path.write_text(
+                                        f'double-empty at {__import__("datetime").datetime.utcnow().isoformat()}Z'
+                                    )
+                                    logger.warning('### Wrote .restart-openclaw.flag — watchdog will clean up poisoned session')
+                                except Exception as _rfe:
+                                    logger.error(f'### Failed to write restart flag: {_rfe}')
+
+                                # 4. Try Z.AI direct fallback for THIS message
                                 try:
                                     import requests as _req
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
@@ -1220,17 +1268,8 @@ def _conversation_inner():
                                 except Exception as _zfe:
                                     logger.error(f'### Z.AI direct fallback failed: {_zfe}')
 
-                                # Write restart flag so host cron restarts openclaw
                                 if not full_response or not full_response.strip():
-                                    try:
-                                        Path('/app/runtime/restart-openclaw.flag').write_text(
-                                            f'double-empty at {__import__("datetime").datetime.utcnow().isoformat()}Z'
-                                        )
-                                        logger.warning('### Wrote restart-openclaw.flag — host cron will restart openclaw')
-                                        full_response = "I lost my connection for a moment. I'm reconnecting now — please try again in a few seconds."
-                                    except Exception as _rfe:
-                                        logger.error(f'### Failed to write restart flag: {_rfe}')
-                                        full_response = "I lost my connection for a moment. Please try again."
+                                    full_response = "I had a brief connection issue. I'm reconnecting now — please try again."
 
                             yield json.dumps({
                                 'type': 'text_done',

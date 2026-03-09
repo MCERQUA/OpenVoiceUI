@@ -606,14 +606,19 @@ def canvas_pages_proxy(path):
                 )
                 content = _stripped.encode('utf-8')
 
-                # Inject base dark-theme fallback + padding for UI chrome clearance
+                # Inject base dark-theme fallback + padding for UI chrome clearance.
+                # Edge tabs are 44px wide on left+right — safe area is 52px each side.
+                # CSS custom props let fixed/absolute elements also honour the safe area.
                 _base_css = (
                     b'<style id="canvas-base-styles">'
+                    b':root{'
+                    b'--canvas-safe-top:0px;'
+                    b'--canvas-safe-right:52px;'
+                    b'--canvas-safe-bottom:0px;'
+                    b'--canvas-safe-left:52px;}'
                     b'html,body{'
-                    b'padding-top:20px!important;'
                     b'padding-left:20px!important;'
                     b'padding-right:20px!important;'
-                    b''
                     b'box-sizing:border-box!important;'
                     b'color:#e2e8f0;'
                     b'background:#0a0a0a;}'
@@ -663,12 +668,13 @@ def canvas_pages_proxy(path):
                 # allowed (canvas-action bridge uses it).
                 resp.headers['Content-Security-Policy'] = (
                     "default-src 'none'; "
-                    "script-src 'unsafe-inline' https://cdn.jsdelivr.net; "
-                    "style-src 'unsafe-inline'; "
-                    "img-src 'self' data: blob:; "
+                    "script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://games.jam-bot.com blob:; "
+                    "style-src 'unsafe-inline' https://games.jam-bot.com; "
+                    "img-src 'self' data: blob: https://games.jam-bot.com; "
                     "media-src 'self' blob:; "
                     "font-src 'self'; "
-                    "connect-src 'self'; "   # allow fetch back to same-origin API (e.g. /api/image-gen)
+                    "connect-src 'self' https://games.jam-bot.com; "
+                    "worker-src blob:; "
                     "frame-src 'none'"
                 )
                 return resp

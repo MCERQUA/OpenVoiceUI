@@ -21,12 +21,18 @@ class WebSpeechSTT {
         this.isListening = false;
         this.onResult = null;
         this.onError = null;
+        this.onListenFinal = null;   // Listen panel hook — called with each final transcript
+        this.onInterim = null;       // Listen panel hook — interim text
 
         // Silence detection for continuous listening
         this.silenceTimer = null;
         this.silenceDelayMs = 3500; // 3.5s — 3s was cutting people off mid-sentence
         this.accumulatedText = '';
         this.isProcessing = false;
+
+        // PTT support
+        this._micMuted = false;
+        this._pttHolding = false;
 
         // Keep mic stream alive during active listening (critical on iOS —
         // releasing and re-acquiring the stream can re-trigger permission prompts)
@@ -77,6 +83,8 @@ class WebSpeechSTT {
                     ? this.accumulatedText + ' ' + finalTranscript.trim()
                     : finalTranscript.trim();
                 console.log('STT Final:', finalTranscript, '| Accumulated:', this.accumulatedText);
+                // Listen panel hook
+                if (this.onListenFinal) this.onListenFinal(finalTranscript.trim());
             }
 
             // Start/restart silence timer — only fires when Chrome stops sending ANY results
@@ -113,10 +121,10 @@ class WebSpeechSTT {
         };
 
         this.recognition.onend = () => {
-            if (this.isListening && !this.isProcessing) {
+            if (this.isListening && !this.isProcessing && !this._micMuted) {
                 const restartDelay = _isIOS ? 500 : 300;
                 setTimeout(() => {
-                    if (this.isListening && !this.isProcessing) {
+                    if (this.isListening && !this.isProcessing && !this._micMuted) {
                         try {
                             this.recognition.start();
                         } catch (e) {
@@ -136,6 +144,7 @@ class WebSpeechSTT {
     }
 
     async start() {
+        if (this._micMuted) return false;
         if (!this._ensureRecognition()) {
             console.error('Speech recognition not supported');
             return false;
@@ -176,6 +185,8 @@ class WebSpeechSTT {
         if (this.recognition) {
             this.isListening = false;
             this.isProcessing = false;
+            this._micMuted = false;
+            this._pttHolding = false;
             this.recognition.stop();
             console.log('STT stopped');
         }
@@ -223,12 +234,89 @@ class WebSpeechSTT {
             clearTimeout(this.silenceTimer);
             this.silenceTimer = null;
         }
-        if (this.isListening) {
+        if (this.isListening && !this._micMuted) {
             try {
                 this.recognition.start();
             } catch (e) {
                 // Already running — fine
             }
+        }
+    }
+
+    // --- PTT helpers (called from PTT code in app.js) ---
+
+    /**
+     * PTT activate — start listening for push-to-talk.
+     * Called when user presses the PTT button.
+     */
+    pttActivate() {
+        this._pttHolding = true;
+        this._micMuted = false;
+        this.isProcessing = false;
+        this.accumulatedText = '';
+        if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+
+        // Start recognition fresh
+        if (!this._ensureRecognition()) return;
+        try {
+            this.recognition.start();
+        } catch (e) {
+            // Already running — fine
+        }
+    }
+
+    /**
+     * PTT release — stop listening and force-send transcript.
+     * Called when user releases the PTT button.
+     */
+    pttRelease() {
+        this._pttHolding = false;
+        this._micMuted = true;
+        if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+
+        // Force-send whatever we've accumulated
+        const text = this.accumulatedText.trim();
+        if (text && this.onResult) {
+            console.log('PTT release — sending:', text);
+            this.isProcessing = true;
+            this.onResult(text);
+        }
+        this.accumulatedText = '';
+
+        // Stop recognition (muted state prevents onend restart)
+        if (this.recognition) {
+            try { this.recognition.stop(); } catch (e) {}
+        }
+    }
+
+    /**
+     * PTT mute — stop recognition and discard.
+     * Called when PTT mode is toggled ON (mic off by default).
+     */
+    pttMute() {
+        this._pttHolding = false;
+        this._micMuted = true;
+        this.isProcessing = true;
+        this.accumulatedText = '';
+        if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+
+        if (this.recognition) {
+            try { this.recognition.stop(); } catch (e) {}
+        }
+    }
+
+    /**
+     * PTT unmute — resume continuous listening.
+     * Called when PTT mode is toggled OFF.
+     */
+    pttUnmute() {
+        this._micMuted = false;
+        this._pttHolding = false;
+        this.isProcessing = false;
+        this.accumulatedText = '';
+
+        if (this.isListening && this.recognition) {
+            try { this.recognition.start(); } catch (e) {}
         }
     }
 }

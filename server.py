@@ -148,6 +148,12 @@ app.register_blueprint(onboarding_bp)
 from routes.image_gen import image_gen_bp
 app.register_blueprint(image_gen_bp)
 
+from routes.workspace import workspace_bp
+app.register_blueprint(workspace_bp)
+
+from routes.icons import icons_bp
+app.register_blueprint(icons_bp)
+
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.
 try:
@@ -581,17 +587,26 @@ def groq_stt():
             response_format="verbose_json",
             language="en",
             temperature=0,
-            prompt="Voice command for AI assistant.",
+            prompt="",
         )
-        # Filter segments with high no_speech_prob (Whisper hallucinations over silence)
+        # Filter segments with high no_speech_prob or low confidence (Whisper hallucinations)
         import re as _re
         segments = getattr(transcription, 'segments', None)
         if segments:
-            text = ' '.join(
-                (seg.get('text', '') if isinstance(seg, dict) else seg.text).strip()
-                for seg in segments
-                if (seg.get('no_speech_prob', 0) if isinstance(seg, dict) else seg.no_speech_prob) < 0.4
-            ).strip()
+            filtered_texts = []
+            for seg in segments:
+                _nsp = seg.get('no_speech_prob', 0) if isinstance(seg, dict) else getattr(seg, 'no_speech_prob', 0)
+                _alp = seg.get('avg_logprob', 0) if isinstance(seg, dict) else getattr(seg, 'avg_logprob', 0)
+                _stxt = (seg.get('text', '') if isinstance(seg, dict) else seg.text).strip()
+                # Reject: high no-speech probability OR very low confidence
+                if _nsp >= 0.2:
+                    logger.debug(f"Groq STT: dropping segment (no_speech_prob={_nsp:.2f}): {_stxt!r}")
+                    continue
+                if _alp < -1.0:
+                    logger.debug(f"Groq STT: dropping segment (avg_logprob={_alp:.2f}): {_stxt!r}")
+                    continue
+                filtered_texts.append(_stxt)
+            text = ' '.join(filtered_texts).strip()
         else:
             text = (transcription.text or "").strip()
         logger.info(f"Groq STT: {text!r}")
@@ -602,14 +617,20 @@ def groq_stt():
             "i'm here with closed captioning", "closed captioning",
             "subscribe", "please subscribe", "like and subscribe",
             "you", "bye", "the end", "subtitles by", "translated by",
-            "voice command for ai assistant",
+            "voice command for ai assistant", "voice command for ai",
+            "alright", "all right", "okay", "ok", "yeah", "yes",
+            "um", "uh", "hmm", "huh", "oh", "ah",
+            "so", "well", "right", "sure", "hey",
+            "thanks", "thank you so much",
+            "i don't know", "i'm sorry",
         }
         # Substrings that indicate prompt-echo or known garbage
         _HALLUCINATION_SUBSTRINGS = [
-            "voice command for ai assistant",
+            "voice command for ai",
             "thanks for watching", "thanks for listening",
             "like and subscribe", "please subscribe",
             "subtitles by", "translated by", "closed captioning",
+            "coupo foundation",  # known recurring hallucination
         ]
         text_lower = text.lower().rstrip('.!?,;:')
         _meaningful = _re.sub(r'[^a-zA-Z0-9]', '', text)
@@ -1127,6 +1148,89 @@ def clawdbot_websocket(ws):
 
 
 # ---------------------------------------------------------------------------
+# Game Library API
+# ---------------------------------------------------------------------------
+# Serves game catalog data to canvas pages (same-origin, no CORS needed).
+# Reads /app/runtime/game-catalog.json (mounted from /mnt/game-drive/catalog.json).
+# Falls back to HTTP proxy at host:6360 if file not mounted.
+_GAME_CATALOG_PATH = os.getenv("GAME_CATALOG_PATH", "/app/runtime/game-catalog.json")
+_GAME_SERVER_URL = os.getenv("GAME_SERVER_URL", "http://172.19.0.1:6360")
+
+def _load_game_catalog():
+    """Load catalog from mounted file. Returns list or None on failure."""
+    # Check primary path, then uploads fallback (uploads/ is always mounted)
+    for path in [_GAME_CATALOG_PATH, "/app/runtime/uploads/game-catalog.json"]:
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            continue
+    return None
+
+@app.route("/api/games", methods=["GET"])
+def games_api():
+    catalog = _load_game_catalog()
+    if catalog is not None:
+        system = request.args.get("system", "").lower()
+        genre = request.args.get("genre", "").lower()
+        search = request.args.get("search", "").lower()
+        games = [g for g in catalog if g.get("status") == "downloaded"]
+        if system:
+            games = [g for g in games if g.get("system", "").lower() == system]
+        if genre:
+            games = [g for g in games if g.get("genre", "").lower() == genre]
+        if search:
+            games = [g for g in games if
+                     search in g.get("title", "").lower() or
+                     search in g.get("description", "").lower()]
+        return jsonify(games)
+    try:
+        import requests as _req
+        r = _req.get(f"{_GAME_SERVER_URL}/api/games", params=dict(request.args), timeout=10)
+        return Response(r.content, status=r.status_code, mimetype="application/json")
+    except Exception as e:
+        return jsonify({"error": f"Game server unreachable: {e}"}), 502
+
+@app.route("/api/games/stats", methods=["GET"])
+def games_stats_api():
+    catalog = _load_game_catalog()
+    if catalog is not None:
+        total = len(catalog)
+        downloaded = sum(1 for g in catalog if g.get("status") == "downloaded")
+        pending = sum(1 for g in catalog if g.get("status") == "pending")
+        failed = sum(1 for g in catalog if g.get("status") == "failed")
+        by_system, by_genre = {}, {}
+        for g in catalog:
+            if g.get("status") == "downloaded":
+                s = g.get("system", "unknown")
+                by_system[s] = by_system.get(s, 0) + 1
+                gr = g.get("genre", "unknown")
+                by_genre[gr] = by_genre.get(gr, 0) + 1
+        return jsonify({"total": total, "downloaded": downloaded,
+                        "pending": pending, "failed": failed,
+                        "bySystem": by_system, "byGenre": by_genre})
+    try:
+        import requests as _req
+        r = _req.get(f"{_GAME_SERVER_URL}/api/stats", timeout=10)
+        return Response(r.content, status=r.status_code, mimetype="application/json")
+    except Exception as e:
+        return jsonify({"error": f"Game server unreachable: {e}"}), 502
+
+@app.route("/api/games/systems", methods=["GET"])
+def games_systems_api():
+    catalog = _load_game_catalog()
+    if catalog is not None:
+        systems = sorted(set(g.get("system", "") for g in catalog if g.get("system")))
+        return jsonify(systems)
+    try:
+        import requests as _req
+        r = _req.get(f"{_GAME_SERVER_URL}/api/systems", timeout=10)
+        return Response(r.content, status=r.status_code, mimetype="application/json")
+    except Exception as e:
+        return jsonify({"error": f"Game server unreachable: {e}"}), 502
+
+
+# ---------------------------------------------------------------------------
 # Per-endpoint rate limits (applied after all routes are registered)
 # ---------------------------------------------------------------------------
 # limiter.limit() returns a wrapped function — must assign it back into
@@ -1138,8 +1242,8 @@ if _limiter:
         'conversation.tts_generate': '10/minute',
         'conversation.tts_preview':  '10/minute',
         'upload_file':               '5/minute',
-        'groq_stt':                  '10/minute',
-        'local_stt':                 '10/minute',
+        'groq_stt':                  '60/minute',
+        'local_stt':                 '60/minute',
     }.items():
         _view_fn = app.view_functions.get(_endpoint)
         if _view_fn:

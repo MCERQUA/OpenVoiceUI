@@ -343,6 +343,23 @@ def upload_file():
     return jsonify(result)
 
 
+@static_files_bp.route('/static/emulators/<path:filepath>')
+def serve_emulator(filepath):
+    """Serve bundled emulator files (js-dos, etc.) from /app/static/emulators/."""
+    emulators_dir = STATIC_DIR / 'emulators'
+    path = _safe_path(emulators_dir, filepath)
+    if path is None:
+        return jsonify({"error": "Invalid path"}), 400
+    if not path.exists():
+        return jsonify({"error": "File not found"}), 404
+    mime_types = {'.js': 'application/javascript', '.css': 'text/css', '.wasm': 'application/wasm'}
+    mime = mime_types.get(path.suffix, 'application/octet-stream')
+    response = send_file(path, mimetype=mime)
+    response.headers['Cache-Control'] = 'public, max-age=86400'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+
 @static_files_bp.route('/uploads/<path:filename>')
 def serve_upload(filename):
     """Serve uploaded files (path traversal guarded)."""

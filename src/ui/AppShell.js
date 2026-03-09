@@ -164,6 +164,12 @@ const SHELL_HTML = `
         </div>
     </div>
 
+    <!-- Agent activity chip — top-center, below settings -->
+    <div class="agent-activity-chip" id="agent-activity-chip" style="display:none">
+        <span class="chip-icon" id="chip-icon">🔄</span>
+        <span class="chip-text" id="chip-text">Agent working...</span>
+    </div>
+
     <!-- Clawdbot Chat UI (hidden - voice-only mode) -->
     <div class="clawdbot-container" id="clawdbot-container" style="display: none !important;">
         <div class="clawdbot-status">

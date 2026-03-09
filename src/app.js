@@ -2041,6 +2041,130 @@ inject();
             }
         };
 
+        // ===== AGENT ACTIVITY CHIP =====
+        // Floating pill (bottom-right) that replaces itself with each agent action.
+        // Uses the same real-time action/tag events already flowing through the SSE stream.
+        window.AgentActivityChip = {
+            _el: null,
+            _iconEl: null,
+            _textEl: null,
+            _hideTimer: null,
+
+            init() {
+                this._el = document.getElementById('agent-activity-chip');
+                this._iconEl = document.getElementById('chip-icon');
+                this._textEl = document.getElementById('chip-text');
+            },
+
+            show(icon, text) {
+                if (!this._el) return;
+                if (this._hideTimer) { clearTimeout(this._hideTimer); this._hideTimer = null; }
+                // Set display:flex before animating — avoids scrollbar from hidden flex element
+                this._el.style.display = 'flex';
+                requestAnimationFrame(() => {
+                    if (this._el.classList.contains('visible')) {
+                        this._el.classList.remove('updating');
+                        void this._el.offsetWidth;
+                        this._el.classList.add('updating');
+                        setTimeout(() => this._el?.classList.remove('updating'), 220);
+                    }
+                    this._iconEl.textContent = icon;
+                    this._textEl.textContent = text;
+                    this._el.classList.add('visible');
+                });
+            },
+
+            hide(delay = 0) {
+                if (!this._el) return;
+                if (this._hideTimer) clearTimeout(this._hideTimer);
+                this._hideTimer = setTimeout(() => {
+                    this._el?.classList.remove('visible');
+                    // After CSS transition completes, truly remove from layout
+                    setTimeout(() => {
+                        if (this._el && !this._el.classList.contains('visible')) {
+                            this._el.style.display = 'none';
+                        }
+                    }, 250);
+                    this._hideTimer = null;
+                }, delay);
+            },
+
+            // Map OpenClaw stream action → chip display
+            handleAction(action) {
+                const { type, phase, name, input } = action || {};
+
+                if (type === 'lifecycle') {
+                    if (phase === 'start') this.show('🔄', 'Thinking...');
+                    else if (phase === 'end' || phase === 'error') this.hide(0);
+                    return;
+                }
+
+                if (type === 'subagent') {
+                    if (phase === 'spawning' || phase === 'start') this.show('🤖', 'Working...');
+                    else if (phase === 'end') this.hide(0);
+                    return;
+                }
+
+                if (type === 'tool' && phase === 'start') {
+                    const n = (name || '').toLowerCase().replace(/[_-]/g, '');
+                    const inp = input || {};
+                    const shortPath = p => { if (!p) return ''; const s = String(p).split('/'); return s[s.length - 1] || String(p); };
+                    const shortUrl  = u => { try { return new URL(u).hostname; } catch { return String(u).substring(0, 30); } };
+                    const cap40    = s => s ? String(s).substring(0, 40) : '';
+
+                    const toolMap = {
+                        read:            ['📖', () => `Reading ${shortPath(inp.file_path || inp.path)}`],
+                        write:           ['✏️',  () => `Writing ${shortPath(inp.file_path || inp.path)}`],
+                        edit:            ['✏️',  () => `Editing ${shortPath(inp.file_path || inp.path)}`],
+                        glob:            ['🔍', () => `Files: ${cap40(inp.pattern)}`],
+                        grep:            ['🔍', () => `Search: "${cap40(inp.pattern)}"`],
+                        bash:            ['⚡', () => `Run: ${cap40(inp.command)}`],
+                        exec:            ['⚡', () => `Run: ${cap40(inp.command)}`],
+                        webfetch:        ['🌐', () => `Fetch: ${shortUrl(inp.url)}`],
+                        websearch:       ['🌐', () => `Search: "${cap40(inp.query)}"`],
+                        agent:           ['🤖', () => 'Working...'],
+                        task:            ['🤖', () => `Task: ${cap40(inp.description)}`],
+                        todowrite:       ['📋', () => 'Updating...'],
+                        notebookedit:    ['📓', () => `Notebook: ${shortPath(inp.notebook_path)}`],
+                        askuserquestion: ['❓', () => 'Waiting for input...'],
+                    };
+
+                    const lookup = Object.keys(toolMap).find(k => n.includes(k));
+                    const [icon, getText] = toolMap[lookup] || ['🔧', () => `Tool: ${name}`];
+                    this.show(icon, getText());
+                }
+            },
+
+            // Map response tags → chip display
+            handleTag(tag, detail) {
+                const d = detail ? String(detail) : '';
+                const tagMap = {
+                    suno:          ['🎵', d ? `Generating: "${d.substring(0, 40)}"` : 'Generating music...'],
+                    canvas:        ['🖼️',  d ? `Opening ${d}` : 'Opening canvas...'],
+                    canvas_url:    ['🖼️',  d ? `Loading ${d.substring(0, 35)}` : 'Loading canvas...'],
+                    canvas_menu:   ['🖼️',  'Opening canvas menu...'],
+                    music_play:    ['▶️',  d ? `Playing "${d}"` : 'Playing music...'],
+                    music_stop:    ['⏹️', 'Stopping music...'],
+                    music_next:    ['⏭️', 'Next track...'],
+                    spotify:       ['🎧', d ? `Spotify: "${d}"` : 'Playing Spotify...'],
+                    sound:         ['🔔', d ? `Sound: ${d}` : 'Playing sound...'],
+                    register_face: ['👤', d ? `Registering: ${d}` : 'Registering face...'],
+                    sleep:         ['😴', 'Going to sleep...'],
+                    session_reset: ['🔄', 'Resetting session...'],
+                    html_canvas:   ['⚡', 'Building canvas page...'],
+                };
+                const entry = tagMap[tag];
+                if (entry) this.show(entry[0], entry[1]);
+            },
+
+            // Called by onSpeaking/onListening — show "Speaking" during TTS, hide when done
+            setSpeaking(speaking) {
+                if (speaking) this.show('🔊', 'Speaking...');
+                else this.hide(0);
+            },
+        };
+        AgentActivityChip.init();
+
         // ===== AUTH MODULE =====
         window.AuthModule = {
             user: null,
@@ -2639,7 +2763,7 @@ inject();
 
                 // Use shared STT instance instead of creating a new one
                 // This prevents conflicts with VoiceConversation's STT
-                this.stt = sharedSTT || new GroqSTT();
+                this.stt = sharedSTT || new WebSpeechSTT();
 
                 // Wake detector state
                 this.restartWakeAfter = false;
@@ -2849,6 +2973,21 @@ inject();
                 }
 
                 // Set up STT callbacks BEFORE greeting so they're ready when STT starts
+                // onListenFinal fires IMMEDIATELY when Groq returns a transcript chunk
+                // — show user text right away so they know the system heard them.
+                this.stt.onListenFinal = (text) => {
+                    if (this._ttsPlaying || !text || !text.trim()) return;
+                    // Show in transcript immediately + set thinking state
+                    this.displayMessage('user', text.trim());
+                    this.callbacks.onMessage('user', text.trim());
+                    TranscriptPanel.addMessage('user', text.trim());
+                    FaceModule.setMood('thinking');
+                    StatusModule.update('thinking', 'THINKING');
+                    TranscriptPanel.showThinking();
+                    document.getElementById('thought-bubbles')?.classList.add('active');
+                    window.HaloSmokeFace?.setThinking(true);
+                };
+
                 this.stt.onResult = (transcript) => {
                     // Ignore any results that arrive while TTS is playing (leftover audio)
                     if (this._ttsPlaying) {
@@ -2857,7 +2996,7 @@ inject();
                     }
                     if (transcript && transcript.trim()) {
                         console.log('Voice input:', transcript);
-                        this.sendMessage(transcript.trim());
+                        this.sendMessage(transcript.trim(), { skipDisplay: true });
                     }
                 };
 
@@ -2989,7 +3128,7 @@ inject();
 
                 // System trigger messages are invisible to the user
                 const isSystemTrigger = text.startsWith('__session_start__');
-                if (!isSystemTrigger) {
+                if (!isSystemTrigger && !opts.skipDisplay) {
                     this.displayMessage('user', text);
                     this.callbacks.onMessage('user', text);
                     TranscriptPanel.addMessage('user', text, { imageUrl: opts.imageUrl || null });
@@ -3092,6 +3231,7 @@ inject();
                             canvasCommandsProcessed.add('CANVAS_MENU');
                             console.log('[Canvas] CANVAS_MENU trigger detected');
                             ActionConsole.addEntry('system', 'Canvas: opening menu');
+                            AgentActivityChip.handleTag('canvas_menu');
                             CanvasControl.showMenu?.() || document.getElementById('canvas-menu-button')?.click();
                         }
                         // Check for [CANVAS:pagename]
@@ -3101,6 +3241,7 @@ inject();
                             const pageName = canvasMatch[1].trim();
                             console.log('[Canvas] CANVAS page trigger:', pageName);
                             ActionConsole.addEntry('system', `Canvas: opening ${pageName}`);
+                            AgentActivityChip.handleTag('canvas', pageName);
                             // Sync manifest first so newly created pages are found
                             try {
                                 await fetch(`${CONFIG.serverUrl}/api/canvas/manifest/sync`, { method: 'POST' });
@@ -3114,6 +3255,7 @@ inject();
                             canvasCommandsProcessed.add('MUSIC_PLAY');
                             const trackName = musicPlay[1]?.trim();
                             ActionConsole.addEntry('system', trackName ? `Music: playing "${trackName}"` : 'Music: playing');
+                            AgentActivityChip.handleTag('music_play', trackName);
                             // Always open the panel regardless of whether tracks exist
                             if (window.musicPlayer?.panelState === 'closed') window.musicPlayer.openPanel();
                             if (trackName) {
@@ -3126,12 +3268,14 @@ inject();
                         if (/\[MUSIC_STOP\]/i.test(text) && !canvasCommandsProcessed.has('MUSIC_STOP')) {
                             canvasCommandsProcessed.add('MUSIC_STOP');
                             ActionConsole.addEntry('system', 'Music: stopped');
+                            AgentActivityChip.handleTag('music_stop');
                             window.musicPlayer?.stop();
                         }
                         // Check for [MUSIC_NEXT]
                         if (/\[MUSIC_NEXT\]/i.test(text) && !canvasCommandsProcessed.has('MUSIC_NEXT')) {
                             canvasCommandsProcessed.add('MUSIC_NEXT');
                             ActionConsole.addEntry('system', 'Music: next track');
+                            AgentActivityChip.handleTag('music_next');
                             window.musicPlayer?.next();
                         }
                         // Check for [SUNO_GENERATE:prompt]
@@ -3140,6 +3284,7 @@ inject();
                             canvasCommandsProcessed.add('SUNO_GENERATE');
                             const sunoPrompt = sunoMatch[1].trim();
                             ActionConsole.addEntry('system', `Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
+                            AgentActivityChip.handleTag('suno', sunoPrompt);
                             window.sunoModule?.generate(sunoPrompt);
                         }
                         // Check for [SPOTIFY:track name|artist] — switches player to Spotify mode
@@ -3149,6 +3294,7 @@ inject();
                             const spotifyTrack = spotifyMatch[1].trim();
                             const spotifyArtist = spotifyMatch[2]?.trim() || '';
                             ActionConsole.addEntry('system', `Spotify: "${spotifyTrack}"${spotifyArtist ? ` by ${spotifyArtist}` : ''}`);
+                            AgentActivityChip.handleTag('spotify', spotifyTrack);
                             window.musicPlayer?.playSpotify(spotifyTrack, spotifyArtist);
                         }
                         // Check for [REGISTER_FACE:name] — agent registers current camera frame
@@ -3157,6 +3303,7 @@ inject();
                             canvasCommandsProcessed.add('REGISTER_FACE');
                             const personName = registerFaceMatch[1].trim();
                             ActionConsole.addEntry('system', `Face: registering "${personName}"`);
+                            AgentActivityChip.handleTag('register_face', personName);
                             const cam = window.cameraModule;
                             if (cam && cam.stream) {
                                 const ctx = cam.canvas.getContext('2d');
@@ -3183,6 +3330,7 @@ inject();
                             const soundName = soundMatch[1].trim();
                             console.log('[Sound] DJ sound trigger:', soundName);
                             ActionConsole.addEntry('system', `Sound: ${soundName}`);
+                            AgentActivityChip.handleTag('sound', soundName);
                             DJSoundboard.play(soundName);
                         }
                         // Check for [CANVAS_URL:https://example.com] — load external URL in iframe
@@ -3193,6 +3341,7 @@ inject();
                             const resolvedUrl = resolveCanvasUrl(externalUrl);
                             console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
                             ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
+                            AgentActivityChip.handleTag('canvas_url', resolvedUrl);
                             const iframe = document.getElementById('canvas-iframe');
                             if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
                         }
@@ -3201,6 +3350,7 @@ inject();
                             canvasCommandsProcessed.add('SLEEP');
                             console.log('[Sleep] Agent requested sleep — will disconnect after audio');
                             ActionConsole.addEntry('system', 'Sleep: going to standby');
+                            AgentActivityChip.handleTag('sleep');
                             window._sleepAfterResponse = true;
                         }
                         // Early HTML canvas: as soon as </html> lands in the stream, save and show
@@ -3213,6 +3363,7 @@ inject();
                                 canvasCommandsProcessed.add('HTML_CANVAS');
                                 console.log('[Canvas] Complete HTML detected in stream, saving early...');
                                 ActionConsole.addEntry('system', 'Canvas: building page from HTML');
+                                AgentActivityChip.handleTag('html_canvas');
                                 this._saveAndShowHtml(htmlEarlyMatch[1].trim());
                             }
                         }
@@ -3275,6 +3426,7 @@ inject();
                                 if (data.type === 'heartbeat') {
                                     const secs = data.elapsed || 0;
                                     StatusModule.update('thinking', `WORKING... ${secs}s`);
+                                    AgentActivityChip.show('⏳', `Working... ${secs}s`);
                                 }
 
                                 // Queued: openclaw is busy, message will be processed after current run
@@ -3286,6 +3438,7 @@ inject();
                                 // Action: tool use or lifecycle event
                                 if (data.type === 'action') {
                                     ActionConsole.processActions([data.action]);
+                                    AgentActivityChip.handleAction(data.action);
                                     // Show tool use in status bar and transcript
                                     if (data.action.type === 'tool' && data.action.phase === 'start') {
                                         const toolLabel = data.action.name || 'tool';
@@ -3366,6 +3519,8 @@ inject();
 
                                     if (data.actions) ActionConsole.processActions(data.actions);
                                     ActionConsole.addEntry('system', `Response complete (${fullResponse?.length || 0} chars, LLM: ${data.timing?.llm_ms}ms)`);
+                                    AgentActivityChip.show('✅', 'Done');
+                                    AgentActivityChip.hide(1500);
                                     console.log(`Text finalized (LLM: ${data.timing?.llm_ms}ms) — waiting for TTS...`);
                                 }
 
@@ -3374,6 +3529,7 @@ inject();
                                     if (data.audio) {
                                         console.log(`TTS ready (${data.timing?.tts_ms}ms, total: ${data.timing?.total_ms}ms)`);
                                         ActionConsole.addEntry('tts', `Playing TTS (TTS: ${data.timing?.tts_ms}ms)`);
+                                        AgentActivityChip.show('🔊', 'Speaking...');
                                         this.playAudio(data.audio, data.audio_format || 'wav');
                                     } else {
                                         console.warn('No audio in TTS response');
@@ -3725,33 +3881,49 @@ inject();
 
             async playNextAudio() {
                 if (this.audioQueue.length === 0) {
-                    this.currentAudio = null;
-                    this.isPlaying = false;
-                    this.callbacks.onListening();
-                    WaveformModule.setAmplitude(0);
-                    // Agent requested sleep — disconnect call and activate wake word detection
-                    if (window._sleepAfterResponse) {
-                        window._sleepAfterResponse = false;
-                        console.log('[Sleep] Farewell audio done — activating wake word mode');
-                        setTimeout(() => {
-                            ModeManager.clawdbotMode?.stopVoiceInput();
-                            UIModule.setCallButtonState('disconnected');
-                            // Ensure we're in normal mode (not listen/a2a)
-                            if (window.ModeSelector?.currentMode !== 'normal') {
-                                window.ModeSelector?.select('normal');
-                            }
-                            // Force-start wake word detector regardless of prior state
-                            if (window.wakeDetector && window.wakeDetector.isSupported()) {
-                                if (!window.wakeDetector.isListening) {
-                                    window.wakeDetector.start();
+                    // Don't immediately transition to listening — more TTS chunks
+                    // may be in-flight from streamed sentences. Wait briefly and
+                    // check again so the stop button doesn't flash between sentences.
+                    if (!this._drainTimer) {
+                        this._drainTimer = setTimeout(() => {
+                            this._drainTimer = null;
+                            if (this.audioQueue.length > 0) {
+                                // New chunk arrived during wait — keep playing
+                                this.playNextAudio();
+                            } else {
+                                // Truly done — transition to listening
+                                this.currentAudio = null;
+                                this.isPlaying = false;
+                                this.callbacks.onListening();
+                                WaveformModule.setAmplitude(0);
+                                if (window._sleepAfterResponse) {
+                                    window._sleepAfterResponse = false;
+                                    console.log('[Sleep] Farewell audio done — activating wake word mode');
+                                    setTimeout(() => {
+                                        ModeManager.clawdbotMode?.stopVoiceInput();
+                                        UIModule.setCallButtonState('disconnected');
+                                        if (window.ModeSelector?.currentMode !== 'normal') {
+                                            window.ModeSelector?.select('normal');
+                                        }
+                                        if (window.wakeDetector && window.wakeDetector.isSupported()) {
+                                            if (!window.wakeDetector.isListening) {
+                                                window.wakeDetector.start();
+                                            }
+                                            const wakeBtn = document.getElementById('wake-button');
+                                            if (wakeBtn) wakeBtn.classList.add('listening');
+                                            console.log('[Sleep] Wake word detector activated');
+                                        }
+                                    }, 600);
                                 }
-                                const wakeBtn = document.getElementById('wake-button');
-                                if (wakeBtn) wakeBtn.classList.add('listening');
-                                console.log('[Sleep] Wake word detector activated');
                             }
-                        }, 600);
+                        }, 800);  // 800ms grace period for next TTS chunk to arrive
                     }
                     return;
+                }
+                // New chunk available — cancel any pending drain timer
+                if (this._drainTimer) {
+                    clearTimeout(this._drainTimer);
+                    this._drainTimer = null;
                 }
 
                 const { base64, format } = this.audioQueue.shift();
@@ -3921,6 +4093,7 @@ inject();
                         WaveformModule.setSpeaking(true);  // Start mouth animation
                         MusicModule.duck(true);
                         document.getElementById('stop-button').style.display = '';
+                        AgentActivityChip.setSpeaking(true);
                         // Mute mic while agent speaks to prevent echo feedback
                         if (this.clawdbotMode.stt) {
                             console.log('🔇 Muting mic during TTS');
@@ -3950,6 +4123,7 @@ inject();
                         WaveformModule.setAmplitude(0);
                         MusicModule.duck(false);
                         document.getElementById('stop-button').style.display = 'none';
+                        AgentActivityChip.setSpeaking(false);
                         // Cancel guard timer — TTS finished normally
                         if (this.clawdbotMode._ttsGuardTimer) { clearTimeout(this.clawdbotMode._ttsGuardTimer); this.clawdbotMode._ttsGuardTimer = null; }
                         // _ttsPlaying stays true through the delay window to block echo
@@ -4169,7 +4343,7 @@ inject();
                 this.config = config;
                 this.isConnected = false;
                 this.isProcessing = false;
-                this.stt = new GroqSTT();
+                this.stt = new WebSpeechSTT();
                 this.ttsProvider = 'supertonic';
                 this.ttsVoice = 'F3';
                 this.audioContext = null;
@@ -5407,9 +5581,9 @@ inject();
             // localStorage — do NOT override it here. voiceConversation.setTTSProvider()
             // below will apply it correctly.
 
-            // Initialize Wake Word Detector (Groq-based — no Chrome Speech API dependency)
-            console.log('Initializing GroqWakeWordDetector...');
-            const wakeDetector = new GroqWakeWordDetector();
+            // Initialize Wake Word Detector (Chrome Web Speech API — free, no hallucinations)
+            console.log('Initializing WakeWordDetector...');
+            const wakeDetector = new WakeWordDetector();
             window.wakeDetector = wakeDetector;
 
             // Set up wake word callback to auto-trigger call button
@@ -8057,7 +8231,7 @@ inject();
         };
 
         // Expose STT instance — lives at ModeManager.clawdbotMode.stt
-        // GroqSTT has mute/PTT support built in — no monkey-patching needed.
+        // WebSpeechSTT has mute/PTT support built in — no monkey-patching needed.
         const _sttExposePoll = setInterval(() => {
             const stt = ModeManager?.clawdbotMode?.stt;
             if (stt && !stt._exposed) {
@@ -8065,7 +8239,7 @@ inject();
                 clearInterval(_sttExposePoll);
                 stt._exposed = true;
 
-                console.log('STT exposed (GroqSTT — no patches needed)');
+                console.log('STT exposed (WebSpeechSTT — Chrome native)');
                 // Apply any profile settings that were deferred (profile loaded before STT existed)
                 if (window._activeProfileData) {
                     const ms = window._activeProfileData?.stt?.silence_timeout_ms;

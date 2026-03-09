@@ -18,6 +18,7 @@ CANVAS_MANIFEST_PATH = RUNTIME_DIR / "canvas-manifest.json"
 VOICE_CLONES_DIR = RUNTIME_DIR / "voice-clones"
 VOICE_SESSION_FILE = str(RUNTIME_DIR / ".voice-session-counter")
 ACTIVE_PROFILE_FILE = RUNTIME_DIR / ".active-profile"
+WORKSPACE_DIR = Path(os.getenv('WORKSPACE_DIR', str(RUNTIME_DIR / 'workspace')))
 
 # Bundled assets (git-tracked, stay at root)
 SOUNDS_DIR = APP_ROOT / "sounds"

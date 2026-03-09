@@ -525,6 +525,13 @@ class GatewayConnection:
                 pass
             self._ws = None
 
+    def force_disconnect(self):
+        """Force-disconnect the persistent WS from a sync context (e.g. after double-empty).
+        Next stream_to_queue() call will reconnect automatically."""
+        if self._loop and self._connected:
+            asyncio.run_coroutine_threadsafe(self._disconnect(), self._loop)
+            logger.warning("### force_disconnect: scheduled WS disconnect")
+
     async def _ensure_connected(self):
         async with self._ws_lock:
             if self._connected and self._ws is not None:

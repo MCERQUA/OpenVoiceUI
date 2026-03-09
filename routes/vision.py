@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -42,9 +43,11 @@ _latest_frame: dict = {'image': None, 'ts': 0}
 
 # ---------------------------------------------------------------------------
 # DeepFace — lazy load (heavy import, downloads models on first use)
+# Serialize all face recognition calls — concurrent TF/h5py calls crash the process.
 # ---------------------------------------------------------------------------
 
 _deepface = None
+_deepface_lock = threading.Lock()
 
 def _get_deepface():
     global _deepface
@@ -220,13 +223,14 @@ def identify_face():
             tmp_path = tmp.name
 
         DeepFace = _get_deepface()
-        results = DeepFace.find(
-            img_path=tmp_path,
-            db_path=str(FACES_DIR),
-            model_name='SFace',
-            enforce_detection=False,
-            silent=True,
-        )
+        with _deepface_lock:
+            results = DeepFace.find(
+                img_path=tmp_path,
+                db_path=str(FACES_DIR),
+                model_name='SFace',
+                enforce_detection=False,
+                silent=True,
+            )
 
         if results and len(results) > 0 and len(results[0]) > 0:
             df           = results[0]
@@ -310,7 +314,8 @@ def register_face(name):
     logger.info('Registered face photo: %s (%s)', safe_name, out_path.name)
 
     # Clear DeepFace's cached index so the new face is picked up immediately
-    _clear_deepface_cache()
+    with _deepface_lock:
+        _clear_deepface_cache()
 
     return jsonify({'ok': True, 'name': safe_name, 'file': out_path.name})
 
@@ -328,7 +333,8 @@ def delete_face(name):
 
     import shutil
     shutil.rmtree(face_dir)
-    _clear_deepface_cache()
+    with _deepface_lock:
+        _clear_deepface_cache()
     return jsonify({'ok': True, 'deleted': safe_name})
 
 

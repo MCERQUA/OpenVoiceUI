@@ -958,6 +958,57 @@
 
         .face-notification.visible { opacity: 1; }
 
+        /* Agent Activity Chip — live agent state indicator (top-center, below settings) */
+        .agent-activity-chip {
+            position: fixed;
+            top: 34px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-4px) scale(0.96);
+            background: rgba(50, 55, 65, 0.95);
+            border: 1px solid rgba(180, 190, 210, 0.3);
+            color: #e8eaed;
+            padding: 5px 14px 5px 10px;
+            border-radius: 0 0 12px 12px;
+            display: none;
+            align-items: center;
+            gap: 7px;
+            font-size: 11px;
+            font-family: var(--font-mono, monospace);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.07);
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            pointer-events: none;
+            z-index: 1400;
+            max-width: 280px;
+        }
+
+        .agent-activity-chip.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0) scale(1);
+        }
+
+        .agent-activity-chip .chip-icon {
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+
+        .agent-activity-chip .chip-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        @keyframes chip-update {
+            0%   { opacity: 1;   transform: translateX(-50%) translateY(0) scale(1); }
+            35%  { opacity: 0.2; transform: translateX(-50%) translateY(-2px) scale(0.95); }
+            100% { opacity: 1;   transform: translateX(-50%) translateY(0) scale(1); }
+        }
+
+        .agent-activity-chip.updating {
+            animation: chip-update 0.22s ease;
+        }
+
         /* ===== MUSIC PANEL — Slide-up card (Concept T) ===== */
         .music-panel {
             position: fixed;
@@ -2527,4 +2578,58 @@
         .cmm-drop-zone.active {
             border-color: rgba(74, 158, 255, 0.8);
             background: rgba(74, 158, 255, 0.1);
+        }
+
+        /* ── Canvas Menu: Mobile ── */
+        @media (max-width: 640px) {
+            /* Slide up as a bottom sheet */
+            .canvas-menu-modal {
+                align-items: flex-end !important;
+            }
+            .cmm-content {
+                width: 100vw !important;
+                max-width: 100vw !important;
+                max-height: 92vh !important;
+                border-radius: 16px 16px 0 0 !important;
+                margin: 0 !important;
+            }
+            /* Quick actions: wrap so they don't overflow */
+            .cmm-quick-actions {
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            /* Bigger touch targets */
+            .cmm-cat-header {
+                padding: 14px 12px;
+                min-height: 52px;
+            }
+            .cmm-page {
+                padding: 12px 12px 12px 36px;
+                min-height: 48px;
+            }
+            .cmm-page-name {
+                font-size: 15px;
+            }
+            /* Give category pages room to expand */
+            .cmm-category.expanded .cmm-cat-pages {
+                max-height: 3000px !important;
+            }
+            /* Search input: full-width, bigger */
+            #canvas-search {
+                font-size: 16px; /* prevents iOS auto-zoom on focus */
+                padding: 12px 14px;
+            }
+            .cmm-close {
+                width: 44px;
+                height: 44px;
+                font-size: 20px;
+            }
+            .cmm-header {
+                padding: 14px 12px;
+            }
+            /* Footer: stack on small screens */
+            .cmm-footer {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
         }
