@@ -2221,6 +2221,95 @@ inject();
         };
         AgentActivityChip.init();
 
+        // ===== ISSUE REPORTER =====
+        window.IssueReporter = {
+            _modal: null,
+            _typeEl: null,
+            _descEl: null,
+            _statusEl: null,
+            _submitBtn: null,
+            _contextPreview: null,
+
+            open() {
+                if (!this._modal) {
+                    this._modal      = document.getElementById('issue-report-modal');
+                    this._typeEl     = document.getElementById('irm-type');
+                    this._descEl     = document.getElementById('irm-description');
+                    this._statusEl   = document.getElementById('irm-status');
+                    this._submitBtn  = document.getElementById('irm-submit-btn');
+                    this._contextPreview = document.getElementById('irm-context-preview');
+                }
+                if (!this._modal) return;
+
+                // Reset state
+                if (this._descEl) this._descEl.value = '';
+                if (this._statusEl) { this._statusEl.textContent = ''; this._statusEl.className = 'irm-status'; }
+                if (this._submitBtn) this._submitBtn.disabled = false;
+
+                // Auto-populate context preview
+                const ctx = this._gatherContext();
+                if (this._contextPreview) {
+                    const parts = [];
+                    if (ctx.canvas_page) parts.push(`canvas:${ctx.canvas_page}`);
+                    if (ctx.session_id)  parts.push(`session:${ctx.session_id.slice(-8)}`);
+                    parts.push(ctx.platform || navigator.platform);
+                    this._contextPreview.textContent = parts.join(' · ');
+                }
+
+                this._modal.style.display = 'flex';
+                setTimeout(() => this._descEl?.focus(), 50);
+            },
+
+            close() {
+                if (this._modal) this._modal.style.display = 'none';
+            },
+
+            _gatherContext() {
+                return {
+                    canvas_page: window._currentCanvasPage || null,
+                    session_id: window._activeSessionId || null,
+                    platform: navigator.platform,
+                    ua: navigator.userAgent.slice(0, 120),
+                    voice_mode: localStorage.getItem('voice_mode') || 'supertonic',
+                    tts_provider: localStorage.getItem('voice_provider') || null,
+                    url: location.pathname,
+                };
+            },
+
+            async submit() {
+                const description = this._descEl?.value.trim();
+                if (!description) {
+                    if (this._statusEl) { this._statusEl.textContent = 'Please describe the issue.'; this._statusEl.className = 'irm-status error'; }
+                    return;
+                }
+
+                if (this._submitBtn) this._submitBtn.disabled = true;
+                if (this._statusEl) { this._statusEl.textContent = 'Submitting…'; this._statusEl.className = 'irm-status'; }
+
+                try {
+                    const res = await fetch('/api/report-issue', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            type: this._typeEl?.value || 'bug',
+                            description,
+                            context: this._gatherContext(),
+                        }),
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                        if (this._statusEl) { this._statusEl.textContent = '✓ Report submitted. Thank you!'; this._statusEl.className = 'irm-status success'; }
+                        setTimeout(() => this.close(), 1800);
+                    } else {
+                        throw new Error(data.error || 'Server error');
+                    }
+                } catch (err) {
+                    if (this._statusEl) { this._statusEl.textContent = `Error: ${err.message}`; this._statusEl.className = 'irm-status error'; }
+                    if (this._submitBtn) this._submitBtn.disabled = false;
+                }
+            },
+        };
+
         // ===== AUTH MODULE =====
         window.AuthModule = {
             user: null,

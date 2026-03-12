@@ -2646,3 +2646,217 @@
                 gap: 8px;
             }
         }
+
+        /* ================================================================
+           Issue Report Button + Modal
+           ================================================================ */
+
+        /* Caution triangle button — top, halfway between center and right edge */
+        .issue-report-btn {
+            position: fixed;
+            top: 8px;
+            left: 75%;
+            transform: translateX(-50%);
+            background: transparent;
+            border: 1px solid rgba(245, 158, 11, 0.0);
+            color: rgba(245, 158, 11, 0.35);
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1200;
+            transition: color 0.2s, background 0.2s, border-color 0.2s, box-shadow 0.2s;
+            padding: 0;
+        }
+
+        .issue-report-btn:hover {
+            color: rgba(245, 158, 11, 0.9);
+            background: rgba(245, 158, 11, 0.10);
+            border-color: rgba(245, 158, 11, 0.4);
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+        }
+
+        /* Modal backdrop */
+        .issue-report-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(4px);
+            z-index: 3000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        /* Modal box */
+        .irm-box {
+            background: #0e1117;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(245,158,11,0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .irm-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        .irm-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #e2e8f0;
+            letter-spacing: 0.02em;
+        }
+
+        .irm-close {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 20px;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0 2px;
+            transition: color 0.15s;
+        }
+        .irm-close:hover { color: #ccc; }
+
+        .irm-body {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .irm-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .irm-label {
+            font-size: 11px;
+            color: #888;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .irm-select,
+        .irm-textarea {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            color: #d1d5db;
+            font-size: 13px;
+            padding: 8px 10px;
+            font-family: inherit;
+            transition: border-color 0.2s;
+            outline: none;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .irm-select:focus,
+        .irm-textarea:focus {
+            border-color: rgba(245, 158, 11, 0.5);
+        }
+
+        .irm-textarea {
+            resize: vertical;
+            min-height: 90px;
+            line-height: 1.5;
+        }
+
+        .irm-context-row {
+            display: flex;
+            gap: 6px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .irm-context-label {
+            font-size: 10px;
+            color: #555;
+            white-space: nowrap;
+            padding-top: 1px;
+        }
+
+        .irm-context-value {
+            font-size: 10px;
+            color: #555;
+            font-family: var(--font-mono, monospace);
+            word-break: break-all;
+        }
+
+        .irm-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.07);
+            gap: 10px;
+        }
+
+        .irm-status {
+            font-size: 11px;
+            color: #6b7280;
+            flex: 1;
+        }
+
+        .irm-status.success { color: #4ade80; }
+        .irm-status.error   { color: #f87171; }
+
+        .irm-btns {
+            display: flex;
+            gap: 8px;
+        }
+
+        .irm-btn {
+            padding: 7px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.15s;
+            letter-spacing: 0.02em;
+        }
+
+        .irm-cancel {
+            background: transparent;
+            border-color: rgba(255,255,255,0.15);
+            color: #9ca3af;
+        }
+        .irm-cancel:hover { border-color: rgba(255,255,255,0.3); color: #e2e8f0; }
+
+        .irm-submit {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: rgba(245, 158, 11, 0.5);
+            color: #f59e0b;
+        }
+        .irm-submit:hover {
+            background: rgba(245, 158, 11, 0.25);
+            border-color: rgba(245, 158, 11, 0.8);
+        }
+        .irm-submit:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 768px) {
+            .issue-report-btn {
+                left: 75%;
+                top: 8px;
+            }
+        }
