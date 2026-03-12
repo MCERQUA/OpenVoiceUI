@@ -152,7 +152,11 @@ from routes.workspace import workspace_bp
 app.register_blueprint(workspace_bp)
 
 from routes.icons import icons_bp
+from routes.ssactivewear import ssactivewear_bp
+from routes.report_issue import report_issue_bp
 app.register_blueprint(icons_bp)
+app.register_blueprint(ssactivewear_bp)
+app.register_blueprint(report_issue_bp)
 
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.

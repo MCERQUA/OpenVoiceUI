@@ -907,9 +907,24 @@ def _conversation_inner():
             event_queue: queue.Queue = queue.Queue()
             _session_key = get_voice_session_key()
 
+            # Check if gateway recently reconnected after a failure —
+            # inject a system note so the agent acknowledges the interruption
+            _recovery_prefix = ''
+            try:
+                _gw = gateway_manager.get(gateway_id)
+                if _gw and hasattr(_gw, 'consume_reconnection') and _gw.consume_reconnection():
+                    _recovery_prefix = (
+                        '[SYSTEM: The connection was briefly interrupted (server restart). '
+                        'Briefly acknowledge this to the user before responding to their message.]\n\n'
+                    )
+                    logger.info('### Injecting recovery prefix into message')
+            except Exception:
+                pass
+
             def _run_gateway():
+                _msg = _recovery_prefix + message_with_context if _recovery_prefix else message_with_context
                 gateway_manager.stream_to_queue(
-                    event_queue, message_with_context, _session_key, captured_actions,
+                    event_queue, _msg, _session_key, captured_actions,
                     gateway_id=gateway_id,
                     agent_id=agent_id,
                 )

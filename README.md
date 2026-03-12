@@ -487,6 +487,12 @@ OpenVoiceUI is designed so you can host a single VPS and serve multiple clients,
 
 ---
 
+## Development Notes
+
+> **Issue Reporter (temporary):** The in-app issue reporting button (`⚑` in the toolbar) is a temporary development tool included during the active development phase to help capture bugs with session context. It will be removed or made optional before a stable release.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |

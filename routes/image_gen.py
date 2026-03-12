@@ -1,9 +1,9 @@
 """
-Image generation proxy — Google Gemini / Imagen APIs.
-Keeps GEMINI_API_KEY server-side.
+Image generation proxy — Google Gemini / Imagen / HuggingFace APIs.
+Keeps API keys server-side.
 
 POST /api/image-gen
-  body: { prompt, images?: [{mime_type, data: base64}], model? }
+  body: { prompt, images?: [{mime_type, data: base64}], model?, quality?, aspect? }
   returns: { images: [{mime_type, data, url}], text }
   NOTE: every generated image is saved to UPLOADS_DIR on the server immediately
         before the response is returned. `url` is the permanent server path.
@@ -26,8 +26,37 @@ image_gen_bp = Blueprint('image_gen', __name__)
 
 GEMINI_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+HF_TOKEN = os.getenv('HF_TOKEN', '')
+HF_INFERENCE_BASE = 'https://router.huggingface.co/hf-inference/models'
 
 DEFAULT_MODEL = 'nano-banana-pro-preview'
+
+# HuggingFace model IDs — prefix with 'hf:' in the frontend
+HF_MODELS = {
+    'black-forest-labs/FLUX.1-schnell',
+    'black-forest-labs/FLUX.1-dev',
+    'stabilityai/stable-diffusion-xl-base-1.0',
+    'stabilityai/stable-diffusion-3.5-large',
+    'stabilityai/stable-diffusion-3.5-large-turbo',
+}
+
+# Resolution presets for HF models (actual pixel control)
+HF_QUALITY_SIZES = {
+    'standard': (1024, 1024),
+    'high':     (1536, 1536),
+    'ultra':    (2048, 2048),
+}
+
+# Aspect ratio → width/height multipliers (base is the quality size)
+HF_ASPECT_RATIOS = {
+    '1:1':  (1.0, 1.0),
+    '16:9': (1.33, 0.75),
+    '9:16': (0.75, 1.33),
+    '4:3':  (1.15, 0.87),
+    '3:4':  (0.87, 1.15),
+    '3:2':  (1.22, 0.82),
+    '2:3':  (0.82, 1.22),
+}
 
 AI_DESIGNS_MANIFEST = UPLOADS_DIR / 'ai-designs-manifest.json'
 
@@ -153,6 +182,45 @@ def _enhance_prompt(idea: str, quality: str = 'standard', style: str = '') -> st
     return text.strip()
 
 
+def _generate_huggingface(model_id, prompt, quality='standard', aspect='1:1'):
+    """HuggingFace Inference API — FLUX, Stable Diffusion, etc."""
+    if not HF_TOKEN:
+        raise ValueError('HF_TOKEN not configured on server')
+
+    base_w, base_h = HF_QUALITY_SIZES.get(quality, (1024, 1024))
+    ar_w, ar_h = HF_ASPECT_RATIOS.get(aspect, (1.0, 1.0))
+    # Round to nearest 8 (required by most diffusion models)
+    width = round(base_w * ar_w / 8) * 8
+    height = round(base_h * ar_h / 8) * 8
+
+    logger.info('image_gen: HF model=%s quality=%s size=%dx%d prompt_len=%d',
+                model_id, quality, width, height, len(prompt))
+
+    payload = {
+        'inputs': prompt,
+        'parameters': {
+            'width': width,
+            'height': height,
+        },
+    }
+
+    url = f'{HF_INFERENCE_BASE}/{model_id}'
+    headers = {
+        'Authorization': f'Bearer {HF_TOKEN}',
+        'Content-Type': 'application/json',
+    }
+    resp = http.post(url, json=payload, headers=headers, timeout=120)
+    resp.raise_for_status()
+
+    # HF Inference API returns raw image bytes
+    content_type = resp.headers.get('Content-Type', 'image/png')
+    mime = content_type.split(';')[0].strip()
+    b64_data = base64.b64encode(resp.content).decode('ascii')
+
+    images_out = [{'mime_type': mime, 'data': b64_data}]
+    return images_out, ''
+
+
 def _generate_imagen(model, prompt, aspect='1:1'):
     """predict-based models (Imagen 4, etc.) — text-to-image only"""
     payload = {
@@ -176,24 +244,32 @@ def _generate_imagen(model, prompt, aspect='1:1'):
 
 @image_gen_bp.route('/api/image-gen', methods=['POST'])
 def generate_image():
-    if not GEMINI_KEY:
-        return jsonify({'error': 'GEMINI_API_KEY not configured on server'}), 503
-
     data = request.get_json(silent=True) or {}
     prompt = (data.get('prompt') or '').strip()
     images = data.get('images', [])
     model = data.get('model') or DEFAULT_MODEL
+    quality = (data.get('quality') or 'standard').strip()
+    aspect = (data.get('aspect') or '1:1').strip()
 
     if not prompt:
         return jsonify({'error': 'prompt is required'}), 400
 
-    aspect = (data.get('aspect') or '1:1').strip()
-
     try:
+        is_hf = model.startswith('hf:')
         is_imagen = model.startswith('imagen-')
-        if is_imagen:
+
+        if is_hf:
+            hf_model_id = model[3:]  # strip 'hf:' prefix
+            if not HF_TOKEN:
+                return jsonify({'error': 'HF_TOKEN not configured on server'}), 503
+            imgs_out, text_out = _generate_huggingface(hf_model_id, prompt, quality, aspect)
+        elif is_imagen:
+            if not GEMINI_KEY:
+                return jsonify({'error': 'GEMINI_API_KEY not configured on server'}), 503
             imgs_out, text_out = _generate_imagen(model, prompt, aspect)
         else:
+            if not GEMINI_KEY:
+                return jsonify({'error': 'GEMINI_API_KEY not configured on server'}), 503
             imgs_out, text_out = _generate_gemini(model, prompt, images)
 
         if not imgs_out:
@@ -212,10 +288,10 @@ def generate_image():
 
     except http.HTTPError as e:
         body = e.response.text[:400] if e.response else str(e)
-        logger.error('Gemini image-gen HTTP error: %s', body)
+        logger.error('image-gen HTTP error: %s', body)
         return jsonify({'error': body}), e.response.status_code if e.response else 502
     except Exception as e:
-        logger.exception('Gemini image-gen error')
+        logger.exception('image-gen error')
         return jsonify({'error': str(e)}), 500
 
 

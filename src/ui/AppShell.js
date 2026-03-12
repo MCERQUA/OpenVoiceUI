@@ -487,4 +487,58 @@ const SHELL_HTML = `
     <audio id="music-player" style="display: none;" crossorigin="anonymous"></audio>
     <audio id="music-player-2" style="display: none;" crossorigin="anonymous"></audio>
     <canvas id="capture-canvas" style="display: none;"></canvas>
+
+    <!-- Issue Report Button — top, halfway between center and right edge -->
+    <button id="issue-report-btn" class="issue-report-btn" title="Report an issue" onclick="window.IssueReporter?.open()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+    </button>
+
+    <!-- Issue Report Modal -->
+    <div id="issue-report-modal" class="issue-report-modal" style="display:none;" onclick="if(event.target===this)window.IssueReporter?.close()">
+        <div class="irm-box">
+            <div class="irm-header">
+                <span class="irm-title">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;color:#f59e0b">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    Report an Issue
+                </span>
+                <button class="irm-close" onclick="window.IssueReporter?.close()" title="Close">&times;</button>
+            </div>
+            <div class="irm-body">
+                <div class="irm-field">
+                    <label class="irm-label">Issue Type</label>
+                    <select id="irm-type" class="irm-select">
+                        <option value="stt">STT / Mic not working</option>
+                        <option value="tts">TTS / Audio problem</option>
+                        <option value="connection">Connection / Gateway error</option>
+                        <option value="canvas">Canvas / Display issue</option>
+                        <option value="slow">Slow / Unresponsive</option>
+                        <option value="bug">Other bug</option>
+                        <option value="feedback">Feedback / Request</option>
+                    </select>
+                </div>
+                <div class="irm-field">
+                    <label class="irm-label">Describe what happened</label>
+                    <textarea id="irm-description" class="irm-textarea" placeholder="What were you doing? What went wrong?" rows="4" maxlength="2000"></textarea>
+                </div>
+                <div class="irm-context-row" id="irm-context-row">
+                    <span class="irm-context-label">Auto-attached:</span>
+                    <span class="irm-context-value" id="irm-context-preview"></span>
+                </div>
+            </div>
+            <div class="irm-footer">
+                <span class="irm-status" id="irm-status"></span>
+                <div class="irm-btns">
+                    <button class="irm-btn irm-cancel" onclick="window.IssueReporter?.close()">Cancel</button>
+                    <button class="irm-btn irm-submit" id="irm-submit-btn" onclick="window.IssueReporter?.submit()">Submit Report</button>
+                </div>
+            </div>
+        </div>
+    </div>
 `;

@@ -400,6 +400,7 @@ class GatewayConnection:
         self._backoff_idx = 0
         self._last_disconnect_time = 0.0
         self._server_version: str | None = None
+        self._reconnected_at: float = 0.0  # timestamp of last successful reconnect after failure
 
     @property
     def url(self):
@@ -764,13 +765,18 @@ class GatewayConnection:
             if data.get('type') == 'event' and data.get('event') == 'chat':
                 payload = data.get('payload', {})
 
-                # Handle aborted runs — the gateway sends chat state=aborted
-                # before the cleanup chat.final. Mark so we discard the final.
+                # Handle aborted runs — exit immediately so heartbeat loop stops.
+                # The gateway may send a cleanup chat.final later but we don't
+                # need to wait for it; the abort is authoritative.
                 if payload.get('state') == 'aborted':
-                    run_was_aborted = True
                     logger.info(f"### RUN ABORTED: runId={payload.get('runId', '?')[:12]} "
                                 f"reason={payload.get('stopReason', '?')}")
-                    continue
+                    event_queue.put({
+                        'type': 'text_done',
+                        'response': collected_text if collected_text else None,
+                        'actions': captured_actions
+                    })
+                    return
 
                 if payload.get('state') == 'error':
                     error_msg = payload.get('errorMessage', 'Unknown error')
@@ -902,6 +908,8 @@ class GatewayConnection:
             await self._disconnect()
             try:
                 await self._ensure_connected()
+                self._reconnected_at = time.time()
+                logger.info("### WS reconnected after failure — flagged for recovery message")
                 await self._send_and_stream(event_queue, message, session_key,
                                             captured_actions, agent_id=agent_id)
             except Exception as e2:
@@ -1013,3 +1021,18 @@ class OpenClawGateway(GatewayBase):
     def abort_active_run(self, session_key):
         """Abort the active run for the given session key."""
         return self._router.abort_active_run(session_key)
+
+    def consume_reconnection(self, max_age_seconds=120):
+        """Check if gateway recently reconnected after a failure.
+        Returns True (once) if reconnection happened within max_age_seconds.
+        Clears the flag after reading so it only fires once."""
+        for conn in self._router._connections.values():
+            if conn._reconnected_at > 0:
+                age = time.time() - conn._reconnected_at
+                if age < max_age_seconds:
+                    conn._reconnected_at = 0.0
+                    logger.info(f"### consume_reconnection: reconnected {age:.0f}s ago — injecting recovery")
+                    return True
+                else:
+                    conn._reconnected_at = 0.0  # expired, clear silently
+        return False

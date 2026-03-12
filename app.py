@@ -117,6 +117,7 @@ def create_app(config_override: dict = None):
             '/api/theme',     # theme config — loaded before Clerk init
             '/api/music',     # music track list — loaded before Clerk init
             '/api/faces',     # face list — loaded before Clerk init
+            '/api/ssactivewear/',  # S&S wholesale catalog proxy — called from canvas pages
         )
         _PUBLIC_EXACT = {
             '/',           # main page — hosts the Clerk login gate itself
@@ -196,7 +197,7 @@ def create_app(config_override: dict = None):
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://*.clerk.accounts.dev https://*.jam-bot.com; "
             "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com; "
+            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://www.ssactivewear.com; "
             "media-src 'self' blob:; "
             "connect-src 'self' wss: https:; "
             "frame-src 'self' https://*.clerk.accounts.dev https://*.jam-bot.com https:; "

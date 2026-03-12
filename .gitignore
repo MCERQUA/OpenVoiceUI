@@ -133,3 +133,6 @@ README_SUPERTONIC.md
 SUPERTONIC_SETUP.md
 INTEGRATION_DETAILS.md
 TTS_PROVIDERS.md
+
+# Agent workspace files — NEVER ship in repo, these are per-client customized
+setup/openvoiceui-agent/

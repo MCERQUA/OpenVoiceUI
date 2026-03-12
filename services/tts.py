@@ -220,21 +220,25 @@ def generate_tts_b64(
     """
     voice = voice or 'M1'
 
-    # ── Try primary provider with retries ────────────────────────────
+    # ── Try primary provider (single attempt for cloud, retries for local) ──
     last_err = None
-    for attempt in range(_MAX_RETRIES + 1):
+    # Cloud providers (groq, qwen3) have their own timeout — don't retry
+    # on timeout, fall back immediately. Only retry local providers.
+    is_cloud = tts_provider in ('groq', 'qwen3')
+    max_attempts = 1 if is_cloud else _MAX_RETRIES + 1
+    for attempt in range(max_attempts):
         try:
             audio_bytes = _generate_with_provider(tts_provider, text, voice)
             logger.info(f"TTS generated: provider={tts_provider}, voice={voice}, attempt={attempt + 1}")
             return base64.b64encode(audio_bytes).decode('utf-8')
         except Exception as e:
             last_err = e
-            if attempt < _MAX_RETRIES:
+            if attempt < max_attempts - 1:
                 delay = _RETRY_DELAYS[attempt]
                 logger.warning(f"TTS attempt {attempt + 1} failed (provider={tts_provider}): {e} — retrying in {delay}s")
                 time.sleep(delay)
             else:
-                logger.error(f"TTS retries exhausted (provider={tts_provider}): {e}")
+                logger.warning(f"TTS failed (provider={tts_provider}): {e} — trying fallback")
 
     # ── Fallback to alternate provider ───────────────────────────────
     fallback_id = _FALLBACK_CHAIN.get(tts_provider)
