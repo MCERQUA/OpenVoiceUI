@@ -858,6 +858,7 @@ let desktopPages = [];     // page IDs shown as loose desktop icons
 let knownPages = [];       // all page IDs we've ever seen
 let _manifestTimer = null;
 let wallpaperUrl = null;   // server URL of custom desktop wallpaper
+let savedPageCategories = {}; // { pageId: catId } — persists drag-to-folder assignments across fetchManifest cycles
 
 // Save state to server (debounced)
 function saveState() {
@@ -867,7 +868,7 @@ function saveState() {
 function _doSaveState() {
   const state = JSON.stringify({
     theme: currentTheme, iconPositions, recycleBin,
-    customFolders, desktopPages, knownPages, wallpaperUrl,
+    customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories,
   });
   fetch('/api/canvas/manifest/page/desktop', {
     method: 'PATCH',
@@ -892,6 +893,7 @@ async function loadState() {
         if (state.desktopPages) desktopPages = state.desktopPages;
         if (state.knownPages) knownPages = state.knownPages;
         if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
+        if (state.savedPageCategories) savedPageCategories = state.savedPageCategories;
       } catch(e) {}
     }
   } catch(e) {}
@@ -900,10 +902,11 @@ async function loadState() {
 /* ══════════════════════════════════════════════════════════════
    MANIFEST SYNC — fetch pages dynamically from server
    ══════════════════════════════════════════════════════════════ */
-async function fetchManifest() {
+async function fetchManifest(forceSync) {
   try {
-    const resp = await fetch('/api/canvas/manifest');
-    if (!resp.ok) return;
+    const url = '/api/canvas/manifest' + (forceSync ? '?sync=1' : '');
+    const resp = await fetch(url);
+    if (!resp.ok) { console.warn('[desktop] manifest fetch failed:', resp.status); return; }
     const data = await resp.json();
 
     // Categories to hide from desktop (system UI, empty, etc.)
@@ -930,10 +933,8 @@ async function fetchManifest() {
     }
     CATEGORIES = newCats;
 
-    // Rebuild PAGES from manifest (skip system/hidden pages, but keep uncategorized)
+    // Rebuild PAGES from manifest — include ALL user-visible pages
     const HIDDEN_PAGES = ['desktop','home','inbox','create','office'];
-    // Only hide system-internal categories from the page list — uncategorized pages
-    // should still appear as loose desktop icons so newly created pages are visible
     const PAGE_HIDDEN_CATS = ['system','test-dev'];
     const newPages = {};
     if (data.pages) {
@@ -948,6 +949,11 @@ async function fetchManifest() {
       });
     }
     PAGES = newPages;
+
+    // Apply saved category overrides (drag-to-folder assignments survive fetchManifest)
+    Object.keys(savedPageCategories).forEach(pageId => {
+      if (PAGES[pageId]) PAGES[pageId].cat = savedPageCategories[pageId];
+    });
 
     // Detect new pages
     const currentIds = Object.keys(PAGES);
@@ -968,7 +974,7 @@ async function fetchManifest() {
 
     rebuildDesktopItems();
     buildDesktopIcons();
-  } catch(e) {}
+  } catch(e) { console.warn('[desktop] fetchManifest error:', e); }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1270,13 +1276,16 @@ function dropIntoFolder(draggedItem, targetId) {
   // Move into category folder
   if (targetItem.action === 'folder' && targetItem.category) {
     PAGES[pageId].cat = targetItem.category;
+    savedPageCategories[pageId] = targetItem.category; // persist across fetchManifest
   }
   // Move into custom folder
-  if (targetItem.action === 'customFolder' && targetItem.folderId) {
+  else if (targetItem.action === 'customFolder' && targetItem.folderId) {
     if (!customFolders[targetItem.folderId]) return;
     if (!customFolders[targetItem.folderId].pages.includes(pageId)) {
       customFolders[targetItem.folderId].pages.push(pageId);
     }
+  } else {
+    return; // not a valid folder target — don't remove from desktop
   }
 
   // Remove from desktopPages
@@ -1575,7 +1584,9 @@ function showContextMenu(x, y, items) {
   menu.innerHTML = '';
   items.forEach(item => {
     if (item === '---') {
-      menu.innerHTML += '<div class="ctx-separator"></div>';
+      const sep = document.createElement('div');
+      sep.className = 'ctx-separator';
+      menu.appendChild(sep);
       return;
     }
     const div = document.createElement('div');
@@ -1594,7 +1605,7 @@ function showContextMenu(x, y, items) {
       const subMenu = document.createElement('div');
       subMenu.className = 'ctx-submenu';
       item.sub.forEach(si => {
-        if (si === '---') { subMenu.innerHTML += '<div class="ctx-separator"></div>'; return; }
+        if (si === '---') { const sep = document.createElement('div'); sep.className = 'ctx-separator'; subMenu.appendChild(sep); return; }
         const sd = document.createElement('div');
         sd.className = 'ctx-item';
         sd.textContent = si.label;
@@ -1610,10 +1621,8 @@ function showContextMenu(x, y, items) {
     menu.appendChild(div);
   });
 
-  const container = document.getElementById('os-container');
-  const rect = container.getBoundingClientRect();
-  menu.style.left = Math.min(x, rect.right - 200) + 'px';
-  menu.style.top = Math.min(y, rect.bottom - items.length * 28) + 'px';
+  menu.style.left = Math.max(5, Math.min(x, window.innerWidth - 210)) + 'px';
+  menu.style.top = Math.max(5, Math.min(y, window.innerHeight - items.length * 28 - 10)) + 'px';
   menu.classList.add('show');
   contextMenuOpen = true;
 }
@@ -1785,6 +1794,7 @@ function buildMoveToSubmenu(item) {
       action: () => {
         if (item.pageId) {
           PAGES[item.pageId].cat = catId;
+          savedPageCategories[item.pageId] = catId; // persist
           desktopPages = desktopPages.filter(id => id !== item.pageId);
           saveState();
           rebuildDesktopItems();
@@ -1889,7 +1899,9 @@ function toggleLockIcons() {
   app.style.cursor = iconsLocked ? 'default' : '';
 }
 
-function createShortcut() {
+async function createShortcut() {
+  // Force-sync manifest to ensure ALL pages are shown (including newly created ones)
+  await fetchManifest(true);
   const available = Object.entries(PAGES).filter(([id]) =>
     !recycleBin.includes(id)
   );
@@ -2237,9 +2249,11 @@ function showFolderItemMenu(e, pageId, folderId) {
   ]);
 }
 
-function addPagesToFolder(folderId) {
+async function addPagesToFolder(folderId) {
   const folder = customFolders[folderId];
   if (!folder) return;
+  // Force-sync manifest to ensure ALL pages are shown (including newly created ones)
+  await fetchManifest(true);
   const available = Object.entries(PAGES).filter(([id]) =>
     !recycleBin.includes(id) && !folder.pages.includes(id)
   );
@@ -2333,10 +2347,19 @@ function showExplorerItemMenu(e, pageId) {
   const page = PAGES[pageId];
   const pageName = page ? page.name : pageId;
 
+  const putOnDesktopAction = () => {
+    delete savedPageCategories[pageId];
+    if (!desktopPages.includes(pageId)) desktopPages.push(pageId);
+    if (!knownPages.includes(pageId)) knownPages.push(pageId);
+    saveState();
+    refreshExplorers();
+  };
   if (isMac || isUbuntu) {
     showContextMenu(e.clientX, e.clientY, [
       {label:'Open', action:()=>openCanvasPage(pageId)},
       {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
+      '---',
+      {label:'Put on Desktop', action:putOnDesktopAction},
       '---',
       {label:isMac?'Get Info':'Properties', action:()=>showPageProperties(pageId)},
       '---',
@@ -2348,6 +2371,8 @@ function showExplorerItemMenu(e, pageId) {
     showContextMenu(e.clientX, e.clientY, [
       {label:'Open', action:()=>openCanvasPage(pageId)},
       {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
+      '---',
+      {label:'Put on Desktop', action:putOnDesktopAction},
       '---',
       {label:'Cut', action:()=>{clipboard={action:'cut',id:pageId,pageId:pageId}}},
       {label:'Copy', action:()=>{clipboard={action:'copy',id:pageId,pageId:pageId}}},
@@ -2740,7 +2765,8 @@ function applyWallpaper(url) {
   wallpaperUrl = url || null;
   const desktop = document.getElementById('desktop');
   if (url) {
-    desktop.style.background = 'url(' + url + ') center/cover no-repeat';
+    // Include a dark fallback color so nothing shows through while the image loads
+    desktop.style.background = 'url(' + url + ') center/cover no-repeat #1a1a1a';
   } else {
     desktop.style.background = '';
   }
