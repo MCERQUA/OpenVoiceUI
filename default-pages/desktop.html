@@ -2832,8 +2832,15 @@ async function init() {
     setTheme(currentTheme);
     updateClock();
   });
-  // Poll for new pages every 30 seconds
+  // Poll for new pages every 30 seconds, pause when tab hidden
   _manifestTimer = setInterval(fetchManifest, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (_manifestTimer) { clearInterval(_manifestTimer); _manifestTimer = null; }
+    } else {
+      if (!_manifestTimer) { fetchManifest(); _manifestTimer = setInterval(fetchManifest, 30000); }
+    }
+  });
 }
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);

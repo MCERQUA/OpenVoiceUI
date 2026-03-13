@@ -6145,13 +6145,21 @@ inject();
             },
 
             _startPoll() {
-                // Poll every 3 seconds for file changes on the displayed canvas page
+                // Poll every 10 seconds for file changes on the displayed canvas page
                 if (this._pollInterval) return;
-                this._pollInterval = setInterval(() => this._checkForUpdates(), 3000);
+                this._pollInterval = setInterval(() => this._checkForUpdates(), 10000);
+                // Pause polling when tab is hidden to reduce server load
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+                    } else if (this.isVisible) {
+                        this._startPoll();
+                    }
+                });
             },
 
             async _checkForUpdates() {
-                if (!this.isVisible || !this.iframe) return;
+                if (!this.isVisible || !this.iframe || document.hidden) return;
                 const src = this.iframe.src || '';
                 // Extract filename from iframe src like "/pages/voice-app-refactor-plan.html"
                 const match = src.match(/\/pages\/([^?#]+)/);
