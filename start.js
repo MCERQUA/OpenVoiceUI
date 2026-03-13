@@ -3,43 +3,45 @@ module.exports = async (kernel) => {
   return {
     daemon: true,
     run: [
-      // Start OpenClaw gateway in background
+      // Start all containers
       {
         method: "shell.run",
         params: {
-          message: "openclaw gateway --port 18791 --home ./openclaw-data",
-          background: true,
+          message: `docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up -d`,
         },
       },
 
-      // Wait a moment for openclaw to initialize
+      // Wait for OpenVoiceUI to be ready (polls /health/ready)
       {
         method: "shell.run",
         params: {
-          message: "node -e \"setTimeout(()=>process.exit(0),3000)\"",
+          message: `node -e "
+const http = require('http');
+const port = ${port};
+let attempts = 0;
+const check = () => {
+  attempts++;
+  const req = http.get('http://localhost:' + port + '/health/ready', (r) => {
+    if (r.statusCode < 400) {
+      console.log('Ready on port ' + port + ' after ' + attempts + ' attempts');
+      process.exit(0);
+    } else {
+      if (attempts < 60) setTimeout(check, 3000);
+      else { console.log('Timed out waiting — check docker logs'); process.exit(0); }
+    }
+  });
+  req.on('error', () => {
+    if (attempts < 60) setTimeout(check, 3000);
+    else { console.log('Timed out waiting — check docker logs'); process.exit(0); }
+  });
+  req.end();
+};
+check();
+"`,
         },
       },
 
-      // Start Flask server (the main daemon process)
-      {
-        method: "shell.run",
-        params: {
-          venv: "env",
-          env: {
-            PORT: `${port}`,
-            CLAWDBOT_GATEWAY_URL: "ws://127.0.0.1:18791",
-            SUPERTONIC_API_URL: "",
-          },
-          message: "python server.py",
-          on: [{
-            // Detect when Flask is listening
-            event: `/Listening on.*${port}|Running on.*${port}|http.*${port}/i`,
-            done: true,
-          }],
-        },
-      },
-
-      // Store the URL so menu can show "Open" button
+      // Store URL for the Open button in the menu
       {
         method: "local.set",
         params: {

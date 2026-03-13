@@ -1,6 +1,14 @@
 module.exports = {
   run: [
-    // Pull latest changes
+    // Stop running containers
+    {
+      method: "shell.run",
+      params: {
+        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml down",
+      },
+    },
+
+    // Pull latest code
     {
       method: "shell.run",
       params: {
@@ -8,20 +16,11 @@ module.exports = {
       },
     },
 
-    // Reinstall Python dependencies
+    // Rebuild images with latest changes
     {
       method: "shell.run",
       params: {
-        venv: "env",
-        message: "pip install -r requirements.txt",
-      },
-    },
-
-    // Update OpenClaw to latest
-    {
-      method: "shell.run",
-      params: {
-        message: "npm install -g openclaw@2026.3.2",
+        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml build",
       },
     },
 
