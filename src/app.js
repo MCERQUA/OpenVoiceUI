@@ -3607,6 +3607,7 @@ inject();
                                 // Heartbeat: server is alive, agent is working
                                 if (data.type === 'heartbeat') {
                                     const secs = data.elapsed || 0;
+                                    this._wasAgentic = true;
                                     StatusModule.update('thinking', `WORKING... ${secs}s`);
                                     AgentActivityChip.show('⏳', `Working... ${secs}s`);
                                 }
@@ -3699,6 +3700,7 @@ inject();
                                     this.callbacks.onMessage('assistant', displayText);
                                     TranscriptPanel.finalizeStreaming(displayText);
 
+                                    this._wasAgentic = false;
                                     if (data.actions) ActionConsole.processActions(data.actions);
                                     ActionConsole.addEntry('system', `Response complete (${fullResponse?.length || 0} chars, LLM: ${data.timing?.llm_ms}ms)`);
                                     AgentActivityChip.show('✅', 'Done');
@@ -3796,7 +3798,14 @@ inject();
                         FaceModule.setMood('neutral');
                         StatusModule.update('idle', 'READY');
                         TranscriptPanel.removeThinking();
-                        TranscriptPanel.finalizeStreaming(null);
+                        // If agent was mid-task (had heartbeats), tell the user it was stopped
+                        if (this._wasAgentic) {
+                            this._wasAgentic = false;
+                            TranscriptPanel.finalizeStreaming('⏹ Task stopped.');
+                            ActionConsole.addEntry('system', 'Task stopped by user');
+                        } else {
+                            TranscriptPanel.finalizeStreaming(null);
+                        }
                         document.getElementById('thought-bubbles')?.classList.remove('active');
                         window.HaloSmokeFace?.setThinking(false);
                     } else {
@@ -3833,12 +3842,16 @@ inject();
                             }, delay);
                             return; // skip finally block's safety net — retry will handle it
                         }
-                        this.addSystemMessage('Connection lost. The agent may have restarted. Try talking again in a moment.');
+                        const lostMsg = this._wasAgentic
+                            ? 'Agent restarted mid-task — your task was interrupted. Try again.'
+                            : 'Connection lost. The agent may have restarted. Try talking again in a moment.';
+                        this._wasAgentic = false;
+                        this.addSystemMessage(lostMsg);
                         ActionConsole.addEntry('error', `Error: ${error.message}`);
                         // Clear thinking state on error
                         FaceModule.setMood('sad');
                         TranscriptPanel.removeThinking();
-                        TranscriptPanel.finalizeStreaming(null);
+                        TranscriptPanel.finalizeStreaming('⚠️ Task interrupted — agent restarted.');
                         document.getElementById('thought-bubbles')?.classList.remove('active');
                         window.HaloSmokeFace?.setThinking(false);
                         setTimeout(() => FaceModule.setMood('neutral'), 2000);

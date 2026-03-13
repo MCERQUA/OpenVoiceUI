@@ -386,24 +386,41 @@ def sync_canvas_manifest() -> dict:
 
 
 def add_page_to_manifest(filename: str, title: str, description: str = '', content: str = '') -> dict:
-    """Add a new page to the manifest (called after page creation)."""
+    """Add or update a page in the manifest (called after page creation/update).
+    When updating an existing page, all user-customised fields are preserved —
+    only 'modified' and, if explicitly supplied, 'display_name' are touched.
+    """
     manifest = load_canvas_manifest()
     page_id = Path(filename).stem
     category = suggest_category(title, content)
-    manifest['pages'][page_id] = {
-        'filename': filename,
-        'display_name': title,
-        'description': description[:200] if description else '',
-        'category': category,
-        'tags': [],
-        'created': datetime.now().isoformat(),
-        'modified': datetime.now().isoformat(),
-        'starred': False,
-        'is_public': False,
-        'is_locked': False,
-        'voice_aliases': generate_voice_aliases(title),
-        'access_count': 0,
-    }
+
+    if page_id in manifest['pages']:
+        # Page already exists — preserve user-customised state (description, starred, etc.)
+        existing = manifest['pages'][page_id]
+        manifest['pages'][page_id] = {
+            **existing,
+            'filename': filename,
+            'modified': datetime.now().isoformat(),
+            # Only update display_name if one is explicitly provided
+            'display_name': title if title else existing.get('display_name', page_id),
+            # Never clear description — it may hold serialised desktop state or notes
+            'description': description[:200] if description else existing.get('description', ''),
+        }
+    else:
+        manifest['pages'][page_id] = {
+            'filename': filename,
+            'display_name': title,
+            'description': description[:200] if description else '',
+            'category': category,
+            'tags': [],
+            'created': datetime.now().isoformat(),
+            'modified': datetime.now().isoformat(),
+            'starred': False,
+            'is_public': False,
+            'is_locked': False,
+            'voice_aliases': generate_voice_aliases(title),
+            'access_count': 0,
+        }
     if category not in manifest['categories']:
         manifest['categories'][category] = {
             'name': category.title(),
@@ -852,10 +869,12 @@ def get_canvas_manifest():
 
     Auto-syncs with the filesystem (throttled to once per 60s) so that
     pages written directly by agents appear without a manual sync call.
+    Pass ?sync=1 to force an immediate sync (bypasses throttle).
     """
     global _last_sync_time
+    force_sync = request.args.get('sync') == '1'
     now = time.time()
-    if now - _last_sync_time >= _SYNC_THROTTLE_SECONDS:
+    if force_sync or now - _last_sync_time >= _SYNC_THROTTLE_SECONDS:
         _last_sync_time = now
         manifest = sync_canvas_manifest()
     else:
@@ -1083,6 +1102,16 @@ def create_canvas_page():
         if not raw_filename:
             slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
             raw_filename = f'{slug}.html'
+
+        # Guard: protected system pages cannot be overwritten via this API.
+        # desktop.html and file-explorer.html are OS infrastructure — their HTML
+        # is maintained by admins, not agents. State is in the manifest description.
+        _PROTECTED_PAGES = {'desktop.html', 'file-explorer.html'}
+        if Path(raw_filename).name in _PROTECTED_PAGES:
+            return jsonify({
+                'error': f'{Path(raw_filename).name} is a protected system page and cannot be overwritten. '
+                         'To update desktop icons or layout, use the desktop UI or ask the admin.',
+            }), 403
 
         # Sanitize: strip directory traversal, ensure .html
         filename = Path(raw_filename).name

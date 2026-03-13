@@ -13,6 +13,18 @@
 // Detect iOS — affects mic stream lifetime and recognition restart timing
 const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
+// Post real STT errors to the server so session monitoring can track them.
+// no-speech and aborted are normal Chrome behaviour — don't report those.
+function _reportSTTError(error, message, source = 'stt') {
+    try {
+        fetch('/api/stt-events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ error, message, provider: 'webspeech', source }),
+        }).catch(() => {}); // fire-and-forget, never block STT
+    } catch (_) {}
+}
+
 // ===== WEB SPEECH STT =====
 // Browser-native speech recognition (free, no API keys needed)
 class WebSpeechSTT {
@@ -113,10 +125,12 @@ class WebSpeechSTT {
             }
             if (event.error === 'audio-capture') {
                 console.error('STT: audio-capture — microphone hardware unavailable');
+                _reportSTTError('audio-capture', 'Microphone hardware unavailable', 'stt');
                 if (this.onError) this.onError('audio-capture');
                 return;
             }
             console.error('STT Error:', event.error);
+            _reportSTTError(event.error, `STT recognition error: ${event.error}`, 'stt');
             if (this.onError) this.onError(event.error);
         };
 
@@ -368,6 +382,7 @@ class WakeWordDetector {
                 return; // Normal during passive listening
             }
             console.warn('Wake word detector error:', event.error);
+            _reportSTTError(event.error, `Wake word error: ${event.error}`, 'wake_word');
         };
 
         this.recognition.onend = () => {

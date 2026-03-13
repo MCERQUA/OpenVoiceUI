@@ -2042,4 +2042,25 @@ def tts_preview():
         import traceback
         logger.error(f'TTS preview error: {e}')
         logger.error(traceback.format_exc())
+
+
+@conversation_bp.route('/api/stt-events', methods=['POST'])
+def stt_events():
+    """Receive STT error/status events from the browser.
+    Logs them in a format the session monitor can parse from container stdout.
+    Only real errors are sent (no-speech and aborted are filtered client-side).
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        error_code = data.get('error', 'unknown')
+        message = data.get('message', '')
+        provider = data.get('provider', 'webspeech')
+        source = data.get('source', 'stt')  # 'stt' or 'wake_word'
+
+        # Log in session-monitor-parseable format
+        print(f"### STT_ERROR: {error_code} — {message} (provider={provider} source={source})",
+              flush=True)
+        return jsonify({'ok': True})
+    except Exception:
+        return jsonify({'ok': False}), 500
         return jsonify({'error': 'Internal server error'}), 500
