@@ -17,12 +17,20 @@ OpenVoiceUI is a modular voice UI shell. You bring the intelligence (LLM + TTS),
 - **Voice I/O** — browser-based STT with push-to-talk, wake words, or continuous mode
 - **Animated Faces** — multiple face modes (eye-face avatar, halo smoke orb) with mood states, thinking animations, and audio-reactive waveform mouth
 - **Web Canvas** — fullscreen iframe display system for AI-generated HTML pages, dashboards, and reports with interactive links, page versioning, and external URL display
+- **Desktop OS Interface** — full desktop-like canvas experience with right-click context menus, wallpaper upload, trash, shortcuts, and folder creation (auto-seeded as default pages)
 - **Music Player** — background music with crossfade, AI ducking, and AI trigger commands
 - **Music Generation** — AI-generated track support via Suno or fal.ai integrations
+- **AI Image Generation** — HuggingFace-powered image generation with FLUX.1 and SD3.5 models, quality presets, and aspect ratio control
+- **Voice Cloning** — clone and generate speech with custom voice embeddings via fal.ai Qwen3-TTS
 - **Soundboard** — configurable sound effects with text-trigger detection
 - **Agent Profiles** — switch personas/providers without restart via JSON config
+- **Agent Activity Chip** — live action ticker showing what the agent is doing in real-time
 - **Live Instruction Editor** — hot-reload system prompt from the admin panel
 - **Admin Dashboard** — session control, playlist editor, face picker, theme editor
+- **Issue Reporter** — in-app bug/feedback reporting modal with session context (development tool)
+- **Server-Side Settings** — voice, face, and TTS preferences persist across devices via server (no localStorage)
+- **Document Upload Extraction** — PDF and document text extraction from uploads
+- **Empty Response Auto-Recovery** — auto-retry on empty LLM responses with Z.AI direct fallback and session auto-recovery
 
 ---
 
@@ -35,13 +43,13 @@ Connect to any LLM via a gateway plugin — OpenClaw is built-in, others are dro
 
 | Provider | Status |
 |----------|--------|
-| Any OpenClaw-compatible gateway | ✓ Built-in |
-| Z.AI (GLM models) | ✓ Built-in |
-| OpenAI-compatible APIs | ✓ Via adapter |
-| Ollama (local) | ✓ Via adapter |
-| Hume EVI | ✓ Built-in adapter |
-| LangChain, AutoGen, custom agent framework | ✓ Via gateway plugin |
-| **Any LLM or framework you build a plugin for** | ✓ Drop a folder in `plugins/` |
+| Any OpenClaw-compatible gateway | Built-in |
+| Z.AI (GLM models) | Built-in |
+| OpenAI-compatible APIs | Via adapter |
+| Ollama (local) | Via adapter |
+| Hume EVI | Built-in adapter |
+| LangChain, AutoGen, custom agent framework | Via gateway plugin |
+| **Any LLM or framework you build a plugin for** | Drop a folder in `plugins/` |
 
 ### TTS Providers
 | Provider | Type | Cost |
@@ -52,11 +60,15 @@ Connect to any LLM via a gateway plugin — OpenClaw is built-in, others are dro
 | **Hume EVI** | Cloud, emotion-aware | ~$0.032/min |
 | **Any TTS engine you implement** | Local or cloud | Your choice |
 
-### STT
-- Web Speech API (browser-native, no API key needed)
-- Whisper (local)
-- Hume EVI (full-duplex)
-- Any STT provider via a custom adapter
+### STT Providers
+| Provider | Type | Cost | Notes |
+|----------|------|------|-------|
+| **Web Speech API** | Browser-native | Free | No API key needed, Chrome/Edge only |
+| **Deepgram Nova-2** | Cloud streaming | Pay-per-use | Reliable paid alternative, real-time WebSocket streaming |
+| **Groq Whisper** | Cloud batch | Free tier available | Fast batch transcription via Groq API |
+| **Whisper** | Local | Free | Self-hosted Whisper model |
+| **Hume EVI** | Cloud, full-duplex | ~$0.032/min | Emotion-aware, bidirectional |
+| **Any STT provider** | Via custom adapter | Your choice | Implement the STT adapter interface |
 
 ---
 
@@ -77,6 +89,16 @@ Connect to any LLM via a gateway plugin — OpenClaw is built-in, others are dro
 - **Interactive links** — canvas pages communicate with the app via postMessage bridge (navigate, speak, open URLs)
 - **Page versioning** — automatic `.versions/` backup on every change with restore API
 - **External URL display** — load any URL in the canvas iframe via `[CANVAS_URL:https://...]`
+- **Default pages** — desktop OS and file explorer pages auto-seeded on startup
+- **Admin lock/URL columns** — admin panel shows lock state and copyable URLs for each page
+- **Padded mode** — configurable edge padding on canvas pages
+- **Error auto-injection** — canvas pages get an error bridge for debugging in the ActionConsole
+- **Content Security Policy** — restrictive CSP on canvas pages to prevent XSS
+
+### STT Improvements
+- **Hallucination filter** — rejects ghost transcripts from silence
+- **Noise rejection** — sustained speech detection prevents spurious triggers
+- **VAD tuning** — configurable voice activity detection thresholds
 
 ### Music Player
 - Background playlist with crossfade (1.5s smooth transitions)
@@ -93,6 +115,12 @@ Define agents in JSON — each profile configures:
 - UI theme, face mood, enabled features
 - Session key strategy
 
+### Security
+- **Content Security Policy** — restrictive CSP headers on canvas pages to prevent XSS
+- **SSRF protection** — all external fetch endpoints validate and block internal network requests
+- **Path traversal protection** — file access endpoints sanitize paths
+- **WebSocket authentication** — gateway WebSocket connections require valid auth tokens
+
 ---
 
 ## Project Structure
@@ -101,6 +129,15 @@ Define agents in JSON — each profile configures:
 ├── server.py                   Entry point
 ├── app.py                      Flask app factory
 ├── docker-compose.yml          Multi-service Docker setup
+├── docker-compose.pinokio.yml  Pinokio one-click installer compose
+├── pinokio.js                  Pinokio app manifest
+├── install.js                  Pinokio install script
+├── start.js                    Pinokio start script
+├── stop.js                     Pinokio stop script
+├── update.js                   Pinokio update script
+├── .devcontainer/
+│   ├── devcontainer.json       VS Code dev container config
+│   └── docker-compose.devcontainer.yml
 ├── routes/
 │   ├── conversation.py         Voice + parallel TTS streaming (with abort + heartbeats)
 │   ├── canvas.py               Canvas display system + CDN stripping
@@ -115,7 +152,13 @@ Define agents in JSON — each profile configures:
 │   ├── theme.py                Theme management
 │   ├── elevenlabs_hybrid.py    ElevenLabs TTS adapter
 │   ├── pi.py                   Pi coding agent
-│   └── static_files.py         Static asset serving
+│   ├── static_files.py         Static asset serving
+│   ├── image_gen.py            HuggingFace image generation (FLUX.1, SD3.5)
+│   ├── workspace.py            Agent workspace file management
+│   ├── ssactivewear.py         S&S Activewear wholesale API proxy
+│   ├── report_issue.py         In-app issue reporter
+│   ├── icons.py                Icon generation
+│   └── onboarding.py           Onboarding flow
 ├── services/
 │   ├── auth.py                 Clerk JWT authentication middleware
 │   ├── canvas_versioning.py    Automatic page version history + restore
@@ -147,8 +190,12 @@ Define agents in JSON — each profile configures:
 ├── deploy/
 │   ├── openclaw/Dockerfile     OpenClaw container build
 │   ├── supertonic/             Supertonic TTS container (Dockerfile + server.py)
+│   ├── skill-runner/           Shared skill execution service (Dockerfile + server.py)
 │   ├── setup-sudo.sh           VPS setup (nginx, SSL, systemd)
 │   └── openvoiceui.service     Systemd unit file
+├── default-pages/              Auto-seeded default canvas pages
+│   ├── desktop.html            Desktop OS interface
+│   └── file-explorer.html      File explorer page
 ├── src/
 │   ├── app.js                  Frontend core
 │   ├── adapters/               Adapter implementations
@@ -172,7 +219,9 @@ Define agents in JSON — each profile configures:
 │   │   ├── themes/             ThemeManager
 │   │   └── visualizers/        PartyFXVisualizer, BaseVisualizer
 │   └── providers/
-│       ├── WebSpeechSTT.js     Browser speech recognition
+│       ├── WebSpeechSTT.js     Browser speech recognition + wake word detection
+│       ├── DeepgramSTT.js      Deepgram Nova-2 streaming STT
+│       ├── GroqSTT.js          Groq Whisper batch STT
 │       ├── TTSPlayer.js        TTS audio playback
 │       └── tts/                TTS provider JS modules
 ├── sounds/                     Soundboard audio files
@@ -199,7 +248,21 @@ Define agents in JSON — each profile configures:
 
 ---
 
-## Deployment (Recommended: VPS)
+## Installation
+
+### Option 1: Pinokio One-Click Install
+
+The easiest way to get started. [Pinokio](https://pinokio.computer) is a free app manager that handles installation, startup, and updates automatically.
+
+1. Install [Pinokio](https://pinokio.computer) if you don't have it
+2. Search for "OpenVoiceUI" in the Pinokio app store, or add this repo URL directly
+3. Click **Install** — Pinokio will clone the repo, build Docker images, and run onboarding
+4. Click **Start** to launch all services
+5. Open the URL shown in Pinokio to access the UI
+
+Pinokio handles Docker Compose orchestration, environment configuration, and service lifecycle. Use the **Stop** button to shut down, and **Update** to pull the latest changes.
+
+### Option 2: Deployment (Recommended: VPS)
 
 The recommended way to run OpenVoiceUI is on a dedicated VPS — microphone access, SSL, and always-on uptime all work significantly better hosted than on a local machine.
 
@@ -221,11 +284,9 @@ sudo systemctl status openvoiceui
 sudo journalctl -u openvoiceui -f
 ```
 
----
+### Option 3: Local Install (Docker)
 
-## Local Install (Docker)
-
-Docker is the easiest path — it runs OpenClaw, Supertonic TTS, and OpenVoiceUI together. Note that browser microphone access requires HTTPS — on localhost Chrome/Edge will still allow it, but other devices on your network won't work without a cert.
+Docker is the easiest path for local development — it runs OpenClaw, Supertonic TTS, and OpenVoiceUI together. Note that browser microphone access requires HTTPS — on localhost Chrome/Edge will still allow it, but other devices on your network won't work without a cert.
 
 ```bash
 git clone https://github.com/MCERQUA/OpenVoiceUI
@@ -233,7 +294,7 @@ cd OpenVoiceUI
 cp .env.example .env
 ```
 
-### Step 1: Onboard OpenClaw (one-time)
+#### Step 1: Onboard OpenClaw (one-time)
 
 Run the interactive onboarding wizard to configure your LLM provider and generate an auth token:
 
@@ -244,7 +305,7 @@ docker compose run --rm openclaw openclaw onboard
 
 This will prompt you to choose an LLM provider (Anthropic, OpenAI, etc.), enter your API key, and generate a gateway auth token.
 
-### Step 2: Configure `.env`
+#### Step 2: Configure `.env`
 
 Set the auth token from onboarding:
 
@@ -255,7 +316,7 @@ CLAWDBOT_AUTH_TOKEN=<token-from-onboarding>
 
 > `CLAWDBOT_GATEWAY_URL` does not need to be set — Docker Compose automatically routes to the OpenClaw container via loopback networking. TTS works out of the box with Supertonic (local, free). Optionally add `GROQ_API_KEY` for Groq Orpheus TTS.
 
-### Step 3: Start
+#### Step 3: Start
 
 ```bash
 docker compose up --build
@@ -263,7 +324,7 @@ docker compose up --build
 
 Open `http://localhost:5001` in your browser.
 
-### How it works
+#### How it works
 
 The `docker-compose.yml` runs three services:
 
@@ -274,6 +335,20 @@ The `docker-compose.yml` runs three services:
 | `openvoiceui` | OpenVoiceUI server (Python/Flask) — serves the frontend and connects to OpenClaw and Supertonic |
 
 OpenClaw config is persisted in a Docker volume (`openclaw-data`), so onboarding only needs to run once.
+
+### Option 4: VS Code Dev Container
+
+For contributors and developers, OpenVoiceUI includes a VS Code dev container configuration that sets up the full development environment automatically.
+
+1. Install the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) in VS Code
+2. Open the repo folder in VS Code
+3. When prompted, click **Reopen in Container** (or run the "Dev Containers: Reopen in Container" command)
+4. VS Code will build and start all services using `.devcontainer/docker-compose.devcontainer.yml`
+5. The development server starts automatically with hot-reload
+
+The dev container includes all dependencies pre-installed and is configured for the full Docker Compose stack.
+
+---
 
 ### TTS setup
 
@@ -299,9 +374,11 @@ To **enable Clerk JWT auth** (for multi-user or public-facing deployments):
 
 OpenVoiceUI connects to an [OpenClaw](https://openclaw.ai) gateway via persistent WebSocket. OpenClaw handles LLM routing, tool use, and agent sessions.
 
-**OpenClaw ≥ 2026.2.24**: Requires Ed25519 device identity signing. OpenVoiceUI handles this automatically — a `.device-identity.json` file is generated on first run (never committed to git). The gateway auto-approves local loopback clients on first connect.
+**OpenClaw >= 2026.2.24**: Requires Ed25519 device identity signing. OpenVoiceUI handles this automatically — a `.device-identity.json` file is generated on first run (never committed to git). The gateway auto-approves local loopback clients on first connect.
 
 **Without a configured gateway**: The frontend will load but `/api/conversation` calls will fail. OpenClaw is the default — or drop in any gateway plugin as a replacement.
+
+**Version compatibility**: OpenVoiceUI is tested against openclaw@2026.3.2 and performs a compatibility check on startup. See [OpenClaw Requirements](docs/openclaw-requirements.md) for details on supported versions and known breaking changes.
 
 ---
 
@@ -317,8 +394,8 @@ OpenVoiceUI connects to an [OpenClaw](https://openclaw.ai) gateway via persisten
 | `CLAWDBOT_GATEWAY_URL` | Yes | OpenClaw WebSocket URL (default: `ws://127.0.0.1:18791`) |
 | `CLAWDBOT_AUTH_TOKEN` | Yes | OpenClaw gateway auth token |
 | `GATEWAY_SESSION_KEY` | No | Session key prefix (default: `voice-main-1`) |
-| `GROQ_API_KEY` | No | Groq Orpheus TTS ([console.groq.com](https://console.groq.com)) |
-| `FAL_KEY` | No | Qwen3-TTS via fal.ai ([fal.ai](https://fal.ai/dashboard)) |
+| `GROQ_API_KEY` | No | Groq Orpheus TTS and Groq Whisper STT ([console.groq.com](https://console.groq.com)) |
+| `FAL_KEY` | No | Qwen3-TTS and voice cloning via fal.ai ([fal.ai](https://fal.ai/dashboard)) |
 | `SUPERTONIC_API_URL` | No | Override Supertonic TTS URL (Docker sets this automatically) |
 | `HUME_API_KEY` | No | Hume EVI — emotion-aware voice ([platform.hume.ai](https://platform.hume.ai)) |
 | `HUME_SECRET_KEY` | No | Hume EVI secret key |
@@ -333,6 +410,9 @@ OpenVoiceUI connects to an [OpenClaw](https://openclaw.ai) gateway via persisten
 | `CANVAS_PAGES_DIR` | No | Override canvas pages path (VPS installs) |
 | `CODING_CLI` | No | Coding agent in openclaw: `codex`, `claude`, `opencode`, `pi`, or `none` |
 | `RATELIMIT_DEFAULT` | No | Custom rate limit (e.g. `"200 per day;50 per hour"`) |
+| `HUGGINGFACE_API_KEY` | No | HuggingFace image generation — FLUX.1, SD3.5 models ([huggingface.co](https://huggingface.co/settings/tokens)) |
+| `DEEPGRAM_API_KEY` | No | Deepgram Nova-2 streaming STT ([deepgram.com](https://console.deepgram.com)) |
+| `AGENT_API_KEY` | No | Internal agent-to-Flask API authentication token |
 
 See `.env.example` for full documentation and comments.
 
@@ -389,12 +469,47 @@ POST /api/session/reset  {"type": "hard"}
 GET  /api/tts/providers
 POST /api/tts/generate  {"text": "Hello", "provider": "groq", "voice": "tara"}
 
+# Voice Cloning (fal.ai Qwen3-TTS)
+POST /api/tts/clone                       # Clone voice from audio sample
+POST /api/tts/generate                    # Generate speech with cloned voice
+     {"text": "Hello", "provider": "qwen3", "voice_id": "clone-xxx"}
+
 # Vision
 POST /api/vision/analyze                  # Image/screenshot analysis
+
+# Image Generation (HuggingFace)
+POST /api/image-gen/generate              # Generate image (FLUX.1, SD3.5)
+     {"prompt": "...", "model": "flux", "quality": "high", "aspect_ratio": "16:9"}
+
+# AI Image Enhancement
+POST /api/image-gen/enhance               # Server-side image editing with aspect ratio
+
+# Workspace
+GET  /api/workspace/files                 # List workspace files
+GET  /api/workspace/files/<path>          # Read workspace file
+POST /api/workspace/files/<path>          # Write workspace file
+
+# Settings (server-side persistence)
+GET  /api/settings                        # Get all persisted settings
+POST /api/settings                        # Save settings to server
 
 # Suno Music Generation
 POST /api/suno/generate                   # Generate AI music
 POST /api/suno/callback                   # Webhook callback endpoint
+
+# Issue Reporter
+POST /api/report-issue                    # Submit bug report with session context
+
+# S&S Activewear
+GET  /api/ssactivewear/*                  # Wholesale apparel API proxy
+POST /api/ssactivewear/*
+
+# Icons
+POST /api/icons/generate                  # Generate icons
+
+# Onboarding
+GET  /api/onboarding/status               # Onboarding flow status
+POST /api/onboarding/complete             # Mark onboarding step complete
 ```
 
 ---
@@ -423,8 +538,8 @@ The backend uses a plugin system for LLM gateways. Drop a folder into `plugins/`
 ```
 plugins/
   my-gateway/
-    plugin.json   ← manifest (id, provides, requires_env)
-    gateway.py    ← class Gateway(GatewayBase)
+    plugin.json   <- manifest (id, provides, requires_env)
+    gateway.py    <- class Gateway(GatewayBase)
 ```
 
 **plugin.json:**
@@ -451,6 +566,19 @@ result = gateway_manager.ask("openclaw", "Summarise this: " + text, session_key)
 ```
 
 Full guide: [`plugins/README.md`](plugins/README.md)
+
+---
+
+## Skill Runner Service
+
+The `deploy/skill-runner/` directory contains a shared skill execution service. This is a lightweight Python server that can execute agent skills in an isolated environment, providing a common runtime for skill definitions that need server-side execution (file I/O, API calls, data processing).
+
+Build and run alongside the main stack:
+
+```bash
+docker compose build skill-runner
+docker compose up -d skill-runner
+```
 
 ---
 
@@ -489,7 +617,7 @@ OpenVoiceUI is designed so you can host a single VPS and serve multiple clients,
 
 ## Development Notes
 
-> **Issue Reporter (temporary):** The in-app issue reporting button (`⚑` in the toolbar) is a temporary development tool included during the active development phase to help capture bugs with session context. It will be removed or made optional before a stable release.
+> **Issue Reporter (temporary):** The in-app issue reporting button in the toolbar is a temporary development tool included during the active development phase to help capture bugs with session context. It will be removed or made optional before a stable release.
 
 ---
 
@@ -499,12 +627,14 @@ OpenVoiceUI is designed so you can host a single VPS and serve multiple clients,
 |-------|------------|
 | Backend | Python / Flask (blueprint architecture) |
 | Frontend | Vanilla JS ES modules (no framework) |
-| STT | Web Speech API / Whisper / Hume |
+| STT | Web Speech API / Deepgram Nova-2 / Groq Whisper / Whisper / Hume |
 | TTS | Supertonic / Groq Orpheus / Qwen3 / Hume EVI |
 | LLM | Any via gateway adapter |
+| Image Gen | HuggingFace (FLUX.1, SD3.5) |
 | Canvas | Fullscreen iframe + SSE manifest system |
 | Music Gen | Suno API / fal.ai |
 | Auth | Clerk (optional) |
+| Installer | Pinokio / Docker Compose / VPS deploy script |
 
 ---
 
