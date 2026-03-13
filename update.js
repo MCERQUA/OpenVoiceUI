@@ -1,14 +1,6 @@
 module.exports = {
   run: [
-    // Stop if running
-    {
-      method: "shell.run",
-      params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml down",
-      },
-    },
-
-    // Pull latest code
+    // Pull latest changes
     {
       method: "shell.run",
       params: {
@@ -16,33 +8,27 @@ module.exports = {
       },
     },
 
-    // Rebuild images
+    // Reinstall Python dependencies
     {
       method: "shell.run",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml build",
+        venv: "env",
+        message: "pip install -r requirements.txt",
       },
     },
 
-    // Start back up
+    // Update OpenClaw to latest
     {
       method: "shell.run",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up -d",
+        message: "npm install -g openclaw@2026.3.2",
       },
     },
 
     {
-      method: "local.set",
+      method: "notify",
       params: {
-        running: true,
-      },
-    },
-
-    {
-      method: "browser.open",
-      params: {
-        url: "http://localhost:{{local.PORT||5001}}",
+        html: "OpenVoiceUI updated! Click <b>Start</b> to launch.",
       },
     },
   ],

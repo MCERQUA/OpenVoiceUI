@@ -1,30 +1,23 @@
 module.exports = {
   run: [
-    // Step 1: Verify Docker is available
-    {
-      method: "shell.run",
-      params: {
-        message: "docker --version && docker compose version",
-      },
-    },
-
-    // Step 2: Collect API keys from user
+    // Step 1: Collect API keys from user
     {
       method: "input",
       params: {
         title: "OpenVoiceUI Setup",
+        description: "Enter your API keys to get started. A free Groq key is required for voice synthesis.",
         form: [
           {
             key: "GROQ_API_KEY",
-            title: "Groq API Key (required — Text-to-Speech)",
-            description: "Free tier available at console.groq.com. Used for Orpheus voice synthesis.",
+            title: "Groq API Key (required — Text-to-Speech + LLM)",
+            description: "Free tier available at console.groq.com",
             placeholder: "gsk_...",
             required: true,
           },
           {
             key: "PORT",
-            title: "Port (optional)",
-            description: "Port to run OpenVoiceUI on. Default is 5001.",
+            title: "Port (optional, default: 5001)",
+            description: "The local port OpenVoiceUI will run on.",
             placeholder: "5001",
             required: false,
           },
@@ -32,7 +25,28 @@ module.exports = {
       },
     },
 
-    // Step 3: Create openclaw-data dir and write local openclaw config (auth disabled for local use)
+    // Step 2: Install Python dependencies in a virtual environment
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        message: [
+          "pip install -r requirements.txt",
+        ],
+      },
+    },
+
+    // Step 3: Install OpenClaw gateway (Node.js AI gateway)
+    {
+      method: "shell.run",
+      params: {
+        message: [
+          "npm install -g openclaw@2026.3.2",
+        ],
+      },
+    },
+
+    // Step 4: Create OpenClaw config (auth disabled for local single-user)
     {
       method: "shell.run",
       params: {
@@ -47,12 +61,12 @@ const config = {
   timeoutSeconds: 120
 };
 fs.writeFileSync('openclaw-data/openclaw.json', JSON.stringify(config, null, 2));
-console.log('openclaw-data/openclaw.json created');
+console.log('OpenClaw config created');
 "`,
       },
     },
 
-    // Step 4: Generate .env from .env.example with keys filled in
+    // Step 5: Create .env from .env.example with keys filled in
     {
       method: "shell.run",
       params: {
@@ -68,6 +82,9 @@ env = env.replace(/^SECRET_KEY=.*/m, 'SECRET_KEY=' + secret);
 env = env.replace(/^PORT=.*/m, 'PORT=' + port);
 env = env.replace(/^DOMAIN=.*/m, 'DOMAIN=localhost');
 env = env.replace(/^CLAWDBOT_AUTH_TOKEN=.*/m, 'CLAWDBOT_AUTH_TOKEN=' + token);
+env = env.replace(/^CLAWDBOT_GATEWAY_URL=.*/m, 'CLAWDBOT_GATEWAY_URL=ws://127.0.0.1:18791');
+env = env.replace(/^USE_GROQ=.*/m, 'USE_GROQ=true');
+env = env.replace(/^USE_GROQ_TTS=.*/m, 'USE_GROQ_TTS=true');
 fs.writeFileSync('.env', env);
 console.log('.env created (port=' + port + ')');
 "`,
@@ -78,27 +95,11 @@ console.log('.env created (port=' + port + ')');
       },
     },
 
-    // Step 5: Build Docker images (this takes a few minutes on first run)
-    {
-      method: "shell.run",
-      params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml build",
-      },
-    },
-
-    // Step 6: Mark as installed and store port
-    {
-      method: "local.set",
-      params: {
-        installed: true,
-        PORT: "{{input.PORT||5001}}",
-      },
-    },
-
+    // Step 6: Done
     {
       method: "notify",
       params: {
-        html: "OpenVoiceUI installed! Click <b>▶ Start</b> to launch.<br><br>On first start you will be guided to configure your AI provider (Anthropic, OpenAI, Ollama, etc.) through the OpenClaw setup wizard.",
+        html: "OpenVoiceUI installed! Click <b>Start</b> to launch.",
       },
     },
   ],

@@ -1,15 +1,9 @@
 module.exports = {
   run: [
     {
-      method: "shell.run",
+      method: "shell.stop",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml down",
-      },
-    },
-    {
-      method: "local.set",
-      params: {
-        running: false,
+        uri: "start.js",
       },
     },
   ],

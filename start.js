@@ -1,57 +1,51 @@
-module.exports = {
-  run: [
-    // Start all containers
-    {
-      method: "shell.run",
-      params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up -d",
-      },
-    },
-
-    // Wait for OpenVoiceUI to be ready
-    {
-      method: "shell.run",
-      params: {
-        message: `node -e "
-const http = require('http');
-const port = process.env.PORT || 5001;
-let attempts = 0;
-const check = () => {
-  attempts++;
-  http.get('http://localhost:' + port + '/health/ready', (r) => {
-    if (r.statusCode < 400) {
-      console.log('Ready after ' + attempts + ' attempts');
-    } else {
-      if (attempts < 30) setTimeout(check, 2000);
-      else { console.log('Timeout — opening anyway'); }
-    }
-  }).on('error', () => {
-    if (attempts < 30) setTimeout(check, 2000);
-    else { console.log('Timeout — opening anyway'); }
-  });
-};
-check();
-"`,
-        env: {
-          PORT: "{{local.PORT||5001}}",
+module.exports = async (kernel) => {
+  let port = await kernel.port(5001)
+  return {
+    daemon: true,
+    run: [
+      // Start OpenClaw gateway in background
+      {
+        method: "shell.run",
+        params: {
+          message: "openclaw gateway --port 18791 --home ./openclaw-data",
+          background: true,
         },
       },
-    },
 
-    // Mark as running
-    {
-      method: "local.set",
-      params: {
-        running: true,
+      // Wait a moment for openclaw to initialize
+      {
+        method: "shell.run",
+        params: {
+          message: "node -e \"setTimeout(()=>process.exit(0),3000)\"",
+        },
       },
-    },
 
-    // Open OpenVoiceUI in browser
-    {
-      method: "browser.open",
-      params: {
-        url: "http://localhost:{{local.PORT||5001}}",
+      // Start Flask server (the main daemon process)
+      {
+        method: "shell.run",
+        params: {
+          venv: "env",
+          env: {
+            PORT: `${port}`,
+            CLAWDBOT_GATEWAY_URL: "ws://127.0.0.1:18791",
+            SUPERTONIC_API_URL: "",
+          },
+          message: "python server.py",
+          on: [{
+            // Detect when Flask is listening
+            event: `/Listening on.*${port}|Running on.*${port}|http.*${port}/i`,
+            done: true,
+          }],
+        },
       },
-    },
-  ],
+
+      // Store the URL so menu can show "Open" button
+      {
+        method: "local.set",
+        params: {
+          url: `http://localhost:${port}`,
+        },
+      },
+    ],
+  }
 }
