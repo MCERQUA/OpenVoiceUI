@@ -39,6 +39,10 @@ module.exports = {
             text: "Terminal",
             href: "start.js",
           }, {
+            icon: "fa-solid fa-square",
+            text: "Stop",
+            href: "stop.js",
+          }, {
             icon: "fa-solid fa-rotate",
             text: "Update",
             href: "update.js",
