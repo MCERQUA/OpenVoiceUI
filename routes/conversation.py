@@ -833,6 +833,16 @@ def _conversation_inner():
         except Exception:
             pass
 
+        # Recently completed Suno generations — agent gets notified on next turn
+        try:
+            from routes.suno import completed_songs_queue
+            if completed_songs_queue:
+                _pending = completed_songs_queue[-3:]
+                _titles = [s.get('title', 'Unknown Track') for s in _pending]
+                context_parts.append(f'[Suno just finished: {", ".join(repr(t) for t in _titles)} — now ready in Generated playlist]')
+        except Exception:
+            pass
+
         # Available canvas pages (agent needs IDs for [CANVAS:page-id])
         try:
             from routes.canvas import load_canvas_manifest
@@ -894,6 +904,12 @@ def _conversation_inner():
                 'A new voice session has just started. Give a brief, friendly one-sentence greeting. '
                 'Do NOT address anyone by name — no face has been recognized and you do not know who is speaking.'
             )
+    elif user_message.startswith('__suno_complete__:'):
+        _song_title = user_message[len('__suno_complete__:'):].strip() or 'your track'
+        _gateway_message = (
+            f'The Suno song "{_song_title}" just finished generating and is now ready in the music player. '
+            f'Let the user know in one brief, friendly sentence and offer to play it for them.'
+        )
     else:
         _gateway_message = user_message
     message_with_context = context_prefix + _gateway_message if context_prefix else _gateway_message

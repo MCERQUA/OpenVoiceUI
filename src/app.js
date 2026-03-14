@@ -1431,8 +1431,9 @@ inject();
                 setTimeout(() => this._hideStatus(), 8000);
                 // Refresh music player so the agent and UI see the new track immediately
                 window.musicPlayer?.loadMetadata();
-                // Speak the completion via TTS
-                this._speakCompletion(title);
+                // Notify the agent so it can proactively respond
+                ActionConsole?.addEntry('system', `🎵 Song ready: "${title}"`);
+                this._notifyAgent(title);
             },
 
             async _speakCompletion(title) {
@@ -1450,6 +1451,46 @@ inject();
                     audio.play().catch(() => {});
                 } catch (e) {
                     console.warn('[Suno] TTS completion error:', e);
+                }
+            },
+
+            async _notifyAgent(title) {
+                try {
+                    const provider = window.voiceAgent?.selectedProvider || 'groq';
+                    const voice = window.voiceAgent?.currentVoice || 'autumn';
+                    const sessionId = window._activeSessionId || `suno-${Date.now()}`;
+
+                    const resp = await fetch(`${CONFIG.serverUrl}/api/conversation`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: `__suno_complete__:${title}`,
+                            tts_provider: provider,
+                            voice: voice,
+                            session_id: sessionId,
+                            ui_context: {},
+                        }),
+                    });
+                    if (!resp.ok) throw new Error('notify failed');
+                    const data = await resp.json();
+
+                    if (data.response) {
+                        TranscriptPanel?.addMessage('assistant', data.response);
+                        ActionConsole?.addEntry('system', `🎵 Agent: ${data.response.substring(0, 80)}`);
+                    }
+                    if (data.audio) {
+                        const binary = atob(data.audio);
+                        const bytes = new Uint8Array(binary.length);
+                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                        const blob = new Blob([bytes], { type: 'audio/mpeg' });
+                        const url = URL.createObjectURL(blob);
+                        const audio = new Audio(url);
+                        audio.onended = () => URL.revokeObjectURL(url);
+                        audio.play().catch(() => {});
+                    }
+                } catch (e) {
+                    console.warn('[Suno] Agent notify failed, falling back to TTS:', e);
+                    this._speakCompletion(title);
                 }
             },
         };
@@ -3093,6 +3134,7 @@ inject();
                 this._sessionGreeted = false;  // Reset so every new call gets a greeting
                 // Generate new session ID for this call
                 this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                window._activeSessionId = this.sessionId;
                 console.log('New conversation session:', this.sessionId);
 
                 // Show thinking state immediately so user sees feedback before any async work
@@ -3454,16 +3496,12 @@ inject();
                             ActionConsole.addEntry('system', 'Music: next track');
                             AgentActivityChip.handleTag('music_next');
                             window.musicPlayer?.next();
-                        }
-                        // Check for [SUNO_GENERATE:prompt]
-                        const sunoMatch = text.match(/\[SUNO_GENERATE:([^\]]+)\]/i);
-                        if (sunoMatch && !canvasCommandsProcessed.has('SUNO_GENERATE')) {
-                            canvasCommandsProcessed.add('SUNO_GENERATE');
-                            const sunoPrompt = sunoMatch[1].trim();
-                            ActionConsole.addEntry('system', `Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
-                            AgentActivityChip.handleTag('suno', sunoPrompt);
+                        [...text.matchAll(/\[SUNO_GENERATE:([^\]]+)\]/gi)].forEach(m => {
+                            const sunoPrompt = m[1].trim();
+                            ActionConsole?.addEntry('system', `🎵 Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
+                            AgentActivityChip?.handleTag('suno', sunoPrompt);
                             window.sunoModule?.generate(sunoPrompt);
-                        }
+                        });
                         // Check for [SPOTIFY:track name|artist] — switches player to Spotify mode
                         const spotifyMatch = text.match(/\[SPOTIFY:([^|\]]+)(?:\|([^\]]+))?\]/i);
                         if (spotifyMatch && !canvasCommandsProcessed.has('SPOTIFY')) {
@@ -4624,6 +4662,7 @@ inject();
 
                 // Generate new session ID for this call
                 this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                window._activeSessionId = this.sessionId;
                 console.log('New conversation session:', this.sessionId);
 
                 // Pause wake word detector during conversation
@@ -4939,13 +4978,10 @@ inject();
                 }
                 // [MUSIC_NEXT]
                 if (/\[MUSIC_NEXT\]/i.test(text)) {
-                    window.musicPlayer?.next();
-                }
-                // [SUNO_GENERATE:prompt]
-                const sunoMatch = text.match(/\[SUNO_GENERATE:([^\]]+)\]/i);
-                if (sunoMatch) {
-                    window.sunoModule?.generate(sunoMatch[1].trim());
-                }
+                // [SUNO_GENERATE:prompt] — may appear multiple times
+                [...text.matchAll(/\[SUNO_GENERATE:([^\]]+)\]/gi)].forEach(m => {
+                    window.sunoModule?.generate(m[1].trim());
+                });
                 // [SPOTIFY:track|artist]
                 const spotifyMatch = text.match(/\[SPOTIFY:([^|\]]+)(?:\|([^\]]+))?\]/i);
                 if (spotifyMatch) {

@@ -1013,7 +1013,7 @@ def handle_page_metadata(page_id):
             except (ValueError, TypeError):
                 pass  # malformed date — allow through
 
-    for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked']:
+    for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon']:
         if field in data:
             old_category = page.get('category')
             page[field] = data[field]
