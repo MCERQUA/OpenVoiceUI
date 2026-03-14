@@ -288,18 +288,35 @@ class WebSpeechSTT {
         this._micMuted = true;
         if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
 
-        // Force-send whatever we've accumulated
-        const text = this.accumulatedText.trim();
-        if (text && this.onResult) {
-            console.log('PTT release — sending:', text);
+        // Check if Chrome already finalized text during the hold
+        const immediate = this.accumulatedText.trim();
+        if (immediate && this.onResult) {
+            console.log('PTT release — sending:', immediate);
             this.isProcessing = true;
-            this.onResult(text);
+            this.onResult(immediate);
+            this.accumulatedText = '';
         }
-        this.accumulatedText = '';
 
-        // Stop recognition (muted state prevents onend restart)
+        // Stop recognition — Chrome finalizes any pending speech as isFinal
+        // (muted state prevents onend restart)
         if (this.recognition) {
             try { this.recognition.stop(); } catch (e) {}
+        }
+
+        // If nothing was finalized during hold, wait for Chrome's post-stop results.
+        // Chrome fires onresult with isFinal=true when recognition.stop() is called,
+        // but the event is async. Give it time to arrive, then send.
+        if (!immediate) {
+            setTimeout(() => {
+                if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+                const text = this.accumulatedText.trim();
+                if (text && this.onResult) {
+                    console.log('PTT release (delayed) — sending:', text);
+                    this.isProcessing = true;
+                    this.onResult(text);
+                }
+                this.accumulatedText = '';
+            }, 400);
         }
     }
 

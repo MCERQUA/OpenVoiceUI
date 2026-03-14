@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background gradient -->
+    <radialGradient id="bg" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#030508"/>
+    </radialGradient>
+
+    <!-- Blue ambient glow behind eyes -->
+    <radialGradient id="ambientGlow" cx="50%" cy="52%" r="50%">
+      <stop offset="0%" stop-color="#0088ff" stop-opacity="0.18"/>
+      <stop offset="60%" stop-color="#0066cc" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Left eye sclera -->
+    <radialGradient id="scleraL" cx="42%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="55%" stop-color="#f0f0f5"/>
+      <stop offset="100%" stop-color="#d8dce8"/>
+    </radialGradient>
+
+    <!-- Right eye sclera -->
+    <radialGradient id="scleraR" cx="42%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="55%" stop-color="#f0f0f5"/>
+      <stop offset="100%" stop-color="#d8dce8"/>
+    </radialGradient>
+
+    <!-- Iris gradient -->
+    <radialGradient id="irisL" cx="45%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#0099ff"/>
+      <stop offset="50%" stop-color="#0066dd"/>
+      <stop offset="100%" stop-color="#003388"/>
+    </radialGradient>
+    <radialGradient id="irisR" cx="45%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#0099ff"/>
+      <stop offset="50%" stop-color="#0066dd"/>
+      <stop offset="100%" stop-color="#003388"/>
+    </radialGradient>
+
+    <!-- Pupil gradient -->
+    <radialGradient id="pupilG" cx="40%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#000005"/>
+    </radialGradient>
+
+    <!-- Eye glow filter -->
+    <filter id="eyeGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur"/>
+      <feFlood flood-color="#0088ff" flood-opacity="0.55" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle outer glow for the whole icon -->
+    <filter id="outerGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#0088ff" flood-opacity="0.2"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Voice wave glow -->
+    <filter id="waveGlow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feFlood flood-color="#0088ff" flood-opacity="0.6"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+
+  <!-- Subtle grid pattern for tech feel -->
+  <g opacity="0.03" stroke="#0088ff" stroke-width="0.5" fill="none">
+    <line x1="128" y1="0" x2="128" y2="512"/>
+    <line x1="256" y1="0" x2="256" y2="512"/>
+    <line x1="384" y1="0" x2="384" y2="512"/>
+    <line x1="0" y1="128" x2="512" y2="128"/>
+    <line x1="0" y1="256" x2="512" y2="256"/>
+    <line x1="0" y1="384" x2="512" y2="384"/>
+  </g>
+
+  <!-- Ambient blue glow -->
+  <rect width="512" height="512" rx="108" fill="url(#ambientGlow)"/>
+
+  <!-- === LEFT EYE === -->
+  <g filter="url(#eyeGlow)">
+    <!-- Sclera (eye white) -->
+    <ellipse cx="168" cy="230" rx="82" ry="96" fill="url(#scleraL)"/>
+  </g>
+
+  <!-- Left eyelid (top shadow) -->
+  <path d="M 86 190 Q 168 145 250 190" stroke="#050510" stroke-width="18" fill="none" stroke-linecap="round"/>
+  <!-- Left lower eyelid hint -->
+  <path d="M 100 295 Q 168 320 236 295" stroke="#050510" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.4"/>
+
+  <!-- Left iris -->
+  <circle cx="168" cy="242" r="42" fill="url(#irisL)"/>
+  <!-- Left iris ring -->
+  <circle cx="168" cy="242" r="42" fill="none" stroke="#0055aa" stroke-width="2" opacity="0.5"/>
+
+  <!-- Left pupil -->
+  <circle cx="168" cy="244" r="22" fill="url(#pupilG)"/>
+
+  <!-- Left eye highlights -->
+  <circle cx="152" cy="222" r="12" fill="rgba(255,255,255,0.9)"/>
+  <circle cx="182" cy="258" r="6" fill="rgba(255,255,255,0.35)"/>
+
+  <!-- === RIGHT EYE === -->
+  <g filter="url(#eyeGlow)">
+    <!-- Sclera (eye white) -->
+    <ellipse cx="344" cy="230" rx="82" ry="96" fill="url(#scleraR)"/>
+  </g>
+
+  <!-- Right eyelid (top shadow) -->
+  <path d="M 262 190 Q 344 145 426 190" stroke="#050510" stroke-width="18" fill="none" stroke-linecap="round"/>
+  <!-- Right lower eyelid hint -->
+  <path d="M 276 295 Q 344 320 412 295" stroke="#050510" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.4"/>
+
+  <!-- Right iris -->
+  <circle cx="344" cy="242" r="42" fill="url(#irisR)"/>
+  <!-- Right iris ring -->
+  <circle cx="344" cy="242" r="42" fill="none" stroke="#0055aa" stroke-width="2" opacity="0.5"/>
+
+  <!-- Right pupil -->
+  <circle cx="344" cy="244" r="22" fill="url(#pupilG)"/>
+
+  <!-- Right eye highlights -->
+  <circle cx="328" cy="222" r="12" fill="rgba(255,255,255,0.9)"/>
+  <circle cx="358" cy="258" r="6" fill="rgba(255,255,255,0.35)"/>
+
+  <!-- === VOICE WAVEFORM (below eyes) === -->
+  <g filter="url(#waveGlow)" transform="translate(256, 380)">
+    <!-- Center wave bars representing voice/audio -->
+    <rect x="-60" y="-8" width="4" height="16" rx="2" fill="#0088ff" opacity="0.6"/>
+    <rect x="-44" y="-14" width="4" height="28" rx="2" fill="#0088ff" opacity="0.7"/>
+    <rect x="-28" y="-20" width="4" height="40" rx="2" fill="#0088ff" opacity="0.8"/>
+    <rect x="-12" y="-26" width="5" height="52" rx="2.5" fill="#0088ff" opacity="0.9"/>
+    <rect x="3" y="-30" width="6" height="60" rx="3" fill="#00aaff"/>
+    <rect x="19" y="-26" width="5" height="52" rx="2.5" fill="#0088ff" opacity="0.9"/>
+    <rect x="35" y="-20" width="4" height="40" rx="2" fill="#0088ff" opacity="0.8"/>
+    <rect x="49" y="-14" width="4" height="28" rx="2" fill="#0088ff" opacity="0.7"/>
+    <rect x="63" y="-8" width="4" height="16" rx="2" fill="#0088ff" opacity="0.6"/>
+  </g>
+
+  <!-- Subtle corner accent lines -->
+  <path d="M 40 108 L 40 60 Q 40 40 60 40 L 108 40" stroke="#0088ff" stroke-width="2" fill="none" opacity="0.15" stroke-linecap="round"/>
+  <path d="M 472 108 L 472 60 Q 472 40 452 40 L 404 40" stroke="#0088ff" stroke-width="2" fill="none" opacity="0.15" stroke-linecap="round"/>
+  <path d="M 40 404 L 40 452 Q 40 472 60 472 L 108 472" stroke="#0088ff" stroke-width="2" fill="none" opacity="0.15" stroke-linecap="round"/>
+  <path d="M 472 404 L 472 452 Q 472 472 452 472 L 404 472" stroke="#0088ff" stroke-width="2" fill="none" opacity="0.15" stroke-linecap="round"/>
+</svg>

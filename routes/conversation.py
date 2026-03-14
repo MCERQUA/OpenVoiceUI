@@ -1155,7 +1155,7 @@ def _conversation_inner():
                             if evt.get('error') and not evt.get('response'):
                                 error_msg = evt['error']
                                 logger.error(f"### GATEWAY ERROR → fallback: {error_msg}")
-                                evt['response'] = "Sorry, I hit a temporary issue. Could you try that again?"
+                                evt['response'] = "One moment, still working on that."
                                 metrics['fallback_used'] = 1
                             full_response = evt.get('response')
                             if full_response and max_response_chars:
@@ -1523,7 +1523,7 @@ def _conversation_inner():
     # ── LAST RESORT ───────────────────────────────────────────────────────
     if not ai_response:
         logger.warning('Both Gateway and Z.AI flash failed, using generic fallback')
-        ai_response = "Hmm, my brain glitched for a second there. Try that again?"
+        ai_response = "One moment, I'm still working on something."
 
     # Clean text for TTS
     tts_text = clean_for_tts(ai_response)

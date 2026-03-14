@@ -583,7 +583,9 @@ def canvas_pages_proxy(path):
     """
     try:
         # Auth check — only when explicitly enabled (opt-in for self-hosted deployments)
-        if CANVAS_REQUIRE_AUTH:
+        # Skip auth for non-HTML assets (images, icons, CSS) — they're embedded resources
+        _is_html = path.endswith('.html')
+        if CANVAS_REQUIRE_AUTH and _is_html:
             page_id = Path(path).stem
             manifest = load_canvas_manifest()
             page_meta = manifest.get('pages', {}).get(page_id, {})

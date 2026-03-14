@@ -1,13 +1,10 @@
 module.exports = {
   run: [
-    // Step 1: Verify Docker is available
+    // Step 1: Verify Docker is installed and running
     {
       method: "shell.run",
       params: {
-        message: [
-          "docker version --format {{.Server.Version}}",
-          "docker compose version",
-        ],
+        message: "node check-docker.js",
       },
     },
 
