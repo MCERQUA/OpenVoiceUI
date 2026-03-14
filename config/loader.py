@@ -71,7 +71,10 @@ def _cast(value: str, cast_type) -> Any:
     if cast_type == "bool":
         return value.lower() in ("true", "1", "yes")
     if cast_type == int:
-        return int(value)
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"Cannot cast {value!r} to int")
     if cast_type == float:
         return float(value)
     return value  # str passthrough
@@ -115,7 +118,13 @@ def _apply_env_overrides(data: dict) -> None:
     for env_key, (config_key, cast_type) in _ENV_MAP.items():
         value = os.environ.get(env_key)
         if value is not None:
-            _deep_set(data, config_key, _cast(value, cast_type))
+            try:
+                _deep_set(data, config_key, _cast(value, cast_type))
+            except (ValueError, TypeError) as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Ignoring env var {env_key}={value!r}: {e}"
+                )
 
     # Generic double-underscore overrides: SERVER__PORT=5002 → server.port
     for env_key, value in os.environ.items():
