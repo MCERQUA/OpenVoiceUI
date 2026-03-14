@@ -1,16 +1,55 @@
 module.exports = {
   run: [
-    // Step 1: Verify Docker daemon is actually running (docker info fails if Desktop is not started)
+    // Step 1: Verify Docker is available and daemon is running
     {
       method: "shell.run",
       params: {
         message: `node -e "
 const { execSync } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+// On Windows, docker may not be on PATH inside conda/pinokio shell
+// Try common install locations if direct call fails
+const winPaths = [
+  'C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin',
+  process.env.LOCALAPPDATA + '\\\\Docker\\\\resources\\\\bin',
+  'C:\\\\ProgramData\\\\DockerDesktop\\\\version-bin',
+];
+
+function findDocker() {
+  // Try PATH first
+  try {
+    execSync('docker version --format ok', { stdio: 'pipe', timeout: 10000 });
+    return 'docker';
+  } catch(e) {}
+  // On Windows, check common install locations
+  if (process.platform === 'win32') {
+    for (const p of winPaths) {
+      const exe = path.join(p, 'docker.exe');
+      if (fs.existsSync(exe)) {
+        process.env.PATH = p + ';' + process.env.PATH;
+        return exe;
+      }
+    }
+  }
+  return null;
+}
+
+const docker = findDocker();
+if (!docker) {
+  console.error('ERROR: Docker CLI not found. Install Docker Desktop from https://docker.com/products/docker-desktop');
+  process.exit(1);
+}
+
+// Docker CLI found — now check if daemon is running
 try {
-  execSync('docker info', { stdio: 'ignore' });
+  execSync('docker info', { stdio: 'pipe', timeout: 15000 });
   console.log('Docker is running');
 } catch(e) {
-  console.error('ERROR: Docker Desktop is not running. Open Docker Desktop, wait for it to fully start, then click Reinstall.');
+  const msg = e.stderr ? e.stderr.toString() : e.message;
+  console.error('ERROR: Docker daemon not responding. Make sure Docker Desktop is fully started.');
+  console.error('Detail: ' + msg.split('\\n')[0]);
   process.exit(1);
 }
 "`,
@@ -50,14 +89,20 @@ try {
 const fs = require('fs');
 fs.mkdirSync('openclaw-data', { recursive: true });
 const config = {
-  trustedProxies: ['127.0.0.1', '172.0.0.0/8', '10.0.0.0/8'],
-  controlUi: {
-    allowInsecureAuth: true,
-    dangerouslyDisableDeviceAuth: true,
+  gateway: {
+    mode: 'local',
+    port: 18791,
+    bind: 'lan',
+    trustedProxies: ['127.0.0.1', '172.16.0.0/12', '10.0.0.0/8'],
+    controlUi: {
+      allowInsecureAuth: true,
+      dangerouslyDisableDeviceAuth: true,
+    },
   },
   agents: {
     defaults: {
       thinkingDefault: 'off',
+      timeoutSeconds: 120,
     },
   },
 };
@@ -111,10 +156,19 @@ console.log('.env created (port=' + port + ')');
       },
     },
 
+    // Step 6: Mark as installed and store port for Pinokio state tracking
+    {
+      method: "local.set",
+      params: {
+        installed: true,
+        PORT: "{{input.PORT||5001}}",
+      },
+    },
+
     {
       method: "notify",
       params: {
-        html: "OpenVoiceUI installed! Click <b>Start</b> to launch.",
+        html: "OpenVoiceUI installed! Click <b>Start</b> to launch.<br><br>On first start, open <code>http://localhost:18791</code> to configure your AI provider (Anthropic, OpenAI, Ollama, etc.) through the OpenClaw setup wizard.",
       },
     },
   ],
