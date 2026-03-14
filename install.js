@@ -94,6 +94,16 @@ console.log('.env created (port=' + port + ')');
       method: "shell.run",
       params: {
         message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml build",
+        on: [{
+          event: "/pipe.*docker|docker.*not running|cannot connect|error during connect/i",
+          done: true,
+          run: {
+            method: "notify",
+            params: {
+              html: "Docker Desktop is not running. Please open Docker Desktop, wait for it to start, then click <b>Reinstall</b>."
+            }
+          }
+        }]
       },
     },
 
