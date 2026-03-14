@@ -10,6 +10,7 @@ module.exports = {
     },
 
     // Wait for OpenVoiceUI to be ready (reads port from .env, polls /health/ready)
+    // Note: first launch may take 5-10 minutes while Supertonic TTS downloads its model.
     {
       method: "shell.run",
       params: {
@@ -22,29 +23,32 @@ try {
   const m = env.match(/^PORT=(\\d+)/m);
   if (m) port = parseInt(m[1]);
 } catch(e) {}
-console.log('Waiting for OpenVoiceUI on port ' + port + '...');
+console.log('Waiting for OpenVoiceUI on port ' + port + ' (first launch may take up to 10 min)...');
 let attempts = 0;
+const MAX = 120;
 const check = () => {
   attempts++;
+  if (attempts % 10 === 0) console.log('Still waiting... (' + Math.round(attempts * 5 / 60) + ' min elapsed)');
   const req = http.get('http://localhost:' + port + '/health/ready', (r) => {
     if (r.statusCode < 400) {
-      console.log('READY url=http://localhost:' + port);
+      const marker = 'OVU' + '_OPEN';
+      console.log(marker + '=http://localhost:' + port);
       process.exit(0);
     } else {
-      if (attempts < 60) setTimeout(check, 3000);
-      else { console.log('Timed out — check docker logs'); process.exit(0); }
+      if (attempts < MAX) setTimeout(check, 5000);
+      else { console.log('Timed out after 10 min — check Docker Desktop logs for errors'); process.exit(0); }
     }
   });
   req.on('error', () => {
-    if (attempts < 60) setTimeout(check, 3000);
-    else { console.log('Timed out — check docker logs'); process.exit(0); }
+    if (attempts < MAX) setTimeout(check, 5000);
+    else { console.log('Timed out after 10 min — check Docker Desktop logs for errors'); process.exit(0); }
   });
   req.end();
 };
 check();
 "`,
         on: [{
-          event: "/READY url=(.+)/",
+          event: "/OVU_OPEN=(.+)/",
           done: true,
           run: {
             method: "local.set",
