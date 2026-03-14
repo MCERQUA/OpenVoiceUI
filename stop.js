@@ -7,7 +7,7 @@ module.exports = {
       },
     },
     {
-      method: "shell.stop",
+      method: "script.stop",
       params: {
         uri: "start.js",
       },
