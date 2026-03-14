@@ -418,6 +418,7 @@ class GroqSTT {
     pttActivate() {
         this._pttHolding = true;
         this._micMuted = false;
+        this._muteActive = false; // Clear stale TTS mute — PTT overrides
         this.isProcessing = false;
         this.accumulatedText = '';
         this.hadSpeechInChunk = false;

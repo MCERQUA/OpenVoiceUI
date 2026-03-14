@@ -35,7 +35,7 @@ GENERATED_DIR = RUNTIME_DIR / 'icons' / 'generated'
 
 # ── Gemini config ──
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
-GEMINI_MODEL = 'gemini-2.0-flash-exp'
+GEMINI_MODEL = 'gemini-2.5-flash-image'
 GEMINI_URL = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent'
 
 # Cache icon list (rebuilt on first request)
@@ -169,7 +169,6 @@ def generate_icon():
                 'contents': [{'parts': [{'text': full_prompt}]}],
                 'generationConfig': {
                     'responseModalities': ['IMAGE', 'TEXT'],
-                    'imageDimension': 'SQUARE_1024',
                 },
             },
             timeout=60,
