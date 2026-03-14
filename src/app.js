@@ -3496,6 +3496,7 @@ inject();
                             ActionConsole.addEntry('system', 'Music: next track');
                             AgentActivityChip.handleTag('music_next');
                             window.musicPlayer?.next();
+                        }
                         [...text.matchAll(/\[SUNO_GENERATE:([^\]]+)\]/gi)].forEach(m => {
                             const sunoPrompt = m[1].trim();
                             ActionConsole?.addEntry('system', `🎵 Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
@@ -4978,6 +4979,8 @@ inject();
                 }
                 // [MUSIC_NEXT]
                 if (/\[MUSIC_NEXT\]/i.test(text)) {
+                    window.musicPlayer?.next();
+                }
                 // [SUNO_GENERATE:prompt] — may appear multiple times
                 [...text.matchAll(/\[SUNO_GENERATE:([^\]]+)\]/gi)].forEach(m => {
                     window.sunoModule?.generate(m[1].trim());
