@@ -945,6 +945,7 @@ async function fetchManifest(forceSync) {
         newPages[pageId] = {
           name: mp.display_name || pageId,
           cat: mp.category || 'uncategorized',
+          iconUrl: mp.icon || null,
         };
       });
     }
@@ -1074,6 +1075,7 @@ function rebuildDesktopItems() {
       id: 'page-' + pageId,
       name: PAGES[pageId].name,
       icon: getPageIconType(PAGES[pageId].cat, pageId, PAGES[pageId].name),
+      iconUrl: PAGES[pageId].iconUrl || null,
       action: 'openPage',
       pageId: pageId,
     });
@@ -1119,7 +1121,10 @@ function buildDesktopIcons() {
       ? (recycleBin.length > 0 ? 'recycle-full' : 'recycle')
       : item.icon;
 
-    el.innerHTML = `<div class="icon-img">${getIcon(recycleIcon)}</div><div class="icon-label">${getIconName(item)}</div>`;
+    const iconHtml = item.iconUrl
+      ? `<img src="${item.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
+      : getIcon(recycleIcon);
+    el.innerHTML = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
     el.addEventListener('mousedown', (e) => onIconMouseDown(e, item));
     el.addEventListener('touchstart', (e) => onIconTouchStart(e, item), {passive:false});
     el.addEventListener('dblclick', (e) => { e.stopPropagation(); onIconDblClick(item); });
@@ -2192,8 +2197,11 @@ function buildCustomFolderGrid(folderId) {
   pages.forEach(id => {
     const p = PAGES[id];
     if (!p) return;
+    const eiIconHtml = p.iconUrl
+      ? `<img src="${p.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
+      : getIcon(getPageIconType(p.cat, id, p.name));
     html += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showFolderItemMenu(event,'${id}','${folderId}')">
-      <div class="ei-icon">${getIcon(getPageIconType(p.cat, id, p.name))}</div>
+      <div class="ei-icon">${eiIconHtml}</div>
       <div class="ei-name">${p.name}</div>
     </div>`;
   });
@@ -2305,8 +2313,11 @@ function buildExplorerGrid(catId) {
   let html = '<div class="explorer-grid">';
   pages.forEach(([id, p]) => {
     const iconType = getPageIconType(p.cat, id, p.name);
+    const catIconHtml = p.iconUrl
+      ? `<img src="${p.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
+      : getIcon(iconType);
     html += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showExplorerItemMenu(event,'${id}')">
-      <div class="ei-icon">${getIcon(iconType)}</div>
+      <div class="ei-icon">${catIconHtml}</div>
       <div class="ei-name">${p.name}</div>
     </div>`;
   });
