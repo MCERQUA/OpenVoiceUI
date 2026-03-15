@@ -33,24 +33,17 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from services.gateways.base import GatewayBase
+from services.gateways.compat import (
+    OPENCLAW_TESTED_VERSION, OPENCLAW_MIN_VERSION,
+    PROTOCOL_MIN, PROTOCOL_MAX,
+    match_event, match_stream, match_state,
+    is_noise_event, is_subagent_spawn_tool, is_subagent_tool,
+    is_stale_response_ex, is_system_response, is_subagent_session_key,
+    extract_server_version, extract_run_id, extract_text_content,
+    build_connect_params, is_challenge_event,
+)
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# OpenClaw version compatibility — the version this code was tested against.
-# Used for startup warnings when a mismatched gateway is detected.
-OPENCLAW_TESTED_VERSION = "2026.3.2"
-OPENCLAW_MIN_VERSION = "2026.3.1"
-
-# System/internal response strings that must never be surfaced to the user.
-_SYSTEM_RESPONSE_PATTERNS = frozenset({
-    'HEARTBEAT_OK',
-    'heartbeat_ok',
-    'HEARTBEAT OK',
-})
 
 # Lightweight prompt armor prepended to every user message.
 # Voice instructions (action tags, style rules) now live in the OpenClaw workspace
@@ -280,10 +273,11 @@ class EventDispatcher:
             evt = data.get('event', '')
 
             # Skip noise
-            if evt in ('health', 'tick', 'presence', 'ping'):
+            if is_noise_event(evt):
                 return
 
-            if evt in ('agent', 'chat'):
+            canonical_evt = match_event(evt)
+            if canonical_evt in ('agent', 'chat'):
                 payload = data.get('payload', {})
                 event_run_id = payload.get('runId', '')
                 event_state = payload.get('state', '')
@@ -291,7 +285,8 @@ class EventDispatcher:
 
                 # Track aborted runs so their subsequent events aren't
                 # delivered to new subscriptions (prevents stale replays).
-                if evt == 'chat' and event_state == 'aborted' and event_run_id:
+                canonical_state = match_state(event_state)
+                if canonical_evt == 'chat' and canonical_state == 'aborted' and event_run_id:
                     self._aborted_runs.add(event_run_id)
                     logger.info(f"### ABORTED run tracked: {event_run_id[:12]}")
                     # Cap set size to prevent unbounded growth
@@ -445,10 +440,10 @@ class GatewayConnection:
             logger.info("### Gateway persistent WS background loop started")
 
     async def _handshake(self, ws):
+        # Step 1 — receive challenge (accept current and future event names)
         challenge_response = await asyncio.wait_for(ws.recv(), timeout=10.0)
         challenge_data = json.loads(challenge_response)
-        if (challenge_data.get('type') != 'event'
-                or challenge_data.get('event') != 'connect.challenge'):
+        if not is_challenge_event(challenge_data):
             raise RuntimeError(f"Expected connect.challenge, got: {challenge_data}")
 
         nonce = challenge_data.get('payload', {}).get('nonce', '')
@@ -457,34 +452,36 @@ class GatewayConnection:
         device_block = _sign_device_connect(
             identity, "cli", "cli", "operator", scopes, self.auth_token, nonce
         )
+
+        # Step 2 — send connect with protocol range (not pinned)
+        params = build_connect_params(
+            auth_token=self.auth_token,
+            client_id="cli",
+            client_mode="cli",
+            platform="linux",
+            user_agent="openvoice-ui-voice/1.0.0",
+            scopes=scopes,
+            caps=["tool-events"],
+            device_block=device_block,
+        )
         handshake = {
             "type": "req",
             "id": f"connect-{uuid.uuid4()}",
             "method": "connect",
-            "params": {
-                "minProtocol": 3, "maxProtocol": 3,
-                "client": {"id": "cli", "version": "1.0.0", "platform": "linux", "mode": "cli"},
-                "role": "operator",
-                "scopes": scopes,
-                "caps": ["tool-events"], "commands": [], "permissions": {},
-                "auth": {"token": self.auth_token},
-                "device": device_block,
-                "locale": "en-US",
-                "userAgent": "openvoice-ui-voice/1.0.0"
-            }
+            "params": params,
         }
         await ws.send(json.dumps(handshake))
+
+        # Step 3 — receive hello
         hello_response = await asyncio.wait_for(ws.recv(), timeout=10.0)
         hello_data = json.loads(hello_response)
         if hello_data.get('type') != 'res' or hello_data.get('error'):
             raise RuntimeError(f"Gateway auth failed: {hello_data.get('error')}")
-        # Try to extract server version from hello response
+
         result = hello_data.get('result', {}) or {}
-        server_version = (
-            result.get('serverVersion')
-            or result.get('version')
-            or (result.get('server', {}) or {}).get('version')
-        )
+        server_version = extract_server_version(result)
+        negotiated_protocol = result.get('protocol', PROTOCOL_MIN)
+        self._negotiated_protocol = negotiated_protocol
         return hello_data, server_version
 
     async def _connect(self):
@@ -661,16 +658,18 @@ class GatewayConnection:
 
             # Event logging (noise already filtered by dispatcher)
             evt = data.get('event', '')
-            if evt not in ('health', 'tick', 'presence', 'ping'):
+            canonical_evt = match_event(evt) if data.get('type') == 'event' else None
+            if not is_noise_event(evt):
                 payload = data.get('payload', {})
-                if not (evt == 'chat' and payload.get('state') == 'delta'):
+                if not (canonical_evt == 'chat' and match_state(payload.get('state', '')) == 'delta'):
                     logger.info(f"### GW EVENT: {json.dumps(data)[:800]}")
 
             # ── Agent events ──────────────────────────────────────────────
-            if data.get('type') == 'event' and data.get('event') == 'agent':
+            if data.get('type') == 'event' and canonical_evt == 'agent':
                 payload = data.get('payload', {})
+                canonical_stream = match_stream(payload.get('stream', ''))
 
-                if payload.get('stream') == 'assistant':
+                if canonical_stream == 'assistant':
                     d = payload.get('data', {})
                     full_text = d.get('text', '')
                     delta_text = d.get('delta', '')
@@ -684,7 +683,7 @@ class GatewayConnection:
                         collected_text = full_text
                         event_queue.put({'type': 'delta', 'text': delta_text})
 
-                if payload.get('stream') == 'tool':
+                if canonical_stream == 'tool':
                     tool_data = payload.get('data', {})
                     phase = tool_data.get('phase', '')
                     args = tool_data.get('args', {})
@@ -703,7 +702,7 @@ class GatewayConnection:
                     if phase == 'start':
                         tool_name = tool_data.get('name', '?')
                         logger.info(f"### TOOL START: {tool_name}")
-                        if tool_name in ('sessions_spawn', 'sessions-spawn', 'spawn_subagent'):
+                        if is_subagent_spawn_tool(tool_name):
                             subagent_active = True
                             logger.info(f"### SUBAGENT SPAWN DETECTED via tool call: {tool_name}")
                             event_queue.put({'type': 'action', 'action': {
@@ -713,10 +712,10 @@ class GatewayConnection:
                     elif phase == 'result':
                         logger.info(f"### TOOL RESULT: {tool_data.get('name', '?')}")
 
-                if payload.get('stream') == 'lifecycle':
+                if canonical_stream == 'lifecycle':
                     phase = payload.get('data', {}).get('phase', '')
                     sk = payload.get('sessionKey', '')
-                    is_subagent = 'subagent:' in sk
+                    is_subagent = is_subagent_session_key(sk)
                     action = {
                         'type': 'lifecycle', 'phase': phase,
                         'sessionKey': sk, 'ts': time.time()
@@ -753,7 +752,7 @@ class GatewayConnection:
                             prev_text_len = 0
                             collected_text = ''
                         elif collected_text:
-                            if collected_text.strip() in _SYSTEM_RESPONSE_PATTERNS:
+                            if is_system_response(collected_text):
                                 logger.info(f"### Suppressing system response (lifecycle end): {collected_text!r}")
                                 event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
                                 return
@@ -762,13 +761,14 @@ class GatewayConnection:
                             return
 
             # ── Chat events ───────────────────────────────────────────────
-            if data.get('type') == 'event' and data.get('event') == 'chat':
+            if data.get('type') == 'event' and canonical_evt == 'chat':
                 payload = data.get('payload', {})
+                chat_state = match_state(payload.get('state', ''))
 
                 # Handle aborted runs — exit immediately so heartbeat loop stops.
                 # The gateway may send a cleanup chat.final later but we don't
                 # need to wait for it; the abort is authoritative.
-                if payload.get('state') == 'aborted':
+                if chat_state == 'aborted':
                     logger.info(f"### RUN ABORTED: runId={payload.get('runId', '?')[:12]} "
                                 f"reason={payload.get('stopReason', '?')}")
                     event_queue.put({
@@ -778,23 +778,21 @@ class GatewayConnection:
                     })
                     return
 
-                if payload.get('state') == 'error':
+                if chat_state == 'error':
                     error_msg = payload.get('errorMessage', 'Unknown error')
                     logger.error(f"### CHAT ERROR: {error_msg}")
                     event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions,
                                      'error': error_msg})
                     return
 
-                if payload.get('state') == 'final':
+                if chat_state == 'final':
                     logger.info(f"### CHAT FINAL payload: {json.dumps(payload)[:1500]}")
 
                     # Detect gateway-injected stale replays from aborted runs.
-                    # These have model="gateway-injected" and totalTokens=0.
                     usage = payload.get('usage', {})
                     model = payload.get('model', '')
                     total_tokens = usage.get('totalTokens', -1)
-                    is_gateway_injected = (model == 'gateway-injected'
-                                           and total_tokens == 0)
+                    is_gateway_injected = is_stale_response_ex(model, total_tokens, payload)
 
                     if run_was_aborted or is_gateway_injected:
                         logger.info(
@@ -814,17 +812,12 @@ class GatewayConnection:
                     final_text = collected_text
                     if not final_text and 'message' in payload:
                         content = payload['message'].get('content', '')
-                        if isinstance(content, list):
-                            text_parts = [
-                                item['text'] for item in content
-                                if item.get('type') == 'text' and item.get('text', '').strip()
-                            ]
-                            content = ' '.join(text_parts)
+                        content = extract_text_content(content)
                         if content and content.strip():
                             final_text = content
 
                     if final_text:
-                        if final_text.strip() in _SYSTEM_RESPONSE_PATTERNS:
+                        if is_system_response(final_text):
                             logger.info(f"### Suppressing system response (chat final): {final_text!r}")
                             event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
                             return
@@ -835,10 +828,7 @@ class GatewayConnection:
                     # Also check if any captured actions suggest subagent activity
                     # even if the subagent_active flag wasn't set (tool name mismatch)
                     _has_subagent_tools = any(
-                        a.get('type') == 'tool' and a.get('name', '') in (
-                            'sessions_spawn', 'sessions-spawn', 'spawn_subagent',
-                            'agent_send', 'agent-send',
-                        )
+                        a.get('type') == 'tool' and is_subagent_tool(a.get('name', ''))
                         for a in captured_actions
                     )
                     if subagent_active or main_lifecycle_ended or _has_subagent_tools:

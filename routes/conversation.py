@@ -35,6 +35,7 @@ from routes.canvas import canvas_context, update_canvas_context, CANVAS_PAGES_DI
 from routes.transcripts import save_conversation_turn
 from routes.music import current_music_state as _music_state
 from services.gateway_manager import gateway_manager
+from services.gateways.compat import is_system_response
 from services.tts import generate_tts_b64 as _tts_generate_b64
 from tts_providers import get_provider, list_providers
 
@@ -1086,11 +1087,13 @@ def _conversation_inner():
                             # Don't fire TTS if buffer looks like a system response
                             # that will be suppressed at text_done. Wait for final
                             # confirmation before speaking.
-                            _buf_stripped = _tts_buf.strip().upper()
-                            _is_system_text = _buf_stripped in (
-                                'HEARTBEAT_OK', 'HEARTBEAT OK',
-                                'HEARTBEAT_O',  # partial match during streaming
-                            ) or _buf_stripped.startswith('HEARTBEAT')
+                            _buf_stripped = _tts_buf.strip()
+                            # Suppress system responses — uses regex from compat layer
+                            # plus partial match for mid-stream detection
+                            _is_system_text = (
+                                is_system_response(_buf_stripped)
+                                or _buf_stripped.upper().startswith('HEARTBEAT')
+                            )
                             # Fire TTS for complete sentences as they arrive
                             if not _is_system_text and not _has_open_tag(_tts_buf):
                                 sentence, _tts_buf = _extract_sentence(_tts_buf, min_len=_min_sentence_chars)
