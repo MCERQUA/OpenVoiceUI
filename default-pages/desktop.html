@@ -945,7 +945,7 @@ async function fetchManifest(forceSync) {
         newPages[pageId] = {
           name: mp.display_name || pageId,
           cat: mp.category || 'uncategorized',
-          iconUrl: mp.icon || null,
+          iconUrl: (mp.icon && /^(\/|https?:)/.test(mp.icon)) ? mp.icon : null,
         };
       });
     }

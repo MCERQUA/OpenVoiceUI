@@ -128,22 +128,17 @@ def serve_sound(filepath):
 # Upload constants & helpers
 # ---------------------------------------------------------------------------
 
-# Hard limit enforced before writing to disk (25 MB)
-_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+# Hard limit enforced before writing to disk (100 MB)
+_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 # Maximum characters returned to the AI as content_preview
 _MAX_PREVIEW_CHARS = 6000
 
-# Server-side allowlist — only these extensions are accepted
-_ALLOWED_EXTENSIONS = {
-    # Images
-    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff',
-    # Structured documents
-    '.pdf', '.docx', '.xlsx', '.pptx',
-    # Plain text / code
-    '.txt', '.md', '.csv', '.log',
-    '.py', '.js', '.ts', '.json', '.yaml', '.yml',
-    '.html', '.css',
+# Only block executables — accept everything else (weird exports, unknown formats, etc.)
+_BLOCKED_EXTENSIONS = {
+    '.exe', '.bat', '.cmd', '.com', '.scr', '.pif',
+    '.msi', '.dll', '.sys', '.vbs', '.vbe', '.wsh',
+    '.wsf', '.ps1', '.sh', '.cpl', '.inf', '.reg',
 }
 
 # Control characters to strip from extracted text (keeps \t \n \r)
@@ -264,7 +259,7 @@ def upload_file():
     # --- Sanitize filename, validate extension ---
     original_name = Path(f.filename).name
     ext = Path(original_name).suffix.lower()
-    if ext not in _ALLOWED_EXTENSIONS:
+    if ext in _BLOCKED_EXTENSIONS:
         return jsonify({'error': f'File type "{ext}" is not allowed'}), 415
 
     # --- Size check before writing to disk ---
@@ -273,7 +268,7 @@ def upload_file():
     file_size = f.stream.tell()
     f.stream.seek(0)
     if file_size > _MAX_UPLOAD_BYTES:
-        return jsonify({'error': 'File too large (25 MB max)'}), 413
+        return jsonify({'error': 'File too large (100 MB max)'}), 413
 
     # --- Save with UUID filename (no original name on disk) ---
     safe_name = f"{uuid.uuid4().hex}{ext}"
