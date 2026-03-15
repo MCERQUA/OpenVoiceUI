@@ -229,47 +229,48 @@ module.exports = {
       },
     },
 
-    // Step 3: Write .env, openclaw.json, and auth-profiles.json
-    // Uses a Node script with env vars instead of fs.write templates
-    // (Pinokio fs.write template resolution is unreliable with array+join)
+    // Step 3: Save input values to JSON file using json.set
+    // Pinokio {{input.*}} templates don't resolve in fs.write or shell.run env
+    // on some platforms. json.set is a different code path that handles them.
+    // We save ALL keys to a JSON file, then setup-config.js reads it.
+    { method: "json.set", params: { path: "pinokio-input.json", key: "PORT", value: "{{input.PORT||5001}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "GROQ_API_KEY", value: "{{input.GROQ_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "DEEPGRAM_API_KEY", value: "{{input.DEEPGRAM_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "ANTHROPIC_API_KEY", value: "{{input.ANTHROPIC_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "ZAI_API_KEY", value: "{{input.ZAI_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "OPENAI_API_KEY", value: "{{input.OPENAI_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "GEMINI_API_KEY", value: "{{input.GEMINI_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "OPENROUTER_API_KEY", value: "{{input.OPENROUTER_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "MISTRAL_API_KEY", value: "{{input.MISTRAL_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "XAI_API_KEY", value: "{{input.XAI_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "CEREBRAS_API_KEY", value: "{{input.CEREBRAS_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "TOGETHER_API_KEY", value: "{{input.TOGETHER_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "HF_TOKEN", value: "{{input.HF_TOKEN}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "MOONSHOT_API_KEY", value: "{{input.MOONSHOT_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "KIMI_API_KEY", value: "{{input.KIMI_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "MINIMAX_API_KEY", value: "{{input.MINIMAX_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "QIANFAN_API_KEY", value: "{{input.QIANFAN_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "MODELSTUDIO_API_KEY", value: "{{input.MODELSTUDIO_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "XIAOMI_API_KEY", value: "{{input.XIAOMI_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "VOLCANO_ENGINE_API_KEY", value: "{{input.VOLCANO_ENGINE_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "BYTEPLUS_API_KEY", value: "{{input.BYTEPLUS_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "SYNTHETIC_API_KEY", value: "{{input.SYNTHETIC_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "VENICE_API_KEY", value: "{{input.VENICE_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "OPENCODE_ZEN_API_KEY", value: "{{input.OPENCODE_ZEN_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "KILOCODE_API_KEY", value: "{{input.KILOCODE_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "AI_GATEWAY_API_KEY", value: "{{input.AI_GATEWAY_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "CLOUDFLARE_AI_GATEWAY_API_KEY", value: "{{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}" } },
+    { method: "json.set", params: { path: "pinokio-input.json", key: "LITELLM_API_KEY", value: "{{input.LITELLM_API_KEY}}" } },
+
+    // Step 4: Generate .env, openclaw.json, and auth-profiles.json from the saved JSON
     {
       method: "shell.run",
       params: {
-        env: {
-          OVU_PORT: "{{input.PORT||5001}}",
-          GROQ_API_KEY: "{{input.GROQ_API_KEY}}",
-          DEEPGRAM_API_KEY: "{{input.DEEPGRAM_API_KEY}}",
-          ANTHROPIC_API_KEY: "{{input.ANTHROPIC_API_KEY}}",
-          OPENAI_API_KEY: "{{input.OPENAI_API_KEY}}",
-          ZAI_API_KEY: "{{input.ZAI_API_KEY}}",
-          GEMINI_API_KEY: "{{input.GEMINI_API_KEY}}",
-          OPENROUTER_API_KEY: "{{input.OPENROUTER_API_KEY}}",
-          MISTRAL_API_KEY: "{{input.MISTRAL_API_KEY}}",
-          XAI_API_KEY: "{{input.XAI_API_KEY}}",
-          CEREBRAS_API_KEY: "{{input.CEREBRAS_API_KEY}}",
-          TOGETHER_API_KEY: "{{input.TOGETHER_API_KEY}}",
-          HF_TOKEN: "{{input.HF_TOKEN}}",
-          MOONSHOT_API_KEY: "{{input.MOONSHOT_API_KEY}}",
-          KIMI_API_KEY: "{{input.KIMI_API_KEY}}",
-          MINIMAX_API_KEY: "{{input.MINIMAX_API_KEY}}",
-          QIANFAN_API_KEY: "{{input.QIANFAN_API_KEY}}",
-          MODELSTUDIO_API_KEY: "{{input.MODELSTUDIO_API_KEY}}",
-          XIAOMI_API_KEY: "{{input.XIAOMI_API_KEY}}",
-          VOLCANO_ENGINE_API_KEY: "{{input.VOLCANO_ENGINE_API_KEY}}",
-          BYTEPLUS_API_KEY: "{{input.BYTEPLUS_API_KEY}}",
-          SYNTHETIC_API_KEY: "{{input.SYNTHETIC_API_KEY}}",
-          VENICE_API_KEY: "{{input.VENICE_API_KEY}}",
-          OPENCODE_ZEN_API_KEY: "{{input.OPENCODE_ZEN_API_KEY}}",
-          KILOCODE_API_KEY: "{{input.KILOCODE_API_KEY}}",
-          AI_GATEWAY_API_KEY: "{{input.AI_GATEWAY_API_KEY}}",
-          CLOUDFLARE_AI_GATEWAY_API_KEY: "{{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}",
-          LITELLM_API_KEY: "{{input.LITELLM_API_KEY}}",
-        },
         message: "node setup-config.js",
       },
     },
 
-    // Step 4: Build Docker images (first run takes a few minutes)
+    // Step 5: Build Docker images (first run takes a few minutes)
     {
       method: "shell.run",
       params: {
@@ -277,7 +278,7 @@ module.exports = {
       },
     },
 
-    // Step 5: Done
+    // Step 6: Done
     {
       method: "notify",
       params: {
