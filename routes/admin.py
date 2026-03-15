@@ -30,6 +30,10 @@ import psutil
 import websockets
 from flask import Blueprint, jsonify, request
 
+from services.gateways.compat import (
+    build_connect_params, is_challenge_event,
+)
+
 logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint('admin', __name__)
@@ -74,28 +78,24 @@ async def _gateway_rpc(method: str, params: dict, timeout: float = 10.0) -> dict
             # Step 1 — receive challenge
             raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
             challenge = json.loads(raw)
-            if (challenge.get('type') != 'event'
-                    or challenge.get('event') != 'connect.challenge'):
+            if not is_challenge_event(challenge):
                 return {"ok": False, "error": f"Unexpected greeting: {challenge}"}
 
             # Step 2 — send connect request
             req_id = str(uuid.uuid4())
+            params = build_connect_params(
+                auth_token=auth_token,
+                client_id="cli",
+                client_mode="cli",
+                platform="linux",
+                user_agent="openvoice-ui-admin/1.0.0",
+                caps=[],
+            )
             await ws.send(json.dumps({
                 "type": "req",
                 "id": f"connect-{req_id}",
                 "method": "connect",
-                "params": {
-                    "minProtocol": 3, "maxProtocol": 3,
-                    "client": {"id": "cli", "version": "1.0.0",
-                                "platform": "linux", "mode": "cli"},
-                    "role": "operator",
-                    "scopes": ["operator.read", "operator.write"],
-                    "caps": [],
-                    "commands": [], "permissions": {},
-                    "auth": {"token": auth_token},
-                    "locale": "en-US",
-                    "userAgent": "openvoice-ui-admin/1.0.0",
-                },
+                "params": params,
             }))
 
             # Step 3 — receive hello

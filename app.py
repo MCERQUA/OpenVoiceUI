@@ -25,8 +25,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 logger = logging.getLogger(__name__)
 
-# Reduced from 100 MB — audio uploads don't need more than 25 MB (P7-T3 security audit)
-_MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+# Match static_files.py and nginx (100 MB) — bulk uploads need full limit
+_MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
 def create_app(config_override: dict = None):
@@ -179,6 +179,11 @@ def create_app(config_override: dict = None):
                     return jsonify({'error': 'Unauthorized', 'code': 'auth_required'}), 401
                 # HTML page request — redirect to root (login gate)
                 return redirect('/')
+
+    # ── JSON error handler for 413 (file too large) ────────────────────────
+    @app.errorhandler(413)
+    def handle_413(e):
+        return jsonify({'error': 'File too large (100 MB max)'}), 413
 
     # ── Security headers (P7-T3 security audit) ──────────────────────────────
     @app.after_request

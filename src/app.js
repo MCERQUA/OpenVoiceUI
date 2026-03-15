@@ -4553,45 +4553,25 @@ inject();
             },
 
             stopAll() {
-                console.log('STOP ALL - killing audio and resetting');
-                // Tell server to abort any active openclaw run (fire-and-forget)
-                console.warn('⛔ ABORT source: stopAll');
-                fetch('/api/conversation/abort', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source: 'stopAll' }),
-                }).catch(() => {});
-                // Stop voiceConversation TTS and abort its fetch
+                // MUTE: Stop TTS audio playback only — do NOT abort the agent's
+                // work, kill the call, or disconnect. The agent keeps working
+                // silently. The user can still speak new requests.
+                console.log('STOP AUDIO - muting TTS (agent keeps working)');
+                // Stop TTS audio on both voice modes
                 if (window._voiceConversation) {
                     window._voiceConversation.stopAudio?.();
-                    if (window._voiceConversation._fetchAbortController) {
-                        window._voiceConversation._fetchAbortController.abort();
-                        window._voiceConversation._fetchAbortController = null;
-                    }
                 }
-                // Stop Clawdbot mode
                 if (this.clawdbotMode) {
                     this.clawdbotMode.stopAudio();
-                    this.clawdbotMode.stopVoiceInput();
-                    if (this.clawdbotMode.stt && this.clawdbotMode.stt.resetProcessing) {
-                        this.clawdbotMode.stt.resetProcessing();
-                    }
                     this.clawdbotMode._ttsPlaying = false;
                 }
-                // Stop Hume mode
-                if (this.humeAdapter) {
-                    this.humeAdapter.disconnect();
-                }
-                if (window.voiceAgent && window.voiceAgent.disconnect) {
-                    window.voiceAgent.disconnect();
-                }
-                // Reset UI
-                StatusModule.update('idle', 'STOPPED');
+                // Un-duck music if it was ducked for TTS
+                MusicModule.duck(false);
+                // Hide the stop button since audio is stopped
+                document.getElementById('stop-button').style.display = 'none';
+                // Face back to neutral (not speaking anymore)
                 FaceModule.setMood('neutral');
                 WaveformModule.setAmplitude(0);
-                MusicModule.duck(false);
-                UIModule.setCallButtonState('disconnected');
-                document.getElementById('stop-button').style.display = 'none';
             }
         };
 
@@ -7189,9 +7169,11 @@ inject();
                     this.panel.addEventListener('drop', (e) => {
                         e.preventDefault();
                         this.panel.classList.remove('tp-dragover');
-                        const file = e.dataTransfer?.files?.[0];
-                        if (file && file.type.startsWith('image/')) {
-                            this._stageFile(file);
+                        const files = e.dataTransfer?.files;
+                        if (files && files.length > 1) {
+                            this._stageBulkFiles(Array.from(files));
+                        } else if (files && files.length === 1) {
+                            this._stageFile(files[0]);
                         }
                     });
                 }
@@ -7201,6 +7183,7 @@ inject();
 
             _stageFile(file) {
                 this._pendingFile = { file, name: file.name, type: file.type, size: file.size };
+                this._pendingBulkFiles = null;
                 // Create blob URL for thumbnail preview in chat
                 if (file.type.startsWith('image/')) {
                     this._pendingImageThumbUrl = URL.createObjectURL(file);
@@ -7209,6 +7192,19 @@ inject();
                 const nameEl = document.getElementById('tp-file-name');
                 if (preview && nameEl) {
                     nameEl.textContent = file.name.length > 20 ? file.name.substring(0, 17) + '...' : file.name;
+                    preview.style.display = 'flex';
+                }
+                document.getElementById('tp-text-input')?.focus();
+                if (!this.isVisible) this.show();
+            },
+
+            _stageBulkFiles(files) {
+                this._pendingFile = null;
+                this._pendingBulkFiles = files;
+                const preview = document.getElementById('tp-file-preview');
+                const nameEl = document.getElementById('tp-file-name');
+                if (preview && nameEl) {
+                    nameEl.textContent = `${files.length} files selected`;
                     preview.style.display = 'flex';
                 }
                 document.getElementById('tp-text-input')?.focus();
@@ -7347,23 +7343,59 @@ inject();
 
             // --- Text input + file upload ---
             _pendingFile: null,
+            _pendingBulkFiles: null,
 
             async sendText() {
                 const input = document.getElementById('tp-text-input');
                 const text = input?.value?.trim() || '';
 
                 // Need either text or a file
-                if (!text && !this._pendingFile) return;
+                if (!text && !this._pendingFile && !this._pendingBulkFiles) return;
 
                 // Grab and clear input + file immediately so repeat sends have nothing to send
                 if (input) input.value = '';
                 const stagedFile = this._pendingFile;
+                const stagedBulkFiles = this._pendingBulkFiles;
                 this._pendingFile = null;
+                this._pendingBulkFiles = null;
 
                 let messageToSend = text;
 
-                // Upload file first if one is staged
-                if (stagedFile) {
+                // Bulk upload — upload all files, send summary to AI
+                if (stagedBulkFiles && stagedBulkFiles.length > 0) {
+                    try {
+                        this.addMessage('assistant', `Uploading ${stagedBulkFiles.length} files...`);
+                        const results = await this.uploadBulkFiles(stagedBulkFiles);
+                        const succeeded = results.filter(r => !r.error);
+                        const failed = results.filter(r => r.error);
+
+                        let parts = [];
+                        if (succeeded.length > 0) {
+                            parts.push(`[BULK UPLOAD: ${succeeded.length} files uploaded successfully]`);
+                            for (const r of succeeded) {
+                                if (r.content_preview) {
+                                    parts.push(`\n--- ${r.original_name} (${r.url}) ---\n${r.content_preview}\n--- End ${r.original_name} ---`);
+                                } else {
+                                    parts.push(`\n- ${r.original_name} → ${r.url} (${r.type})`);
+                                }
+                            }
+                        }
+                        if (failed.length > 0) {
+                            parts.push(`\n[FAILED: ${failed.length} files]`);
+                            for (const r of failed) {
+                                parts.push(`\n- ${r.name}: ${r.error}`);
+                            }
+                        }
+                        messageToSend = parts.join('') + (text ? `\n\n${text}` : '');
+                    } catch (err) {
+                        console.error('Bulk upload failed:', err);
+                        this.addMessage('assistant', `Bulk upload failed: ${err.message}`);
+                        return;
+                    }
+                    this.clearFile();
+                }
+                // Single file upload
+                else if (stagedFile) {
                     try {
                         const result = await this.uploadFile(stagedFile.file);
                         if (result.type === 'image') {
@@ -7399,12 +7431,18 @@ inject();
             },
 
             handleUpload(inputEl) {
-                const file = inputEl?.files?.[0];
-                if (file) this._stageFile(file);
+                const files = inputEl?.files;
+                if (!files || files.length === 0) return;
+                if (files.length === 1) {
+                    this._stageFile(files[0]);
+                } else {
+                    this._stageBulkFiles(Array.from(files));
+                }
             },
 
             clearFile() {
                 this._pendingFile = null;
+                this._pendingBulkFiles = null;
                 const preview = document.getElementById('tp-file-preview');
                 if (preview) preview.style.display = 'none';
                 const fileInput = document.getElementById('tp-file-input');
@@ -7416,17 +7454,41 @@ inject();
                 formData.append('file', file);
 
                 const serverUrl = window.CONFIG?.serverUrl || '';
-                const resp = await fetch(`${serverUrl}/api/upload`, {
-                    method: 'POST',
-                    body: formData
-                });
+                let resp;
+                try {
+                    resp = await fetch(`${serverUrl}/api/upload`, {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'same-origin'
+                    });
+                } catch (networkErr) {
+                    console.error('Upload network error:', networkErr, 'file:', file.name, 'size:', file.size);
+                    throw new Error(`Network error uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`);
+                }
 
                 if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    throw new Error(err.error || 'Upload failed');
+                    const errBody = await resp.text().catch(() => '');
+                    console.error('Upload server error:', resp.status, errBody, 'file:', file.name);
+                    let msg;
+                    try { msg = JSON.parse(errBody).error; } catch(e) {}
+                    throw new Error(msg || `Server error ${resp.status} uploading ${file.name}`);
                 }
 
                 return await resp.json();
+            },
+
+            async uploadBulkFiles(files) {
+                const results = [];
+                // Upload sequentially to avoid overwhelming the server
+                for (const file of files) {
+                    try {
+                        const result = await this.uploadFile(file);
+                        results.push(result);
+                    } catch (err) {
+                        results.push({ error: err.message, name: file.name });
+                    }
+                }
+                return results;
             }
         };
 

@@ -1176,21 +1176,20 @@ def clawdbot_websocket(ws):
                 challenge = json.loads(await asyncio.wait_for(gw.recv(), timeout=10.0))
                 logger.debug(f"Gateway challenge: {challenge.get('event')}")
 
+                from services.gateways.compat import build_connect_params
+                connect_params = build_connect_params(
+                    auth_token=auth_token,
+                    client_id="webchat",
+                    client_mode="webchat",
+                    platform="web",
+                    user_agent="openvoice-ui-webchat/1.0.0",
+                    caps=[],
+                )
                 await gw.send(json.dumps({
                     "type": "req",
                     "id": f"connect-{uuid.uuid4()}",
                     "method": "connect",
-                    "params": {
-                        "minProtocol": 3,
-                        "maxProtocol": 3,
-                        "client": {
-                            "id": "webchat",
-                            "version": "1.0.0",
-                            "platform": "web",
-                            "mode": "webchat",
-                        },
-                        "auth": {"token": auth_token},
-                    },
+                    "params": connect_params,
                 }))
 
                 resp = json.loads(await asyncio.wait_for(gw.recv(), timeout=10.0))
