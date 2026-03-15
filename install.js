@@ -67,6 +67,13 @@ module.exports = {
             required: false,
           },
           {
+            key: "CEREBRAS_API_KEY",
+            title: "Cerebras API Key",
+            description: "cloud.cerebras.ai",
+            placeholder: "",
+            required: false,
+          },
+          {
             key: "TOGETHER_API_KEY",
             title: "Together AI API Key",
             description: "api.together.xyz/settings/api-keys",
@@ -274,6 +281,7 @@ module.exports = {
           "MISTRAL_API_KEY={{input.MISTRAL_API_KEY}}",
           "XAI_API_KEY={{input.XAI_API_KEY}}",
           "ZAI_API_KEY={{input.ZAI_API_KEY}}",
+          "CEREBRAS_API_KEY={{input.CEREBRAS_API_KEY}}",
           "TOGETHER_API_KEY={{input.TOGETHER_API_KEY}}",
           "HF_TOKEN={{input.HF_TOKEN}}",
           "MOONSHOT_API_KEY={{input.MOONSHOT_API_KEY}}",
