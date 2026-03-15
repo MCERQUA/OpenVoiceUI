@@ -2061,6 +2061,7 @@ def tts_preview():
         import traceback
         logger.error(f'TTS preview error: {e}')
         logger.error(traceback.format_exc())
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @conversation_bp.route('/api/stt-events', methods=['POST'])
@@ -2082,4 +2083,3 @@ def stt_events():
         return jsonify({'ok': True})
     except Exception:
         return jsonify({'ok': False}), 500
-        return jsonify({'error': 'Internal server error'}), 500

@@ -377,7 +377,7 @@ function upload(file,id){
 function addQI(id,name,size,c,file){
   $('queue').classList.add('on');
   let th='';
-  if(file&&file.type&&file.type.startsWith('image/')){const u=URL.createObjectURL(file);th=`<img src="${u}" onload="URL.revokeObjectURL(this.src)">`}
+  if(file&&file.type&&file.type.startsWith('image/')){const u=URL.createObjectURL(file);th=`<img src="${u}" onload="try{URL.revokeObjectURL(this.src)}catch(e){}">`}
   else th=IC[c]||IC.oth;
   const el=document.createElement('div');el.className='qi';el.id='qi'+id;
   el.innerHTML=`<div class="qi-ic t-${c}">${th}</div><div class="qi-body"><div class="qi-name">${esc(name)}</div><div class="qi-row"><span class="qi-size">${sz(size)}</span><div class="qi-bar"><div class="qi-bar-f" id="qb${id}"></div></div></div></div><div class="qi-st up" id="qs${id}">0%</div><button class="q-btn" title="Cancel" onclick="cancelQ(${id})"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;

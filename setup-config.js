@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // setup-config.js — Generates all config files for OpenVoiceUI Pinokio install.
-// Reads API keys from pinokio-input.json, env vars, or prompts in terminal.
+// Reads API keys from PINOKIO_* environment variables (set by install.js env: block).
+// This avoids the broken json.set / pinokio-input.json flow entirely.
 
 const fs = require("fs");
 const path = require("path");
@@ -10,122 +11,64 @@ const crypto = require("crypto");
 // Helpers
 // ---------------------------------------------------------------------------
 
-function isRealValue(v) {
-  if (!v || typeof v !== "string" || !v.trim()) return false;
-  if (v === "undefined" || v === "null" || v.startsWith("{{")) return false;
-  return true;
-}
-
-// Synchronous terminal prompt — works without packages, works on Windows
-function promptSync(question) {
-  process.stdout.write(question);
-  const buf = Buffer.alloc(4096);
-  let str = "";
-  try {
-    const bytesRead = fs.readSync(0, buf, 0, buf.length);
-    str = buf.toString("utf8", 0, bytesRead).replace(/[\r\n]/g, "").trim();
-  } catch (_) {}
-  return str;
-}
-
-// ---------------------------------------------------------------------------
-// 0. Load keys from all available sources
-// ---------------------------------------------------------------------------
-
-let input = {};
-
-// Source 1: pinokio-input.json
-try {
-  const raw = fs.readFileSync("pinokio-input.json", "utf8").trim();
-  if (raw && !raw.startsWith("{{")) {
-    input = JSON.parse(raw);
-    console.log(`  Found pinokio-input.json (${Object.keys(input).length} keys)`);
-  }
-} catch (_) {
-  console.log("  No pinokio-input.json found");
-}
-
-// Source 2: environment variables
-const allKeys = [
-  "GROQ_API_KEY", "DEEPGRAM_API_KEY", "ANTHROPIC_API_KEY", "ZAI_API_KEY",
-  "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY",
-  "XAI_API_KEY", "CEREBRAS_API_KEY", "TOGETHER_API_KEY", "HF_TOKEN",
-  "MOONSHOT_API_KEY", "KIMI_API_KEY", "MINIMAX_API_KEY", "QIANFAN_API_KEY",
-  "MODELSTUDIO_API_KEY", "XIAOMI_API_KEY", "VOLCANO_ENGINE_API_KEY",
-  "BYTEPLUS_API_KEY", "SYNTHETIC_API_KEY", "VENICE_API_KEY",
-  "OPENCODE_ZEN_API_KEY", "KILOCODE_API_KEY", "AI_GATEWAY_API_KEY",
-  "CLOUDFLARE_AI_GATEWAY_API_KEY", "LITELLM_API_KEY", "PORT",
-];
-for (const k of allKeys) {
-  if (!isRealValue(input[k]) && isRealValue(process.env[k])) {
-    input[k] = process.env[k];
-  }
-}
-
-function getKey(name) {
-  const v = input[name];
-  return isRealValue(v) ? v.trim() : "";
-}
-
-// Source 3: interactive prompt for missing required keys
-const hasGroq = !!getKey("GROQ_API_KEY");
-const hasDeepgram = !!getKey("DEEPGRAM_API_KEY");
-const hasAiProvider = ["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"].some(k => !!getKey(k));
-
-if (!hasGroq || !hasDeepgram || !hasAiProvider) {
-  console.log("\n  ============================================================");
-  console.log("  Missing required API keys — please paste them below.");
-  console.log("  ============================================================\n");
-
-  if (!hasGroq) {
-    const v = promptSync("  Groq API Key (required — TTS, free at console.groq.com): ");
-    if (v) input.GROQ_API_KEY = v;
-  }
-  if (!hasDeepgram) {
-    const v = promptSync("  Deepgram API Key (required — STT, free at console.deepgram.com): ");
-    if (v) input.DEEPGRAM_API_KEY = v;
-  }
-  if (!["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"].some(k => !!getKey(k))) {
-    console.log("\n  Need at least ONE AI provider:");
-    const v1 = promptSync("  Anthropic API Key (best quality) [Enter to skip]: ");
-    if (v1) input.ANTHROPIC_API_KEY = v1;
-    if (!v1) {
-      const v2 = promptSync("  Z.AI API Key (good quality, low cost) [Enter to skip]: ");
-      if (v2) input.ZAI_API_KEY = v2;
-    }
-    if (!v1 && !getKey("ZAI_API_KEY")) {
-      const v3 = promptSync("  OpenAI API Key [Enter to skip]: ");
-      if (v3) input.OPENAI_API_KEY = v3;
-    }
-  }
-  console.log("");
-}
-
-// Final validation
-if (!getKey("GROQ_API_KEY") || !getKey("DEEPGRAM_API_KEY")) {
-  console.error("  FATAL: Groq and Deepgram keys are required. Cannot continue.");
-  process.exit(1);
-}
-if (!["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"].some(k => !!getKey(k))) {
-  console.error("  FATAL: At least one AI provider key is required. Cannot continue.");
-  process.exit(1);
+function getKey(envName) {
+  // install.js passes keys as PINOKIO_<KEY_NAME> via env
+  const v = process.env["PINOKIO_" + envName] || "";
+  if (!v || v === "undefined" || v === "null" || v.startsWith("{{")) return "";
+  return v.trim();
 }
 
 const PORT = getKey("PORT") || "5001";
 
 // ---------------------------------------------------------------------------
-// 1. Write .env
+// 1. Write openclaw.json (nested gateway/agents format for v2026.3.2+)
 // ---------------------------------------------------------------------------
+
+const openclawConfig = {
+  gateway: {
+    mode: "local",
+    port: 18791,
+    bind: "lan",
+    trustedProxies: ["127.0.0.1", "172.16.0.0/12", "10.0.0.0/8"],
+    controlUi: {
+      allowInsecureAuth: true,
+      dangerouslyDisableDeviceAuth: true,
+    },
+  },
+  agents: {
+    defaults: {
+      thinkingDefault: "off",
+      blockStreamingDefault: "on",
+      blockStreamingBreak: "text_end",
+      timeoutSeconds: 300,
+    },
+    list: [{ id: "main", default: true, workspace: "/root/.openclaw/workspace" }],
+  },
+};
+
+fs.mkdirSync("openclaw-data/workspace", { recursive: true });
+fs.writeFileSync(
+  "openclaw-data/openclaw.json",
+  JSON.stringify(openclawConfig, null, 2) + "\n"
+);
+console.log("  Wrote openclaw-data/openclaw.json");
+
+// ---------------------------------------------------------------------------
+// 2. Write .env
+// ---------------------------------------------------------------------------
+
+const token = crypto.randomBytes(32).toString("hex");
+const secret = crypto.randomBytes(32).toString("hex");
 
 const envLines = [
   "# OpenVoiceUI — generated by Pinokio installer",
   `PORT=${PORT}`,
   "DOMAIN=localhost",
-  "SECRET_KEY=pinokio-local-install",
+  `SECRET_KEY=${secret}`,
   "",
   "# OpenClaw Gateway",
   "CLAWDBOT_GATEWAY_URL=ws://127.0.0.1:18791",
-  "CLAWDBOT_AUTH_TOKEN=pinokio-local-token",
+  `CLAWDBOT_AUTH_TOKEN=${token}`,
   "GATEWAY_SESSION_KEY=voice-main-1",
   "",
   "# AI Provider Keys",
@@ -144,62 +87,51 @@ const envKeyList = [
 for (const k of envKeyList) envLines.push(`${k}=${getKey(k)}`);
 
 envLines.push(
-  "", "# TTS", `GROQ_API_KEY=${getKey("GROQ_API_KEY")}`,
-  "USE_GROQ=true", "USE_GROQ_TTS=true",
-  "", "# STT", `DEEPGRAM_API_KEY=${getKey("DEEPGRAM_API_KEY")}`,
-  "", "# Supertonic TTS", "SUPERTONIC_API_URL=http://supertonic:8765",
+  "",
+  "# TTS",
+  `GROQ_API_KEY=${getKey("GROQ_API_KEY")}`,
+  "USE_GROQ=true",
+  "USE_GROQ_TTS=true",
+  "",
+  "# STT",
+  `DEEPGRAM_API_KEY=${getKey("DEEPGRAM_API_KEY")}`,
+  "",
+  "# Supertonic TTS",
+  "SUPERTONIC_API_URL=http://supertonic:8765"
 );
 
 fs.writeFileSync(".env", envLines.join("\n") + "\n");
 console.log("  Wrote .env");
 
 // ---------------------------------------------------------------------------
-// 2. Write openclaw.json
-// ---------------------------------------------------------------------------
-
-const openclawConfig = {
-  gateway: {
-    mode: "local",
-    port: 18791,
-    auth: { mode: "token", token: "pinokio-local-token" },
-    trustedProxies: ["127.0.0.1", "172.16.0.0/12", "10.0.0.0/8"],
-    controlUi: {
-      allowInsecureAuth: true,
-      dangerouslyDisableDeviceAuth: true,
-      dangerouslyAllowHostHeaderOriginFallback: true,
-    },
-  },
-  agents: {
-    defaults: {
-      thinkingDefault: "off",
-      blockStreamingDefault: "on",
-      blockStreamingBreak: "text_end",
-      timeoutSeconds: 300,
-    },
-    list: [{ id: "main", default: true, workspace: "/root/.openclaw/workspace" }],
-  },
-};
-
-fs.mkdirSync("openclaw-data/workspace", { recursive: true });
-fs.writeFileSync("openclaw-data/openclaw.json", JSON.stringify(openclawConfig, null, 2) + "\n");
-console.log("  Wrote openclaw-data/openclaw.json");
-
-// ---------------------------------------------------------------------------
-// 3. Write auth-profiles.json
+// 3. Write auth-profiles.json (so OpenClaw has working providers on first start)
 // ---------------------------------------------------------------------------
 
 const providerMap = {
-  ANTHROPIC_API_KEY: "anthropic", OPENAI_API_KEY: "openai",
-  GEMINI_API_KEY: "google", OPENROUTER_API_KEY: "openrouter",
-  MISTRAL_API_KEY: "mistral", XAI_API_KEY: "xai", ZAI_API_KEY: "zai",
-  CEREBRAS_API_KEY: "cerebras", TOGETHER_API_KEY: "together",
-  HF_TOKEN: "huggingface", GROQ_API_KEY: "groq", DEEPGRAM_API_KEY: "deepgram",
-  MOONSHOT_API_KEY: "moonshot", KIMI_API_KEY: "kimi-coding",
-  MINIMAX_API_KEY: "minimax", QIANFAN_API_KEY: "qianfan",
-  MODELSTUDIO_API_KEY: "modelstudio", XIAOMI_API_KEY: "xiaomi",
-  VOLCANO_ENGINE_API_KEY: "volcano-engine", BYTEPLUS_API_KEY: "byteplus",
-  SYNTHETIC_API_KEY: "synthetic", VENICE_API_KEY: "venice",
-  OPENCODE_ZEN_API_KEY: "opencode", KILOCODE_API_KEY: "kilocode",
+  ANTHROPIC_API_KEY: "anthropic",
+  OPENAI_API_KEY: "openai",
+  GEMINI_API_KEY: "google",
+  OPENROUTER_API_KEY: "openrouter",
+  MISTRAL_API_KEY: "mistral",
+  XAI_API_KEY: "xai",
+  ZAI_API_KEY: "zai",
+  CEREBRAS_API_KEY: "cerebras",
+  TOGETHER_API_KEY: "together",
+  HF_TOKEN: "huggingface",
+  GROQ_API_KEY: "groq",
+  DEEPGRAM_API_KEY: "deepgram",
+  MOONSHOT_API_KEY: "moonshot",
+  KIMI_API_KEY: "kimi-coding",
+  MINIMAX_API_KEY: "minimax",
+  QIANFAN_API_KEY: "qianfan",
+  MODELSTUDIO_API_KEY: "modelstudio",
+  XIAOMI_API_KEY: "xiaomi",
+  VOLCANO_ENGINE_API_KEY: "volcano-engine",
+  BYTEPLUS_API_KEY: "byteplus",
+  SYNTHETIC_API_KEY: "synthetic",
+  VENICE_API_KEY: "venice",
+  OPENCODE_ZEN_API_KEY: "opencode",
+  KILOCODE_API_KEY: "kilocode",
   AI_GATEWAY_API_KEY: "ai-gateway",
   CLOUDFLARE_AI_GATEWAY_API_KEY: "cloudflare-ai-gateway",
   LITELLM_API_KEY: "litellm",
@@ -210,43 +142,30 @@ let keyCount = 0;
 for (const [envVar, providerId] of Object.entries(providerMap)) {
   const key = getKey(envVar);
   if (key) {
-    authProfiles[providerId] = [{
-      id: "default", type: "api_key", key,
-      lastUsed: null, disabled: false, cooldown: null,
-    }];
+    authProfiles[providerId] = [
+      {
+        id: "default",
+        type: "api_key",
+        key,
+        lastUsed: null,
+        disabled: false,
+        cooldown: null,
+      },
+    ];
     keyCount++;
   }
 }
 
 const agentDir = "openclaw-data/agents/main/agent";
 fs.mkdirSync(agentDir, { recursive: true });
-fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify(authProfiles, null, 2) + "\n");
+fs.writeFileSync(
+  path.join(agentDir, "auth-profiles.json"),
+  JSON.stringify(authProfiles, null, 2) + "\n"
+);
 console.log(`  Wrote auth-profiles.json (${keyCount} provider(s))`);
 
 // ---------------------------------------------------------------------------
-// 4. Pre-pair device identity (bypasses NOT_PAIRED gateway error)
+// Done
 // ---------------------------------------------------------------------------
-
-const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
-const rawPub = publicKey.export({ type: "spki", format: "der" }).slice(-32);
-const deviceId = crypto.createHash("sha256").update(rawPub).digest("hex");
-const pubPem = publicKey.export({ type: "spki", format: "pem" });
-const privPem = privateKey.export({ type: "pkcs8", format: "pem" });
-
-// Identity for OpenVoiceUI
-fs.writeFileSync("openclaw-data/pre-paired-device.json",
-  JSON.stringify({ deviceId, publicKeyPem: pubPem, privateKeyPem: privPem }, null, 2) + "\n");
-
-// Pre-register in paired.json for OpenClaw
-fs.mkdirSync("openclaw-data/devices", { recursive: true });
-const paired = {};
-paired[deviceId] = {
-  publicKey: pubPem, name: "openvoiceui-local",
-  paired: true, pairedAt: new Date().toISOString(), autoApproved: true,
-};
-fs.writeFileSync("openclaw-data/devices/paired.json", JSON.stringify(paired, null, 2) + "\n");
-// Clear pending.json — stale repair requests block pairing even when paired.json is correct
-fs.writeFileSync("openclaw-data/devices/pending.json", "{}\n");
-console.log(`  Pre-paired device: ${deviceId.slice(0, 16)}...`);
 
 console.log("\n  Configuration complete!\n");

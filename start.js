@@ -1,35 +1,56 @@
 module.exports = {
-  daemon: true,
   run: [
-    // Start containers in foreground (Pinokio daemon mode manages lifecycle)
+    // Start all containers in detached mode
     {
       method: "shell.run",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up",
-        on: [{
-          // Match OpenVoiceUI's startup message (not OpenClaw's earlier "listening on ws://")
-          event: "/OpenVoiceUI starting on port/i",
-          done: true,
-        }],
+        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up -d",
       },
     },
 
-    // Auto-approve any pending device pairing requests
-    // OpenClaw requires device pairing but the pre-paired identity mount
-    // doesn't work with Docker named volumes on Windows. This approves
-    // whatever device OpenVoiceUI auto-generates on first connection.
+    // Wait for OpenVoiceUI to be ready
     {
       method: "shell.run",
       params: {
-        message: "node auto-approve-devices.js",
+        message: `node -e "
+const http = require('http');
+const port = process.env.PORT || 5001;
+let attempts = 0;
+const check = () => {
+  attempts++;
+  http.get('http://localhost:' + port + '/health/ready', (r) => {
+    if (r.statusCode < 400) {
+      console.log('Ready after ' + attempts + ' attempts');
+    } else {
+      if (attempts < 30) setTimeout(check, 2000);
+      else { console.log('Timeout — opening anyway'); }
+    }
+  }).on('error', () => {
+    if (attempts < 30) setTimeout(check, 2000);
+    else { console.log('Timeout — opening anyway'); }
+  });
+};
+check();
+"`,
+        env: {
+          PORT: "{{local.PORT||5001}}",
+        },
       },
     },
 
-    // Set URL so pinokio.js shows "Open" button
+    // Mark as running
     {
       method: "local.set",
       params: {
-        url: "http://localhost:5001",
+        running: true,
+      },
+    },
+
+    // Open OpenVoiceUI in browser
+    {
+      method: "browser.open",
+      params: {
+        url: "http://localhost:{{local.PORT||5001}}",
       },
     },
   ],
