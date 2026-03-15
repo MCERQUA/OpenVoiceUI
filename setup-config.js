@@ -7,6 +7,35 @@ const path = require("path");
 
 const PORT = process.env.OVU_PORT || "5001";
 
+// Filter out junk values from unresolved Pinokio templates or empty fields
+function isRealValue(v) {
+  if (!v || !v.trim()) return false;
+  // Pinokio may pass literal "undefined" / "null" / unresolved "{{...}}" for blank fields
+  if (v === "undefined" || v === "null" || v.startsWith("{{")) return false;
+  return true;
+}
+
+// --- 0. Validate required keys -----------------------------------------------
+
+const groqKey = process.env.GROQ_API_KEY;
+const deepgramKey = process.env.DEEPGRAM_API_KEY;
+const hasGroq = isRealValue(groqKey);
+const hasDeepgram = isRealValue(deepgramKey);
+
+const aiProviderKeys = ["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"];
+const hasAiProvider = aiProviderKeys.some(k => isRealValue(process.env[k]));
+
+if (!hasGroq || !hasDeepgram || !hasAiProvider) {
+  console.error("\n  ============================================================");
+  console.error("  INSTALL FAILED — Missing required API keys\n");
+  if (!hasGroq) console.error("    MISSING: Groq API Key (required for Text-to-Speech)");
+  if (!hasDeepgram) console.error("    MISSING: Deepgram API Key (required for Speech-to-Text)");
+  if (!hasAiProvider) console.error("    MISSING: At least one AI provider key (Anthropic, Z.AI, or OpenAI)");
+  console.error("\n  Click Reinstall and fill in the required fields.");
+  console.error("  ============================================================\n");
+  process.exit(1);
+}
+
 // --- 1. Write .env -----------------------------------------------------------
 
 const envLines = [
@@ -35,14 +64,6 @@ const envKeys = [
   "CLOUDFLARE_AI_GATEWAY_API_KEY", "LITELLM_API_KEY",
 ];
 
-// Filter out junk values from unresolved Pinokio templates or empty fields
-function isRealValue(v) {
-  if (!v || !v.trim()) return false;
-  // Pinokio may pass literal "undefined" / "null" / unresolved "{{...}}" for blank fields
-  if (v === "undefined" || v === "null" || v.startsWith("{{")) return false;
-  return true;
-}
-
 for (const k of envKeys) {
   const v = process.env[k] || "";
   envLines.push(`${k}=${isRealValue(v) ? v : ""}`);
@@ -54,6 +75,10 @@ envLines.push(
   `GROQ_API_KEY=${isRealValue(process.env.GROQ_API_KEY) ? process.env.GROQ_API_KEY : ""}`,
   "USE_GROQ=true",
   "USE_GROQ_TTS=true",
+  "",
+  "",
+  "# STT — Deepgram (Speech-to-Text)",
+  `DEEPGRAM_API_KEY=${isRealValue(process.env.DEEPGRAM_API_KEY) ? process.env.DEEPGRAM_API_KEY : ""}`,
   "",
   "# Supertonic TTS (ships with docker compose)",
   "SUPERTONIC_API_URL=http://supertonic:8765",
@@ -121,6 +146,7 @@ const providerMap = {
   TOGETHER_API_KEY:                "together",
   HF_TOKEN:                        "huggingface",
   GROQ_API_KEY:                    "groq",
+  DEEPGRAM_API_KEY:                "deepgram",
   MOONSHOT_API_KEY:                "moonshot",
   KIMI_API_KEY:                    "kimi-coding",
   MINIMAX_API_KEY:                 "minimax",

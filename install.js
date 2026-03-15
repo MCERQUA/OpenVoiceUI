@@ -9,28 +9,58 @@ module.exports = {
     },
 
     // Step 2: Collect API keys from user
-    // Matches OpenClaw's onboarding wizard providers + Groq for TTS
     {
       method: "input",
       params: {
         title: "OpenVoiceUI Setup",
-        description: "Enter your AI provider API keys below. You need at least one AI provider key and a Groq key for voice synthesis. All fields except Groq are optional — fill in whichever providers you use.",
+        description: "Configure your AI provider keys. REQUIRED keys are needed for the app to function. RECOMMENDED keys give you the best AI experience. All other keys are optional.",
         form: [
-          // --- Major Providers ---
+          // ═══════════════════════════════════════════════════════════
+          // REQUIRED — app won't work without these
+          // ═══════════════════════════════════════════════════════════
+          {
+            key: "GROQ_API_KEY",
+            title: "[REQUIRED] Groq API Key — Text-to-Speech + fast LLM",
+            description: "Free tier at console.groq.com — powers voice synthesis",
+            placeholder: "gsk_...",
+            required: true,
+          },
+          {
+            key: "DEEPGRAM_API_KEY",
+            title: "[REQUIRED] Deepgram API Key — Speech-to-Text",
+            description: "Free tier at console.deepgram.com — powers voice recognition",
+            placeholder: "",
+            required: true,
+          },
+
+          // ═══════════════════════════════════════════════════════════
+          // RECOMMENDED — pick at least one AI provider
+          // ═══════════════════════════════════════════════════════════
           {
             key: "ANTHROPIC_API_KEY",
-            title: "Anthropic API Key (recommended — default provider)",
-            description: "console.anthropic.com/settings/keys",
+            title: "[RECOMMENDED] Anthropic API Key — best results, higher cost",
+            description: "console.anthropic.com/settings/keys — Claude models, highest quality",
             placeholder: "sk-ant-...",
             required: false,
           },
           {
+            key: "ZAI_API_KEY",
+            title: "[RECOMMENDED] Z.AI API Key — good results, low cost",
+            description: "z.ai — GLM models, great value for daily use",
+            placeholder: "",
+            required: false,
+          },
+          {
             key: "OPENAI_API_KEY",
-            title: "OpenAI API Key",
+            title: "[RECOMMENDED] OpenAI API Key — GPT models",
             description: "platform.openai.com/api-keys",
             placeholder: "sk-...",
             required: false,
           },
+
+          // ═══════════════════════════════════════════════════════════
+          // OPTIONAL — additional providers
+          // ═══════════════════════════════════════════════════════════
           {
             key: "GEMINI_API_KEY",
             title: "Google Gemini API Key",
@@ -60,13 +90,6 @@ module.exports = {
             required: false,
           },
           {
-            key: "ZAI_API_KEY",
-            title: "Z.AI API Key (GLM)",
-            description: "z.ai",
-            placeholder: "",
-            required: false,
-          },
-          {
             key: "CEREBRAS_API_KEY",
             title: "Cerebras API Key",
             description: "cloud.cerebras.ai",
@@ -87,7 +110,6 @@ module.exports = {
             placeholder: "hf_...",
             required: false,
           },
-          // --- Asian Providers ---
           {
             key: "MOONSHOT_API_KEY",
             title: "Moonshot API Key (Kimi)",
@@ -144,7 +166,6 @@ module.exports = {
             placeholder: "",
             required: false,
           },
-          // --- Other Providers ---
           {
             key: "SYNTHETIC_API_KEY",
             title: "Synthetic API Key",
@@ -166,7 +187,6 @@ module.exports = {
             placeholder: "",
             required: false,
           },
-          // --- Gateways / Proxies ---
           {
             key: "KILOCODE_API_KEY",
             title: "Kilo Gateway API Key",
@@ -195,15 +215,10 @@ module.exports = {
             placeholder: "",
             required: false,
           },
-          // --- Required: Groq (TTS + LLM) ---
-          {
-            key: "GROQ_API_KEY",
-            title: "Groq API Key (required — Text-to-Speech + fast LLM)",
-            description: "Free tier at console.groq.com",
-            placeholder: "gsk_...",
-            required: true,
-          },
-          // --- Settings ---
+
+          // ═══════════════════════════════════════════════════════════
+          // SETTINGS
+          // ═══════════════════════════════════════════════════════════
           {
             key: "PORT",
             title: "Port (default: 5001)",
@@ -222,13 +237,15 @@ module.exports = {
       params: {
         env: {
           OVU_PORT: "{{input.PORT||5001}}",
+          GROQ_API_KEY: "{{input.GROQ_API_KEY}}",
+          DEEPGRAM_API_KEY: "{{input.DEEPGRAM_API_KEY}}",
           ANTHROPIC_API_KEY: "{{input.ANTHROPIC_API_KEY}}",
           OPENAI_API_KEY: "{{input.OPENAI_API_KEY}}",
+          ZAI_API_KEY: "{{input.ZAI_API_KEY}}",
           GEMINI_API_KEY: "{{input.GEMINI_API_KEY}}",
           OPENROUTER_API_KEY: "{{input.OPENROUTER_API_KEY}}",
           MISTRAL_API_KEY: "{{input.MISTRAL_API_KEY}}",
           XAI_API_KEY: "{{input.XAI_API_KEY}}",
-          ZAI_API_KEY: "{{input.ZAI_API_KEY}}",
           CEREBRAS_API_KEY: "{{input.CEREBRAS_API_KEY}}",
           TOGETHER_API_KEY: "{{input.TOGETHER_API_KEY}}",
           HF_TOKEN: "{{input.HF_TOKEN}}",
@@ -247,7 +264,6 @@ module.exports = {
           AI_GATEWAY_API_KEY: "{{input.AI_GATEWAY_API_KEY}}",
           CLOUDFLARE_AI_GATEWAY_API_KEY: "{{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}",
           LITELLM_API_KEY: "{{input.LITELLM_API_KEY}}",
-          GROQ_API_KEY: "{{input.GROQ_API_KEY}}",
         },
         message: "node setup-config.js",
       },
