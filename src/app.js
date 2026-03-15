@@ -2357,9 +2357,10 @@ inject();
             dropdownOpen: false,
 
             async init() {
-                // If no Clerk key configured, skip auth entirely (local / self-hosted mode)
+                // If no Clerk key configured, show local-mode menu instead of Clerk auth
                 if (!window.AGENT_CONFIG?.clerkPublishableKey) {
                     console.log('Auth disabled — no Clerk key configured (local mode)');
+                    this._renderLocalMenu();
                     return;
                 }
 
@@ -2648,6 +2649,70 @@ inject();
                         </div>
                     </div>
                 `;
+            },
+
+            _renderLocalMenu() {
+                const container = document.getElementById('user-button');
+                container.innerHTML = `
+                    <div class="user-menu-container">
+                        <button class="user-avatar-btn" onclick="AuthModule.toggleDropdown()" title="Menu">
+                            <span class="avatar-fallback" style="display:flex">⚙️</span>
+                        </button>
+                        <div class="user-dropdown" id="user-dropdown">
+                            <div class="user-dropdown-header">
+                                <div class="user-dropdown-info" style="padding:4px 0">
+                                    <div class="user-dropdown-name">Local Mode</div>
+                                    <div class="user-dropdown-email">No authentication configured</div>
+                                </div>
+                            </div>
+
+                            <div class="udm-section-label">Platform</div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin()">
+                                <span class="udi-icon">⚡</span> Admin Dashboard
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('agents')">
+                                <span class="udi-icon">🤖</span> Agent Profiles
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('frameworks')">
+                                <span class="udi-icon">🔌</span> Frameworks
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('install')">
+                                <span class="udi-icon">📦</span> Install Framework
+                            </div>
+
+                            <div class="user-dropdown-divider"></div>
+                            <div class="udm-section-label">Appearance</div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openSettings('themes')">
+                                <span class="udi-icon">🎨</span> Themes & Colors
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openSettings('face')">
+                                <span class="udi-icon">👁️</span> Face Display
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openSettings('voice')">
+                                <span class="udi-icon">🎙️</span> Voice Preview
+                            </div>
+
+                            <div class="user-dropdown-divider"></div>
+                            <div class="udm-section-label">System</div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('djtools')">
+                                <span class="udi-icon">✏️</span> DJ Prompt Editor
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('tests')">
+                                <span class="udi-icon">🧪</span> Connector Tests
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('system')">
+                                <span class="udi-icon">⚙️</span> System & Health
+                            </div>
+                        </div>
+                    </div>
+                `;
+                // Close dropdown when clicking outside
+                document.addEventListener('click', (e) => {
+                    const c = document.querySelector('.user-menu-container');
+                    if (c && !c.contains(e.target) && this.dropdownOpen) {
+                        this.closeDropdown();
+                    }
+                });
             },
 
             toggleDropdown() {

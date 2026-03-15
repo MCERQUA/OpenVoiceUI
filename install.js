@@ -13,15 +13,60 @@ module.exports = {
       method: "input",
       params: {
         title: "OpenVoiceUI Setup",
-        description: "A free Groq key is required for voice synthesis. Get one at console.groq.com",
+        description: "Enter your AI provider API keys below. You need at least one AI provider key (Anthropic recommended) and a Groq key for voice synthesis.",
         form: [
+          // --- AI Provider Keys (at least one needed) ---
+          {
+            key: "ANTHROPIC_API_KEY",
+            title: "Anthropic API Key (recommended — default AI provider)",
+            description: "console.anthropic.com/settings/keys",
+            placeholder: "sk-ant-...",
+            required: false,
+          },
+          {
+            key: "OPENAI_API_KEY",
+            title: "OpenAI API Key",
+            description: "platform.openai.com/api-keys",
+            placeholder: "sk-...",
+            required: false,
+          },
+          {
+            key: "GEMINI_API_KEY",
+            title: "Google Gemini API Key (free tier available)",
+            description: "aistudio.google.com/apikey",
+            placeholder: "AIza...",
+            required: false,
+          },
+          {
+            key: "OPENROUTER_API_KEY",
+            title: "OpenRouter API Key (access to 100+ models)",
+            description: "openrouter.ai/keys",
+            placeholder: "sk-or-...",
+            required: false,
+          },
+          {
+            key: "MISTRAL_API_KEY",
+            title: "Mistral API Key",
+            description: "console.mistral.ai/api-keys",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "XAI_API_KEY",
+            title: "xAI API Key (Grok models)",
+            description: "console.x.ai",
+            placeholder: "xai-...",
+            required: false,
+          },
+          // --- Required Keys ---
           {
             key: "GROQ_API_KEY",
-            title: "Groq API Key (required — Text-to-Speech)",
-            description: "Free tier available at console.groq.com",
+            title: "Groq API Key (required — Text-to-Speech + fast LLM)",
+            description: "Free tier at console.groq.com",
             placeholder: "gsk_...",
             required: true,
           },
+          // --- Optional Settings ---
           {
             key: "PORT",
             title: "Port (default: 5001)",
@@ -40,7 +85,7 @@ module.exports = {
       },
     },
 
-    // Step 4: Write openclaw config (nested keys for v2026.3.2+, compat layer handles differences)
+    // Step 4: Write openclaw config (nested keys for v2026.3.2+)
     {
       method: "fs.write",
       params: {
@@ -75,7 +120,7 @@ module.exports = {
       },
     },
 
-    // Step 5: Write .env (local install — no auth, fixed tokens are fine)
+    // Step 5: Write .env with all provider keys
     {
       method: "fs.write",
       params: {
@@ -91,7 +136,15 @@ module.exports = {
           "CLAWDBOT_AUTH_TOKEN=pinokio-local-token",
           "GATEWAY_SESSION_KEY=voice-main-1",
           "",
-          "# TTS — Groq Orpheus",
+          "# AI Provider Keys (openclaw uses whichever are set)",
+          "ANTHROPIC_API_KEY={{input.ANTHROPIC_API_KEY}}",
+          "OPENAI_API_KEY={{input.OPENAI_API_KEY}}",
+          "GEMINI_API_KEY={{input.GEMINI_API_KEY}}",
+          "OPENROUTER_API_KEY={{input.OPENROUTER_API_KEY}}",
+          "MISTRAL_API_KEY={{input.MISTRAL_API_KEY}}",
+          "XAI_API_KEY={{input.XAI_API_KEY}}",
+          "",
+          "# TTS — Groq (also available as fast LLM provider)",
           "GROQ_API_KEY={{input.GROQ_API_KEY}}",
           "USE_GROQ=true",
           "USE_GROQ_TTS=true",
@@ -115,7 +168,7 @@ module.exports = {
     {
       method: "notify",
       params: {
-        html: "OpenVoiceUI installed! Click <b>Start</b> to launch.<br><br>The app opens at <code>http://localhost:5001</code>.<br>To configure your AI provider, open <code>http://localhost:18791</code> and paste the gateway token: <code>pinokio-local-token</code>",
+        html: "OpenVoiceUI installed! Click <b>Start</b> to launch.<br><br>The app opens at <code>http://localhost:5001</code>.<br>To change your AI model or add more provider keys later, open <code>http://localhost:18791</code> (token: <code>pinokio-local-token</code>).",
       },
     },
   ],
