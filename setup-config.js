@@ -1,62 +1,121 @@
-// setup-config.js — Called by install.js via shell.run with env vars.
-// Writes .env, openclaw.json, and auth-profiles.json from environment variables.
-// This avoids Pinokio template resolution issues with fs.write.
+#!/usr/bin/env node
+// setup-config.js — Generates all config files for OpenVoiceUI Pinokio install.
+// Reads API keys from pinokio-input.json, env vars, or prompts in terminal.
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
-// Filter out junk values from unresolved Pinokio templates or empty fields
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function isRealValue(v) {
   if (!v || typeof v !== "string" || !v.trim()) return false;
   if (v === "undefined" || v === "null" || v.startsWith("{{")) return false;
   return true;
 }
 
-// --- 0. Load input from pinokio-input.json -----------------------------------
-// Pinokio's {{input.*}} templates don't resolve in fs.write or shell.run env
-// on Windows. We use json.set to write each key to a file, then read it here.
-
-let input = {};
-const inputFile = "pinokio-input.json";
-try {
-  input = JSON.parse(fs.readFileSync(inputFile, "utf8"));
-  console.log(`  Read ${Object.keys(input).length} keys from ${inputFile}`);
-} catch (e) {
-  console.error(`  ERROR: Could not read ${inputFile}: ${e.message}`);
-  console.error("  The install form may not have saved properly. Try Reinstall.");
-  process.exit(1);
+// Synchronous terminal prompt — works without packages, works on Windows
+function promptSync(question) {
+  process.stdout.write(question);
+  const buf = Buffer.alloc(4096);
+  let str = "";
+  try {
+    const bytesRead = fs.readSync(0, buf, 0, buf.length);
+    str = buf.toString("utf8", 0, bytesRead).replace(/[\r\n]/g, "").trim();
+  } catch (_) {}
+  return str;
 }
 
-// Helper: get a value from input JSON, falling back to env var
+// ---------------------------------------------------------------------------
+// 0. Load keys from all available sources
+// ---------------------------------------------------------------------------
+
+let input = {};
+
+// Source 1: pinokio-input.json
+try {
+  const raw = fs.readFileSync("pinokio-input.json", "utf8").trim();
+  if (raw && !raw.startsWith("{{")) {
+    input = JSON.parse(raw);
+    console.log(`  Found pinokio-input.json (${Object.keys(input).length} keys)`);
+  }
+} catch (_) {
+  console.log("  No pinokio-input.json found");
+}
+
+// Source 2: environment variables
+const allKeys = [
+  "GROQ_API_KEY", "DEEPGRAM_API_KEY", "ANTHROPIC_API_KEY", "ZAI_API_KEY",
+  "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY",
+  "XAI_API_KEY", "CEREBRAS_API_KEY", "TOGETHER_API_KEY", "HF_TOKEN",
+  "MOONSHOT_API_KEY", "KIMI_API_KEY", "MINIMAX_API_KEY", "QIANFAN_API_KEY",
+  "MODELSTUDIO_API_KEY", "XIAOMI_API_KEY", "VOLCANO_ENGINE_API_KEY",
+  "BYTEPLUS_API_KEY", "SYNTHETIC_API_KEY", "VENICE_API_KEY",
+  "OPENCODE_ZEN_API_KEY", "KILOCODE_API_KEY", "AI_GATEWAY_API_KEY",
+  "CLOUDFLARE_AI_GATEWAY_API_KEY", "LITELLM_API_KEY", "PORT",
+];
+for (const k of allKeys) {
+  if (!isRealValue(input[k]) && isRealValue(process.env[k])) {
+    input[k] = process.env[k];
+  }
+}
+
 function getKey(name) {
-  const fromJson = input[name];
-  if (isRealValue(fromJson)) return fromJson.trim();
-  const fromEnv = process.env[name];
-  if (isRealValue(fromEnv)) return fromEnv.trim();
-  return "";
+  const v = input[name];
+  return isRealValue(v) ? v.trim() : "";
+}
+
+// Source 3: interactive prompt for missing required keys
+const hasGroq = !!getKey("GROQ_API_KEY");
+const hasDeepgram = !!getKey("DEEPGRAM_API_KEY");
+const hasAiProvider = ["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"].some(k => !!getKey(k));
+
+if (!hasGroq || !hasDeepgram || !hasAiProvider) {
+  console.log("\n  ============================================================");
+  console.log("  Missing required API keys — please paste them below.");
+  console.log("  ============================================================\n");
+
+  if (!hasGroq) {
+    const v = promptSync("  Groq API Key (required — TTS, free at console.groq.com): ");
+    if (v) input.GROQ_API_KEY = v;
+  }
+  if (!hasDeepgram) {
+    const v = promptSync("  Deepgram API Key (required — STT, free at console.deepgram.com): ");
+    if (v) input.DEEPGRAM_API_KEY = v;
+  }
+  if (!["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"].some(k => !!getKey(k))) {
+    console.log("\n  Need at least ONE AI provider:");
+    const v1 = promptSync("  Anthropic API Key (best quality) [Enter to skip]: ");
+    if (v1) input.ANTHROPIC_API_KEY = v1;
+    if (!v1) {
+      const v2 = promptSync("  Z.AI API Key (good quality, low cost) [Enter to skip]: ");
+      if (v2) input.ZAI_API_KEY = v2;
+    }
+    if (!v1 && !getKey("ZAI_API_KEY")) {
+      const v3 = promptSync("  OpenAI API Key [Enter to skip]: ");
+      if (v3) input.OPENAI_API_KEY = v3;
+    }
+  }
+  console.log("");
+}
+
+// Final validation
+if (!getKey("GROQ_API_KEY") || !getKey("DEEPGRAM_API_KEY")) {
+  console.error("  FATAL: Groq and Deepgram keys are required. Cannot continue.");
+  process.exit(1);
+}
+if (!["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"].some(k => !!getKey(k))) {
+  console.error("  FATAL: At least one AI provider key is required. Cannot continue.");
+  process.exit(1);
 }
 
 const PORT = getKey("PORT") || "5001";
 
-// --- Validate required keys --------------------------------------------------
-
-const hasGroq = !!getKey("GROQ_API_KEY");
-const hasDeepgram = !!getKey("DEEPGRAM_API_KEY");
-const aiProviderKeys = ["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"];
-const hasAiProvider = aiProviderKeys.some(k => !!getKey(k));
-
-if (!hasGroq || !hasDeepgram || !hasAiProvider) {
-  console.error("\n  ============================================================");
-  console.error("  INSTALL FAILED — Missing required API keys\n");
-  if (!hasGroq) console.error("    MISSING: Groq API Key (required for Text-to-Speech)");
-  if (!hasDeepgram) console.error("    MISSING: Deepgram API Key (required for Speech-to-Text)");
-  if (!hasAiProvider) console.error("    MISSING: At least one AI provider key (Anthropic, Z.AI, or OpenAI)");
-  console.error("\n  Click Reinstall and fill in the required fields.");
-  console.error("  ============================================================\n");
-  process.exit(1);
-}
-
-// --- 1. Write .env -----------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 1. Write .env
+// ---------------------------------------------------------------------------
 
 const envLines = [
   "# OpenVoiceUI — generated by Pinokio installer",
@@ -69,11 +128,10 @@ const envLines = [
   "CLAWDBOT_AUTH_TOKEN=pinokio-local-token",
   "GATEWAY_SESSION_KEY=voice-main-1",
   "",
-  "# AI Provider Keys (openclaw uses whichever are set)",
+  "# AI Provider Keys",
 ];
 
-// Every env-var → .env key mapping (only write non-empty values)
-const envKeys = [
+const envKeyList = [
   "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
   "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY", "ZAI_API_KEY",
   "CEREBRAS_API_KEY", "TOGETHER_API_KEY", "HF_TOKEN",
@@ -83,39 +141,27 @@ const envKeys = [
   "OPENCODE_ZEN_API_KEY", "KILOCODE_API_KEY", "AI_GATEWAY_API_KEY",
   "CLOUDFLARE_AI_GATEWAY_API_KEY", "LITELLM_API_KEY",
 ];
-
-for (const k of envKeys) {
-  envLines.push(`${k}=${getKey(k)}`);
-}
+for (const k of envKeyList) envLines.push(`${k}=${getKey(k)}`);
 
 envLines.push(
-  "",
-  "# TTS — Groq (also available as fast LLM provider)",
-  `GROQ_API_KEY=${getKey("GROQ_API_KEY")}`,
-  "USE_GROQ=true",
-  "USE_GROQ_TTS=true",
-  "",
-  "",
-  "# STT — Deepgram (Speech-to-Text)",
-  `DEEPGRAM_API_KEY=${getKey("DEEPGRAM_API_KEY")}`,
-  "",
-  "# Supertonic TTS (ships with docker compose)",
-  "SUPERTONIC_API_URL=http://supertonic:8765",
+  "", "# TTS", `GROQ_API_KEY=${getKey("GROQ_API_KEY")}`,
+  "USE_GROQ=true", "USE_GROQ_TTS=true",
+  "", "# STT", `DEEPGRAM_API_KEY=${getKey("DEEPGRAM_API_KEY")}`,
+  "", "# Supertonic TTS", "SUPERTONIC_API_URL=http://supertonic:8765",
 );
 
 fs.writeFileSync(".env", envLines.join("\n") + "\n");
 console.log("  Wrote .env");
 
-// --- 2. Write openclaw.json --------------------------------------------------
+// ---------------------------------------------------------------------------
+// 2. Write openclaw.json
+// ---------------------------------------------------------------------------
 
 const openclawConfig = {
   gateway: {
     mode: "local",
     port: 18791,
-    auth: {
-      mode: "token",
-      token: "pinokio-local-token",
-    },
+    auth: { mode: "token", token: "pinokio-local-token" },
     trustedProxies: ["127.0.0.1", "172.16.0.0/12", "10.0.0.0/8"],
     controlUi: {
       allowInsecureAuth: true,
@@ -130,136 +176,75 @@ const openclawConfig = {
       blockStreamingBreak: "text_end",
       timeoutSeconds: 300,
     },
-    list: [
-      {
-        id: "main",
-        default: true,
-        workspace: "/root/.openclaw/workspace",
-      },
-    ],
+    list: [{ id: "main", default: true, workspace: "/root/.openclaw/workspace" }],
   },
 };
 
 fs.mkdirSync("openclaw-data/workspace", { recursive: true });
-fs.writeFileSync(
-  "openclaw-data/openclaw.json",
-  JSON.stringify(openclawConfig, null, 2) + "\n"
-);
+fs.writeFileSync("openclaw-data/openclaw.json", JSON.stringify(openclawConfig, null, 2) + "\n");
 console.log("  Wrote openclaw-data/openclaw.json");
 
-// --- 3. Write auth-profiles.json ---------------------------------------------
-// OpenClaw reads API keys from agents/<id>/agent/auth-profiles.json, NOT from
-// environment variables. Without this file, every LLM request fails with
-// "No API key found for provider".
+// ---------------------------------------------------------------------------
+// 3. Write auth-profiles.json
+// ---------------------------------------------------------------------------
 
-// Map: env-var name → openclaw provider ID
 const providerMap = {
-  ANTHROPIC_API_KEY:               "anthropic",
-  OPENAI_API_KEY:                  "openai",
-  GEMINI_API_KEY:                  "google",
-  OPENROUTER_API_KEY:              "openrouter",
-  MISTRAL_API_KEY:                 "mistral",
-  XAI_API_KEY:                     "xai",
-  ZAI_API_KEY:                     "zai",
-  CEREBRAS_API_KEY:                "cerebras",
-  TOGETHER_API_KEY:                "together",
-  HF_TOKEN:                        "huggingface",
-  GROQ_API_KEY:                    "groq",
-  DEEPGRAM_API_KEY:                "deepgram",
-  MOONSHOT_API_KEY:                "moonshot",
-  KIMI_API_KEY:                    "kimi-coding",
-  MINIMAX_API_KEY:                 "minimax",
-  QIANFAN_API_KEY:                 "qianfan",
-  MODELSTUDIO_API_KEY:             "modelstudio",
-  XIAOMI_API_KEY:                  "xiaomi",
-  VOLCANO_ENGINE_API_KEY:          "volcano-engine",
-  BYTEPLUS_API_KEY:                "byteplus",
-  SYNTHETIC_API_KEY:               "synthetic",
-  VENICE_API_KEY:                  "venice",
-  OPENCODE_ZEN_API_KEY:            "opencode",
-  KILOCODE_API_KEY:                "kilocode",
-  AI_GATEWAY_API_KEY:              "ai-gateway",
-  CLOUDFLARE_AI_GATEWAY_API_KEY:   "cloudflare-ai-gateway",
-  LITELLM_API_KEY:                 "litellm",
+  ANTHROPIC_API_KEY: "anthropic", OPENAI_API_KEY: "openai",
+  GEMINI_API_KEY: "google", OPENROUTER_API_KEY: "openrouter",
+  MISTRAL_API_KEY: "mistral", XAI_API_KEY: "xai", ZAI_API_KEY: "zai",
+  CEREBRAS_API_KEY: "cerebras", TOGETHER_API_KEY: "together",
+  HF_TOKEN: "huggingface", GROQ_API_KEY: "groq", DEEPGRAM_API_KEY: "deepgram",
+  MOONSHOT_API_KEY: "moonshot", KIMI_API_KEY: "kimi-coding",
+  MINIMAX_API_KEY: "minimax", QIANFAN_API_KEY: "qianfan",
+  MODELSTUDIO_API_KEY: "modelstudio", XIAOMI_API_KEY: "xiaomi",
+  VOLCANO_ENGINE_API_KEY: "volcano-engine", BYTEPLUS_API_KEY: "byteplus",
+  SYNTHETIC_API_KEY: "synthetic", VENICE_API_KEY: "venice",
+  OPENCODE_ZEN_API_KEY: "opencode", KILOCODE_API_KEY: "kilocode",
+  AI_GATEWAY_API_KEY: "ai-gateway",
+  CLOUDFLARE_AI_GATEWAY_API_KEY: "cloudflare-ai-gateway",
+  LITELLM_API_KEY: "litellm",
 };
 
 const authProfiles = {};
 let keyCount = 0;
-
 for (const [envVar, providerId] of Object.entries(providerMap)) {
   const key = getKey(envVar);
   if (key) {
-    authProfiles[providerId] = [
-      {
-        id: "default",
-        type: "api_key",
-        key: key,
-        lastUsed: null,
-        disabled: false,
-        cooldown: null,
-      },
-    ];
+    authProfiles[providerId] = [{
+      id: "default", type: "api_key", key,
+      lastUsed: null, disabled: false, cooldown: null,
+    }];
     keyCount++;
   }
 }
 
-// Create agent directory and write auth-profiles
 const agentDir = "openclaw-data/agents/main/agent";
 fs.mkdirSync(agentDir, { recursive: true });
-fs.writeFileSync(
-  path.join(agentDir, "auth-profiles.json"),
-  JSON.stringify(authProfiles, null, 2) + "\n"
-);
-console.log(`  Wrote auth-profiles.json (${keyCount} provider(s) configured)`);
+fs.writeFileSync(path.join(agentDir, "auth-profiles.json"), JSON.stringify(authProfiles, null, 2) + "\n");
+console.log(`  Wrote auth-profiles.json (${keyCount} provider(s))`);
 
-if (keyCount === 0) {
-  console.warn("\n  WARNING: No AI provider keys were entered!");
-  console.warn("  The agent won't be able to respond without at least one key.");
-  console.warn("  Re-run the installer to add keys, or edit openclaw-data/agents/main/agent/auth-profiles.json\n");
-}
+// ---------------------------------------------------------------------------
+// 4. Pre-pair device identity (bypasses NOT_PAIRED gateway error)
+// ---------------------------------------------------------------------------
 
-// --- 4. Pre-generate device identity and pre-pair it ----------------------------
-// OpenClaw requires device pairing for WebSocket connections. Even with
-// dangerouslyDisableDeviceAuth:true, the gateway still requires pairing for
-// the WS protocol (that flag only affects the control UI).
-// Fix: generate an Ed25519 keypair, save it for OpenVoiceUI to use, and
-// pre-register it in OpenClaw's devices/paired.json so no approval is needed.
-
-const crypto = require("crypto");
-
-// Generate Ed25519 keypair
 const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
 const rawPub = publicKey.export({ type: "spki", format: "der" }).slice(-32);
 const deviceId = crypto.createHash("sha256").update(rawPub).digest("hex");
 const pubPem = publicKey.export({ type: "spki", format: "pem" });
 const privPem = privateKey.export({ type: "pkcs8", format: "pem" });
 
-// Save full identity for OpenVoiceUI (matches Python _load_device_identity format)
-const deviceIdentity = {
-  deviceId: deviceId,
-  publicKeyPem: pubPem,
-  privateKeyPem: privPem,
-};
-fs.writeFileSync(
-  "openclaw-data/pre-paired-device.json",
-  JSON.stringify(deviceIdentity, null, 2) + "\n"
-);
-console.log(`  Generated device identity: ${deviceId.slice(0, 16)}...`);
+// Identity for OpenVoiceUI
+fs.writeFileSync("openclaw-data/pre-paired-device.json",
+  JSON.stringify({ deviceId, publicKeyPem: pubPem, privateKeyPem: privPem }, null, 2) + "\n");
 
-// Pre-register in devices/paired.json so OpenClaw accepts this device immediately
+// Pre-register in paired.json for OpenClaw
 fs.mkdirSync("openclaw-data/devices", { recursive: true });
-const pairedDevices = {};
-pairedDevices[deviceId] = {
-  publicKey: pubPem,
-  name: "openvoiceui-local",
-  paired: true,
-  pairedAt: new Date().toISOString(),
-  autoApproved: true,
+const paired = {};
+paired[deviceId] = {
+  publicKey: pubPem, name: "openvoiceui-local",
+  paired: true, pairedAt: new Date().toISOString(), autoApproved: true,
 };
-fs.writeFileSync(
-  "openclaw-data/devices/paired.json",
-  JSON.stringify(pairedDevices, null, 2) + "\n"
-);
-console.log("  Wrote devices/paired.json (pre-paired)");
+fs.writeFileSync("openclaw-data/devices/paired.json", JSON.stringify(paired, null, 2) + "\n");
+console.log(`  Pre-paired device: ${deviceId.slice(0, 16)}...`);
 
 console.log("\n  Configuration complete!\n");
