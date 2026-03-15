@@ -2370,10 +2370,8 @@ inject();
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
                 if (typeof Clerk === 'undefined') {
-                    console.error('Clerk SDK failed to load — showing auth error gate');
-                    this._showAuthErrorGate('Authentication service failed to load. Please refresh the page or check your connection.');
-                    // Block forever — do not let app continue without auth
-                    await new Promise(() => {});
+                    console.warn('Clerk SDK failed to load — falling back to local mode');
+                    this._renderLocalMenu();
                     return;
                 }
 
@@ -2435,9 +2433,10 @@ inject();
                     });
                 } catch (error) {
                     console.error('Auth init error:', error);
-                    this._showAuthErrorGate('Authentication failed to initialize. Please refresh the page.\n\nError: ' + error.message);
-                    // Block forever — do not let app continue without auth
-                    await new Promise(() => {});
+                    // If Clerk fails (wrong domain, bad key, network), fall back to local mode
+                    // instead of blocking the app forever
+                    console.warn('Falling back to local mode due to auth error');
+                    this._renderLocalMenu();
                 }
             },
 
