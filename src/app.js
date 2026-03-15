@@ -4553,45 +4553,25 @@ inject();
             },
 
             stopAll() {
-                console.log('STOP ALL - killing audio and resetting');
-                // Tell server to abort any active openclaw run (fire-and-forget)
-                console.warn('⛔ ABORT source: stopAll');
-                fetch('/api/conversation/abort', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source: 'stopAll' }),
-                }).catch(() => {});
-                // Stop voiceConversation TTS and abort its fetch
+                // MUTE: Stop TTS audio playback only — do NOT abort the agent's
+                // work, kill the call, or disconnect. The agent keeps working
+                // silently. The user can still speak new requests.
+                console.log('STOP AUDIO - muting TTS (agent keeps working)');
+                // Stop TTS audio on both voice modes
                 if (window._voiceConversation) {
                     window._voiceConversation.stopAudio?.();
-                    if (window._voiceConversation._fetchAbortController) {
-                        window._voiceConversation._fetchAbortController.abort();
-                        window._voiceConversation._fetchAbortController = null;
-                    }
                 }
-                // Stop Clawdbot mode
                 if (this.clawdbotMode) {
                     this.clawdbotMode.stopAudio();
-                    this.clawdbotMode.stopVoiceInput();
-                    if (this.clawdbotMode.stt && this.clawdbotMode.stt.resetProcessing) {
-                        this.clawdbotMode.stt.resetProcessing();
-                    }
                     this.clawdbotMode._ttsPlaying = false;
                 }
-                // Stop Hume mode
-                if (this.humeAdapter) {
-                    this.humeAdapter.disconnect();
-                }
-                if (window.voiceAgent && window.voiceAgent.disconnect) {
-                    window.voiceAgent.disconnect();
-                }
-                // Reset UI
-                StatusModule.update('idle', 'STOPPED');
+                // Un-duck music if it was ducked for TTS
+                MusicModule.duck(false);
+                // Hide the stop button since audio is stopped
+                document.getElementById('stop-button').style.display = 'none';
+                // Face back to neutral (not speaking anymore)
                 FaceModule.setMood('neutral');
                 WaveformModule.setAmplitude(0);
-                MusicModule.duck(false);
-                UIModule.setCallButtonState('disconnected');
-                document.getElementById('stop-button').style.display = 'none';
             }
         };
 
