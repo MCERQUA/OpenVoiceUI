@@ -245,6 +245,8 @@ paired[deviceId] = {
   paired: true, pairedAt: new Date().toISOString(), autoApproved: true,
 };
 fs.writeFileSync("openclaw-data/devices/paired.json", JSON.stringify(paired, null, 2) + "\n");
+// Clear pending.json — stale repair requests block pairing even when paired.json is correct
+fs.writeFileSync("openclaw-data/devices/pending.json", "{}\n");
 console.log(`  Pre-paired device: ${deviceId.slice(0, 16)}...`);
 
 console.log("\n  Configuration complete!\n");
