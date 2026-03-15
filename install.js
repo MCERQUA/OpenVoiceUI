@@ -58,6 +58,13 @@ module.exports = {
             placeholder: "xai-...",
             required: false,
           },
+          {
+            key: "ZAI_API_KEY",
+            title: "Z.AI API Key (GLM models)",
+            description: "z.ai",
+            placeholder: "",
+            required: false,
+          },
           // --- Required Keys ---
           {
             key: "GROQ_API_KEY",
@@ -143,6 +150,7 @@ module.exports = {
           "OPENROUTER_API_KEY={{input.OPENROUTER_API_KEY}}",
           "MISTRAL_API_KEY={{input.MISTRAL_API_KEY}}",
           "XAI_API_KEY={{input.XAI_API_KEY}}",
+          "ZAI_API_KEY={{input.ZAI_API_KEY}}",
           "",
           "# TTS — Groq (also available as fast LLM provider)",
           "GROQ_API_KEY={{input.GROQ_API_KEY}}",
