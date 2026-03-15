@@ -1,56 +1,24 @@
 module.exports = {
+  daemon: true,
   run: [
-    // Start all containers in detached mode
+    // Start containers in foreground (Pinokio daemon mode manages lifecycle)
     {
       method: "shell.run",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up -d",
+        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up",
+        on: [{
+          // Match OpenVoiceUI's startup message (not OpenClaw's earlier "listening on ws://")
+          event: "/OpenVoiceUI starting on port/i",
+          done: true,
+        }],
       },
     },
 
-    // Wait for OpenVoiceUI to be ready
-    {
-      method: "shell.run",
-      params: {
-        message: `node -e "
-const http = require('http');
-const port = process.env.PORT || 5001;
-let attempts = 0;
-const check = () => {
-  attempts++;
-  http.get('http://localhost:' + port + '/health/ready', (r) => {
-    if (r.statusCode < 400) {
-      console.log('Ready after ' + attempts + ' attempts');
-    } else {
-      if (attempts < 30) setTimeout(check, 2000);
-      else { console.log('Timeout — opening anyway'); }
-    }
-  }).on('error', () => {
-    if (attempts < 30) setTimeout(check, 2000);
-    else { console.log('Timeout — opening anyway'); }
-  });
-};
-check();
-"`,
-        env: {
-          PORT: "{{local.PORT||5001}}",
-        },
-      },
-    },
-
-    // Mark as running
+    // Set URL so pinokio.js shows "Open" button
     {
       method: "local.set",
       params: {
-        running: true,
-      },
-    },
-
-    // Open OpenVoiceUI in browser
-    {
-      method: "browser.open",
-      params: {
-        url: "http://localhost:{{local.PORT||5001}}",
+        url: "http://localhost:5001",
       },
     },
   ],

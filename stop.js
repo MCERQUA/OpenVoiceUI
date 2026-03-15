@@ -7,9 +7,9 @@ module.exports = {
       },
     },
     {
-      method: "local.set",
+      method: "script.stop",
       params: {
-        running: false,
+        uri: "start.js",
       },
     },
   ],
