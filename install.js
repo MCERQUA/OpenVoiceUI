@@ -9,16 +9,17 @@ module.exports = {
     },
 
     // Step 2: Collect API keys from user
+    // Matches OpenClaw's onboarding wizard providers + Groq for TTS
     {
       method: "input",
       params: {
         title: "OpenVoiceUI Setup",
-        description: "Enter your AI provider API keys below. You need at least one AI provider key (Anthropic recommended) and a Groq key for voice synthesis.",
+        description: "Enter your AI provider API keys below. You need at least one AI provider key and a Groq key for voice synthesis. All fields except Groq are optional — fill in whichever providers you use.",
         form: [
-          // --- AI Provider Keys (at least one needed) ---
+          // --- Major Providers ---
           {
             key: "ANTHROPIC_API_KEY",
-            title: "Anthropic API Key (recommended — default AI provider)",
+            title: "Anthropic API Key (recommended — default provider)",
             description: "console.anthropic.com/settings/keys",
             placeholder: "sk-ant-...",
             required: false,
@@ -32,14 +33,14 @@ module.exports = {
           },
           {
             key: "GEMINI_API_KEY",
-            title: "Google Gemini API Key (free tier available)",
+            title: "Google Gemini API Key",
             description: "aistudio.google.com/apikey",
             placeholder: "AIza...",
             required: false,
           },
           {
             key: "OPENROUTER_API_KEY",
-            title: "OpenRouter API Key (access to 100+ models)",
+            title: "OpenRouter API Key (100+ models)",
             description: "openrouter.ai/keys",
             placeholder: "sk-or-...",
             required: false,
@@ -53,12 +54,148 @@ module.exports = {
           },
           {
             key: "XAI_API_KEY",
-            title: "xAI API Key (Grok models)",
+            title: "xAI API Key (Grok)",
             description: "console.x.ai",
             placeholder: "xai-...",
             required: false,
           },
-          // --- Required Keys ---
+          {
+            key: "ZAI_API_KEY",
+            title: "Z.AI API Key (GLM)",
+            description: "z.ai",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "CEREBRAS_API_KEY",
+            title: "Cerebras API Key",
+            description: "cloud.cerebras.ai",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "TOGETHER_API_KEY",
+            title: "Together AI API Key",
+            description: "api.together.xyz/settings/api-keys",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "HF_TOKEN",
+            title: "Hugging Face Token",
+            description: "huggingface.co/settings/tokens",
+            placeholder: "hf_...",
+            required: false,
+          },
+          // --- Asian Providers ---
+          {
+            key: "MOONSHOT_API_KEY",
+            title: "Moonshot API Key (Kimi)",
+            description: "platform.moonshot.cn",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "KIMI_API_KEY",
+            title: "Kimi Coding API Key",
+            description: "platform.moonshot.cn",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "MINIMAX_API_KEY",
+            title: "MiniMax API Key",
+            description: "platform.minimaxi.com",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "QIANFAN_API_KEY",
+            title: "Qianfan API Key",
+            description: "cloud.baidu.com",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "MODELSTUDIO_API_KEY",
+            title: "Alibaba Model Studio API Key",
+            description: "modelstudio.aliyun.com",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "XIAOMI_API_KEY",
+            title: "Xiaomi API Key",
+            description: "xiaomi.com",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "VOLCANO_ENGINE_API_KEY",
+            title: "Volcano Engine API Key (Doubao)",
+            description: "volcengine.com",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "BYTEPLUS_API_KEY",
+            title: "BytePlus API Key",
+            description: "byteplus.com",
+            placeholder: "",
+            required: false,
+          },
+          // --- Other Providers ---
+          {
+            key: "SYNTHETIC_API_KEY",
+            title: "Synthetic API Key",
+            description: "synthetic.com",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "VENICE_API_KEY",
+            title: "Venice AI API Key",
+            description: "venice.ai",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "OPENCODE_ZEN_API_KEY",
+            title: "OpenCode API Key (Zen)",
+            description: "opencode.ai",
+            placeholder: "",
+            required: false,
+          },
+          // --- Gateways / Proxies ---
+          {
+            key: "KILOCODE_API_KEY",
+            title: "Kilo Gateway API Key",
+            description: "kilocode.ai",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "AI_GATEWAY_API_KEY",
+            title: "Vercel AI Gateway API Key",
+            description: "vercel.com",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "CLOUDFLARE_AI_GATEWAY_API_KEY",
+            title: "Cloudflare AI Gateway API Key",
+            description: "dash.cloudflare.com",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "LITELLM_API_KEY",
+            title: "LiteLLM API Key",
+            description: "litellm.ai",
+            placeholder: "",
+            required: false,
+          },
+          // --- Required: Groq (TTS + LLM) ---
           {
             key: "GROQ_API_KEY",
             title: "Groq API Key (required — Text-to-Speech + fast LLM)",
@@ -66,7 +203,7 @@ module.exports = {
             placeholder: "gsk_...",
             required: true,
           },
-          // --- Optional Settings ---
+          // --- Settings ---
           {
             key: "PORT",
             title: "Port (default: 5001)",
@@ -143,6 +280,25 @@ module.exports = {
           "OPENROUTER_API_KEY={{input.OPENROUTER_API_KEY}}",
           "MISTRAL_API_KEY={{input.MISTRAL_API_KEY}}",
           "XAI_API_KEY={{input.XAI_API_KEY}}",
+          "ZAI_API_KEY={{input.ZAI_API_KEY}}",
+          "CEREBRAS_API_KEY={{input.CEREBRAS_API_KEY}}",
+          "TOGETHER_API_KEY={{input.TOGETHER_API_KEY}}",
+          "HF_TOKEN={{input.HF_TOKEN}}",
+          "MOONSHOT_API_KEY={{input.MOONSHOT_API_KEY}}",
+          "KIMI_API_KEY={{input.KIMI_API_KEY}}",
+          "MINIMAX_API_KEY={{input.MINIMAX_API_KEY}}",
+          "QIANFAN_API_KEY={{input.QIANFAN_API_KEY}}",
+          "MODELSTUDIO_API_KEY={{input.MODELSTUDIO_API_KEY}}",
+          "XIAOMI_API_KEY={{input.XIAOMI_API_KEY}}",
+          "VOLCANO_ENGINE_API_KEY={{input.VOLCANO_ENGINE_API_KEY}}",
+          "BYTEPLUS_API_KEY={{input.BYTEPLUS_API_KEY}}",
+          "SYNTHETIC_API_KEY={{input.SYNTHETIC_API_KEY}}",
+          "VENICE_API_KEY={{input.VENICE_API_KEY}}",
+          "OPENCODE_ZEN_API_KEY={{input.OPENCODE_ZEN_API_KEY}}",
+          "KILOCODE_API_KEY={{input.KILOCODE_API_KEY}}",
+          "AI_GATEWAY_API_KEY={{input.AI_GATEWAY_API_KEY}}",
+          "CLOUDFLARE_AI_GATEWAY_API_KEY={{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}",
+          "LITELLM_API_KEY={{input.LITELLM_API_KEY}}",
           "",
           "# TTS — Groq (also available as fast LLM provider)",
           "GROQ_API_KEY={{input.GROQ_API_KEY}}",
