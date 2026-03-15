@@ -3,7 +3,7 @@ services:
     build:
       context: deploy/openclaw
       args:
-        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.2}
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.13}
         CODING_CLI: ${CODING_CLI:-none}
     volumes:
       - openclaw-data:/root/.openclaw

@@ -40,7 +40,7 @@ module.exports = {
       },
     },
 
-    // Step 4: Write openclaw config (nested keys for v2026.3.2+)
+    // Step 4: Write openclaw config (nested keys for v2026.3.2+, compat layer handles differences)
     {
       method: "fs.write",
       params: {

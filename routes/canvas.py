@@ -667,16 +667,33 @@ def canvas_pages_proxy(path):
                     b'window.parent.postMessage({type:"canvas-action",action:"speak",text:t},"*");};}'
                     b'</script>'
                 )
+                # Inject auth token bridge — parent pushes fresh Clerk JWT,
+                # canvas pages use it via authFetch() or _canvasAuthToken
+                _auth_bridge = (
+                    b'<script id="canvas-auth-bridge">'
+                    b'window._canvasAuthToken=null;'
+                    b'window.addEventListener("message",function(e){'
+                    b'if(e.data&&e.data.type==="auth-token"){'
+                    b'window._canvasAuthToken=e.data.token;}});'
+                    b'window.authFetch=function(url,opts){'
+                    b'opts=opts||{};'
+                    b'if(window._canvasAuthToken){'
+                    b'opts.headers=Object.assign(opts.headers||{},{"Authorization":"Bearer "+window._canvasAuthToken});}'
+                    b'return fetch(url,opts);};'
+                    b'window.parent.postMessage({type:"canvas-action",action:"request-auth-token"},"*");'
+                    b'</script>'
+                )
                 _inject = _base_css + _error_bridge
                 if b'</head>' in content:
                     content = content.replace(b'</head>', _inject + b'</head>', 1)
                 else:
                     content = _inject + content
-                # Inject nav/speak helpers before </body>
+                # Inject nav/speak helpers + auth bridge before </body>
+                _body_inject = _nav_helpers + _auth_bridge
                 if b'</body>' in content:
-                    content = content.replace(b'</body>', _nav_helpers + b'</body>', 1)
+                    content = content.replace(b'</body>', _body_inject + b'</body>', 1)
                 else:
-                    content += _nav_helpers
+                    content += _body_inject
                 resp = Response(content, mimetype='text/html')
                 resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
                 resp.headers['Pragma'] = 'no-cache'
@@ -694,7 +711,7 @@ def canvas_pages_proxy(path):
                     "font-src 'self'; "
                     "connect-src 'self' https://games.jam-bot.com; "
                     "worker-src blob:; "
-                    "frame-src 'none'"
+                    "frame-src 'self' https://*.jam-bot.com"
                 )
                 return resp
             else:

@@ -155,7 +155,6 @@ Define agents in JSON — each profile configures:
 │   ├── static_files.py         Static asset serving
 │   ├── image_gen.py            HuggingFace image generation (FLUX.1, SD3.5)
 │   ├── workspace.py            Agent workspace file management
-│   ├── ssactivewear.py         S&S Activewear wholesale API proxy
 │   ├── report_issue.py         In-app issue reporter
 │   ├── icons.py                Icon generation
 │   └── onboarding.py           Onboarding flow
@@ -240,11 +239,11 @@ Define agents in JSON — each profile configures:
 
 ## Prerequisites
 
-- **OpenClaw gateway `2026.3.2`** — [openclaw.ai](https://openclaw.ai) · [version requirements](docs/openclaw-requirements.md)
+- **OpenClaw gateway `2026.3.13`** — [openclaw.ai](https://openclaw.ai) · [version requirements](docs/openclaw-requirements.md)
 - **Groq API key** for TTS — [console.groq.com](https://console.groq.com) (free tier available)
 - Optional: Suno API key (music generation), Clerk (auth for multi-user deployments)
 
-> OpenVoiceUI is tested with **openclaw@2026.3.2**. The Docker setup installs this version automatically. If you're using an existing OpenClaw install, see [OpenClaw Requirements](docs/openclaw-requirements.md) — other versions may have breaking changes that prevent voice conversations from working.
+> OpenVoiceUI is tested with **openclaw@2026.3.13**. The Docker setup installs this version automatically. If you're using an existing OpenClaw install, see [OpenClaw Requirements](docs/openclaw-requirements.md) — other versions may have breaking changes that prevent voice conversations from working.
 
 ---
 
@@ -378,7 +377,7 @@ OpenVoiceUI connects to an [OpenClaw](https://openclaw.ai) gateway via persisten
 
 **Without a configured gateway**: The frontend will load but `/api/conversation` calls will fail. OpenClaw is the default — or drop in any gateway plugin as a replacement.
 
-**Version compatibility**: OpenVoiceUI is tested against openclaw@2026.3.2 and performs a compatibility check on startup. See [OpenClaw Requirements](docs/openclaw-requirements.md) for details on supported versions and known breaking changes.
+**Version compatibility**: OpenVoiceUI is tested against openclaw@2026.3.13 and performs a compatibility check on startup. A protocol compatibility layer handles differences between versions automatically. See [OpenClaw Requirements](docs/openclaw-requirements.md) for details on supported versions and known breaking changes.
 
 ---
 
@@ -499,10 +498,6 @@ POST /api/suno/callback                   # Webhook callback endpoint
 
 # Issue Reporter
 POST /api/report-issue                    # Submit bug report with session context
-
-# S&S Activewear
-GET  /api/ssactivewear/*                  # Wholesale apparel API proxy
-POST /api/ssactivewear/*
 
 # Icons
 POST /api/icons/generate                  # Generate icons

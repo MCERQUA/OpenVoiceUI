@@ -2543,6 +2543,18 @@ inject();
                 return Clerk.session?.getToken() ?? null;
             },
 
+            async _pushAuthTokenToCanvas() {
+                // Push current Clerk JWT to the active canvas iframe via postMessage.
+                // The injected canvas-auth-bridge script stores it as _canvasAuthToken.
+                try {
+                    const token = await Clerk.session?.getToken();
+                    const iframe = document.getElementById('canvas-iframe');
+                    if (token && iframe?.contentWindow) {
+                        iframe.contentWindow.postMessage({type: 'auth-token', token}, '*');
+                    }
+                } catch (e) { /* session may be gone */ }
+            },
+
             async _syncSessionCookie() {
                 // Clerk tokens expire every ~60s. Sync to __session cookie so
                 // iframe navigations and direct /pages/ URLs carry auth.
@@ -2551,6 +2563,12 @@ inject();
                         const token = await Clerk.session?.getToken();
                         if (token) {
                             document.cookie = `__session=${token}; path=/; SameSite=Lax; Secure`;
+                            // Also push fresh token to canvas iframe so long-running
+                            // uploads/API calls never hit an expired cookie
+                            const iframe = document.getElementById('canvas-iframe');
+                            if (iframe?.contentWindow) {
+                                iframe.contentWindow.postMessage({type: 'auth-token', token}, '*');
+                            }
                         }
                     } catch (e) { /* session may be gone */ }
                 };
@@ -6133,6 +6151,10 @@ inject();
                                     container.classList.remove('canvas-padded');
                                 }
                             }
+                            break;
+                        case 'request-auth-token':
+                            // Canvas page requesting a fresh Clerk JWT for API calls
+                            Auth._pushAuthTokenToCanvas();
                             break;
                         case 'menu':
                             CanvasControl.showMenu();
