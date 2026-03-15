@@ -394,6 +394,7 @@ def add_page_to_manifest(filename: str, title: str, description: str = '', conte
     page_id = Path(filename).stem
     category = suggest_category(title, content)
 
+    is_new_page = False
     if page_id in manifest['pages']:
         # Page already exists — preserve user-customised state (description, starred, etc.)
         existing = manifest['pages'][page_id]
@@ -407,6 +408,7 @@ def add_page_to_manifest(filename: str, title: str, description: str = '', conte
             'description': description[:200] if description else existing.get('description', ''),
         }
     else:
+        is_new_page = True
         manifest['pages'][page_id] = {
             'filename': filename,
             'display_name': title,
@@ -432,8 +434,53 @@ def add_page_to_manifest(filename: str, title: str, description: str = '', conte
         manifest['categories'][category]['pages'].append(page_id)
     if page_id in manifest.get('uncategorized', []):
         manifest['uncategorized'].remove(page_id)
+
+    # Auto-inject new pages into the desktop state so they appear as icons
+    # even when the desktop page isn't actively open in the browser
+    if is_new_page and page_id != 'desktop':
+        _inject_page_into_desktop_state(manifest, page_id)
+
     save_canvas_manifest(manifest)
     return manifest['pages'][page_id]
+
+
+def _inject_page_into_desktop_state(manifest: dict, page_id: str) -> None:
+    """Inject a newly created page into the desktop's serialised state.
+
+    The desktop stores its icon layout in the 'description' field of the
+    'desktop' page entry as a JSON blob with desktopPages, knownPages, etc.
+    When a page is created while the desktop isn't open, it would never get
+    added.  This ensures every new page appears as a desktop icon immediately.
+    """
+    desktop_entry = manifest.get('pages', {}).get('desktop')
+    if not desktop_entry:
+        return
+    desc = desktop_entry.get('description', '')
+    if not desc:
+        return
+    try:
+        state = json.loads(desc)
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    changed = False
+    known = state.get('knownPages', [])
+    desktop_pages = state.get('desktopPages', [])
+    hidden = state.get('hiddenPages', [])
+    recycle = state.get('recycleBin', [])
+
+    if page_id not in known:
+        known.append(page_id)
+        changed = True
+    # Add to desktop unless user previously recycled/hid it
+    if page_id not in desktop_pages and page_id not in hidden and page_id not in recycle:
+        desktop_pages.append(page_id)
+        changed = True
+
+    if changed:
+        state['knownPages'] = known
+        state['desktopPages'] = desktop_pages
+        desktop_entry['description'] = json.dumps(state)
 
 
 def track_page_access(page_id: str) -> None:

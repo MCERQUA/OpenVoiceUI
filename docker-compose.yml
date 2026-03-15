@@ -42,7 +42,7 @@ services:
       - canvas-pages:/app/runtime/canvas-pages
     depends_on:
       openclaw:
-        condition: service_started
+        condition: service_healthy
       supertonic:
         condition: service_healthy
     restart: unless-stopped
