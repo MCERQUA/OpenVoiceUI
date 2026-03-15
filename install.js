@@ -229,16 +229,42 @@ module.exports = {
       },
     },
 
-    // Step 3: Save input to JSON file
-    // Try THREE methods — whichever works on this platform will create the file.
-    // Pinokio template resolution is broken on Windows for some methods.
-
-    // Method A: fs.write with JSON.stringify expression
+    // Step 3: Save ALL input to JSON file in a SINGLE step
+    // input variable only carries to the immediately next step, so this must
+    // be one call. Uses correct json.set syntax: { "filepath": { key: value } }
     {
-      method: "fs.write",
+      method: "json.set",
       params: {
-        path: "pinokio-input.json",
-        text: "{{JSON.stringify(input)}}",
+        "pinokio-input.json": {
+          "PORT": "{{input.PORT||5001}}",
+          "GROQ_API_KEY": "{{input.GROQ_API_KEY}}",
+          "DEEPGRAM_API_KEY": "{{input.DEEPGRAM_API_KEY}}",
+          "ANTHROPIC_API_KEY": "{{input.ANTHROPIC_API_KEY}}",
+          "ZAI_API_KEY": "{{input.ZAI_API_KEY}}",
+          "OPENAI_API_KEY": "{{input.OPENAI_API_KEY}}",
+          "GEMINI_API_KEY": "{{input.GEMINI_API_KEY}}",
+          "OPENROUTER_API_KEY": "{{input.OPENROUTER_API_KEY}}",
+          "MISTRAL_API_KEY": "{{input.MISTRAL_API_KEY}}",
+          "XAI_API_KEY": "{{input.XAI_API_KEY}}",
+          "CEREBRAS_API_KEY": "{{input.CEREBRAS_API_KEY}}",
+          "TOGETHER_API_KEY": "{{input.TOGETHER_API_KEY}}",
+          "HF_TOKEN": "{{input.HF_TOKEN}}",
+          "MOONSHOT_API_KEY": "{{input.MOONSHOT_API_KEY}}",
+          "KIMI_API_KEY": "{{input.KIMI_API_KEY}}",
+          "MINIMAX_API_KEY": "{{input.MINIMAX_API_KEY}}",
+          "QIANFAN_API_KEY": "{{input.QIANFAN_API_KEY}}",
+          "MODELSTUDIO_API_KEY": "{{input.MODELSTUDIO_API_KEY}}",
+          "XIAOMI_API_KEY": "{{input.XIAOMI_API_KEY}}",
+          "VOLCANO_ENGINE_API_KEY": "{{input.VOLCANO_ENGINE_API_KEY}}",
+          "BYTEPLUS_API_KEY": "{{input.BYTEPLUS_API_KEY}}",
+          "SYNTHETIC_API_KEY": "{{input.SYNTHETIC_API_KEY}}",
+          "VENICE_API_KEY": "{{input.VENICE_API_KEY}}",
+          "OPENCODE_ZEN_API_KEY": "{{input.OPENCODE_ZEN_API_KEY}}",
+          "KILOCODE_API_KEY": "{{input.KILOCODE_API_KEY}}",
+          "AI_GATEWAY_API_KEY": "{{input.AI_GATEWAY_API_KEY}}",
+          "CLOUDFLARE_AI_GATEWAY_API_KEY": "{{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}",
+          "LITELLM_API_KEY": "{{input.LITELLM_API_KEY}}",
+        },
       },
     },
 
@@ -251,8 +277,6 @@ module.exports = {
     },
 
     // Step 5: Build Docker images (first run takes a few minutes)
-    // NOTE: if setup-config.js failed because pinokio-input.json was empty/missing,
-    // the build step won't run (Pinokio stops on shell.run exit code 1)
     {
       method: "shell.run",
       params: {
