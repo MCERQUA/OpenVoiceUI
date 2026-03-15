@@ -233,18 +233,48 @@ const deviceId = crypto.createHash("sha256").update(rawPub).digest("hex");
 const pubPem = publicKey.export({ type: "spki", format: "pem" });
 const privPem = privateKey.export({ type: "pkcs8", format: "pem" });
 
-// Identity for OpenVoiceUI
+// Base64url of raw Ed25519 public key — this is the format the gateway uses
+// for device identity comparison during the WS handshake (not PEM).
+const pubB64url = rawPub.toString("base64url");
+
+// Identity for OpenVoiceUI (Python client reads PEM for signing)
 fs.writeFileSync("openclaw-data/pre-paired-device.json",
   JSON.stringify({ deviceId, publicKeyPem: pubPem, privateKeyPem: privPem }, null, 2) + "\n");
 
-// Pre-register in paired.json for OpenClaw
+// Pre-register in paired.json for OpenClaw gateway.
+// Format must match what approveDevicePairing() writes:
+//   - publicKey: base64url of raw Ed25519 bytes (NOT PEM)
+//   - role/roles/scopes/approvedScopes: authorization metadata
+//   - tokens: per-role auth tokens for subsequent verifyDeviceToken() calls
 fs.mkdirSync("openclaw-data/devices", { recursive: true });
+const nowMs = Date.now();
+const pairingToken = crypto.randomBytes(32).toString("hex");
 const paired = {};
 paired[deviceId] = {
-  publicKey: pubPem, name: "openvoiceui-local",
-  paired: true, pairedAt: new Date().toISOString(), autoApproved: true,
+  deviceId,
+  publicKey: pubB64url,
+  displayName: "openvoiceui-local",
+  platform: "linux",
+  clientId: "cli",
+  clientMode: "cli",
+  role: "operator",
+  roles: ["operator"],
+  scopes: ["operator.read", "operator.write"],
+  approvedScopes: ["operator.read", "operator.write"],
+  tokens: {
+    operator: {
+      token: pairingToken,
+      role: "operator",
+      scopes: ["operator.read", "operator.write"],
+      createdAtMs: nowMs,
+    },
+  },
+  createdAtMs: nowMs,
+  approvedAtMs: nowMs,
 };
 fs.writeFileSync("openclaw-data/devices/paired.json", JSON.stringify(paired, null, 2) + "\n");
+// Clear any stale pending pairing requests
+fs.writeFileSync("openclaw-data/devices/pending.json", "{}\n");
 console.log(`  Pre-paired device: ${deviceId.slice(0, 16)}...`);
 
 console.log("\n  Configuration complete!\n");
