@@ -14,6 +14,17 @@ module.exports = {
       },
     },
 
+    // Auto-approve any pending device pairing requests
+    // OpenClaw requires device pairing but the pre-paired identity mount
+    // doesn't work with Docker named volumes on Windows. This approves
+    // whatever device OpenVoiceUI auto-generates on first connection.
+    {
+      method: "shell.run",
+      params: {
+        message: "node auto-approve-devices.js",
+      },
+    },
+
     // Set URL so pinokio.js shows "Open" button
     {
       method: "local.set",
