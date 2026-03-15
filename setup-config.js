@@ -218,4 +218,48 @@ if (keyCount === 0) {
   console.warn("  Re-run the installer to add keys, or edit openclaw-data/agents/main/agent/auth-profiles.json\n");
 }
 
+// --- 4. Pre-generate device identity and pre-pair it ----------------------------
+// OpenClaw requires device pairing for WebSocket connections. Even with
+// dangerouslyDisableDeviceAuth:true, the gateway still requires pairing for
+// the WS protocol (that flag only affects the control UI).
+// Fix: generate an Ed25519 keypair, save it for OpenVoiceUI to use, and
+// pre-register it in OpenClaw's devices/paired.json so no approval is needed.
+
+const crypto = require("crypto");
+
+// Generate Ed25519 keypair
+const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+const rawPub = publicKey.export({ type: "spki", format: "der" }).slice(-32);
+const deviceId = crypto.createHash("sha256").update(rawPub).digest("hex");
+const pubPem = publicKey.export({ type: "spki", format: "pem" });
+const privPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+// Save full identity for OpenVoiceUI (matches Python _load_device_identity format)
+const deviceIdentity = {
+  deviceId: deviceId,
+  publicKeyPem: pubPem,
+  privateKeyPem: privPem,
+};
+fs.writeFileSync(
+  "openclaw-data/pre-paired-device.json",
+  JSON.stringify(deviceIdentity, null, 2) + "\n"
+);
+console.log(`  Generated device identity: ${deviceId.slice(0, 16)}...`);
+
+// Pre-register in devices/paired.json so OpenClaw accepts this device immediately
+fs.mkdirSync("openclaw-data/devices", { recursive: true });
+const pairedDevices = {};
+pairedDevices[deviceId] = {
+  publicKey: pubPem,
+  name: "openvoiceui-local",
+  paired: true,
+  pairedAt: new Date().toISOString(),
+  autoApproved: true,
+};
+fs.writeFileSync(
+  "openclaw-data/devices/paired.json",
+  JSON.stringify(pairedDevices, null, 2) + "\n"
+);
+console.log("  Wrote devices/paired.json (pre-paired)");
+
 console.log("\n  Configuration complete!\n");
