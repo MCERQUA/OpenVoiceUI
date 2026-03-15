@@ -50,10 +50,19 @@ module.exports = {
             mode: "local",
             port: 18791,
             bind: "lan",
+            auth: {
+              token: "pinokio-local-token",
+            },
             trustedProxies: ["127.0.0.1", "172.16.0.0/12", "10.0.0.0/8"],
             controlUi: {
               allowInsecureAuth: true,
               dangerouslyDisableDeviceAuth: true,
+              allowedOrigins: [
+                "http://localhost:18791",
+                "http://127.0.0.1:18791",
+                "http://localhost:5001",
+                "http://127.0.0.1:5001",
+              ],
             },
           },
           agents: {
@@ -106,7 +115,7 @@ module.exports = {
     {
       method: "notify",
       params: {
-        html: "OpenVoiceUI installed! Click <b>Start</b> to launch.<br><br>On first start, open <code>http://localhost:18791</code> to configure your AI provider through the OpenClaw setup wizard.",
+        html: "OpenVoiceUI installed! Click <b>Start</b> to launch.<br><br>The app opens at <code>http://localhost:5001</code>.<br>To configure your AI provider, open <code>http://localhost:18791</code> and paste the gateway token: <code>pinokio-local-token</code>",
       },
     },
   ],

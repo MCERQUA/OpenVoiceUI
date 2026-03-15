@@ -6,14 +6,16 @@ RUN apt-get update \
 
 RUN pip install --no-cache-dir supertonic==1.1.2 fastapi uvicorn soundfile numpy
 
-# Pre-download models so they're baked into the image
-RUN python3 -c "from supertonic import TTS; tts = TTS(auto_download=True)"
-
 RUN useradd -r -m appuser
-USER appuser
 
 WORKDIR /app
 COPY server.py .
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+# Pre-download models as appuser so the cache path matches runtime
+RUN python3 -c "from supertonic import TTS; tts = TTS(auto_download=True)"
 
 EXPOSE 8765
 

@@ -7,7 +7,8 @@ module.exports = {
       params: {
         message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up",
         on: [{
-          event: "/Listening on.*\\d+|Running on http|Uvicorn running on/i",
+          // Match OpenVoiceUI's startup message (not OpenClaw's earlier "listening on ws://")
+          event: "/OpenVoiceUI starting on port/i",
           done: true,
         }],
       },
