@@ -2788,7 +2788,9 @@ async function uploadWallpaper(file) {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+    const opts = { method: 'POST', body: fd };
+    if(window._canvasAuthToken) opts.headers = { 'Authorization': 'Bearer ' + window._canvasAuthToken };
+    const resp = await fetch('/api/upload', opts);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     const url = data.url || data.path;
