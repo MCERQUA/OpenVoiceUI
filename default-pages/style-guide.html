@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JamBot Style Guide v0.2</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  /* ── Surface Scale (visible layers, NOT all black) ────── */
+  --bg:           #13141a;  /* base background */
+  --surface:      #1a1b23;  /* card level 1 */
+  --surface-2:    #21222c;  /* card level 2 / nested */
+  --surface-hover:#282936;  /* hover state */
+  --surface-3:    #2e3040;  /* elevated / modals */
+
+  /* ── Border Scale ─────────────────────────────────────── */
+  --border:       #2a2b37;  /* default borders */
+  --border-light: #353648;  /* hover / emphasis borders */
+  --border-heavy: #42445a;  /* strong dividers */
+
+  /* ── Brand: Blue (no purple) ──────────────────────────── */
+  --brand:        #3b82f6;
+  --brand-light:  #60a5fa;
+  --brand-dim:    rgba(59,130,246,0.12);
+  --brand-glow:   rgba(59,130,246,0.15);
+  --brand-glow-s: rgba(59,130,246,0.25);
+  --brand-border: rgba(59,130,246,0.25);
+
+  /* ── Semantic ─────────────────────────────────────────── */
+  --success:       #34d399;
+  --success-dim:   rgba(52,211,153,0.1);
+  --success-border:rgba(52,211,153,0.2);
+  --warning:       #fbbf24;
+  --warning-dim:   rgba(251,191,36,0.1);
+  --warning-border:rgba(251,191,36,0.2);
+  --danger:        #f87171;
+  --danger-dim:    rgba(248,113,113,0.1);
+  --danger-border: rgba(248,113,113,0.2);
+  --info:          #60a5fa;
+  --info-dim:      rgba(96,165,250,0.1);
+  --cyan:          #22d3ee;
+  --cyan-dim:      rgba(34,211,238,0.1);
+
+  /* ── Text ─────────────────────────────────────────────── */
+  --text:          #e8eaf0;
+  --text-secondary:#9498ab;
+  --text-muted:    #5f6380;
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-xs: 6px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 20px 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.style-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--brand);
+  padding: 28px 0 6px;
+}
+.style-label:first-of-type { padding-top: 0; }
+
+.style-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  padding: 18px 0 10px;
+}
+
+.divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-light), transparent);
+  margin: 24px 0;
+}
+
+/* ── Typography ──────────────────────────────────────────── */
+.type-demo h1 {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.type-demo h2 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin-bottom: 4px;
+}
+.type-demo h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.type-demo p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.type-demo .caption {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Color Palette ───────────────────────────────────────── */
+.palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: 6px;
+}
+.swatch {
+  aspect-ratio: 1;
+  border-radius: var(--radius-xs);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 4px 2px;
+  font-size: 7px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.6);
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.swatch.dark-text { color: rgba(0,0,0,0.5); }
+
+/* ── Card Styles ─────────────────────────────────────────── */
+.card-row { display: flex; flex-direction: column; gap: 10px; }
+
+.card-flat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.card-glow {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--brand-border);
+  box-shadow: 0 0 20px var(--brand-glow), inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+.card-glass {
+  background: rgba(26,27,35,0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+}
+
+.card-accent {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.card-gradient {
+  background: linear-gradient(145deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  position: relative;
+  overflow: hidden;
+}
+.card-gradient::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(59,130,246,0.35), transparent);
+}
+
+.card-layered {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.02) inset;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.card-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ── KPI ─────────────────────────────────────────────────── */
+.kpi-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.kpi .kpi-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+}
+.kpi .kpi-val {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1.2;
+}
+.kpi .kpi-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.kpi-bar {
+  border-left: 3px solid var(--brand);
+}
+
+.kpi-glow {
+  border-color: var(--brand-border);
+  box-shadow: 0 0 12px var(--brand-glow);
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.btn {
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 12px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: white;
+  box-shadow: 0 4px 12px rgba(59,130,246,0.25);
+}
+.btn-primary:hover {
+  box-shadow: 0 6px 20px rgba(59,130,246,0.35);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+}
+.btn-secondary:hover {
+  border-color: var(--brand-border);
+  color: var(--text);
+  background: var(--brand-dim);
+}
+
+.btn-soft {
+  background: var(--brand-dim);
+  border: 1px solid var(--brand-border);
+  color: var(--brand-light);
+}
+.btn-soft:hover {
+  background: var(--brand-glow-s);
+}
+
+.btn-action {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  color: var(--text);
+  text-align: left;
+  width: 100%;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-action:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+}
+.btn-action .btn-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.btn-action .btn-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.btn-action.primary-action {
+  border-color: var(--brand-border);
+  background: var(--brand-dim);
+}
+.btn-action.primary-action:hover {
+  box-shadow: 0 0 12px var(--brand-glow);
+}
+
+/* ── Status ──────────────────────────────────────────────── */
+.status-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.status-item:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-light);
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.running { background: var(--success); box-shadow: 0 0 6px rgba(52,211,153,0.5); }
+.status-dot.blocked { background: var(--warning); box-shadow: 0 0 6px rgba(251,191,36,0.4); }
+.status-dot.setup   { background: var(--text-muted); }
+.status-dot.error   { background: var(--danger); box-shadow: 0 0 6px rgba(248,113,113,0.4); }
+.status-name {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+}
+.status-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 20px;
+}
+.status-badge.running { background: var(--success-dim); color: var(--success); }
+.status-badge.blocked { background: var(--warning-dim); color: var(--warning); }
+.status-badge.setup   { background: rgba(95,99,128,0.15); color: var(--text-muted); }
+
+/* ── Progress Bar ────────────────────────────────────────── */
+.progress-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.progress-title { font-size: 13px; font-weight: 600; }
+.progress-pct { font-size: 13px; font-weight: 700; color: var(--brand); }
+.progress-track {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--brand);
+  transition: width 0.5s ease;
+}
+.progress-sub {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ── Timeline ────────────────────────────────────────────── */
+.timeline {
+  position: relative;
+  padding-left: 24px;
+}
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: linear-gradient(180deg, var(--brand), var(--brand-light), var(--border));
+}
+.tl-item { position: relative; padding-bottom: 18px; }
+.tl-item:last-child { padding-bottom: 0; }
+.tl-dot {
+  position: absolute;
+  left: -20px;
+  top: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--brand);
+  background: var(--bg);
+}
+.tl-dot.done { background: var(--brand); }
+.tl-dot.active { background: var(--brand); box-shadow: 0 0 8px var(--brand-glow-s); }
+.tl-label { font-size: 12px; font-weight: 600; }
+.tl-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* ── Chips ───────────────────────────────────────────────── */
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  background: var(--surface);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.chip:hover { border-color: var(--border-light); color: var(--text); }
+.chip.active { background: var(--brand-dim); border-color: var(--brand-border); color: var(--brand-light); }
+.chip .chip-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+/* ── Avatar ──────────────────────────────────────────────── */
+.avatar-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.avatar.brand   { background: var(--brand-dim); border: 1px solid var(--brand-border); color: var(--brand-light); }
+.avatar.success { background: var(--success-dim); border: 1px solid var(--success-border); color: var(--success); }
+.avatar.warning { background: var(--warning-dim); border: 1px solid var(--warning-border); color: var(--warning); }
+.avatar.danger  { background: var(--danger-dim); border: 1px solid var(--danger-border); color: var(--danger); }
+.avatar.cyan    { background: var(--cyan-dim); border: 1px solid rgba(34,211,238,0.2); color: var(--cyan); }
+
+/* ── Queue Item ──────────────────────────────────────────── */
+.queue-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.queue-item:hover { border-color: var(--border-light); background: var(--surface-hover); }
+.queue-body { flex: 1; }
+.queue-title { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+.queue-text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 6px; }
+.queue-unlock {
+  font-size: 10px;
+  color: var(--success);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.queue-unlock::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  background: var(--success);
+  border-radius: 50%;
+}
+.queue-action {
+  background: var(--brand-dim);
+  border: 1px solid var(--brand-border);
+  color: var(--brand-light);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  align-self: center;
+  transition: all 0.15s ease;
+}
+.queue-action:hover { background: var(--brand-glow-s); }
+
+/* ── Agent Card (office hub style) ───────────────────────── */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.agent-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+.agent-card:hover { background: var(--surface-hover); border-color: var(--border-light); transform: translateY(-1px); }
+.agent-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.agent-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.agent-card .role { font-size: 11px; color: var(--text-muted); line-height: 1.3; }
+.agent-card .status-pip {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+/* Department icon colors */
+.dept-ops .agent-icon    { background: var(--success-dim); color: var(--success); }
+.dept-revenue .agent-icon { background: var(--warning-dim); color: var(--warning); }
+.dept-marketing .agent-icon { background: var(--brand-dim); color: var(--brand-light); }
+.dept-tech .agent-icon   { background: var(--cyan-dim); color: var(--cyan); }
+.dept-finance .agent-icon { background: var(--warning-dim); color: var(--warning); }
+.dept-strategy .agent-icon { background: var(--info-dim); color: var(--info); }
+
+/* ── Notification Badge ──────────────────────────────────── */
+.notif-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--danger);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 6px;
+}
+
+/* ── Action Grid ─────────────────────────────────────────── */
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.footer-note {
+  text-align: center;
+  padding: 30px 0 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+</style>
+</head>
+<body>
+
+<div class="type-demo">
+  <h1>JamBot Design System</h1>
+  <h3>v0.2 &mdash; Lighter surfaces, blue brand, no purple</h3>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- SURFACES -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Surface Scale</div>
+<div class="style-desc">Each level is visibly distinct. Background → Surface → Surface 2 → Hover → Surface 3. Cards pop off the background.</div>
+<div class="palette">
+  <div class="swatch" style="background:#13141a">BG</div>
+  <div class="swatch" style="background:#1a1b23">Surface</div>
+  <div class="swatch" style="background:#21222c">Surf 2</div>
+  <div class="swatch" style="background:#282936">Hover</div>
+  <div class="swatch" style="background:#2e3040">Surf 3</div>
+</div>
+
+<div class="section-title">Borders</div>
+<div class="palette">
+  <div class="swatch" style="background:#2a2b37">Default</div>
+  <div class="swatch" style="background:#353648">Light</div>
+  <div class="swatch" style="background:#42445a">Heavy</div>
+</div>
+
+<div class="section-title">Text</div>
+<div class="palette">
+  <div class="swatch dark-text" style="background:#e8eaf0">Primary</div>
+  <div class="swatch" style="background:#9498ab">Secondary</div>
+  <div class="swatch" style="background:#5f6380">Muted</div>
+</div>
+
+<div class="section-title">Brand + Semantic</div>
+<div class="palette">
+  <div class="swatch" style="background:#3b82f6">Blue</div>
+  <div class="swatch" style="background:#60a5fa">Blue Lt</div>
+  <div class="swatch" style="background:#34d399">Success</div>
+  <div class="swatch" style="background:#fbbf24">Warning</div>
+  <div class="swatch" style="background:#f87171">Danger</div>
+  <div class="swatch" style="background:#22d3ee">Cyan</div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- TYPOGRAPHY -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Typography</div>
+<div class="type-demo">
+  <h1>AI Office Dashboard</h1>
+  <h2>Department Status</h2>
+  <h3>Section Label &middot; Uppercase Tracking</h3>
+  <p>Body text for descriptions and conversational content. Readable, warm, not clinical.</p>
+  <div class="caption">Caption &middot; timestamps &middot; metadata &middot; 11px</div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- CARDS -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Card Styles</div>
+<div class="style-desc">Six options on the new surface scale. All are now clearly visible against the background.</div>
+
+<div class="section-title">A &mdash; Flat</div>
+<div class="card-row">
+  <div class="card-flat">
+    <div class="card-title">Standard Card</div>
+    <div class="card-text">Clean baseline. Surface + border. This is the default for most content.</div>
+  </div>
+</div>
+
+<div class="section-title">B &mdash; Blue Glow</div>
+<div class="card-row">
+  <div class="card-glow">
+    <div class="card-title">Glow Card</div>
+    <div class="card-text">Blue glow on border. Use for highlighted / active / selected items. Premium feel without being flashy.</div>
+  </div>
+</div>
+
+<div class="section-title">C &mdash; Glass</div>
+<div class="card-row">
+  <div class="card-glass">
+    <div class="card-title">Glass Card</div>
+    <div class="card-text">Frosted glass with blur. Layered feeling. Good for overlays and hero sections.</div>
+  </div>
+</div>
+
+<div class="section-title">D &mdash; Left Accent</div>
+<div class="card-row">
+  <div class="card-accent">
+    <div class="card-title">Accent Card</div>
+    <div class="card-text">Colored left border for hierarchy and categorization. Pairs well with status indicators.</div>
+  </div>
+</div>
+
+<div class="section-title">E &mdash; Gradient + Top Line</div>
+<div class="card-row">
+  <div class="card-gradient">
+    <div class="card-title">Gradient Card</div>
+    <div class="card-text">Subtle diagonal gradient with luminous top edge. Feels elevated without being loud.</div>
+  </div>
+</div>
+
+<div class="section-title">F &mdash; Layered Shadow</div>
+<div class="card-row">
+  <div class="card-layered">
+    <div class="card-title">Layered Card</div>
+    <div class="card-text">Subtle drop shadow + inner highlight. Feels physical, lifted off the surface. Good depth cue.</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- KPIs -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">KPI Cards</div>
+
+<div class="section-title">Standard</div>
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi-label">Running</div>
+    <div class="kpi-val" style="color:var(--success)">14</div>
+    <div class="kpi-sub">departments active</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Close Rate</div>
+    <div class="kpi-val" style="color:var(--warning)">68%</div>
+    <div class="kpi-sub">last 30 days</div>
+  </div>
+</div>
+
+<div class="section-title">Left Bar</div>
+<div class="kpi-row">
+  <div class="kpi kpi-bar" style="border-left-color:var(--success)">
+    <div class="kpi-label">Revenue</div>
+    <div class="kpi-val" style="color:var(--success)">$47K</div>
+  </div>
+  <div class="kpi kpi-bar" style="border-left-color:var(--danger)">
+    <div class="kpi-label">Overdue</div>
+    <div class="kpi-val" style="color:var(--danger)">3</div>
+  </div>
+</div>
+
+<div class="section-title">Blue Glow</div>
+<div class="kpi-row">
+  <div class="kpi kpi-glow">
+    <div class="kpi-label">Pipeline</div>
+    <div class="kpi-val" style="color:var(--brand-light)">$128K</div>
+  </div>
+  <div class="kpi kpi-glow">
+    <div class="kpi-label">Reviews</div>
+    <div class="kpi-val" style="color:var(--brand-light)">4.8</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- BUTTONS -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Buttons</div>
+<div class="btn-row">
+  <button class="btn btn-primary">Get Started</button>
+  <button class="btn btn-soft">View Details</button>
+  <button class="btn btn-secondary">Cancel</button>
+</div>
+<div style="height:10px"></div>
+<div class="action-grid">
+  <button class="btn-action primary-action">
+    <span class="btn-label">Follow Up Hot</span>
+    <span class="btn-desc">Draft messages for 3 estimates</span>
+  </button>
+  <button class="btn-action">
+    <span class="btn-label">Full Pipeline</span>
+    <span class="btn-desc">All estimates by status</span>
+  </button>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- AVATARS -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Agent Avatars</div>
+<div class="style-desc">Blue for brand/default, semantic colors for departments. All use dim bg + border, no solid fills.</div>
+<div class="avatar-row">
+  <div class="avatar brand">SM</div>
+  <div class="avatar success">DS</div>
+  <div class="avatar warning">BK</div>
+  <div class="avatar danger">SF</div>
+  <div class="avatar cyan">CB</div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- AGENT CARDS -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Agent Cards (Office Hub)</div>
+<div class="agent-grid">
+  <div class="agent-card dept-ops">
+    <div class="status-pip" style="background:var(--success)"></div>
+    <div class="agent-icon">DS</div>
+    <h3>Dispatcher</h3>
+    <div class="role">Scheduling, dispatch, field ops</div>
+  </div>
+  <div class="agent-card dept-revenue">
+    <div class="status-pip" style="background:var(--warning)"></div>
+    <div class="agent-icon">SM</div>
+    <h3>Sales Manager</h3>
+    <div class="role">Estimates, pricing, proposals</div>
+  </div>
+  <div class="agent-card dept-marketing">
+    <div class="status-pip" style="background:var(--success)"></div>
+    <div class="agent-icon">MS</div>
+    <h3>Marketing</h3>
+    <div class="role">SEO, ads, campaigns</div>
+  </div>
+  <div class="agent-card dept-tech">
+    <div class="status-pip" style="background:var(--text-muted)"></div>
+    <div class="agent-icon">CB</div>
+    <h3>Canvas Builder</h3>
+    <div class="role">Pages, dashboards</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- STATUS -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Department Status List</div>
+<div class="status-row">
+  <div class="status-item">
+    <div class="status-dot running"></div>
+    <div style="flex:1">
+      <div class="status-name">Competitor Intel</div>
+      <div class="status-sub">Monitoring 3 competitors weekly</div>
+    </div>
+    <div class="status-badge running">Running</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot blocked"></div>
+    <div style="flex:1">
+      <div class="status-name">Sales Manager</div>
+      <div class="status-sub">Need your recent estimates</div>
+    </div>
+    <div class="status-badge blocked">Needs Input</div>
+  </div>
+  <div class="status-item">
+    <div class="status-dot setup"></div>
+    <div style="flex:1">
+      <div class="status-name">Dispatcher</div>
+      <div class="status-sub">Need crew info and hours</div>
+    </div>
+    <div class="status-badge setup">Setup</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- PROGRESS -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Progress</div>
+<div class="progress-wrap">
+  <div class="progress-header">
+    <div class="progress-title">Office Setup</div>
+    <div class="progress-pct">65%</div>
+  </div>
+  <div class="progress-track">
+    <div class="progress-fill" style="width:65%"></div>
+  </div>
+  <div class="progress-sub">
+    <span>13 of 20 departments online</span>
+    <span>7 need input</span>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- TIMELINE -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Timeline</div>
+<div class="timeline">
+  <div class="tl-item">
+    <div class="tl-dot done"></div>
+    <div class="tl-label">Onboarding Complete</div>
+    <div class="tl-desc">Business info collected, team briefed</div>
+  </div>
+  <div class="tl-item">
+    <div class="tl-dot done"></div>
+    <div class="tl-label">SEO Audit Running</div>
+    <div class="tl-desc">12 keywords tracked, 4 opportunities found</div>
+  </div>
+  <div class="tl-item">
+    <div class="tl-dot active"></div>
+    <div class="tl-label">Competitor Scan</div>
+    <div class="tl-desc">Analyzing 3 competitors now...</div>
+  </div>
+  <div class="tl-item">
+    <div class="tl-dot"></div>
+    <div class="tl-label">First Morning Briefing</div>
+    <div class="tl-desc">Tomorrow at 8am</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- QUEUE -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Queue / Needs From You</div>
+<div class="card-row">
+  <div class="queue-item" onclick="speak('Let me tell you about my recent estimates')">
+    <div class="avatar warning" style="width:36px;height:36px;font-size:12px;border-radius:10px">SM</div>
+    <div class="queue-body">
+      <div class="queue-title">Sales Manager needs your estimates</div>
+      <div class="queue-text">Tell me about your last few estimates — what they were for, amounts, and if they closed.</div>
+      <div class="queue-unlock">Unlocks pipeline tracking + follow-up automation</div>
+    </div>
+    <button class="queue-action">Answer</button>
+  </div>
+  <div class="queue-item" onclick="speak('Let me tell you about our licenses')">
+    <div class="avatar danger" style="width:36px;height:36px;font-size:12px;border-radius:10px">SF</div>
+    <div class="queue-body">
+      <div class="queue-title">Compliance needs your license info</div>
+      <div class="queue-text">What licenses and certs does your team hold? I'll track renewal dates.</div>
+      <div class="queue-unlock">Unlocks expiration alerts + renewal reminders</div>
+    </div>
+    <button class="queue-action">Answer</button>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- CHIPS + BADGES -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="style-label">Chips &amp; Badges</div>
+<div class="chip-row">
+  <span class="chip active"><span class="chip-dot" style="background:var(--brand)"></span>All</span>
+  <span class="chip"><span class="chip-dot" style="background:var(--success)"></span>Running</span>
+  <span class="chip"><span class="chip-dot" style="background:var(--warning)"></span>Blocked</span>
+  <span class="chip"><span class="chip-dot" style="background:var(--text-muted)"></span>Setup</span>
+</div>
+<div style="height:10px"></div>
+<div style="display:flex;align-items:center;gap:10px">
+  <span style="font-size:13px">Needs From You</span>
+  <span class="notif-badge">4</span>
+  <span style="flex:1"></span>
+  <span style="font-size:13px">New Reviews</span>
+  <span class="notif-badge" style="background:var(--success)">2</span>
+</div>
+
+<div class="footer-note">
+  JamBot Canvas Design System v0.2<br>
+  Blue brand &middot; Visible surfaces &middot; No purple
+</div>
+
+<script>
+function nav(page) {
+  window.parent.postMessage({type:'canvas-action', action:'navigate', page: page}, '*');
+}
+function speak(text) {
+  window.parent.postMessage({type:'canvas-action', action:'speak', text: text}, '*');
+}
+</script>
+</body>
+</html>
