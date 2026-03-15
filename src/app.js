@@ -3147,9 +3147,8 @@ inject();
 
                 // Determine WebSocket URL based on hostname
                 // Connect to voice agent (main agent, voice-optimized)
-                const wsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-                    ? 'ws://localhost:5002/ws/clawdbot?agent=main'
-                    : `wss://${window.location.host}/ws/clawdbot?agent=main`;
+                const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProto}//${window.location.host}/ws/clawdbot?agent=main`;
 
                 console.log('Clawdbot connecting to:', wsUrl);
 
@@ -6206,9 +6205,10 @@ inject();
                         case 'open-url':
                             // Load external URL in the iframe
                             if (url) {
+                                const resolvedUrl = resolveCanvasUrl(url) || url;
                                 const iframe = document.getElementById('canvas-iframe');
                                 const container = document.getElementById('canvas-container');
-                                if (iframe) iframe.src = url;
+                                if (iframe) iframe.src = resolvedUrl;
                                 if (container && event.data.padded) {
                                     container.classList.add('canvas-padded');
                                 } else if (container) {

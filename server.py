@@ -148,6 +148,9 @@ app.register_blueprint(onboarding_bp)
 from routes.image_gen import image_gen_bp
 app.register_blueprint(image_gen_bp)
 
+from routes.chat import chat_bp
+app.register_blueprint(chat_bp)
+
 from routes.workspace import workspace_bp
 app.register_blueprint(workspace_bp)
 
@@ -1291,7 +1294,7 @@ def openclaw_ui_websocket(ws):
         return
     logger.info(f"OpenClaw UI WebSocket authenticated: user_id={user_id}")
 
-    gateway_url = os.getenv("CLAWDBOT_GATEWAY_URL", "ws://127.0.0.1:18789")
+    gateway_url = os.getenv("CLAWDBOT_GATEWAY_URL", "ws://127.0.0.1:18791")
     auth_token = os.getenv("CLAWDBOT_AUTH_TOKEN")
 
     if not auth_token:

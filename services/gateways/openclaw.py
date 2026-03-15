@@ -486,7 +486,7 @@ class GatewayConnection:
 
     async def _connect(self):
         t_start = time.time()
-        ws = await websockets.connect(self.url)
+        ws = await websockets.connect(self.url, open_timeout=10)
         try:
             hello_data, server_version = await self._handshake(ws)
         except Exception:
