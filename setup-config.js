@@ -5,25 +5,45 @@
 const fs = require("fs");
 const path = require("path");
 
-const PORT = process.env.OVU_PORT || "5001";
-
 // Filter out junk values from unresolved Pinokio templates or empty fields
 function isRealValue(v) {
-  if (!v || !v.trim()) return false;
-  // Pinokio may pass literal "undefined" / "null" / unresolved "{{...}}" for blank fields
+  if (!v || typeof v !== "string" || !v.trim()) return false;
   if (v === "undefined" || v === "null" || v.startsWith("{{")) return false;
   return true;
 }
 
-// --- 0. Validate required keys -----------------------------------------------
+// --- 0. Load input from pinokio-input.json -----------------------------------
+// Pinokio's {{input.*}} templates don't resolve in fs.write or shell.run env
+// on Windows. We use json.set to write each key to a file, then read it here.
 
-const groqKey = process.env.GROQ_API_KEY;
-const deepgramKey = process.env.DEEPGRAM_API_KEY;
-const hasGroq = isRealValue(groqKey);
-const hasDeepgram = isRealValue(deepgramKey);
+let input = {};
+const inputFile = "pinokio-input.json";
+try {
+  input = JSON.parse(fs.readFileSync(inputFile, "utf8"));
+  console.log(`  Read ${Object.keys(input).length} keys from ${inputFile}`);
+} catch (e) {
+  console.error(`  ERROR: Could not read ${inputFile}: ${e.message}`);
+  console.error("  The install form may not have saved properly. Try Reinstall.");
+  process.exit(1);
+}
 
+// Helper: get a value from input JSON, falling back to env var
+function getKey(name) {
+  const fromJson = input[name];
+  if (isRealValue(fromJson)) return fromJson.trim();
+  const fromEnv = process.env[name];
+  if (isRealValue(fromEnv)) return fromEnv.trim();
+  return "";
+}
+
+const PORT = getKey("PORT") || "5001";
+
+// --- Validate required keys --------------------------------------------------
+
+const hasGroq = !!getKey("GROQ_API_KEY");
+const hasDeepgram = !!getKey("DEEPGRAM_API_KEY");
 const aiProviderKeys = ["ANTHROPIC_API_KEY", "ZAI_API_KEY", "OPENAI_API_KEY"];
-const hasAiProvider = aiProviderKeys.some(k => isRealValue(process.env[k]));
+const hasAiProvider = aiProviderKeys.some(k => !!getKey(k));
 
 if (!hasGroq || !hasDeepgram || !hasAiProvider) {
   console.error("\n  ============================================================");
@@ -65,20 +85,19 @@ const envKeys = [
 ];
 
 for (const k of envKeys) {
-  const v = process.env[k] || "";
-  envLines.push(`${k}=${isRealValue(v) ? v : ""}`);
+  envLines.push(`${k}=${getKey(k)}`);
 }
 
 envLines.push(
   "",
   "# TTS — Groq (also available as fast LLM provider)",
-  `GROQ_API_KEY=${isRealValue(process.env.GROQ_API_KEY) ? process.env.GROQ_API_KEY : ""}`,
+  `GROQ_API_KEY=${getKey("GROQ_API_KEY")}`,
   "USE_GROQ=true",
   "USE_GROQ_TTS=true",
   "",
   "",
   "# STT — Deepgram (Speech-to-Text)",
-  `DEEPGRAM_API_KEY=${isRealValue(process.env.DEEPGRAM_API_KEY) ? process.env.DEEPGRAM_API_KEY : ""}`,
+  `DEEPGRAM_API_KEY=${getKey("DEEPGRAM_API_KEY")}`,
   "",
   "# Supertonic TTS (ships with docker compose)",
   "SUPERTONIC_API_URL=http://supertonic:8765",
@@ -168,13 +187,13 @@ const authProfiles = {};
 let keyCount = 0;
 
 for (const [envVar, providerId] of Object.entries(providerMap)) {
-  const key = process.env[envVar];
-  if (isRealValue(key)) {
+  const key = getKey(envVar);
+  if (key) {
     authProfiles[providerId] = [
       {
         id: "default",
         type: "api_key",
-        key: key.trim(),
+        key: key,
         lastUsed: null,
         disabled: false,
         cooldown: null,
