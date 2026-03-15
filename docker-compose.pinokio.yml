@@ -1,7 +1,7 @@
 # Pinokio local install override
-# - Swaps openclaw-data volume for local dir (pre-configured openclaw.json)
-# - Injects .env into both containers so API keys + auth token are available
-# - Mounts pre-paired device identity into openvoiceui so gateway accepts it
+# - Swaps openclaw-data volume for local dir (pre-configured openclaw.json + auth-profiles)
+# - Injects .env into both containers so API keys are available
+# - dangerouslyDisableDeviceAuth is set in openclaw.json so no device pairing needed
 services:
   openclaw:
     env_file:
@@ -9,10 +9,3 @@ services:
     volumes:
       - ./openclaw-data:/root/.openclaw
       - canvas-pages:/root/.openclaw/workspace/canvas-pages
-  openvoiceui:
-    environment:
-      - CLAWDBOT_AUTH_TOKEN=pinokio-local-token
-    volumes:
-      - openvoiceui-runtime:/app/runtime
-      - canvas-pages:/app/runtime/canvas-pages
-      - ./openclaw-data/pre-paired-device.json:/app/runtime/uploads/.device-identity.json:ro

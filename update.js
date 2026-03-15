@@ -1,6 +1,6 @@
 module.exports = {
   run: [
-    // Stop running containers
+    // Stop if running
     {
       method: "shell.run",
       params: {
@@ -16,7 +16,7 @@ module.exports = {
       },
     },
 
-    // Rebuild images with latest changes
+    // Rebuild images
     {
       method: "shell.run",
       params: {
@@ -24,10 +24,25 @@ module.exports = {
       },
     },
 
+    // Start back up
     {
-      method: "notify",
+      method: "shell.run",
       params: {
-        html: "OpenVoiceUI updated! Click <b>Start</b> to launch.",
+        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up -d",
+      },
+    },
+
+    {
+      method: "local.set",
+      params: {
+        running: true,
+      },
+    },
+
+    {
+      method: "browser.open",
+      params: {
+        url: "http://localhost:{{local.PORT||5001}}",
       },
     },
   ],

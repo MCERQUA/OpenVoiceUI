@@ -1,10 +1,10 @@
 module.exports = {
   run: [
-    // Step 1: Verify Docker is installed and running
+    // Step 1: Verify Docker is available
     {
       method: "shell.run",
       params: {
-        message: "node check-docker.js",
+        message: "docker --version && docker compose version",
       },
     },
 
@@ -37,17 +37,17 @@ module.exports = {
           // RECOMMENDED — pick at least one AI provider
           // ═══════════════════════════════════════════════════════════
           {
-            key: "ANTHROPIC_API_KEY",
-            title: "[RECOMMENDED] Anthropic API Key — best results, higher cost",
-            description: "console.anthropic.com/settings/keys — Claude models, highest quality",
-            placeholder: "sk-ant-...",
+            key: "ZAI_API_KEY",
+            title: "[RECOMMENDED] Z.AI API Key — great quality, low cost",
+            description: "z.ai — GLM models, excellent value for daily use",
+            placeholder: "",
             required: false,
           },
           {
-            key: "ZAI_API_KEY",
-            title: "[RECOMMENDED] Z.AI API Key — good results, low cost",
-            description: "z.ai — GLM models, great value for daily use",
-            placeholder: "",
+            key: "ANTHROPIC_API_KEY",
+            title: "[RECOMMENDED] Anthropic API Key — Claude models",
+            description: "console.anthropic.com/settings/keys — highest quality",
+            placeholder: "sk-ant-...",
             required: false,
           },
           {
@@ -222,6 +222,7 @@ module.exports = {
           {
             key: "PORT",
             title: "Port (default: 5001)",
+            description: "Port to run OpenVoiceUI on",
             placeholder: "5001",
             required: false,
           },
@@ -229,54 +230,47 @@ module.exports = {
       },
     },
 
-    // Step 3: Save ALL input to JSON file in a SINGLE step
-    // input variable only carries to the immediately next step, so this must
-    // be one call. Uses correct json.set syntax: { "filepath": { key: value } }
-    {
-      method: "json.set",
-      params: {
-        "pinokio-input.json": {
-          "PORT": "{{input.PORT||5001}}",
-          "GROQ_API_KEY": "{{input.GROQ_API_KEY}}",
-          "DEEPGRAM_API_KEY": "{{input.DEEPGRAM_API_KEY}}",
-          "ANTHROPIC_API_KEY": "{{input.ANTHROPIC_API_KEY}}",
-          "ZAI_API_KEY": "{{input.ZAI_API_KEY}}",
-          "OPENAI_API_KEY": "{{input.OPENAI_API_KEY}}",
-          "GEMINI_API_KEY": "{{input.GEMINI_API_KEY}}",
-          "OPENROUTER_API_KEY": "{{input.OPENROUTER_API_KEY}}",
-          "MISTRAL_API_KEY": "{{input.MISTRAL_API_KEY}}",
-          "XAI_API_KEY": "{{input.XAI_API_KEY}}",
-          "CEREBRAS_API_KEY": "{{input.CEREBRAS_API_KEY}}",
-          "TOGETHER_API_KEY": "{{input.TOGETHER_API_KEY}}",
-          "HF_TOKEN": "{{input.HF_TOKEN}}",
-          "MOONSHOT_API_KEY": "{{input.MOONSHOT_API_KEY}}",
-          "KIMI_API_KEY": "{{input.KIMI_API_KEY}}",
-          "MINIMAX_API_KEY": "{{input.MINIMAX_API_KEY}}",
-          "QIANFAN_API_KEY": "{{input.QIANFAN_API_KEY}}",
-          "MODELSTUDIO_API_KEY": "{{input.MODELSTUDIO_API_KEY}}",
-          "XIAOMI_API_KEY": "{{input.XIAOMI_API_KEY}}",
-          "VOLCANO_ENGINE_API_KEY": "{{input.VOLCANO_ENGINE_API_KEY}}",
-          "BYTEPLUS_API_KEY": "{{input.BYTEPLUS_API_KEY}}",
-          "SYNTHETIC_API_KEY": "{{input.SYNTHETIC_API_KEY}}",
-          "VENICE_API_KEY": "{{input.VENICE_API_KEY}}",
-          "OPENCODE_ZEN_API_KEY": "{{input.OPENCODE_ZEN_API_KEY}}",
-          "KILOCODE_API_KEY": "{{input.KILOCODE_API_KEY}}",
-          "AI_GATEWAY_API_KEY": "{{input.AI_GATEWAY_API_KEY}}",
-          "CLOUDFLARE_AI_GATEWAY_API_KEY": "{{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}",
-          "LITELLM_API_KEY": "{{input.LITELLM_API_KEY}}",
-        },
-      },
-    },
-
-    // Step 4: Generate .env, openclaw.json, auth-profiles, and pre-paired device
+    // Step 3: Generate ALL config files in one shot.
+    // Pinokio's {{input.X}} only carries to the immediately next step,
+    // so we pass everything via env and do all file writes in one call.
     {
       method: "shell.run",
       params: {
         message: "node setup-config.js",
+        env: {
+          PINOKIO_PORT: "{{input.PORT||5001}}",
+          PINOKIO_GROQ_API_KEY: "{{input.GROQ_API_KEY}}",
+          PINOKIO_DEEPGRAM_API_KEY: "{{input.DEEPGRAM_API_KEY}}",
+          PINOKIO_ANTHROPIC_API_KEY: "{{input.ANTHROPIC_API_KEY}}",
+          PINOKIO_ZAI_API_KEY: "{{input.ZAI_API_KEY}}",
+          PINOKIO_OPENAI_API_KEY: "{{input.OPENAI_API_KEY}}",
+          PINOKIO_GEMINI_API_KEY: "{{input.GEMINI_API_KEY}}",
+          PINOKIO_OPENROUTER_API_KEY: "{{input.OPENROUTER_API_KEY}}",
+          PINOKIO_MISTRAL_API_KEY: "{{input.MISTRAL_API_KEY}}",
+          PINOKIO_XAI_API_KEY: "{{input.XAI_API_KEY}}",
+          PINOKIO_CEREBRAS_API_KEY: "{{input.CEREBRAS_API_KEY}}",
+          PINOKIO_TOGETHER_API_KEY: "{{input.TOGETHER_API_KEY}}",
+          PINOKIO_HF_TOKEN: "{{input.HF_TOKEN}}",
+          PINOKIO_MOONSHOT_API_KEY: "{{input.MOONSHOT_API_KEY}}",
+          PINOKIO_KIMI_API_KEY: "{{input.KIMI_API_KEY}}",
+          PINOKIO_MINIMAX_API_KEY: "{{input.MINIMAX_API_KEY}}",
+          PINOKIO_QIANFAN_API_KEY: "{{input.QIANFAN_API_KEY}}",
+          PINOKIO_MODELSTUDIO_API_KEY: "{{input.MODELSTUDIO_API_KEY}}",
+          PINOKIO_XIAOMI_API_KEY: "{{input.XIAOMI_API_KEY}}",
+          PINOKIO_VOLCANO_ENGINE_API_KEY: "{{input.VOLCANO_ENGINE_API_KEY}}",
+          PINOKIO_BYTEPLUS_API_KEY: "{{input.BYTEPLUS_API_KEY}}",
+          PINOKIO_SYNTHETIC_API_KEY: "{{input.SYNTHETIC_API_KEY}}",
+          PINOKIO_VENICE_API_KEY: "{{input.VENICE_API_KEY}}",
+          PINOKIO_OPENCODE_ZEN_API_KEY: "{{input.OPENCODE_ZEN_API_KEY}}",
+          PINOKIO_KILOCODE_API_KEY: "{{input.KILOCODE_API_KEY}}",
+          PINOKIO_AI_GATEWAY_API_KEY: "{{input.AI_GATEWAY_API_KEY}}",
+          PINOKIO_CLOUDFLARE_AI_GATEWAY_API_KEY: "{{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}",
+          PINOKIO_LITELLM_API_KEY: "{{input.LITELLM_API_KEY}}",
+        },
       },
     },
 
-    // Step 5: Build Docker images (first run takes a few minutes)
+    // Step 4: Build Docker images (first run takes a few minutes)
     {
       method: "shell.run",
       params: {
@@ -284,11 +278,19 @@ module.exports = {
       },
     },
 
-    // Step 6: Done
+    // Step 5: Mark as installed and store port
+    {
+      method: "local.set",
+      params: {
+        installed: true,
+        PORT: "{{input.PORT||5001}}",
+      },
+    },
+
     {
       method: "notify",
       params: {
-        html: "OpenVoiceUI installed! Click <b>Start</b> to launch.<br><br>The app opens at <code>http://localhost:5001</code>.<br>To change your AI model or add more provider keys later, open <code>http://localhost:18791</code> (token: <code>pinokio-local-token</code>).",
+        html: "OpenVoiceUI installed! Click <b>&#9654; Start</b> to launch.<br><br>The app opens at <code>http://localhost:{{input.PORT||5001}}</code>.<br>To change your AI model or add more provider keys later, open <code>http://localhost:18791</code>.",
       },
     },
   ],
