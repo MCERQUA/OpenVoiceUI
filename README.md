@@ -155,7 +155,6 @@ Define agents in JSON — each profile configures:
 │   ├── static_files.py         Static asset serving
 │   ├── image_gen.py            HuggingFace image generation (FLUX.1, SD3.5)
 │   ├── workspace.py            Agent workspace file management
-│   ├── ssactivewear.py         S&S Activewear wholesale API proxy
 │   ├── report_issue.py         In-app issue reporter
 │   ├── icons.py                Icon generation
 │   └── onboarding.py           Onboarding flow
@@ -499,10 +498,6 @@ POST /api/suno/callback                   # Webhook callback endpoint
 
 # Issue Reporter
 POST /api/report-issue                    # Submit bug report with session context
-
-# S&S Activewear
-GET  /api/ssactivewear/*                  # Wholesale apparel API proxy
-POST /api/ssactivewear/*
 
 # Icons
 POST /api/icons/generate                  # Generate icons
