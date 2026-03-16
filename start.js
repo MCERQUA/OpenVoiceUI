@@ -14,6 +14,17 @@ module.exports = {
       },
     },
 
+    // Auto-approve any pending device pairing requests.
+    // OpenClaw requires device pairing for WebSocket connections.
+    // dangerouslyDisableDeviceAuth only affects the control UI, not WS.
+    // This approves whatever device OpenVoiceUI auto-generates on first connect.
+    {
+      method: "shell.run",
+      params: {
+        message: "node auto-approve-devices.js",
+      },
+    },
+
     // Set URL so pinokio.js shows "Open" button (uses port from install)
     {
       method: "local.set",
