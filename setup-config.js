@@ -29,6 +29,7 @@ const openclawConfig = {
     mode: "local",
     port: 18791,
     bind: "lan",
+    auth: { mode: "token", token: token },
     trustedProxies: ["127.0.0.1", "172.16.0.0/12", "10.0.0.0/8"],
     controlUi: {
       allowInsecureAuth: true,
@@ -57,7 +58,7 @@ console.log("  Wrote openclaw-data/openclaw.json");
 // 2. Write .env
 // ---------------------------------------------------------------------------
 
-const token = crypto.randomBytes(32).toString("hex");
+const token = crypto.randomBytes(24).toString("hex");
 const secret = crypto.randomBytes(32).toString("hex");
 
 const envLines = [
