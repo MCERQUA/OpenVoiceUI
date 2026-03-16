@@ -199,7 +199,7 @@ export class VoiceSession {
         eventBus.emit('session:thinking', {});
         faceManager.setMood('thinking');
 
-        const provider = localStorage.getItem('voice_provider') || 'supertonic';
+        const provider = localStorage.getItem('voice_provider') || 'groq';
         const voice = localStorage.getItem('voice_voice') || 'M1';
 
         try {
@@ -372,7 +372,7 @@ export class VoiceSession {
 
         return new Promise(async (resolve) => {
             try {
-                const provider = localStorage.getItem('voice_provider') || 'supertonic';
+                const provider = localStorage.getItem('voice_provider') || 'groq';
                 const voice = localStorage.getItem('voice_voice') || 'M1';
 
                 const response = await fetch(`${this.serverUrl}/api/tts/generate`, {

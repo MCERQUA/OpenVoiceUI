@@ -637,7 +637,7 @@ def conversation():
 
     Request JSON:
         message      : str  — transcribed user speech (required)
-        tts_provider : str  — 'supertonic' | 'groq' (default: supertonic)
+        tts_provider : str  — 'supertonic' | 'groq' (default: env DEFAULT_TTS_PROVIDER or groq)
         voice        : str  — voice ID, e.g. 'M1' (default: M1)
         session_id   : str  — session identifier (default: default)
         ui_context   : dict — canvas/music state from frontend (optional)
@@ -680,7 +680,7 @@ def _conversation_inner():
     logger.info(f'Received conversation request: {data}')
 
     user_message = data.get('message', '').strip()
-    tts_provider = data.get('tts_provider', 'supertonic')
+    tts_provider = data.get('tts_provider') or os.getenv('DEFAULT_TTS_PROVIDER', 'groq')
     voice = data.get('voice', 'M1')
     session_id = data.get('session_id', 'default')
     ui_context = data.get('ui_context', {})

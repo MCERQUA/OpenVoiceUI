@@ -21,7 +21,7 @@ import { eventBus } from './EventBus.js';
 /** Compile-time defaults — must not contain secrets */
 const DEFAULTS = {
     tts: {
-        provider: 'supertonic',
+        provider: 'groq',
         volume: 1.0,
         rate: 1.0,
     },
