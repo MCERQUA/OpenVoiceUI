@@ -13,6 +13,9 @@ const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.pinokio.
 const MAX_ATTEMPTS = 24;  // 24 × 5s = 2 minutes
 const DELAY_MS = 5000;
 
+// MSYS_NO_PATHCONV=1 prevents Git Bash on Windows from converting /container/paths
+const EXEC_ENV = Object.assign({}, process.env, { MSYS_NO_PATHCONV: "1" });
+
 // Node one-liner that runs INSIDE the openclaw container
 const script = `
 const fs = require('fs');
@@ -65,7 +68,7 @@ async function run() {
     try {
       const result = execSync(
         `${COMPOSE} exec -T openclaw node -e "${script.replace(/"/g, '\\"')}"`,
-        { encoding: "utf8", timeout: 15000 }
+        { encoding: "utf8", timeout: 15000, env: EXEC_ENV }
       ).trim();
 
       // New device(s) approved
