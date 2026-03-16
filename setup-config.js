@@ -41,6 +41,7 @@ const openclawConfig = {
     bind: "lan",
     auth: { mode: "token", token: token },
     trustedProxies: ["127.0.0.1", "172.16.0.0/12", "10.0.0.0/8"],
+    dangerouslyDisableDeviceAuth: true,
     controlUi: {
       allowInsecureAuth: true,
       dangerouslyDisableDeviceAuth: true,
