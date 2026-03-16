@@ -14,11 +14,11 @@ module.exports = {
       },
     },
 
-    // Set URL so pinokio.js shows "Open" button
+    // Set URL so pinokio.js shows "Open" button (uses port from install)
     {
       method: "local.set",
       params: {
-        url: "http://localhost:5001",
+        url: "http://localhost:{{local.PORT||5001}}",
       },
     },
   ],
