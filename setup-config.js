@@ -174,6 +174,86 @@ fs.writeFileSync(
 console.log(`  Wrote auth-profiles.json (${keyCount} provider(s))`);
 
 // ---------------------------------------------------------------------------
+// 4. Pre-generate device identity and pre-pair it
+// ---------------------------------------------------------------------------
+// OpenClaw requires device pairing for WebSocket connections. Even with
+// dangerouslyDisableDeviceAuth:true, the gateway still requires pairing for
+// the WS protocol (that flag only affects the control UI).
+//
+// Fix: generate an Ed25519 keypair at install time, register the public key
+// in OpenClaw's devices/paired.json, and save the full identity so start.js
+// can inject it into the OpenVoiceUI container via docker exec.
+
+// Generate Ed25519 keypair
+const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+
+// Raw 32-byte public key — extract via JWK.x (most reliable cross-platform)
+const devJwk = publicKey.export({ format: "jwk" });
+const rawPub = Buffer.from(devJwk.x, "base64url");
+
+// deviceId = SHA256(raw public key) — matches Python's hashlib.sha256(raw_pub).hexdigest()
+const deviceId = crypto.createHash("sha256").update(rawPub).digest("hex");
+
+// PEM formats — OpenVoiceUI Python client uses PEM for signing
+const pubPem = publicKey.export({ type: "spki", format: "pem" });
+const privPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+// base64url of raw Ed25519 bytes — this is what the gateway compares during WS handshake
+const pubB64url = rawPub.toString("base64url");
+
+// Save full identity for injection into OpenVoiceUI container at start time
+// (Python client reads PEM format for Ed25519 signing)
+const deviceIdentity = {
+  deviceId: deviceId,
+  publicKeyPem: pubPem,
+  privateKeyPem: privPem,
+};
+fs.writeFileSync(
+  "openclaw-data/pre-paired-device.json",
+  JSON.stringify(deviceIdentity, null, 2) + "\n"
+);
+console.log(`  Generated device identity: ${deviceId.slice(0, 16)}...`);
+
+// Pre-register in OpenClaw's devices/paired.json so it accepts this device.
+// Format must match what approveDevicePairing() writes:
+//   - publicKey: base64url of raw Ed25519 bytes (NOT PEM — gateway compares literally)
+//   - role/roles/scopes/approvedScopes: authorization metadata
+//   - tokens: per-role auth tokens for verifyDeviceToken() calls
+fs.mkdirSync("openclaw-data/devices", { recursive: true });
+const nowMs = Date.now();
+const pairingToken = crypto.randomBytes(32).toString("hex");
+const pairedDevices = {};
+pairedDevices[deviceId] = {
+  deviceId: deviceId,
+  publicKey: pubB64url,
+  displayName: "pinokio-openvoiceui",
+  platform: "linux",
+  clientId: "cli",
+  clientMode: "cli",
+  role: "operator",
+  roles: ["operator"],
+  scopes: ["operator.read", "operator.write"],
+  approvedScopes: ["operator.read", "operator.write"],
+  tokens: {
+    operator: {
+      token: pairingToken,
+      role: "operator",
+      scopes: ["operator.read", "operator.write"],
+      createdAtMs: nowMs,
+    },
+  },
+  createdAtMs: nowMs,
+  approvedAtMs: nowMs,
+};
+fs.writeFileSync(
+  "openclaw-data/devices/paired.json",
+  JSON.stringify(pairedDevices, null, 2) + "\n"
+);
+// Clear pending.json — stale entries with silent:false permanently block auto-approval
+fs.writeFileSync("openclaw-data/devices/pending.json", "{}\n");
+console.log("  Wrote devices/paired.json (pre-paired)");
+
+// ---------------------------------------------------------------------------
 // Done
 // ---------------------------------------------------------------------------
 
