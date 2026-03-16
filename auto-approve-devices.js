@@ -2,12 +2,15 @@
 // auto-approve-devices.js — Approve all pending OpenClaw devices.
 // Runs on the host, execs into the openclaw container to move pending → paired.
 // Called by start.js after containers are healthy.
-// Retries up to 3 times with 5s delay to wait for OpenVoiceUI's first connect attempt.
+//
+// Polls for up to 2 minutes (24 retries × 5s) because OpenVoiceUI doesn't
+// connect to OpenClaw until the user opens the browser — which happens AFTER
+// Pinokio shows the "Open" button. We need to wait for that.
 
 const { execSync } = require("child_process");
 
 const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml";
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 24;  // 24 × 5s = 2 minutes
 const DELAY_MS = 5000;
 
 // Node one-liner that runs INSIDE the openclaw container
@@ -20,6 +23,7 @@ try {
   let paired = {};
   try { pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8')); } catch(e) {}
   try { paired = JSON.parse(fs.readFileSync(pairedPath, 'utf8')); } catch(e) {}
+  const pairedCount = Object.keys(paired).length;
   let count = 0;
   for (const entry of Object.values(pending)) {
     if (entry.deviceId && entry.publicKey) {
@@ -40,6 +44,8 @@ try {
     fs.writeFileSync(pairedPath, JSON.stringify(paired, null, 2));
     fs.writeFileSync(pendingPath, '{}');
     console.log('APPROVED:' + count);
+  } else if (pairedCount > 0) {
+    console.log('ALREADY_PAIRED:' + pairedCount);
   } else {
     console.log('APPROVED:0');
   }
@@ -53,6 +59,8 @@ function sleep(ms) {
 }
 
 async function run() {
+  console.log("  Waiting for browser to connect (up to 2 minutes)...");
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const result = execSync(
@@ -60,21 +68,35 @@ async function run() {
         { encoding: "utf8", timeout: 15000 }
       ).trim();
 
-      const match = result.match(/APPROVED:(\d+)/);
-      if (match && parseInt(match[1]) > 0) {
-        console.log(`  Auto-approved ${match[1]} device(s) (attempt ${attempt})`);
+      // New device(s) approved
+      const approvedMatch = result.match(/APPROVED:(\d+)/);
+      if (approvedMatch && parseInt(approvedMatch[1]) > 0) {
+        console.log(`  Auto-approved ${approvedMatch[1]} device(s) — ready to use!`);
         return;
       }
 
+      // Device already paired from a previous session
+      const pairedMatch = result.match(/ALREADY_PAIRED:(\d+)/);
+      if (pairedMatch && parseInt(pairedMatch[1]) > 0) {
+        console.log(`  Device already paired (${pairedMatch[1]} device(s)) — ready to use!`);
+        return;
+      }
+
+      // Nothing yet — keep polling
       if (attempt < MAX_ATTEMPTS) {
-        console.log(`  No pending devices yet (attempt ${attempt}/${MAX_ATTEMPTS}), waiting ${DELAY_MS/1000}s...`);
+        // Only log every 4th attempt to avoid spam
+        if (attempt % 4 === 0) {
+          const remaining = Math.round((MAX_ATTEMPTS - attempt) * DELAY_MS / 1000);
+          console.log(`  Still waiting for browser connection... (${remaining}s remaining)`);
+        }
         await sleep(DELAY_MS);
       } else {
-        console.log("  No pending devices after all attempts (device may already be paired)");
+        console.log("  Timeout: No device connected after 2 minutes.");
+        console.log("  If you see NOT_PAIRED errors, open the browser and restart the app.");
       }
     } catch (e) {
       if (attempt < MAX_ATTEMPTS) {
-        console.log(`  Auto-approve attempt ${attempt} failed, retrying...`);
+        // Container might still be starting — retry silently
         await sleep(DELAY_MS);
       } else {
         console.log("  Device auto-approve failed:", e.message.split("\n")[0]);
