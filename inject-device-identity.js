@@ -98,14 +98,12 @@ if (containerIdentity) {
     // Save locally so they stay in sync
     fs.writeFileSync(IDENTITY_FILE, JSON.stringify(containerIdentity, null, 2) + "\n");
 
-    // Restart openclaw so it picks up the new paired.json
-    console.log("  Restarting openclaw to load updated paired.json...");
-    try {
-      exec(COMPOSE + " restart openclaw", { timeout: 30000 });
-      console.log("  OpenClaw restarted — device is now paired");
-    } catch (e) {
-      console.log("  Warning: openclaw restart failed — may need manual restart");
-    }
+    // No restart needed — openclaw-data/ is a bind mount so paired.json
+    // changes are immediately visible inside the container. OpenClaw reads
+    // paired.json on each WS connection attempt (getPairedDevice()), not
+    // just at startup. DO NOT restart openclaw here — openvoiceui uses
+    // network_mode: "service:openclaw" so restarting openclaw kills both.
+    console.log("  Device is now paired (no restart needed — bind mount is live)");
   } catch (e) {
     console.log("  Warning: could not sync identity: " + e.message);
   }
