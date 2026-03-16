@@ -26,6 +26,14 @@ const secret = crypto.randomBytes(32).toString("hex");
 // 1. Write openclaw.json (nested gateway/agents format for v2026.3.2+)
 // ---------------------------------------------------------------------------
 
+// Pick default model based on which keys the user provided
+let defaultModel = "groq/llama-3.3-70b-versatile"; // fallback — Groq is required
+if (getKey("ZAI_API_KEY"))       defaultModel = "z-ai/glm-4.7";
+if (getKey("ANTHROPIC_API_KEY")) defaultModel = "anthropic/claude-sonnet-4-5";
+if (getKey("OPENAI_API_KEY"))    defaultModel = "openai/gpt-4o";
+// Z.AI wins if multiple are set (best value)
+if (getKey("ZAI_API_KEY"))       defaultModel = "z-ai/glm-4.7";
+
 const openclawConfig = {
   gateway: {
     mode: "local",
@@ -40,6 +48,7 @@ const openclawConfig = {
   },
   agents: {
     defaults: {
+      model: defaultModel,
       thinkingDefault: "off",
       blockStreamingDefault: "on",
       blockStreamingBreak: "text_end",
