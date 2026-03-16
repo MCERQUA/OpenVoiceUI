@@ -26,6 +26,9 @@ try {
       paired[entry.deviceId] = {
         publicKey: entry.publicKey,
         name: entry.name || 'auto-approved',
+        role: entry.role || 'operator',
+        roles: entry.roles || ['operator'],
+        scopes: entry.scopes || ['operator.read', 'operator.write'],
         paired: true,
         pairedAt: new Date().toISOString(),
         autoApproved: true,
