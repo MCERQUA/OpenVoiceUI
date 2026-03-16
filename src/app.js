@@ -4687,7 +4687,7 @@ inject();
                     this.stt = new WebSpeechSTT();
                     console.log('STT provider: Chrome Web Speech');
                 }
-                this.ttsProvider = 'supertonic';
+                this.ttsProvider = 'groq';
                 this.ttsVoice = 'F3';
                 this.audioContext = null;
                 this.analyser = null;

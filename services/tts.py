@@ -201,7 +201,7 @@ def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
 def generate_tts_b64(
     text: str,
     voice: Optional[str] = None,
-    tts_provider: str = 'supertonic',
+    tts_provider: str = 'groq',
     **kwargs,
 ) -> Optional[str]:
     """
