@@ -1608,6 +1608,58 @@ def conversation_abort():
 
 
 # ---------------------------------------------------------------------------
+# POST /api/conversation/steer
+# ---------------------------------------------------------------------------
+
+
+@conversation_bp.route('/api/conversation/steer', methods=['POST'])
+def conversation_steer():
+    """Inject a user message into the active agent run (steer mode).
+
+    Fire-and-forget from client — used when the user speaks while the
+    agent is silently working (tools / sub-agents / heartbeat).  Instead
+    of aborting the active run and starting fresh, this sends a second
+    chat.send to the same session.  OpenClaw's messages.queue.mode=steer
+    injects the message at the next tool boundary so the agent sees the
+    user's correction and pivots immediately.
+
+    The active /api/conversation streaming response continues receiving
+    the steered output — no new streaming connection is needed.
+
+    Request body:
+        message  (str)  — the user's text to inject
+        source   (str)  — label for logging (e.g. 'clawdbot-sendMessage')
+
+    Returns:
+        { ok: true, steered: true/false }
+    """
+    body = request.get_json(silent=True) or {}
+    message = (body.get('message') or '').strip()
+    source = body.get('source', 'unknown')
+
+    if not message:
+        return jsonify({'ok': False, 'error': 'No message provided'}), 400
+
+    # Input length guard (same as main conversation endpoint)
+    if len(message) > 4000:
+        return jsonify({'ok': False, 'error': 'Message too long'}), 400
+
+    session_key = get_voice_session_key()
+
+    steered = gateway_manager.send_steer(message, session_key)
+
+    logger.info(
+        f"### STEER request session={session_key} steered={steered} "
+        f"source={source} text={message!r}"
+    )
+
+    # Log the steer message as a user turn so the transcript is preserved
+    log_conversation('user', message, session_id='default')
+
+    return jsonify({'ok': True, 'steered': steered})
+
+
+# ---------------------------------------------------------------------------
 # POST /api/conversation/reset
 # ---------------------------------------------------------------------------
 

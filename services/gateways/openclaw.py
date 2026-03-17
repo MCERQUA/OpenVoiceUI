@@ -601,6 +601,75 @@ class GatewayConnection:
         except Exception:
             return False
 
+    # ── Steer (inject message into active run) ─────────────────────────
+
+    async def _send_steer(self, message, session_key):
+        """Send a steer message (chat.send) fire-and-forget.
+
+        When openclaw.json has messages.queue.mode="steer", openclaw
+        injects a new chat.send into the active run at the next tool
+        boundary.  Remaining tool calls in the current batch are
+        skipped with "Skipped due to queued user message." and the
+        agent sees the user's correction immediately.
+
+        We do NOT create a Subscription — the active subscription's
+        _stream_events loop already receives events for the running
+        runId.  The steered output flows on that same run.
+
+        Returns True if the message was sent, False if skipped.
+        """
+        if not self._connected or not self._ws or not self._dispatcher:
+            logger.info("### STEER skipped: not connected")
+            return False
+
+        # Only steer if there's an active subscription (someone is
+        # listening for events).  Otherwise the steered output would
+        # have no consumer and the user would never see the response.
+        sub = self._dispatcher.find_active_sub_by_session(session_key)
+        if not sub:
+            logger.info(f"### STEER skipped: no active sub for session {session_key}")
+            return False
+
+        chat_id = str(uuid.uuid4())
+        full_message = _PROMPT_ARMOR + message
+        chat_request = {
+            "type": "req",
+            "id": f"steer-{chat_id}",
+            "method": "chat.send",
+            "params": {
+                "message": full_message,
+                "sessionKey": session_key,
+                "idempotencyKey": chat_id,
+            }
+        }
+        try:
+            await self._dispatcher.send(self._ws, chat_request)
+            logger.info(
+                f"### STEER sent ({len(message)} chars, "
+                f"active_run={sub.run_id[:12] if sub.run_id else 'none'}): "
+                f"{message[:80]}"
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"### STEER send failed: {e}")
+            return False
+
+    def send_steer(self, message, session_key):
+        """Send a steer message into the active run (sync wrapper).
+
+        See _send_steer for full documentation.
+        """
+        if not self._started or not self._loop:
+            return False
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_steer(message, session_key),
+            self._loop
+        )
+        try:
+            return future.result(timeout=5)
+        except Exception:
+            return False
+
     async def _stream_events(self, sub, event_queue, session_key,
                              captured_actions, agent_id=None):
         """Process events from a Subscription queue and emit to the HTTP event_queue.
@@ -976,6 +1045,13 @@ class GatewayRouter:
                 return True
         return False
 
+    def send_steer(self, message, session_key):
+        """Send a steer message across all connections."""
+        for conn in self._connections.values():
+            if conn.send_steer(message, session_key):
+                return True
+        return False
+
 
 # ---------------------------------------------------------------------------
 # OpenClawGateway — GatewayBase wrapper
@@ -1011,6 +1087,15 @@ class OpenClawGateway(GatewayBase):
     def abort_active_run(self, session_key):
         """Abort the active run for the given session key."""
         return self._router.abort_active_run(session_key)
+
+    def send_steer(self, message, session_key):
+        """Inject a message into the active run (steer mode).
+
+        Fire-and-forget — openclaw's queue.mode=steer handles
+        injection at the next tool boundary.  The active streaming
+        response continues receiving the steered output.
+        """
+        return self._router.send_steer(message, session_key)
 
     def consume_reconnection(self, max_age_seconds=120):
         """Check if gateway recently reconnected after a failure.

@@ -3402,20 +3402,47 @@ inject();
             async sendMessage(text, opts = {}) {
                 if (!text || !text.trim()) return;
 
-                // Interrupt: abort any in-flight request and stop current audio FIRST
-                // (must happen before the _sending guard so interrupts aren't blocked)
+                // ── Interrupt vs Steer ─────────────────────────────────────
+                // When a new message arrives while a request is in-flight:
+                //   • TTS playing → ABORT  (stop spoken output, kill run, fresh start)
+                //   • Agent working silently (tools/subagents) → STEER
+                //     Send the message fire-and-forget; openclaw injects it at the
+                //     next tool boundary (messages.queue.mode=steer).  The existing
+                //     streaming fetch continues receiving the steered output.
                 if (this._fetchAbortController) {
-                    this._fetchAbortController.abort();
-                    this._fetchAbortController = null;
-                    // Tell server to abort the openclaw run (fire-and-forget)
-                    console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (new msg: "${text.substring(0,30)}")`);
-                    fetch(`${this.config.serverUrl}/api/conversation/abort`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ source: 'clawdbot-sendMessage', text: text.substring(0, 50) }),
-                    }).catch(() => {});
+                    if (this._ttsPlaying) {
+                        // Agent already responded, TTS playing → ABORT
+                        this._fetchAbortController.abort();
+                        this._fetchAbortController = null;
+                        console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (TTS playing, new msg: "${text.substring(0,30)}")`);
+                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: 'clawdbot-sendMessage', text: text.substring(0, 50) }),
+                        }).catch(() => {});
+                        this.stopAudio();
+                    } else {
+                        // Agent working silently → STEER (inject at next tool boundary)
+                        console.log(`🔀 STEER: injecting "${text.substring(0,50)}" into active run`);
+                        ActionConsole.addEntry('system', `Steering: "${text.substring(0, 60)}"`);
+                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: text, source: 'clawdbot-sendMessage' }),
+                        }).catch(() => {});
+                        // Show the user's steer message in transcript
+                        if (!opts.skipDisplay) {
+                            this.displayMessage('user', text);
+                            this.callbacks.onMessage('user', text);
+                            TranscriptPanel.addMessage('user', text, { imageUrl: opts.imageUrl || null });
+                        }
+                        // Return early — the existing streaming response will receive
+                        // the steered output.  Do NOT abort fetch or start a new one.
+                        return;
+                    }
+                } else {
+                    this.stopAudio();
                 }
-                this.stopAudio();
 
                 // Wait for previous send to finish unwinding after abort
                 if (this._sending) {
@@ -3919,11 +3946,11 @@ inject();
                         FaceModule.setMood('neutral');
                         StatusModule.update('idle', 'READY');
                         TranscriptPanel.removeThinking();
-                        // If agent was mid-task (had heartbeats), tell the user it was stopped
+                        // If agent was mid-task (had heartbeats), note the redirect
                         if (this._wasAgentic) {
                             this._wasAgentic = false;
-                            TranscriptPanel.finalizeStreaming('⏹ Task stopped.');
-                            ActionConsole.addEntry('system', 'Task stopped by user');
+                            TranscriptPanel.finalizeStreaming('🔀 Redirected.');
+                            ActionConsole.addEntry('system', 'Task redirected by user');
                         } else {
                             TranscriptPanel.finalizeStreaming(null);
                         }
@@ -4879,19 +4906,40 @@ inject();
                     return;
                 }
 
-                // Interrupt: abort any in-flight request and stop current audio
+                // ── Interrupt vs Steer (same logic as ClawdbotMode.sendMessage) ──
+                // Check ClawdbotMode's _ttsPlaying to decide abort vs steer.
                 if (this._fetchAbortController) {
-                    this._fetchAbortController.abort();
-                    this._fetchAbortController = null;
-                    // Tell server to abort the openclaw run (fire-and-forget)
-                    console.warn(`⛔ ABORT source: VoiceConversation.handleUserTranscript (transcript: "${transcript.substring(0,30)}")`);
-                    fetch(`${this.config.serverUrl}/api/conversation/abort`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ source: 'voice-handleUserTranscript', text: transcript.substring(0, 50) }),
-                    }).catch(() => {});
+                    const cm = ModeManager?.clawdbotMode;
+                    if (cm?._ttsPlaying) {
+                        // TTS playing → ABORT (stop spoken output)
+                        this._fetchAbortController.abort();
+                        this._fetchAbortController = null;
+                        console.warn(`⛔ ABORT source: VoiceConversation.handleUserTranscript (TTS playing)`);
+                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: 'voice-handleUserTranscript', text: transcript.substring(0, 50) }),
+                        }).catch(() => {});
+                        this.stopAudio();
+                    } else {
+                        // Agent working silently → STEER
+                        console.log(`🔀 STEER: injecting "${transcript.substring(0,50)}" into active run`);
+                        ActionConsole.addEntry('system', `Steering: "${transcript.substring(0, 60)}"`);
+                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: transcript, source: 'voice-handleUserTranscript' }),
+                        }).catch(() => {});
+                        // Show user text, reset STT for next input, and return.
+                        // The existing streaming response will receive the steered output.
+                        this.callbacks.onTranscript(transcript, true);
+                        TranscriptPanel.addMessage('user', transcript);
+                        this.stt.resetProcessing();
+                        return;
+                    }
+                } else {
+                    this.stopAudio();
                 }
-                this.stopAudio();
 
                 console.log('User said:', transcript);
                 this.callbacks.onTranscript(transcript, true);
