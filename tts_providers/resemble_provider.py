@@ -157,13 +157,24 @@ class ResembleProvider(TTSProvider):
 
         self.validate_text(text)
 
-        # Resolve voice UUID
+        # Resolve voice — accept UUID or display name
         voice_uuid = voice or os.getenv('RESEMBLE_VOICE_UUID', '')
         if not voice_uuid:
             raise RuntimeError(
                 "No voice_uuid provided and RESEMBLE_VOICE_UUID not set. "
                 "Create a voice at app.resemble.ai and set the UUID."
             )
+
+        # If the voice looks like a name (not a short hex UUID), resolve it
+        if not all(c in '0123456789abcdef' for c in voice_uuid):
+            cache = _voices_cache_global or self._fetch_voices_from_api()
+            for v in cache:
+                if v['name'] == voice_uuid:
+                    logger.info(f"[Resemble] Resolved voice name '{voice_uuid}' → {v['id']}")
+                    voice_uuid = v['id']
+                    break
+            else:
+                logger.warning(f"[Resemble] Voice name '{voice_uuid}' not found in {len(cache)} voices")
 
         model = kwargs.get('model', '')
         sample_rate = kwargs.get('sample_rate', 24000)
