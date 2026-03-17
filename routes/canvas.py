@@ -753,7 +753,7 @@ def canvas_pages_proxy(path):
                     "default-src 'none'; "
                     "script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://games.jam-bot.com blob:; "
                     "style-src 'unsafe-inline' https://games.jam-bot.com; "
-                    "img-src 'self' data: blob: https://games.jam-bot.com; "
+                    "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob:; "
                     "font-src 'self'; "
                     "connect-src 'self' https://games.jam-bot.com; "
