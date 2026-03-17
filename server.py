@@ -159,6 +159,9 @@ from routes.report_issue import report_issue_bp
 app.register_blueprint(icons_bp)
 app.register_blueprint(report_issue_bp)
 
+from routes.registry import registry_bp
+app.register_blueprint(registry_bp)
+
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.
 try:
