@@ -217,6 +217,35 @@ module.exports = {
           },
 
           // ═══════════════════════════════════════════════════════════
+          // ADDITIONAL TTS PROVIDERS
+          // ═══════════════════════════════════════════════════════════
+          {
+            key: "RESEMBLE_API_KEY",
+            title: "Resemble AI API Key — Chatterbox TTS (streaming, voice cloning)",
+            description: "Pay-as-you-go from $5 at resemble.ai — high-quality streaming TTS with emotion control",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "RESEMBLE_VOICE_UUID",
+            title: "Resemble Voice UUID (create at app.resemble.ai)",
+            description: "Clone or select a voice in your Resemble dashboard, then paste the voice UUID here",
+            placeholder: "",
+            required: false,
+          },
+
+          // ═══════════════════════════════════════════════════════════
+          // MUSIC GENERATION
+          // ═══════════════════════════════════════════════════════════
+          {
+            key: "SUNO_API_KEY",
+            title: "Suno API Key — AI Music Generation",
+            description: "Get your key at sunoapi.org/user → API Keys. Generates full AI songs from text prompts (~45s per song).",
+            placeholder: "",
+            required: false,
+          },
+
+          // ═══════════════════════════════════════════════════════════
           // SETTINGS
           // ═══════════════════════════════════════════════════════════
           {
@@ -266,6 +295,9 @@ module.exports = {
           PINOKIO_AI_GATEWAY_API_KEY: "{{input.AI_GATEWAY_API_KEY}}",
           PINOKIO_CLOUDFLARE_AI_GATEWAY_API_KEY: "{{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}",
           PINOKIO_LITELLM_API_KEY: "{{input.LITELLM_API_KEY}}",
+          PINOKIO_RESEMBLE_API_KEY: "{{input.RESEMBLE_API_KEY}}",
+          PINOKIO_RESEMBLE_VOICE_UUID: "{{input.RESEMBLE_VOICE_UUID}}",
+          PINOKIO_SUNO_API_KEY: "{{input.SUNO_API_KEY}}",
         },
       },
     },

@@ -91,7 +91,8 @@ const envKeyList = [
   "MODELSTUDIO_API_KEY", "XIAOMI_API_KEY", "VOLCANO_ENGINE_API_KEY",
   "BYTEPLUS_API_KEY", "SYNTHETIC_API_KEY", "VENICE_API_KEY",
   "OPENCODE_ZEN_API_KEY", "KILOCODE_API_KEY", "AI_GATEWAY_API_KEY",
-  "CLOUDFLARE_AI_GATEWAY_API_KEY", "LITELLM_API_KEY",
+  "CLOUDFLARE_AI_GATEWAY_API_KEY", "LITELLM_API_KEY", "SUNO_API_KEY",
+  "RESEMBLE_API_KEY", "RESEMBLE_VOICE_UUID",
 ];
 for (const k of envKeyList) envLines.push(`${k}=${getKey(k)}`);
 
@@ -144,6 +145,7 @@ const providerMap = {
   AI_GATEWAY_API_KEY: "ai-gateway",
   CLOUDFLARE_AI_GATEWAY_API_KEY: "cloudflare-ai-gateway",
   LITELLM_API_KEY: "litellm",
+  SUNO_API_KEY: "suno",
 };
 
 const authProfiles = {};
