@@ -222,6 +222,7 @@ class ResembleProvider(TTSProvider):
             with httpx.Client(timeout=httpx.Timeout(API_TIMEOUT)) as client:
                 resp = client.get(
                     f"{API_BASE_URL}/voices",
+                    params={"page": 1, "page_size": 1},
                     headers=self._auth_headers(),
                 )
                 resp.raise_for_status()
@@ -245,8 +246,9 @@ class ResembleProvider(TTSProvider):
         return bool(self.api_key)
 
     def get_info(self) -> dict:
-        voices = self._fetch_voices_from_api()
-        voice_names = [v['name'] for v in voices] if voices else []
+        # Don't fetch voices here — it makes 4 API calls and blocks page load.
+        # Voices are fetched lazily via list_voices() / /api/tts/voices endpoint.
+        cached_names = [v['name'] for v in self._voices_cache] if self._voices_cache else []
         return {
             'name': 'Resemble AI (Chatterbox)',
             'provider_id': 'resemble',
@@ -258,7 +260,7 @@ class ResembleProvider(TTSProvider):
             'quality': 'very-high',
             'latency': 'very-fast',
             'cost_per_minute': 0.10,
-            'voices': voice_names,
+            'voices': cached_names,
             'features': [
                 'streaming', 'voice-cloning', 'emotion-control',
                 'ssml', 'multilingual', 'cloud', 'wav-output',
