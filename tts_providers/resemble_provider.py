@@ -19,6 +19,7 @@ import os
 import io
 import time
 import logging
+import threading
 
 import httpx
 
@@ -44,6 +45,13 @@ STREAM_TIMEOUT = 30.0    # Max wait for full streaming response
 CONNECT_TIMEOUT = 10.0   # TCP connect timeout
 API_TIMEOUT = 15.0       # For voice listing / non-synthesis calls
 
+# Module-level voice cache — shared across all ResembleProvider instances.
+# list_providers() creates new instances each call, so instance-level cache
+# is lost. This persists across the process lifetime.
+_voices_cache_global = None
+_voices_cache_time_global = 0
+_voices_loading_global = False
+
 
 class ResembleProvider(TTSProvider):
     """
@@ -62,8 +70,13 @@ class ResembleProvider(TTSProvider):
         self.api_key = os.getenv('RESEMBLE_API_KEY', '')
         self._status = 'active' if self.api_key else 'error'
         self._init_error = None if self.api_key else 'RESEMBLE_API_KEY not set'
-        self._voices_cache = None
-        self._voices_cache_time = 0
+
+        # Warm the global voice cache in background on first instantiation
+        global _voices_loading_global
+        if self.api_key and not _voices_cache_global and not _voices_loading_global:
+            _voices_loading_global = True
+            t = threading.Thread(target=self._fetch_voices_from_api, daemon=True)
+            t.start()
 
     def _auth_headers(self):
         return {
@@ -76,10 +89,11 @@ class ResembleProvider(TTSProvider):
     # ------------------------------------------------------------------
 
     def _fetch_voices_from_api(self) -> list:
-        """Fetch available voices from Resemble API. Cached for 5 minutes."""
+        """Fetch available voices from Resemble API. Cached globally for 5 minutes."""
+        global _voices_cache_global, _voices_cache_time_global, _voices_loading_global
         now = time.time()
-        if self._voices_cache and (now - self._voices_cache_time) < 300:
-            return self._voices_cache
+        if _voices_cache_global and (now - _voices_cache_time_global) < 300:
+            return _voices_cache_global
 
         try:
             voices = []
@@ -107,14 +121,16 @@ class ResembleProvider(TTSProvider):
                         break
                     page += 1
 
-            self._voices_cache = voices
-            self._voices_cache_time = now
+            _voices_cache_global = voices
+            _voices_cache_time_global = now
+            _voices_loading_global = False
             logger.info(f"[Resemble] Fetched {len(voices)} voices from API")
             return voices
 
         except Exception as e:
+            _voices_loading_global = False
             logger.warning(f"[Resemble] Failed to fetch voices: {e}")
-            return self._voices_cache or []
+            return _voices_cache_global or []
 
     # ------------------------------------------------------------------
     # Speech generation (HTTP streaming)
@@ -236,7 +252,7 @@ class ResembleProvider(TTSProvider):
             return {"ok": False, "latency_ms": latency_ms, "detail": str(e)}
 
     def list_voices(self) -> list:
-        voices = self._fetch_voices_from_api()
+        voices = _voices_cache_global or self._fetch_voices_from_api()
         return [v['id'] for v in voices] if voices else []
 
     def get_default_voice(self) -> str:
@@ -246,9 +262,9 @@ class ResembleProvider(TTSProvider):
         return bool(self.api_key)
 
     def get_info(self) -> dict:
-        # Don't fetch voices here — it makes 4 API calls and blocks page load.
-        # Voices are fetched lazily via list_voices() / /api/tts/voices endpoint.
-        cached_names = [v['name'] for v in self._voices_cache] if self._voices_cache else []
+        # Use global cache — populated by background thread on first init.
+        # Never fetch synchronously here; that blocks the settings panel.
+        cached_names = [v['name'] for v in _voices_cache_global] if _voices_cache_global else []
         return {
             'name': 'Resemble AI (Chatterbox)',
             'provider_id': 'resemble',
