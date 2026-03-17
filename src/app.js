@@ -14,6 +14,7 @@ inject();
         import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
         import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js';
+        import { DeepgramStreamingSTT, DeepgramStreamingWakeWordDetector } from '/src/providers/DeepgramStreamingSTT.js';
 
         // ===== CONFIGURATION =====
         const CONFIG = {
@@ -4478,7 +4479,9 @@ inject();
                         AgentActivityChip.setSpeaking(false);
                         // Cancel guard timer — TTS finished normally
                         if (this.clawdbotMode._ttsGuardTimer) { clearTimeout(this.clawdbotMode._ttsGuardTimer); this.clawdbotMode._ttsGuardTimer = null; }
-                        // _ttsPlaying stays true through the delay window to block echo
+                        // _ttsPlaying stays true through brief delay to block echo.
+                        // 300ms is enough — DeepgramStreamingSTT mutes its audio pipeline
+                        // during TTS so speaker audio can't be captured. Reduced from 1500ms.
                         setTimeout(() => {
                             this.clawdbotMode._ttsPlaying = false;
                             if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt) {
@@ -4492,7 +4495,7 @@ inject();
                                     if (!this.clawdbotMode.stt.isListening) this.clawdbotMode.stt.start();
                                 }
                             }
-                        }, 1500);
+                        }, 300);
                     },
                     onMessage: (role, text) => {
                         console.log(`Clawdbot ${role}:`, text);
@@ -4677,9 +4680,12 @@ inject();
                 this.isProcessing = false;
                 // Select STT provider from server profile (default: webspeech)
                 const sttProvider = window._serverProfile?.stt?.provider || 'webspeech';
-                if (sttProvider === 'deepgram') {
+                if (sttProvider === 'deepgram-streaming' || sttProvider === 'deepgram') {
+                    this.stt = new DeepgramStreamingSTT();
+                    console.log('STT provider: Deepgram Streaming (WebSocket)');
+                } else if (sttProvider === 'deepgram-batch') {
                     this.stt = new DeepgramSTT();
-                    console.log('STT provider: Deepgram Nova-2');
+                    console.log('STT provider: Deepgram Nova-2 (batch)');
                 } else if (sttProvider === 'groq') {
                     this.stt = new GroqSTT();
                     console.log('STT provider: Groq Whisper');
@@ -6056,7 +6062,9 @@ inject();
                     document.getElementById('stop-button').style.display = 'none';
                     // Cancel guard timer — TTS finished normally
                     if (ModeManager.clawdbotMode?._ttsGuardTimer) { clearTimeout(ModeManager.clawdbotMode._ttsGuardTimer); ModeManager.clawdbotMode._ttsGuardTimer = null; }
-                    // _ttsPlaying stays true through the delay window to block echo
+                    // _ttsPlaying stays true through brief delay to block echo.
+                    // 300ms is enough — DeepgramStreamingSTT mutes its audio pipeline
+                    // during TTS so speaker audio can't be captured. Reduced from 1500ms.
                     setTimeout(() => {
                         if (ModeManager.clawdbotMode) ModeManager.clawdbotMode._ttsPlaying = false;
                         if (voiceConversation.stt) {
@@ -6071,7 +6079,7 @@ inject();
                                 if (!voiceConversation.stt.isListening) voiceConversation.stt.start();
                             }
                         }
-                    }, 1500);
+                    }, 300);
                 },
                 onTranscript: (text, isUser) => {
                     console.log(`${isUser ? 'User' : 'AI'}: ${text}`);
@@ -8686,7 +8694,7 @@ inject();
                 clearInterval(_sttExposePoll);
                 stt._exposed = true;
 
-                const _sttName = stt instanceof DeepgramSTT ? 'Deepgram Nova-2' : stt instanceof GroqSTT ? 'Groq Whisper' : 'Chrome Web Speech';
+                const _sttName = stt instanceof DeepgramStreamingSTT ? 'Deepgram Streaming' : stt instanceof DeepgramSTT ? 'Deepgram Nova-2' : stt instanceof GroqSTT ? 'Groq Whisper' : 'Chrome Web Speech';
                 console.log(`STT exposed (${_sttName})`);
                 // Apply any profile settings that were deferred (profile loaded before STT existed)
                 if (window._activeProfileData) {

@@ -125,7 +125,7 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["webspeech", "whisper", "hume", "elevenlabs"]
+          "enum": ["deepgram", "deepgram-streaming", "deepgram-batch", "groq", "webspeech", "whisper", "hume", "elevenlabs"]
         },
         "language": { "type": "string", "default": "en-US" },
         "notes":    { "type": "string" },

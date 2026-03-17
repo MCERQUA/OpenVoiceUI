@@ -678,6 +678,25 @@ def groq_stt():
         return jsonify({"error": "Speech-to-text failed"}), 500
 
 
+@app.route("/api/stt/deepgram/token", methods=["GET"])
+def deepgram_stt_token():
+    """Return the Deepgram API key for browser-side WebSocket streaming.
+
+    The browser needs the key to open a direct WebSocket to Deepgram's
+    live transcription API.  The key is passed via the WebSocket sub-protocol
+    header so it never appears in URLs or logs.
+
+    NOTE: Deepgram supports scoped / short-lived project keys — if you want
+    tighter security, create a key with only 'usage:write' permission and
+    rotate it.  For now we hand out the configured key since the UI is
+    already authenticated.
+    """
+    api_key = os.environ.get("DEEPGRAM_API_KEY", "")
+    if not api_key:
+        return jsonify({"error": "DEEPGRAM_API_KEY not configured"}), 500
+    return jsonify({"token": api_key})
+
+
 @app.route("/api/stt/deepgram", methods=["POST"])
 def deepgram_stt():
     """Transcribe audio using Deepgram Nova-2 API (reliable, low-cost)."""
