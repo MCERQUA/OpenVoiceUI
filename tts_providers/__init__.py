@@ -31,6 +31,7 @@ from .hume_provider import HumeProvider
 from .supertonic_provider import SupertonicProvider
 from .groq_provider import GroqProvider
 from .qwen3_provider import Qwen3Provider
+from .resemble_provider import ResembleProvider
 
 # Provider registry
 _PROVIDERS = {
@@ -38,6 +39,7 @@ _PROVIDERS = {
     'supertonic': SupertonicProvider,
     'groq': GroqProvider,
     'qwen3': Qwen3Provider,
+    'resemble': ResembleProvider,
 }
 
 def _load_config() -> Dict[str, Any]:
@@ -128,6 +130,7 @@ __all__ = [
     'SupertonicProvider',
     'GroqProvider',
     'Qwen3Provider',
+    'ResembleProvider',
     'get_provider',
     'list_providers',
 ]

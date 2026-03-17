@@ -181,6 +181,7 @@ def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) 
 _FALLBACK_CHAIN = {
     'groq': 'supertonic',
     'qwen3': 'supertonic',
+    'resemble': 'supertonic',
 }
 
 _MAX_RETRIES = 2
@@ -193,8 +194,10 @@ def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
     provider_info = provider.get_info()
     audio_format = provider_info.get('audio_format', 'wav')
 
-    if audio_format == 'mp3':
+    # Cloud providers that return WAV handle their own chunking/limits
+    if audio_format == 'mp3' or tts_provider in ('resemble',):
         return provider.generate_speech(text=text, voice=voice)
+    # Local WAV providers (supertonic) need ONNX overflow chunking
     return generate_tts_chunked(provider, text, voice)
 
 
@@ -224,7 +227,7 @@ def generate_tts_b64(
     last_err = None
     # Cloud providers (groq, qwen3) have their own timeout — don't retry
     # on timeout, fall back immediately. Only retry local providers.
-    is_cloud = tts_provider in ('groq', 'qwen3')
+    is_cloud = tts_provider in ('groq', 'qwen3', 'resemble')
     max_attempts = 1 if is_cloud else _MAX_RETRIES + 1
     for attempt in range(max_attempts):
         try:
