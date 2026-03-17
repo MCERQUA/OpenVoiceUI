@@ -71,6 +71,27 @@
       "audio_format": "mp3",
       "sample_rate": 24000
     },
+    "resemble": {
+      "name": "Resemble AI (Chatterbox)",
+      "provider_id": "resemble",
+      "cost_per_minute": 0.10,
+      "quality": "very-high",
+      "latency": "very-fast",
+      "voices": [],
+      "features": ["streaming", "voice-cloning", "emotion-control", "ssml", "multilingual", "cloud", "wav-output", "paralinguistic-tags"],
+      "requires_api_key": true,
+      "status": "active",
+      "description": "Resemble AI Chatterbox — streaming TTS, voice cloning, emotion/exaggeration control, SSML, 90+ languages",
+      "documentation_url": "https://docs.resemble.ai",
+      "languages": ["en", "es", "fr", "de", "it", "pt", "ja", "ko", "zh", "ar", "ru", "hi", "nl", "pl", "sv", "da", "fi", "el", "cs", "hu", "ro", "tr", "uk", "vi", "th", "id"],
+      "max_characters": 2000,
+      "notes": "Models: chatterbox-turbo (fastest, paralinguistic tags), chatterbox (emotion/exaggeration), chatterbox-multilingual (23 langs). Voice cloning via Resemble dashboard. RESEMBLE_API_KEY + RESEMBLE_VOICE_UUID required.",
+      "requires_microphone": false,
+      "requires_websocket": false,
+      "mode": "tts-only",
+      "audio_format": "wav",
+      "sample_rate": 24000
+    },
     "groq": {
       "name": "Groq Orpheus",
       "provider_id": "groq",
