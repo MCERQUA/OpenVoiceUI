@@ -3,6 +3,7 @@
 **Date:** 2026-02-28
 **Observed on:** Foamology (foamology.jam-bot.com), likely all client domains
 **Priority:** Low — nothing is leaking, but worth addressing
+**GitHub:** #167
 
 ## What's Happening
 

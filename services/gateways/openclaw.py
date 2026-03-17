@@ -925,6 +925,27 @@ class GatewayConnection:
     async def _send_and_stream(self, event_queue, message, session_key,
                                captured_actions, agent_id=None):
         """Create a subscription, send chat.send, and process events."""
+
+        # ── Abort-before-send: ensure no stale run is active on this session ──
+        # If a previous run is still in-flight (user hit stop+start quickly),
+        # abort it and wait for the abort to settle before sending the new one.
+        # Without this, Z.AI accumulates stale abort states and returns empties.
+        existing_sub = self._dispatcher.find_active_sub_by_session(session_key)
+        if existing_sub and existing_sub.run_id:
+            logger.warning(f"### Abort-before-send: killing stale run {existing_sub.run_id[:8]} on session {session_key}")
+            await self._send_abort(existing_sub.run_id, session_key, "pre-send-cleanup")
+            # Wait for the stale subscription to finish (up to 2s)
+            for _ in range(20):
+                if not self._dispatcher.find_active_sub_by_session(session_key):
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                # Force-unsubscribe the stale sub if it didn't clear
+                logger.warning(f"### Abort-before-send: force-unsubscribing stale {existing_sub.chat_id[:8]}")
+                self._dispatcher.unsubscribe(existing_sub.chat_id)
+            # Brief settle after abort so Z.AI processes the state change
+            await asyncio.sleep(0.2)
+
         ws = self._ws
         chat_id = str(uuid.uuid4())
         sub = self._dispatcher.subscribe(chat_id, session_key)

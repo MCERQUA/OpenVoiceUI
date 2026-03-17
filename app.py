@@ -113,10 +113,12 @@ def create_app(config_override: dict = None):
             '/api/canvas/',  # canvas API — creation, manifest, context (no per-user auth needed)
             '/api/uploads',   # uploads list — files are already public at /uploads/, listing is fine
             '/api/profiles',  # read-only profile config — loaded before Clerk init
+            '/api/chat',      # LLM proxy (Groq) — used by canvas pages for inline AI
             '/api/tts/',      # TTS provider list — loaded before Clerk init
             '/api/theme',     # theme config — loaded before Clerk init
             '/api/music',     # music track list — loaded before Clerk init
             '/api/faces',     # face list — loaded before Clerk init
+            '/api/icons/',    # icon library + generated icons — static images, no secrets
         )
         _PUBLIC_EXACT = {
             '/',           # main page — hosts the Clerk login gate itself

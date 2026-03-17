@@ -3212,6 +3212,15 @@ inject();
             }
 
             async startVoiceInput() {
+                // Debounce: prevent rapid start/stop/start cycles that poison the session
+                if (this._startingSession) return;
+                if (Date.now() - (this._lastCallToggle || 0) < 2000) {
+                    console.warn('[Session] Debounce: ignoring rapid call toggle');
+                    return;
+                }
+                this._startingSession = true;
+                this._lastCallToggle = Date.now();
+
                 this._voiceActive = true;  // Mark call as active
                 this._sessionGreeted = false;  // Reset so every new call gets a greeting
                 // Generate new session ID for this call
@@ -3278,6 +3287,7 @@ inject();
                 // — show user text right away so they know the system heard them.
                 this.stt.onListenFinal = (text) => {
                     if (this._ttsPlaying || !text || !text.trim()) return;
+                    if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     // Show in transcript immediately + set thinking state
                     this.displayMessage('user', text.trim());
                     this.callbacks.onMessage('user', text.trim());
@@ -3295,6 +3305,7 @@ inject();
                         console.log('Ignoring transcript during TTS:', transcript);
                         return;
                     }
+                    if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     if (transcript && transcript.trim()) {
                         console.log('Voice input:', transcript);
                         this.sendMessage(transcript.trim(), { skipDisplay: true });
@@ -3339,9 +3350,11 @@ inject();
                     console.error('Failed to start voice input');
                     this.callbacks.onError('Failed to start voice input');
                 }
+                this._startingSession = false;
             }
 
             stopVoiceInput() {
+                this._startingSession = false;
                 this._voiceActive = false;  // Mark call as ended — prevents safety-net restart
                 this._ttsPlaying = false;
                 if (this._ttsGuardTimer) { clearTimeout(this._ttsGuardTimer); this._ttsGuardTimer = null; }
@@ -4007,6 +4020,7 @@ inject();
                 } finally {
                     if (_inactivityTimer) clearTimeout(_inactivityTimer);
                     this._sending = false;
+                    this._fetchAbortController = null;
                     // Safety net: if no audio was queued/played, STT never gets restarted
                     // via onListening callback. Ensure mic comes back after a short delay.
                     // Only fires if call is still active (_voiceActive) — prevents restart after hang-up.
@@ -4028,6 +4042,12 @@ inject();
             }
 
             async _sendGreetingTrigger() {
+                // Cooldown: prevent rapid greeting triggers that poison the session
+                if (Date.now() - (this._lastGreetingSent || 0) < 5000) {
+                    console.warn('[Session] Skipping greeting — cooldown active');
+                    return;
+                }
+                this._lastGreetingSent = Date.now();
                 // Send a session start signal to the agent — generates its own greeting
                 // based on face recognition, memory (MEMORY.md / clawd/memory/), and GREETINGS.md
                 // Face recognition context is automatically included via sendMessage() → identified_person
@@ -4512,8 +4532,8 @@ inject();
                         setTimeout(() => {
                             this.clawdbotMode._ttsPlaying = false;
                             if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt) {
-                                // Skip resume if PTT is held — user is actively speaking
-                                if (this.clawdbotMode.stt._pttHolding) return;
+                                // Skip resume if PTT mode is on (mic only opens on hold)
+                                if (this.clawdbotMode.stt._micMuted || this.clawdbotMode.stt._pttHolding) return;
                                 console.log('🎤 Unmuting mic after TTS');
                                 if (this.clawdbotMode.stt.resume) {
                                     this.clawdbotMode.stt.resume();
