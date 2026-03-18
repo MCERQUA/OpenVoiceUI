@@ -1,0 +1,53 @@
+# Git
+.git/
+.github/
+
+# Dev tools
+.devcontainer/
+dev-notes/
+tests/
+.coveragerc
+.eslintrc*
+.prettierrc*
+
+# Pinokio-specific (kept in repo, not needed for npm)
+pinokio.js
+install.js
+start.js
+stop.js
+update.js
+docker-compose.pinokio.yml
+auto-approve-devices.js
+inject-device-identity.js
+
+# Runtime data (generated, never shipped)
+runtime/
+openclaw-data/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Environment (user generates via setup)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docs images (large)
+docs/banner.png
+docs/screenshots/
+
+# Plugins (git submodules, user adds their own)
+plugins/
+
+# Claude/AI project files
+CLAUDE.md
+.claude/
+scripts/

@@ -74,6 +74,7 @@ class WebSpeechSTT {
 
         this.recognition.onresult = (event) => {
             if (this.isProcessing) return;
+            if (this._micMuted) return;  // PTT mode — mic should be silent
 
             // ANY result (interim or final) means the user is still speaking.
             // Reset the silence timer on every event so we never cut off mid-speech.

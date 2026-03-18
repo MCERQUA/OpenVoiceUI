@@ -14,6 +14,7 @@ inject();
         import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
         import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js';
+        import { DeepgramStreamingSTT, DeepgramStreamingWakeWordDetector } from '/src/providers/DeepgramStreamingSTT.js';
 
         // ===== CONFIGURATION =====
         const CONFIG = {
@@ -3211,6 +3212,15 @@ inject();
             }
 
             async startVoiceInput() {
+                // Debounce: prevent rapid start/stop/start cycles that poison the session
+                if (this._startingSession) return;
+                if (Date.now() - (this._lastCallToggle || 0) < 2000) {
+                    console.warn('[Session] Debounce: ignoring rapid call toggle');
+                    return;
+                }
+                this._startingSession = true;
+                this._lastCallToggle = Date.now();
+
                 this._voiceActive = true;  // Mark call as active
                 this._sessionGreeted = false;  // Reset so every new call gets a greeting
                 // Generate new session ID for this call
@@ -3277,6 +3287,7 @@ inject();
                 // — show user text right away so they know the system heard them.
                 this.stt.onListenFinal = (text) => {
                     if (this._ttsPlaying || !text || !text.trim()) return;
+                    if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     // Show in transcript immediately + set thinking state
                     this.displayMessage('user', text.trim());
                     this.callbacks.onMessage('user', text.trim());
@@ -3294,6 +3305,7 @@ inject();
                         console.log('Ignoring transcript during TTS:', transcript);
                         return;
                     }
+                    if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     if (transcript && transcript.trim()) {
                         console.log('Voice input:', transcript);
                         this.sendMessage(transcript.trim(), { skipDisplay: true });
@@ -3338,9 +3350,11 @@ inject();
                     console.error('Failed to start voice input');
                     this.callbacks.onError('Failed to start voice input');
                 }
+                this._startingSession = false;
             }
 
             stopVoiceInput() {
+                this._startingSession = false;
                 this._voiceActive = false;  // Mark call as ended — prevents safety-net restart
                 this._ttsPlaying = false;
                 if (this._ttsGuardTimer) { clearTimeout(this._ttsGuardTimer); this._ttsGuardTimer = null; }
@@ -3401,20 +3415,47 @@ inject();
             async sendMessage(text, opts = {}) {
                 if (!text || !text.trim()) return;
 
-                // Interrupt: abort any in-flight request and stop current audio FIRST
-                // (must happen before the _sending guard so interrupts aren't blocked)
+                // ── Interrupt vs Steer ─────────────────────────────────────
+                // When a new message arrives while a request is in-flight:
+                //   • TTS playing → ABORT  (stop spoken output, kill run, fresh start)
+                //   • Agent working silently (tools/subagents) → STEER
+                //     Send the message fire-and-forget; openclaw injects it at the
+                //     next tool boundary (messages.queue.mode=steer).  The existing
+                //     streaming fetch continues receiving the steered output.
                 if (this._fetchAbortController) {
-                    this._fetchAbortController.abort();
-                    this._fetchAbortController = null;
-                    // Tell server to abort the openclaw run (fire-and-forget)
-                    console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (new msg: "${text.substring(0,30)}")`);
-                    fetch(`${this.config.serverUrl}/api/conversation/abort`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ source: 'clawdbot-sendMessage', text: text.substring(0, 50) }),
-                    }).catch(() => {});
+                    if (this._ttsPlaying) {
+                        // Agent already responded, TTS playing → ABORT
+                        this._fetchAbortController.abort();
+                        this._fetchAbortController = null;
+                        console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (TTS playing, new msg: "${text.substring(0,30)}")`);
+                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: 'clawdbot-sendMessage', text: text.substring(0, 50) }),
+                        }).catch(() => {});
+                        this.stopAudio();
+                    } else {
+                        // Agent working silently → STEER (inject at next tool boundary)
+                        console.log(`🔀 STEER: injecting "${text.substring(0,50)}" into active run`);
+                        ActionConsole.addEntry('system', `Steering: "${text.substring(0, 60)}"`);
+                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: text, source: 'clawdbot-sendMessage' }),
+                        }).catch(() => {});
+                        // Show the user's steer message in transcript
+                        if (!opts.skipDisplay) {
+                            this.displayMessage('user', text);
+                            this.callbacks.onMessage('user', text);
+                            TranscriptPanel.addMessage('user', text, { imageUrl: opts.imageUrl || null });
+                        }
+                        // Return early — the existing streaming response will receive
+                        // the steered output.  Do NOT abort fetch or start a new one.
+                        return;
+                    }
+                } else {
+                    this.stopAudio();
                 }
-                this.stopAudio();
 
                 // Wait for previous send to finish unwinding after abort
                 if (this._sending) {
@@ -3918,11 +3959,11 @@ inject();
                         FaceModule.setMood('neutral');
                         StatusModule.update('idle', 'READY');
                         TranscriptPanel.removeThinking();
-                        // If agent was mid-task (had heartbeats), tell the user it was stopped
+                        // If agent was mid-task (had heartbeats), note the redirect
                         if (this._wasAgentic) {
                             this._wasAgentic = false;
-                            TranscriptPanel.finalizeStreaming('⏹ Task stopped.');
-                            ActionConsole.addEntry('system', 'Task stopped by user');
+                            TranscriptPanel.finalizeStreaming('🔀 Redirected.');
+                            ActionConsole.addEntry('system', 'Task redirected by user');
                         } else {
                             TranscriptPanel.finalizeStreaming(null);
                         }
@@ -3979,6 +4020,7 @@ inject();
                 } finally {
                     if (_inactivityTimer) clearTimeout(_inactivityTimer);
                     this._sending = false;
+                    this._fetchAbortController = null;
                     // Safety net: if no audio was queued/played, STT never gets restarted
                     // via onListening callback. Ensure mic comes back after a short delay.
                     // Only fires if call is still active (_voiceActive) — prevents restart after hang-up.
@@ -4000,6 +4042,12 @@ inject();
             }
 
             async _sendGreetingTrigger() {
+                // Cooldown: prevent rapid greeting triggers that poison the session
+                if (Date.now() - (this._lastGreetingSent || 0) < 5000) {
+                    console.warn('[Session] Skipping greeting — cooldown active');
+                    return;
+                }
+                this._lastGreetingSent = Date.now();
                 // Send a session start signal to the agent — generates its own greeting
                 // based on face recognition, memory (MEMORY.md / clawd/memory/), and GREETINGS.md
                 // Face recognition context is automatically included via sendMessage() → identified_person
@@ -4478,12 +4526,14 @@ inject();
                         AgentActivityChip.setSpeaking(false);
                         // Cancel guard timer — TTS finished normally
                         if (this.clawdbotMode._ttsGuardTimer) { clearTimeout(this.clawdbotMode._ttsGuardTimer); this.clawdbotMode._ttsGuardTimer = null; }
-                        // _ttsPlaying stays true through the delay window to block echo
+                        // _ttsPlaying stays true through brief delay to block echo.
+                        // 300ms is enough — DeepgramStreamingSTT mutes its audio pipeline
+                        // during TTS so speaker audio can't be captured. Reduced from 1500ms.
                         setTimeout(() => {
                             this.clawdbotMode._ttsPlaying = false;
                             if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt) {
-                                // Skip resume if PTT is held — user is actively speaking
-                                if (this.clawdbotMode.stt._pttHolding) return;
+                                // Skip resume if PTT mode is on (mic only opens on hold)
+                                if (this.clawdbotMode.stt._micMuted || this.clawdbotMode.stt._pttHolding) return;
                                 console.log('🎤 Unmuting mic after TTS');
                                 if (this.clawdbotMode.stt.resume) {
                                     this.clawdbotMode.stt.resume();
@@ -4492,7 +4542,7 @@ inject();
                                     if (!this.clawdbotMode.stt.isListening) this.clawdbotMode.stt.start();
                                 }
                             }
-                        }, 1500);
+                        }, 300);
                     },
                     onMessage: (role, text) => {
                         console.log(`Clawdbot ${role}:`, text);
@@ -4677,9 +4727,12 @@ inject();
                 this.isProcessing = false;
                 // Select STT provider from server profile (default: webspeech)
                 const sttProvider = window._serverProfile?.stt?.provider || 'webspeech';
-                if (sttProvider === 'deepgram') {
+                if (sttProvider === 'deepgram-streaming' || sttProvider === 'deepgram') {
+                    this.stt = new DeepgramStreamingSTT();
+                    console.log('STT provider: Deepgram Streaming (WebSocket)');
+                } else if (sttProvider === 'deepgram-batch') {
                     this.stt = new DeepgramSTT();
-                    console.log('STT provider: Deepgram Nova-2');
+                    console.log('STT provider: Deepgram Nova-2 (batch)');
                 } else if (sttProvider === 'groq') {
                     this.stt = new GroqSTT();
                     console.log('STT provider: Groq Whisper');
@@ -4873,19 +4926,40 @@ inject();
                     return;
                 }
 
-                // Interrupt: abort any in-flight request and stop current audio
+                // ── Interrupt vs Steer (same logic as ClawdbotMode.sendMessage) ──
+                // Check ClawdbotMode's _ttsPlaying to decide abort vs steer.
                 if (this._fetchAbortController) {
-                    this._fetchAbortController.abort();
-                    this._fetchAbortController = null;
-                    // Tell server to abort the openclaw run (fire-and-forget)
-                    console.warn(`⛔ ABORT source: VoiceConversation.handleUserTranscript (transcript: "${transcript.substring(0,30)}")`);
-                    fetch(`${this.config.serverUrl}/api/conversation/abort`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ source: 'voice-handleUserTranscript', text: transcript.substring(0, 50) }),
-                    }).catch(() => {});
+                    const cm = ModeManager?.clawdbotMode;
+                    if (cm?._ttsPlaying) {
+                        // TTS playing → ABORT (stop spoken output)
+                        this._fetchAbortController.abort();
+                        this._fetchAbortController = null;
+                        console.warn(`⛔ ABORT source: VoiceConversation.handleUserTranscript (TTS playing)`);
+                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: 'voice-handleUserTranscript', text: transcript.substring(0, 50) }),
+                        }).catch(() => {});
+                        this.stopAudio();
+                    } else {
+                        // Agent working silently → STEER
+                        console.log(`🔀 STEER: injecting "${transcript.substring(0,50)}" into active run`);
+                        ActionConsole.addEntry('system', `Steering: "${transcript.substring(0, 60)}"`);
+                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: transcript, source: 'voice-handleUserTranscript' }),
+                        }).catch(() => {});
+                        // Show user text, reset STT for next input, and return.
+                        // The existing streaming response will receive the steered output.
+                        this.callbacks.onTranscript(transcript, true);
+                        TranscriptPanel.addMessage('user', transcript);
+                        this.stt.resetProcessing();
+                        return;
+                    }
+                } else {
+                    this.stopAudio();
                 }
-                this.stopAudio();
 
                 console.log('User said:', transcript);
                 this.callbacks.onTranscript(transcript, true);
@@ -6056,7 +6130,9 @@ inject();
                     document.getElementById('stop-button').style.display = 'none';
                     // Cancel guard timer — TTS finished normally
                     if (ModeManager.clawdbotMode?._ttsGuardTimer) { clearTimeout(ModeManager.clawdbotMode._ttsGuardTimer); ModeManager.clawdbotMode._ttsGuardTimer = null; }
-                    // _ttsPlaying stays true through the delay window to block echo
+                    // _ttsPlaying stays true through brief delay to block echo.
+                    // 300ms is enough — DeepgramStreamingSTT mutes its audio pipeline
+                    // during TTS so speaker audio can't be captured. Reduced from 1500ms.
                     setTimeout(() => {
                         if (ModeManager.clawdbotMode) ModeManager.clawdbotMode._ttsPlaying = false;
                         if (voiceConversation.stt) {
@@ -6071,7 +6147,7 @@ inject();
                                 if (!voiceConversation.stt.isListening) voiceConversation.stt.start();
                             }
                         }
-                    }, 1500);
+                    }, 300);
                 },
                 onTranscript: (text, isUser) => {
                     console.log(`${isUser ? 'User' : 'AI'}: ${text}`);
@@ -8686,7 +8762,7 @@ inject();
                 clearInterval(_sttExposePoll);
                 stt._exposed = true;
 
-                const _sttName = stt instanceof DeepgramSTT ? 'Deepgram Nova-2' : stt instanceof GroqSTT ? 'Groq Whisper' : 'Chrome Web Speech';
+                const _sttName = stt instanceof DeepgramStreamingSTT ? 'Deepgram Streaming' : stt instanceof DeepgramSTT ? 'Deepgram Nova-2' : stt instanceof GroqSTT ? 'Groq Whisper' : 'Chrome Web Speech';
                 console.log(`STT exposed (${_sttName})`);
                 // Apply any profile settings that were deferred (profile loaded before STT existed)
                 if (window._activeProfileData) {
