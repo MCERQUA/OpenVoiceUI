@@ -185,19 +185,44 @@ def registry_checkin():
             return;
         }}
 
-        // The app just proves it's running by redirecting back to beta.pinokio.co
-        // with the token — Pinokio handles the actual registry API call with its session.
-        msgEl.innerHTML = '<span style="color:#4ade80">&#10004; Install verified!</span><p class="hint">Redirecting back to Pinokio&hellip;</p>';
+        // POST to /checkpoints/snapshot which computes the proper hash and calls api.pinokio.co
+        var snapshotUrl = '/checkpoints/snapshot?publish=1'
+            + '&registry=' + encodeURIComponent(cfg.registry)
+            + '&repo='     + encodeURIComponent(cfg.repo)
+            + '&app='      + encodeURIComponent(cfg.appSlug);
 
-        if (cfg.returnUrl) {{
-            var sep = cfg.returnUrl.includes('?') ? '&' : '?';
-            // Pass token back so beta.pinokio.co can complete the checkin server-side
-            setTimeout(function() {{
-                window.location.href = cfg.returnUrl + sep + 'token=' + encodeURIComponent(token) + '&ok=1';
-            }}, 1000);
-        }} else {{
-            msgEl.innerHTML += '<p class="hint">No return URL — check-in confirmed locally.</p>';
-        }}
+        fetch(snapshotUrl, {{
+            method: 'POST',
+            headers: {{ 'X-Registry-Token': token, 'Content-Type': 'application/json' }},
+        }})
+        .then(function(r) {{ return r.json().then(function(d) {{ return {{ ok: r.ok, data: d }}; }}); }})
+        .then(function(res) {{
+            if (!res.ok || !res.data.ok) {{
+                var err    = (res.data && res.data.error)  || 'snapshot_failed';
+                var detail = (res.data && res.data.detail) || '';
+                var msg = 'Check-in failed: ' + err;
+                if (detail) msg += ' — ' + (typeof detail === 'object' ? JSON.stringify(detail) : detail);
+                showError(msg + '. Redirecting&hellip;');
+                if (cfg.returnUrl) {{
+                    var sep = cfg.returnUrl.includes('?') ? '&' : '?';
+                    setTimeout(function() {{
+                        window.location.href = cfg.returnUrl + sep + 'error=' + encodeURIComponent(err);
+                    }}, 5000);
+                }}
+                return;
+            }}
+            var cpHash = (res.data.created && res.data.created.hash) || '';
+            msgEl.innerHTML = '<span style="color:#4ade80">&#10004; Check-in complete!</span><p class="hint">Redirecting back to Pinokio&hellip;</p>';
+            if (cfg.returnUrl) {{
+                var sep = cfg.returnUrl.includes('?') ? '&' : '?';
+                setTimeout(function() {{
+                    window.location.href = cfg.returnUrl + sep + 'ok=1' + (cpHash ? '&hash=' + encodeURIComponent(cpHash) : '');
+                }}, 1000);
+            }}
+        }})
+        .catch(function(e) {{
+            showError('Network error: ' + e.message);
+        }});
     }})();
     </script>
 </body>
@@ -206,11 +231,11 @@ def registry_checkin():
     return Response(html, content_type='text/html')
 
 
-def _get_commit_hash() -> str:
-    """Return the current git commit hash using the best available method."""
+def _get_git_sha(repo_url: str) -> str:
+    """Get the real git commit SHA — try local git first, then GitHub API."""
     app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    # 1. Try git directly (works on host / dev installs)
+    # 1. Local git (works in dev/host installs)
     try:
         return subprocess.check_output(
             ['git', 'rev-parse', 'HEAD'],
@@ -220,26 +245,60 @@ def _get_commit_hash() -> str:
         pass
 
     # 2. GIT_COMMIT env var baked in at Docker build time
-    env_hash = os.getenv('GIT_COMMIT', '').strip()
-    if env_hash:
-        return env_hash
+    env_sha = os.getenv('GIT_COMMIT', '').strip()
+    if env_sha:
+        return env_sha
 
-    # 3. GIT_HASH file written during Docker build (via `git rev-parse HEAD > /app/GIT_HASH`)
+    # 3. GIT_HASH file written during Docker build
     hash_file = os.path.join(app_root, 'GIT_HASH')
     if os.path.exists(hash_file):
         return open(hash_file).read().strip()
 
-    # 4. Derive a stable hash from package.json version
+    # 4. Fetch from GitHub API — repo_url like https://github.com/OWNER/REPO
     try:
-        import hashlib
-        pkg = os.path.join(app_root, 'package.json')
-        version = json.load(open(pkg)).get('version', '0.0.0')
-        return hashlib.sha1(f'openvoiceui-{version}'.encode()).hexdigest()
+        parts = repo_url.rstrip('/').rstrip('.git').split('/')
+        if len(parts) >= 2:
+            owner, repo = parts[-2], parts[-1]
+            resp = requests.get(
+                f'https://api.github.com/repos/{owner}/{repo}/commits/main',
+                headers={'Accept': 'application/vnd.github.sha'},
+                timeout=8,
+            )
+            if resp.ok:
+                return resp.text.strip()
     except Exception:
         pass
 
+    return ''
+
+
+def _compute_checkpoint_hash(repo_url: str, git_sha: str) -> str:
+    """
+    Compute the Pinokio checkpoint hash exactly as pinokiod does.
+    Format: "sha256:" + SHA256(stableStringify({version, root, repos[]}))
+    stableStringify = JSON with keys sorted alphabetically at every level.
+    """
     import hashlib
-    return hashlib.sha1(b'openvoiceui-unknown').hexdigest()
+
+    def stable_stringify(obj) -> str:
+        if isinstance(obj, dict):
+            pairs = ','.join(
+                f'{json.dumps(k)}:{stable_stringify(v)}'
+                for k, v in sorted(obj.items())
+            )
+            return '{' + pairs + '}'
+        if isinstance(obj, list):
+            return '[' + ','.join(stable_stringify(v) for v in obj) + ']'
+        return json.dumps(obj)
+
+    canonical = {
+        'version': 1,
+        'root': repo_url,
+        'repos': [{'commit': git_sha, 'path': '.', 'repo': repo_url}],
+    }
+    serialized = stable_stringify(canonical)
+    digest = hashlib.sha256(serialized.encode()).hexdigest()
+    return f'sha256:{digest}'
 
 
 @registry_bp.route('/checkpoints/snapshot', methods=['POST'])
@@ -257,23 +316,27 @@ def checkpoints_snapshot():
     if not token:
         return jsonify({'ok': False, 'error': 'missing_token'}), 400
 
-    # Get current git hash — try several strategies since git may not be in the container
-    commit_hash = _get_commit_hash()
+    # Get real git SHA, then compute the proper Pinokio checkpoint hash
+    git_sha = _get_git_sha(repo_url)
+    if not git_sha:
+        return jsonify({'ok': False, 'error': 'snapshot_failed',
+                        'detail': 'Could not determine git commit SHA'}), 500
 
-    created = {'hash': commit_hash}
+    checkpoint_hash = _compute_checkpoint_hash(repo_url, git_sha)
+    created = {'hash': checkpoint_hash}
 
     if not publish:
         return jsonify({'ok': True, 'created': created})
 
-    # Publish to Pinokio registry
-    # Include checkpoint + system metadata that the API expects
+    # Publish to Pinokio registry with the exact body format pinokiod uses
     import platform as _platform
     post_body = {
-        'hash':       commit_hash,
+        'hash':       checkpoint_hash,
         'visibility': 'public',
         'checkpoint': {
-            'repoUrl': repo_url,
-            'appSlug': app_slug,
+            'version': 1,
+            'root':    repo_url,
+            'repos':   [{'commit': git_sha, 'path': '.', 'repo': repo_url}],
         },
         'system': {
             'platform': _platform.system().lower(),
