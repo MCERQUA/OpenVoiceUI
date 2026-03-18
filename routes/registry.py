@@ -185,44 +185,19 @@ def registry_checkin():
             return;
         }}
 
-        // POST to our local /checkpoints/snapshot which handles the registry API call
-        var snapshotUrl = '/checkpoints/snapshot?publish=1'
-            + '&registry=' + encodeURIComponent(cfg.registry)
-            + '&repo='     + encodeURIComponent(cfg.repo)
-            + '&app='      + encodeURIComponent(cfg.appSlug);
+        // The app just proves it's running by redirecting back to beta.pinokio.co
+        // with the token — Pinokio handles the actual registry API call with its session.
+        msgEl.innerHTML = '<span style="color:#4ade80">&#10004; Install verified!</span><p class="hint">Redirecting back to Pinokio&hellip;</p>';
 
-        fetch(snapshotUrl, {{
-            method: 'POST',
-            headers: {{ 'X-Registry-Token': token, 'Content-Type': 'application/json' }},
-        }})
-        .then(function(r) {{ return r.json().then(function(d) {{ return {{ ok: r.ok, data: d }}; }}); }})
-        .then(function(res) {{
-            if (!res.ok || !res.data.ok) {{
-                var err    = (res.data && res.data.error)  || 'snapshot_failed';
-                var detail = (res.data && res.data.detail) || '';
-                var msg = 'Check-in failed: ' + err;
-                if (detail) msg += ' — ' + (typeof detail === 'object' ? JSON.stringify(detail) : detail);
-                showError(msg + '. Redirecting&hellip;');
-                if (cfg.returnUrl) {{
-                    var sep = cfg.returnUrl.includes('?') ? '&' : '?';
-                    setTimeout(function() {{
-                        window.location.href = cfg.returnUrl + sep + 'error=' + encodeURIComponent(err);
-                    }}, 5000);
-                }}
-                return;
-            }}
-            var hash = (res.data.created && res.data.created.hash) || '';
-            msgEl.innerHTML = '<span style="color:#4ade80">&#10004; Check-in complete!</span><p class="hint">Redirecting back to Pinokio&hellip;</p>';
-            if (cfg.returnUrl) {{
-                var sep = cfg.returnUrl.includes('?') ? '&' : '?';
-                setTimeout(function() {{
-                    window.location.href = cfg.returnUrl + sep + 'ok=1' + (hash ? '&hash=' + hash : '');
-                }}, 1000);
-            }}
-        }})
-        .catch(function(e) {{
-            showError('Network error during check-in. ' + e.message);
-        }});
+        if (cfg.returnUrl) {{
+            var sep = cfg.returnUrl.includes('?') ? '&' : '?';
+            // Pass token back so beta.pinokio.co can complete the checkin server-side
+            setTimeout(function() {{
+                window.location.href = cfg.returnUrl + sep + 'token=' + encodeURIComponent(token) + '&ok=1';
+            }}, 1000);
+        }} else {{
+            msgEl.innerHTML += '<p class="hint">No return URL — check-in confirmed locally.</p>';
+        }}
     }})();
     </script>
 </body>
