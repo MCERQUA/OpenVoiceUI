@@ -126,9 +126,9 @@ _VOICE_INSTRUCTIONS = (
 
     # --- Canvas: create a new page ---
     "CREATING A NEW CANVAS PAGE: "
-    "Step 1 — write the HTML file: write({path:'workspace/canvas/pagename.html', content:'<!DOCTYPE html>...'}). "
+    "Step 1 — write the HTML file: write({path:'workspace/canvas-pages/pagename.html', content:'<!DOCTYPE html>...'}). "
     "Step 2 — open it in your spoken response: 'Here it is. [CANVAS:pagename]' "
-    "Step 3 — verify it opened: exec('curl -s http://openvoiceui:5001/api/canvas/context') "
+    "Step 3 — verify it opened: exec('curl -s http://localhost:5001/api/canvas/context') "
     "returns {current_page, current_title}. If current_page matches → confirm to user. "
     "If still old page → say so and resend [CANVAS:pagename]. If null → say 'Opening canvas now.' and resend. "
 
@@ -151,7 +151,7 @@ _VOICE_INSTRUCTIONS = (
 
     # --- Canvas: make public ---
     "MAKE A PAGE PUBLIC (shareable without login): "
-    "exec('curl -s -X PATCH http://openvoiceui:5001/api/canvas/manifest/page/PAGE_ID "
+    "exec('curl -s -X PATCH http://localhost:5001/api/canvas/manifest/page/PAGE_ID "
     "-H \"Content-Type: application/json\" -d \\'{{\"is_public\": true}}\\'') "
     "Shareable URL format: https://DOMAIN/pages/pagename.html "
 
@@ -195,13 +195,16 @@ _VOICE_INSTRUCTIONS = (
     "yeah, lets_go, gunshot, bruh, sad_trombone. "
 
     # --- Onboarding notifications ---
-    "ONBOARDING NOTIFICATIONS (popup at top-center of screen): "
-    "[NOTIFY:message] — show/update popup message. "
-    "[NOTIFY_TITLE:text] — update popup title bar. "
-    "[NOTIFY_PROGRESS:N/M] — show step progress dots (e.g. [NOTIFY_PROGRESS:2/5]). "
-    "[NOTIFY_STATUS:text] — update small status line (e.g. '3 agents working...'). "
-    "[NOTIFY_CLOSE] — hide popup temporarily. "
-    "[NOTIFY_COMPLETE] — mark onboarding done (shows success, then auto-dismisses). "
+    # ⚠️ NOT IMPLEMENTED — frontend handler for these tags does not exist yet.
+    # Do NOT add to voice-system-prompt.md until the popup UI is built in app.js.
+    # Tracked in: docs/jambot/onboarding-and-video-system.md
+    # "ONBOARDING NOTIFICATIONS (popup at top-center of screen): "
+    # "[NOTIFY:message] — show/update popup message. "
+    # "[NOTIFY_TITLE:text] — update popup title bar. "
+    # "[NOTIFY_PROGRESS:N/M] — show step progress dots (e.g. [NOTIFY_PROGRESS:2/5]). "
+    # "[NOTIFY_STATUS:text] — update small status line (e.g. '3 agents working...'). "
+    # "[NOTIFY_CLOSE] — hide popup temporarily. "
+    # "[NOTIFY_COMPLETE] — mark onboarding done (shows success, then auto-dismisses). "
 
     # --- Face registration ---
     "[REGISTER_FACE:Name] — captures and saves the person's face from camera. "
@@ -333,6 +336,8 @@ def get_voice_session_key() -> str:
     Cache is invalidated by bump_voice_session() (explicit agent reset only).
     """
     global _session_key_cache
+    # Auto-clear stale recovery keys (stuck >60s)
+    _check_recovery_timeout()
     # If session is poisoned, use recovery key to escape
     if _session_recovery_key is not None:
         return _session_recovery_key
@@ -376,13 +381,22 @@ def bump_voice_session() -> str:
     return stable_key
 
 
+_recovery_entered_at: float = 0
+
+
 def _enter_session_recovery():
     """Switch to a temporary recovery session key after double-empty.
     Openclaw will create a fresh session for this key, escaping the
     poisoned state. The recovery key is cleared on the first successful
     (non-empty, non-fallback) response."""
-    global _session_recovery_key
+    global _session_recovery_key, _recovery_entered_at
     import datetime
+    # Cooldown: don't thrash recovery keys from rapid start/stop cycles
+    now = time.time()
+    if now - _recovery_entered_at < 30:
+        logger.info('### SESSION RECOVERY: skipping — cooldown active (entered <30s ago)')
+        return
+    _recovery_entered_at = now
     _session_recovery_key = f'recovery-{int(datetime.datetime.utcnow().timestamp())}'
     logger.warning(f'### SESSION RECOVERY: switching to key "{_session_recovery_key}" to escape poisoned session')
 
@@ -396,6 +410,16 @@ def _exit_session_recovery():
         _session_recovery_key = None
         stable = get_voice_session_key()
         logger.info(f'### SESSION RECOVERY CLEARED: "{old_recovery}" → back to stable key "{stable}"')
+
+
+def _check_recovery_timeout():
+    """Auto-clear stale recovery keys. If recovery has been active for >60s
+    without a successful response, the recovery key itself may be stuck.
+    Fall back to stable key."""
+    global _session_recovery_key, _recovery_entered_at
+    if _session_recovery_key is not None and time.time() - _recovery_entered_at > 60:
+        logger.warning(f'### SESSION RECOVERY TIMEOUT: "{_session_recovery_key}" active for >60s — clearing')
+        _session_recovery_key = None
 
 
 # ---------------------------------------------------------------------------
@@ -1605,6 +1629,58 @@ def conversation_abort():
         aborted = gw.abort_active_run(session_key)
     logger.info(f"### ABORT request session={session_key} aborted={aborted} source={source} text={source_text!r}")
     return jsonify({'ok': True, 'aborted': aborted})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversation/steer
+# ---------------------------------------------------------------------------
+
+
+@conversation_bp.route('/api/conversation/steer', methods=['POST'])
+def conversation_steer():
+    """Inject a user message into the active agent run (steer mode).
+
+    Fire-and-forget from client — used when the user speaks while the
+    agent is silently working (tools / sub-agents / heartbeat).  Instead
+    of aborting the active run and starting fresh, this sends a second
+    chat.send to the same session.  OpenClaw's messages.queue.mode=steer
+    injects the message at the next tool boundary so the agent sees the
+    user's correction and pivots immediately.
+
+    The active /api/conversation streaming response continues receiving
+    the steered output — no new streaming connection is needed.
+
+    Request body:
+        message  (str)  — the user's text to inject
+        source   (str)  — label for logging (e.g. 'clawdbot-sendMessage')
+
+    Returns:
+        { ok: true, steered: true/false }
+    """
+    body = request.get_json(silent=True) or {}
+    message = (body.get('message') or '').strip()
+    source = body.get('source', 'unknown')
+
+    if not message:
+        return jsonify({'ok': False, 'error': 'No message provided'}), 400
+
+    # Input length guard (same as main conversation endpoint)
+    if len(message) > 4000:
+        return jsonify({'ok': False, 'error': 'Message too long'}), 400
+
+    session_key = get_voice_session_key()
+
+    steered = gateway_manager.send_steer(message, session_key)
+
+    logger.info(
+        f"### STEER request session={session_key} steered={steered} "
+        f"source={source} text={message!r}"
+    )
+
+    # Log the steer message as a user turn so the transcript is preserved
+    log_conversation('user', message, session_id='default')
+
+    return jsonify({'ok': True, 'steered': steered})
 
 
 # ---------------------------------------------------------------------------

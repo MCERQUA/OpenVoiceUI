@@ -130,6 +130,9 @@ Define agents in JSON — each profile configures:
 ├── app.py                      Flask app factory
 ├── docker-compose.yml          Multi-service Docker setup
 ├── docker-compose.pinokio.yml  Pinokio one-click installer compose
+├── package.json                npm package manifest
+├── cli/
+│   └── index.js                npm CLI (setup, start, stop, status, logs)
 ├── pinokio.js                  Pinokio app manifest
 ├── install.js                  Pinokio install script
 ├── start.js                    Pinokio start script
@@ -249,7 +252,33 @@ Define agents in JSON — each profile configures:
 
 ## Installation
 
-### Option 1: Pinokio One-Click Install
+### Option 1: npm (Quickest)
+
+```bash
+npx openvoiceui setup
+```
+
+This runs an interactive wizard that configures your API keys, generates all config files, and builds the Docker images. Then start with:
+
+```bash
+npx openvoiceui start
+```
+
+Open `http://localhost:5001` in your browser.
+
+Other commands: `npx openvoiceui stop`, `npx openvoiceui status`, `npx openvoiceui logs`, `npx openvoiceui restart`.
+
+Or install globally:
+
+```bash
+npm install -g openvoiceui
+openvoiceui setup
+openvoiceui start
+```
+
+[![npm version](https://img.shields.io/npm/v/openvoiceui.svg)](https://www.npmjs.com/package/openvoiceui)
+
+### Option 2: Pinokio One-Click Install
 
 The easiest way to get started. [Pinokio](https://pinokio.computer) is a free app manager that handles installation, startup, and updates automatically.
 
@@ -261,7 +290,7 @@ The easiest way to get started. [Pinokio](https://pinokio.computer) is a free ap
 
 Pinokio handles Docker Compose orchestration, environment configuration, and service lifecycle. Use the **Stop** button to shut down, and **Update** to pull the latest changes.
 
-### Option 2: Deployment (Recommended: VPS)
+### Option 3: Deployment (Recommended: VPS)
 
 The recommended way to run OpenVoiceUI is on a dedicated VPS — microphone access, SSL, and always-on uptime all work significantly better hosted than on a local machine.
 
@@ -283,7 +312,7 @@ sudo systemctl status openvoiceui
 sudo journalctl -u openvoiceui -f
 ```
 
-### Option 3: Local Install (Docker)
+### Option 4: Local Install (Docker)
 
 Docker is the easiest path for local development — it runs OpenClaw, Supertonic TTS, and OpenVoiceUI together. Note that browser microphone access requires HTTPS — on localhost Chrome/Edge will still allow it, but other devices on your network won't work without a cert.
 
@@ -335,7 +364,7 @@ The `docker-compose.yml` runs three services:
 
 OpenClaw config is persisted in a Docker volume (`openclaw-data`), so onboarding only needs to run once.
 
-### Option 4: VS Code Dev Container
+### Option 5: VS Code Dev Container
 
 For contributors and developers, OpenVoiceUI includes a VS Code dev container configuration that sets up the full development environment automatically.
 
@@ -629,7 +658,7 @@ OpenVoiceUI is designed so you can host a single VPS and serve multiple clients,
 | Canvas | Fullscreen iframe + SSE manifest system |
 | Music Gen | Suno API / fal.ai |
 | Auth | Clerk (optional) |
-| Installer | Pinokio / Docker Compose / VPS deploy script |
+| Installer | npm / Pinokio / Docker Compose / VPS deploy script |
 
 ---
 

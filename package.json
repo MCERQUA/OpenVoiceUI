@@ -1,0 +1,82 @@
+{
+  "name": "openvoiceui",
+  "version": "1.0.0",
+  "description": "Voice-powered AI assistant platform — connect any LLM, any TTS, with a live web canvas, music generation, and agent orchestration",
+  "bin": {
+    "openvoiceui": "cli/index.js"
+  },
+  "scripts": {
+    "setup": "node cli/index.js setup",
+    "start": "node cli/index.js start",
+    "stop": "node cli/index.js stop",
+    "status": "node cli/index.js status",
+    "logs": "node cli/index.js logs"
+  },
+  "keywords": [
+    "voice-ai",
+    "openvoiceui",
+    "openclaw",
+    "tts",
+    "stt",
+    "ai-assistant",
+    "voice-agent",
+    "ai-canvas",
+    "llm",
+    "speech-to-text",
+    "text-to-speech",
+    "voice-interface",
+    "ai-music",
+    "docker"
+  ],
+  "author": "MCERQUA",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MCERQUA/OpenVoiceUI.git"
+  },
+  "homepage": "https://github.com/MCERQUA/OpenVoiceUI",
+  "bugs": {
+    "url": "https://github.com/MCERQUA/OpenVoiceUI/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "files": [
+    "cli/",
+    "deploy/",
+    "docker-compose.yml",
+    "docker-compose.pinokio.yml",
+    "Dockerfile",
+    "requirements.txt",
+    ".env.example",
+    "setup-config.js",
+    "inject-device-identity.js",
+    "auto-approve-devices.js",
+    "app.py",
+    "server.py",
+    "index.html",
+    "greetings.json",
+    "src/",
+    "static/",
+    "routes/",
+    "services/",
+    "providers/",
+    "tts_providers/",
+    "config/",
+    "data/",
+    "default-pages/",
+    "profiles/",
+    "prompts/",
+    "sounds/",
+    "README.md",
+    "LICENSE",
+    "SETUP.md",
+    "!**/__pycache__",
+    "!**/*.pyc"
+  ]
+}

@@ -49,9 +49,9 @@ Repeating [CANVAS:same-page] on an already-open page forces a refresh — use th
 ---
 
 CANVAS — CREATE A NEW PAGE:
-Step 1 — Write the HTML file using your write tool: path is workspace/canvas/pagename.html
+Step 1 — Write the HTML file using your write tool: path is workspace/canvas-pages/pagename.html
 Step 2 — Open it in your response: say something like "Here it is. [CANVAS:pagename]"
-Step 3 — Verify it opened: exec("curl -s http://openvoiceui:5001/api/canvas/context") returns {"current_page": "pagename.html", "current_title": "..."}
+Step 3 — Verify it opened: exec("curl -s http://localhost:5001/api/canvas/context") returns {"current_page": "pagename.html", "current_title": "..."}
 If current_page matches what you opened — confirm to user: "You should be seeing [page name] now."
 If current_page is still the old page — say so and resend [CANVAS:pagename].
 If current_page is null or empty — say "Opening the canvas now." and resend [CANVAS:pagename].
@@ -79,7 +79,7 @@ External links that open new tab: <a href="https://example.com" target="_blank">
 ---
 
 CANVAS — MAKE A PAGE PUBLIC (shareable without login):
-exec("curl -s -X PATCH http://openvoiceui:5001/api/canvas/manifest/page/PAGE_ID -H 'Content-Type: application/json' -d '{\"is_public\": true}'")
+exec("curl -s -X PATCH http://localhost:5001/api/canvas/manifest/page/PAGE_ID -H 'Content-Type: application/json' -d '{\"is_public\": true}'")
 Replace PAGE_ID with the page filename without .html extension.
 To make private again: use {"is_public": false}
 Shareable URL format: https://DOMAIN/pages/pagename.html

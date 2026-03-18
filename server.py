@@ -159,6 +159,9 @@ from routes.report_issue import report_issue_bp
 app.register_blueprint(icons_bp)
 app.register_blueprint(report_issue_bp)
 
+from routes.registry import registry_bp
+app.register_blueprint(registry_bp)
+
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.
 try:
@@ -676,6 +679,25 @@ def groq_stt():
     except Exception as e:
         logger.error(f"Groq STT error: {e}")
         return jsonify({"error": "Speech-to-text failed"}), 500
+
+
+@app.route("/api/stt/deepgram/token", methods=["GET"])
+def deepgram_stt_token():
+    """Return the Deepgram API key for browser-side WebSocket streaming.
+
+    The browser needs the key to open a direct WebSocket to Deepgram's
+    live transcription API.  The key is passed via the WebSocket sub-protocol
+    header so it never appears in URLs or logs.
+
+    NOTE: Deepgram supports scoped / short-lived project keys — if you want
+    tighter security, create a key with only 'usage:write' permission and
+    rotate it.  For now we hand out the configured key since the UI is
+    already authenticated.
+    """
+    api_key = os.environ.get("DEEPGRAM_API_KEY", "")
+    if not api_key:
+        return jsonify({"error": "DEEPGRAM_API_KEY not configured"}), 500
+    return jsonify({"token": api_key})
 
 
 @app.route("/api/stt/deepgram", methods=["POST"])

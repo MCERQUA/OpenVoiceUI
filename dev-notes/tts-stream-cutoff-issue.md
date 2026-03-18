@@ -1,99 +1,57 @@
 # TTS Stream Audio Cutoff Issue
 
-**Date:** 2026-02-27
-**Observed on:** Foamology session (researching company, 5 subagents launched)
-**Priority:** Next sprint item
+**Date:** 2026-02-27 (original), updated 2026-03-17
+**Priority:** Medium — tracked in GitHub #115, #81
+**Status:** Partially addressed — `min_sentence_chars` now wired, other config options still unwired
 
-## What Happened (Plain English)
+## The Problem
 
-The user asked the AI to research Foamology. The AI responded with a list of 5 things it was going to research. Instead of hearing that as smooth speech, the user heard choppy, cut-off audio — like someone rapidly starting and stopping a recording.
+When the AI streams a response, it's broken into sentences and each sentence gets TTS generated in parallel. Multiple audio clips arrive at the frontend almost simultaneously, causing choppy/overlapping playback.
 
-Here's why: When the AI streams a response, the app breaks it into sentences and sends each sentence to the voice engine (Groq) separately. The problem is it sends ALL sentences at the same time — so 5 audio clips come back almost simultaneously. The audio player is supposed to queue them and play one after another, but they arrive so fast that they pile up and step on each other.
+## Current State (March 2026)
 
-Think of it like 5 people trying to talk through the same walkie-talkie at once. Each one starts talking before the last one finishes. The app has a queue system that should prevent this (like a "wait your turn" line), but it's not working reliably — probably because some of the audio clips are so short or arrive so fast that the browser can't keep up.
+### What's been fixed:
+- **`min_sentence_chars` is now wired** — `conversation.py` line 885-894 reads the profile value (default 40) instead of only using a hardcode. Profile can now override this.
 
-There are three settings in the app config that were designed to fix this, but none of them are actually connected to the code yet. They're just placeholder settings that do nothing. See `unwired-tts-config-options.md` for details on those.
+### What's still broken:
+- **`parallel_sentences`** — still always parallel, config value ignored (exists in `profiles/default.json` but code always fires TTS in background threads)
+- **`inter_sentence_gap_ms`** — still not implemented, no pause between audio chunks
+- **Frontend audio queue** — `TTSPlayer.js` uses `HTMLAudioElement` with `onended` callbacks. Works for well-spaced chunks but unreliable when chunks arrive rapidly. No pre-buffering or gap logic.
 
----
+## Backend Flow (current)
 
-## Technical Details
+1. LLM streams tokens → accumulate in `_tts_buf`
+2. `_extract_sentence()` splits on `.!?` with configurable `min_len` (from profile, default 40)
+3. Each sentence fires `_fire_tts()` in a **background thread** — all run in parallel
+4. Audio chunks yielded sequentially to client (waits for each thread in order)
+5. Client receives NDJSON: `{"type": "audio", "audio": "<base64>", "chunk": N}`
 
-### Symptom
-When LLM streams a long response, TTS audio chunks play rapidly and cut each other off instead of playing as smooth sequential speech.
+## Frontend Flow (current)
 
-## Root Cause Analysis
+1. `TTSPlayer.queue(base64Audio)` creates `Audio` element with `onended → _playNext()`
+2. `_playNext()` shifts from `audioQueue[]`, plays next
+3. No gap, no pre-buffering, no validation of empty chunks
 
-### Backend Flow (routes/conversation.py)
-1. LLM streams token-by-token via OpenClaw gateway
-2. Tokens accumulate in `_tts_buf`
-3. `_extract_sentence()` splits on `.!?` with min 40 chars (hardcoded, ignores profile `min_sentence_chars`)
-4. Each complete sentence fires `_fire_tts()` in a **background thread** — all TTS runs in parallel
-5. Audio chunks are **yielded sequentially** to the client (waits for each thread in order)
-6. Client receives NDJSON with `{"type": "audio", "audio": "<base64>", "chunk": N}`
-
-### Frontend Flow (src/providers/TTSPlayer.js)
-1. `TTSPlayer` has a queue-based player: `audioQueue[]`, `currentAudio`, `isPlaying`
-2. `queue(base64Audio)` creates an `Audio` element with `onended → _playNext()`
-3. `_playNext()` shifts from queue, plays next — should be sequential
-4. VoiceSession.js line 326: `this.tts.queue(data.audio)` on each chunk
-
-### The Problem
-The queue implementation looks correct on paper, but audio chunks arrive very fast from backend (all TTS fired in parallel, ~130-200ms Groq latency). Possible issues:
-- **Browser `onended` unreliability** on very short audio clips
-- **Race condition**: chunks arrive faster than `onended` fires, new `queue()` call might interfere
-- **No gap between chunks**: no silence between sentences makes it sound like cutoff even when sequential
-- **Backend ordering**: parallel TTS threads may complete out of order vs yield order
-
-## Config Options (exist in schema but NOT implemented)
+## Config Options Status
 
 | Config | Default | Status |
 |--------|---------|--------|
+| `min_sentence_chars` | `40` | **WIRED** — reads from profile (line 894) |
 | `parallel_sentences` | `true` | NOT IMPLEMENTED — always parallel |
-| `min_sentence_chars` | `40` | HARDCODED in `_extract_sentence()`, ignores profile value |
 | `inter_sentence_gap_ms` | `null` | NOT IMPLEMENTED — no silence between chunks |
+
+## GitHub Issues
+
+- **#115** — feat: wire TTS sentence streaming config options from profile (covers `parallel_sentences` and `inter_sentence_gap_ms`)
+- **#81** — perf: high TTS latency on greeting responses (related — parallel TTS is fast but causes overlap)
 
 ## Key Files
 
 **Backend:**
-- `routes/conversation.py` lines 643-878 — sentence extraction, TTS firing, audio yielding
-- `services/tts.py` lines 103-114 — sentence splitting in `generate_tts_chunked`
-- `profiles/manager.py` lines 56-62 — VoiceConfig defaults (was supertonic/M1, now groq/autumn)
+- `routes/conversation.py` — `_extract_sentence()` (~line 1014), `_fire_tts()` (~line 1026), `_min_sentence_chars` (~line 885)
+- `profiles/manager.py` — VoiceConfig schema (lines 56-62)
+- `profiles/default.json` — default values
 
 **Frontend:**
-- `src/providers/TTSPlayer.js` — queue-based audio player (queue/playNext/stop)
-- `src/core/VoiceSession.js` line 326 — queuing audio from stream
-
-## Proposed Fix Direction (DO NOT IMPLEMENT YET)
-
-1. **Frontend: harden the audio queue**
-   - Use `AudioContext` instead of `new Audio()` for more reliable playback control
-   - Add explicit gap between chunks (respect `inter_sentence_gap_ms`)
-   - Add `oncanplaythrough` before attempting play
-   - Consider pre-buffering: wait for N chunks before starting playback
-
-2. **Backend: respect profile config**
-   - Read `min_sentence_chars` from profile instead of hardcoded 40
-   - Implement `parallel_sentences: false` option for sequential TTS
-   - Consider coalescing short sentences before TTS dispatch
-
-3. **Backend: smarter sentence batching**
-   - Instead of 1 sentence = 1 TTS call, batch 2-3 short sentences together
-   - Reduces number of audio chunks client needs to manage
-   - Reduces Groq API calls
-
-## Foamology Session Log Evidence
-
-```
-23:51:20 [Groq] Requesting TTS: 'Background and founder research. 2. Services...' voice=autumn
-23:51:20 [Groq] Requesting TTS: 'Customer reviews and reputation. 4. Competition...' voice=autumn
-23:51:21 [Groq] Requesting TTS: 'Recent news and developments. The agents will...' voice=autumn
-23:51:21 [Groq] Requesting TTS: 'I'll summarize everything for you once they complete.' voice=autumn
-23:51:22 TTS generated: 399430 bytes in 1332ms
-23:51:22 TTS generated: 349510 bytes in 1215ms
-23:51:23 TTS generated: 345670 bytes in 2329ms
-23:51:24 TTS generated: 330310 bytes in 3057ms
-23:51:24 TTS generated: 169030 bytes in 3357ms
-```
-
-5 TTS chunks generated in ~4 seconds, all fired in parallel. Client receives them in rapid succession.
-Total response: 19816ms LLM + 3356ms TTS = 23173ms total.
+- `src/providers/TTSPlayer.js` — queue-based audio player (queue/_playNext/stop)
+- `src/core/VoiceSession.js` line 342 — queuing audio from stream
