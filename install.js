@@ -302,11 +302,14 @@ module.exports = {
       },
     },
 
-    // Step 4: Build Docker images (first run takes a few minutes)
+    // Step 4: Record git SHA for registry check-in, then build Docker images
     {
       method: "shell.run",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml build",
+        message: [
+          "git rev-parse HEAD > GIT_HASH",
+          "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml build",
+        ],
       },
     },
 
