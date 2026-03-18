@@ -52,6 +52,7 @@ def registry_checkin():
         'returnUrl': return_url,
         'registry':  registry,
         'appSlug':   app_slug,
+        'repo':      repo,
     })
 
     html = f'''<!DOCTYPE html>
@@ -185,20 +186,28 @@ def registry_checkin():
         }}
 
         // POST to our local /checkpoints/snapshot which handles the registry API call
-        fetch('/checkpoints/snapshot?publish=1&registry=' + encodeURIComponent(cfg.registry), {{
+        var snapshotUrl = '/checkpoints/snapshot?publish=1'
+            + '&registry=' + encodeURIComponent(cfg.registry)
+            + '&repo='     + encodeURIComponent(cfg.repo)
+            + '&app='      + encodeURIComponent(cfg.appSlug);
+
+        fetch(snapshotUrl, {{
             method: 'POST',
             headers: {{ 'X-Registry-Token': token, 'Content-Type': 'application/json' }},
         }})
         .then(function(r) {{ return r.json().then(function(d) {{ return {{ ok: r.ok, data: d }}; }}); }})
         .then(function(res) {{
             if (!res.ok || !res.data.ok) {{
-                var err = (res.data && res.data.error) || 'snapshot_failed';
-                showError('Check-in failed: ' + err + '. Redirecting&hellip;');
+                var err    = (res.data && res.data.error)  || 'snapshot_failed';
+                var detail = (res.data && res.data.detail) || '';
+                var msg = 'Check-in failed: ' + err;
+                if (detail) msg += ' — ' + (typeof detail === 'object' ? JSON.stringify(detail) : detail);
+                showError(msg + '. Redirecting&hellip;');
                 if (cfg.returnUrl) {{
                     var sep = cfg.returnUrl.includes('?') ? '&' : '?';
                     setTimeout(function() {{
                         window.location.href = cfg.returnUrl + sep + 'error=' + encodeURIComponent(err);
-                    }}, 2500);
+                    }}, 5000);
                 }}
                 return;
             }}
@@ -267,6 +276,8 @@ def checkpoints_snapshot():
     token    = request.headers.get('X-Registry-Token', '').strip()
     registry = request.args.get('registry', 'https://api.pinokio.co').rstrip('/')
     publish  = request.args.get('publish', '0') == '1'
+    repo_url = request.args.get('repo', 'https://github.com/MCERQUA/OpenVoiceUI')
+    app_slug = request.args.get('app', 'github-com-mcerqua-openvoiceui')
 
     if not token:
         return jsonify({'ok': False, 'error': 'missing_token'}), 400
@@ -280,6 +291,21 @@ def checkpoints_snapshot():
         return jsonify({'ok': True, 'created': created})
 
     # Publish to Pinokio registry
+    # Include checkpoint + system metadata that the API expects
+    import platform as _platform
+    post_body = {
+        'hash':       commit_hash,
+        'visibility': 'public',
+        'checkpoint': {
+            'repoUrl': repo_url,
+            'appSlug': app_slug,
+        },
+        'system': {
+            'platform': _platform.system().lower(),
+            'arch':     _platform.machine(),
+        },
+    }
+
     try:
         resp = requests.post(
             f'{registry}/checkpoints',
@@ -287,10 +313,7 @@ def checkpoints_snapshot():
                 'Authorization': f'Bearer {token}',
                 'Content-Type':  'application/json',
             },
-            json={
-                'hash':       commit_hash,
-                'visibility': 'public',
-            },
+            json=post_body,
             timeout=15,
         )
     except requests.RequestException as e:
@@ -300,8 +323,13 @@ def checkpoints_snapshot():
         try:
             detail = resp.json()
         except Exception:
-            detail = resp.text[:200]
-        return jsonify({'ok': False, 'error': 'publish_failed', 'detail': detail}), 502
+            detail = resp.text[:500]
+        import logging
+        logging.getLogger(__name__).warning(
+            f'Pinokio registry publish failed: HTTP {resp.status_code} — {detail}'
+        )
+        return jsonify({'ok': False, 'error': 'publish_failed', 'detail': detail,
+                        'status': resp.status_code}), 502
 
     try:
         pub_data = resp.json()
