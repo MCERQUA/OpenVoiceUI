@@ -291,10 +291,16 @@ def _compute_checkpoint_hash(repo_url: str, git_sha: str) -> str:
             return '[' + ','.join(stable_stringify(v) for v in obj) + ']'
         return json.dumps(obj)
 
+    # canonicalRepoUrl() in pinokiod strips protocol, then lowercases the full URL
+    canonical_url = repo_url.strip().rstrip('/')
+    if canonical_url.lower().endswith('.git'):
+        canonical_url = canonical_url[:-4]
+    canonical_url = canonical_url.lower()
+
     canonical = {
         'version': 1,
-        'root': repo_url,
-        'repos': [{'commit': git_sha, 'path': '.', 'repo': repo_url}],
+        'root': canonical_url,
+        'repos': [{'commit': git_sha, 'path': '.', 'repo': canonical_url}],
     }
     serialized = stable_stringify(canonical)
     digest = hashlib.sha256(serialized.encode()).hexdigest()
@@ -377,5 +383,5 @@ def checkpoints_snapshot():
     return jsonify({
         'ok':      True,
         'created': created,
-        'publish': {'ok': True, 'hash': commit_hash, **pub_data},
+        'publish': {'ok': True, 'hash': checkpoint_hash, **pub_data},
     })
