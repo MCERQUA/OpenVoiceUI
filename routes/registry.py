@@ -375,10 +375,12 @@ def checkpoints_snapshot():
             detail = resp.text[:500]
         import logging
         logging.getLogger(__name__).warning(
-            f'Pinokio registry publish failed: HTTP {resp.status_code} — {detail}'
+            f'Pinokio registry publish failed: HTTP {resp.status_code} — {detail} '
+            f'(our_sha={git_sha[:12]}, our_hash={checkpoint_hash})'
         )
         return jsonify({'ok': False, 'error': 'publish_failed', 'detail': detail,
-                        'status': resp.status_code}), 502
+                        'status': resp.status_code,
+                        '_debug': {'sha': git_sha, 'hash': checkpoint_hash, 'canon_url': canon_url}}), 502
 
     try:
         pub_data = resp.json()
@@ -389,4 +391,61 @@ def checkpoints_snapshot():
         'ok':      True,
         'created': created,
         'publish': {'ok': True, 'hash': checkpoint_hash, **pub_data},
+    })
+
+
+@registry_bp.route('/registry/debug')
+def registry_debug():
+    """
+    Debug endpoint — visit http://localhost:<port>/registry/debug to see what
+    SHA and checkpoint hash this server would compute for the registry check-in.
+    Compare with what Pinokio computed locally.
+    """
+    repo_url = request.args.get('repo', 'https://github.com/MCERQUA/OpenVoiceUI')
+
+    import platform as _platform
+    git_sha = _get_git_sha(repo_url)
+
+    canon_url = repo_url.strip().rstrip('/')
+    if canon_url.lower().endswith('.git'):
+        canon_url = canon_url[:-4]
+    canon_url = canon_url.lower()
+
+    checkpoint_hash = _compute_checkpoint_hash(repo_url, git_sha) if git_sha else ''
+
+    import json as _json
+
+    # Show what the POST body would look like
+    post_body = {
+        'hash': checkpoint_hash,
+        'visibility': 'public',
+        'checkpoint': {
+            'version': 1,
+            'root': canon_url,
+            'repos': [{'commit': git_sha, 'path': '.', 'repo': canon_url}],
+        },
+        'system': {
+            'platform': _platform.system().lower(),
+            'arch': _platform.machine(),
+        },
+    }
+
+    import os as _os
+    app_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    hash_file = _os.path.join(app_root, 'GIT_HASH')
+    git_hash_file_contents = ''
+    if _os.path.exists(hash_file):
+        git_hash_file_contents = open(hash_file).read().strip()
+
+    return jsonify({
+        'git_sha': git_sha,
+        'git_sha_source': 'git' if not git_sha else (
+            'env' if _os.getenv('GIT_COMMIT', '').strip() == git_sha else (
+                'file' if git_hash_file_contents == git_sha else 'github_api'
+            )
+        ),
+        'git_hash_file': git_hash_file_contents,
+        'canonical_url': canon_url,
+        'checkpoint_hash': checkpoint_hash,
+        'post_body': post_body,
     })
