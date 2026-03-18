@@ -119,6 +119,8 @@ def create_app(config_override: dict = None):
             '/api/music',     # music track list — loaded before Clerk init
             '/api/faces',     # face list — loaded before Clerk init
             '/api/icons/',    # icon library + generated icons — static images, no secrets
+            '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
+            '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
         )
         _PUBLIC_EXACT = {
             '/',           # main page — hosts the Clerk login gate itself
