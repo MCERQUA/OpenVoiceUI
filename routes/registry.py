@@ -334,15 +334,20 @@ def checkpoints_snapshot():
     if not publish:
         return jsonify({'ok': True, 'created': created})
 
-    # Publish to Pinokio registry with the exact body format pinokiod uses
+    # Publish to Pinokio registry with the exact body format pinokiod uses.
+    # The checkpoint URLs must be lowercased to match the registry's canonicalRepoUrl().
     import platform as _platform
+    canon_url = repo_url.strip().rstrip('/')
+    if canon_url.lower().endswith('.git'):
+        canon_url = canon_url[:-4]
+    canon_url = canon_url.lower()
     post_body = {
         'hash':       checkpoint_hash,
         'visibility': 'public',
         'checkpoint': {
             'version': 1,
-            'root':    repo_url,
-            'repos':   [{'commit': git_sha, 'path': '.', 'repo': repo_url}],
+            'root':    canon_url,
+            'repos':   [{'commit': git_sha, 'path': '.', 'repo': canon_url}],
         },
         'system': {
             'platform': _platform.system().lower(),
