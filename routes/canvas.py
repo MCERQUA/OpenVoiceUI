@@ -31,7 +31,7 @@ from services.canvas_versioning import (
 # Constants
 # ---------------------------------------------------------------------------
 
-from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR
+from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR
 CANVAS_SSE_PORT = int(os.getenv('CANVAS_SSE_PORT', '3030'))
 CANVAS_SESSION_PORT = int(os.getenv('CANVAS_SESSION_PORT', '3002'))
 BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
@@ -1313,3 +1313,184 @@ def restore_page_version(page_id, timestamp):
         'restored_from': timestamp,
         'message': f'Page restored to version from {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))}',
     })
+
+
+# ---------------------------------------------------------------------------
+# Build Log API — serves z-code session JSONL files parsed into human-readable lines
+# The openclaw workspace is mounted into openvoiceui at /app/runtime/workspace/Agent
+# JSONL session files are synced here: Agent/scripts/logs/zcode-sessions/*.jsonl
+# ---------------------------------------------------------------------------
+
+_BUILD_LOG_DIR = WORKSPACE_DIR / 'Agent' / 'scripts' / 'logs'
+_ZCODE_SESSIONS_DIR = _BUILD_LOG_DIR / 'zcode-sessions'
+
+
+def _parse_jsonl_to_lines(jsonl_path):
+    """Parse a z-code JSONL session file into human-readable activity lines."""
+    import json as _json
+    results = []
+    try:
+        with open(jsonl_path, encoding='utf-8', errors='replace') as _f:
+            for raw in _f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    obj = _json.loads(raw)
+                except Exception:
+                    continue
+                if obj.get('type') != 'assistant':
+                    continue
+                ts_raw = obj.get('timestamp', '')
+                ts = ts_raw[11:16] if len(ts_raw) >= 16 else '?'
+                content = obj.get('message', {}).get('content', [])
+                for c in content:
+                    if not isinstance(c, dict):
+                        continue
+                    ct = c.get('type')
+                    if ct == 'text':
+                        text = c.get('text', '').strip()
+                        if text:
+                            short = text.replace('\n', ' ')[:160]
+                            results.append((ts_raw, f'[{ts}] {short}'))
+                    elif ct == 'tool_use':
+                        name = c.get('name', '?')
+                        inp = c.get('input', {})
+                        _pfx = '/home/node/.openclaw/workspace/'
+                        if name == 'Read':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Reading: {fp}'))
+                        elif name == 'WebSearch':
+                            results.append((ts_raw, f'[{ts}] Searching: {inp.get("query", "")}'))
+                        elif name == 'Bash':
+                            cmd = inp.get('command', '').strip().replace('\n', ' ')[:100]
+                            results.append((ts_raw, f'[{ts}] Running: {cmd}'))
+                        elif name == 'Write':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Writing: {fp}'))
+                        elif name == 'Edit':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Editing: {fp}'))
+                        elif name == 'Glob':
+                            results.append((ts_raw, f'[{ts}] Scanning: {inp.get("pattern", "")}'))
+                        elif name == 'Grep':
+                            results.append((ts_raw, f'[{ts}] Searching: {inp.get("pattern", "")}'))
+                        elif name == 'TodoWrite':
+                            todos = inp.get('todos', [])
+                            in_prog = [
+                                t['content'] for t in todos
+                                if isinstance(t, dict) and t.get('status') == 'in_progress'
+                            ]
+                            if in_prog:
+                                results.append((ts_raw, f'[{ts}] Starting: {in_prog[0][:80]}'))
+                        elif name == 'Agent':
+                            desc = inp.get('description', '')
+                            if desc:
+                                results.append((ts_raw, f'[{ts}] Spawning agent: {desc[:80]}'))
+                        else:
+                            results.append((ts_raw, f'[{ts}] {name}: {str(inp)[:80]}'))
+    except Exception:
+        pass
+    return results
+
+
+@canvas_bp.route('/api/canvas/build-log/<project>', methods=['GET'])
+def canvas_build_log(project):
+    """Return parsed z-code JSONL session activity as human-readable console lines.
+
+    GET /api/canvas/build-log/<project>?lines=300&since=<iso-timestamp>
+    Returns: {"lines": [...], "status": "ok", "sources": N, "updated_at": "..."}
+    Returns: {"lines": [], "status": "no_log"} if no JSONL files found yet.
+    """
+    import re as _re
+    import json as _json
+    if not _re.match(r'^[a-z0-9][a-z0-9\-_]{0,80}$', project):
+        return jsonify({'error': 'Invalid project name'}), 400
+
+    try:
+        n_lines = min(int(request.args.get('lines', 300)), 1000)
+    except (ValueError, TypeError):
+        n_lines = 300
+
+    # Optional: only return lines after this ISO timestamp (for incremental polling)
+    since_ts = request.args.get('since', '')
+
+    try:
+        sessions_dir = _ZCODE_SESSIONS_DIR
+        if not sessions_dir.exists():
+            return jsonify({'lines': [], 'status': 'no_log'})
+
+        # Find JSONL files — use ALL of them sorted by mtime (single-tenant: newest = current build)
+        all_jsonl = sorted(sessions_dir.glob('*.jsonl'), key=lambda p: p.stat().st_mtime)
+        if not all_jsonl:
+            return jsonify({'lines': [], 'status': 'no_log'})
+
+        # Determine build start time from the project status file (if available)
+        build_start_ts = ''
+        status_path = CANVAS_PAGES_DIR / '_data' / 'builds' / f'{project}-status.json'
+        if status_path.exists():
+            try:
+                with open(status_path) as _sf:
+                    _sd = _json.load(_sf)
+                build_start_ts = _sd.get('startedAt', '')
+            except Exception:
+                pass
+
+        # Collect entries from all JSONL files, filtered to files updated after build start
+        all_entries = []
+        sources_used = 0
+        for jf in all_jsonl:
+            # Skip JSONL files older than build start (if we know it)
+            if build_start_ts:
+                import time as _time
+                try:
+                    # Compare file mtime to build start
+                    file_mtime_iso = _time.strftime(
+                        '%Y-%m-%dT%H:%M:%S', _time.gmtime(jf.stat().st_mtime)
+                    )
+                    if file_mtime_iso < build_start_ts[:19]:
+                        continue
+                except Exception:
+                    pass
+            entries = _parse_jsonl_to_lines(jf)
+            if entries:
+                all_entries.extend(entries)
+                sources_used += 1
+
+        if not all_entries:
+            # Fall back: use ALL files if nothing matched the build-start filter
+            for jf in all_jsonl:
+                entries = _parse_jsonl_to_lines(jf)
+                all_entries.extend(entries)
+                sources_used += 1
+
+        # Sort by timestamp string (ISO, sorts lexically), dedupe adjacent identical lines
+        all_entries.sort(key=lambda x: x[0])
+
+        # Filter by since_ts if provided
+        if since_ts:
+            all_entries = [(ts, line) for ts, line in all_entries if ts > since_ts]
+
+        # Deduplicate: remove consecutive identical display lines
+        deduped = []
+        last_line = None
+        for ts, line in all_entries:
+            if line != last_line:
+                deduped.append((ts, line))
+                last_line = line
+
+        # Return tail
+        tail_entries = deduped[-n_lines:] if len(deduped) > n_lines else deduped
+        lines_out = [line for _, line in tail_entries]
+        last_ts = tail_entries[-1][0] if tail_entries else ''
+
+        return jsonify({
+            'lines': lines_out,
+            'status': 'ok',
+            'sources': sources_used,
+            'total_lines': len(deduped),
+            'updated_at': last_ts,
+        })
+    except Exception as exc:
+        logger.error(f'Build log read error for {project}: {exc}')
+        return jsonify({'lines': [], 'status': 'error', 'error': str(exc)}), 500

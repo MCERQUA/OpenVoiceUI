@@ -1182,6 +1182,14 @@ def _conversation_inner():
                             if evt.get('error') and not evt.get('response'):
                                 error_msg = evt['error']
                                 logger.error(f"### GATEWAY ERROR → fallback: {error_msg}")
+                                # Detect rate limit specifically so the UI can surface it
+                                if 'rate limit' in error_msg.lower():
+                                    yield json.dumps({
+                                        'type': 'rate_limit',
+                                        'provider': 'Z.AI',
+                                        'message': error_msg,
+                                    }) + '\n'
+                                    metrics['rate_limited'] = 1
                                 evt['response'] = "One moment, still working on that."
                                 metrics['fallback_used'] = 1
                             full_response = evt.get('response')
@@ -1329,6 +1337,25 @@ def _conversation_inner():
 
                                 if not full_response or not full_response.strip():
                                     full_response = "I had a brief connection issue. I'm reconnecting now — please try again."
+
+                            # ── Timeout empty: agent ran but produced nothing in 300s ──
+                            # This is NOT session poisoning — the session is healthy but the
+                            # agent ran out of time (long tool chain, image gen, website build).
+                            # Return a graceful spoken message; do NOT enter recovery.
+                            if _is_empty and not getattr(stream_response, '_retried', False) \
+                                    and metrics.get('llm_inference_ms', 0) >= 30000:
+                                if user_message == '__session_start__':
+                                    full_response = "Hey, give me just a moment — I'm getting started."
+                                else:
+                                    full_response = (
+                                        "That took a bit longer than expected on my end. "
+                                        "I'm still here — try again and I'll get right to it."
+                                    )
+                                metrics['fallback_used'] = 1
+                                logger.warning(
+                                    f"### TIMEOUT EMPTY ({metrics['llm_inference_ms']}ms) — "
+                                    f"graceful fallback, no session recovery"
+                                )
 
                             yield json.dumps({
                                 'type': 'text_done',
