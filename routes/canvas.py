@@ -320,28 +320,35 @@ def sync_canvas_manifest() -> dict:
         return manifest
 
     existing_files = {p.name for p in CANVAS_PAGES_DIR.glob('*.html')}
-    manifest_files = {p.get('filename') for p in manifest['pages'].values()}
+    # Only consider pages that have a proper 'filename' field — entries using
+    # non-standard keys (e.g. 'file') are treated as un-tracked and will be
+    # re-synced below, which also standardises their format.
+    manifest_files = {p.get('filename') for p in manifest['pages'].values() if p.get('filename')}
 
     for filename in existing_files - manifest_files:
         page_id = Path(filename).stem
+        # Preserve any existing metadata (starred, display_name, etc.) but fix
+        # non-standard entries that used 'file'/'title' instead of 'filename'/'display_name'.
+        existing = manifest['pages'].get(page_id, {})
         filepath = CANVAS_PAGES_DIR / filename
-        title = page_id.replace('-', ' ').title()
+        title = existing.get('display_name') or existing.get('title') or page_id.replace('-', ' ').title()
         try:
             content = filepath.read_text()[:1000]
         except Exception:
             content = ''
-        category = suggest_category(title, content)
+        category = existing.get('category') or suggest_category(title, content)
         manifest['pages'][page_id] = {
+            **{k: v for k, v in existing.items() if k not in ('file', 'title', 'created_at')},
             'filename': filename,
             'display_name': title,
-            'description': '',
+            'description': existing.get('description', ''),
             'category': category,
-            'tags': [],
-            'created': datetime.fromtimestamp(filepath.stat().st_ctime).isoformat(),
+            'tags': existing.get('tags', []),
+            'created': existing.get('created') or existing.get('created_at') or datetime.fromtimestamp(filepath.stat().st_ctime).isoformat(),
             'modified': datetime.fromtimestamp(filepath.stat().st_mtime).isoformat(),
-            'starred': False,
-            'voice_aliases': generate_voice_aliases(title),
-            'access_count': 0,
+            'starred': existing.get('starred', False),
+            'voice_aliases': existing.get('voice_aliases') or generate_voice_aliases(title),
+            'access_count': existing.get('access_count', 0),
         }
         if category not in manifest['categories']:
             manifest['categories'][category] = {
@@ -352,7 +359,9 @@ def sync_canvas_manifest() -> dict:
             }
         if page_id not in manifest['categories'][category]['pages']:
             manifest['categories'][category]['pages'].append(page_id)
-        # Note: uncategorized pages are managed via manifest['categories']['uncategorized']['pages']
+        # Inject every newly-discovered page into the desktop icon list so it
+        # appears immediately without requiring the desktop to be open first.
+        _inject_page_into_desktop_state(manifest, page_id)
 
     # Reconcile: pages registered in pages{} but missing from their category list
     for page_id, page_data in manifest['pages'].items():
@@ -873,7 +882,7 @@ def openclaw_ui_proxy(path=''):
         # Strip headers that interfere with iframe/proxy rendering
         excluded_headers = [
             'content-encoding', 'content-length', 'transfer-encoding',
-            'connection', 'x-frame-options',
+            'connection', 'x-frame-options', 'content-security-policy',
         ]
         headers = [(k, v) for k, v in resp.headers.items()
                    if k.lower() not in excluded_headers]

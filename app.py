@@ -77,6 +77,7 @@ def create_app(config_override: dict = None):
     _extra_origins = [o.strip() for o in os.getenv('CORS_ORIGINS', '').split(',') if o.strip()]
     CORS(app, origins=[
         r'^http://localhost:\d+$',
+        r'^chrome-extension://',   # JamBot Browser Companion extension
         *_extra_origins,
     ], supports_credentials=True)
 
@@ -121,6 +122,7 @@ def create_app(config_override: dict = None):
             '/api/icons/',    # icon library + generated icons — static images, no secrets
             '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
             '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
+            '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
         )
         _PUBLIC_EXACT = {
             '/',           # main page — hosts the Clerk login gate itself
@@ -134,8 +136,7 @@ def create_app(config_override: dict = None):
             '/favicon.ico',     # Browser favicon request — before auth
             '/ws/clawdbot',     # WebSocket — browsers can't send Clerk token in WS headers;
                                 # handler secures itself via CLAWDBOT_AUTH_TOKEN to the gateway
-            '/openclaw-ui',     # WebSocket upgrade for OpenClaw Control UI proxy;
-                                # handler does its own Clerk auth via __session cookie
+            '/openclaw-ui',     # WebSocket upgrade for OpenClaw Control UI proxy (no trailing slash)
         }
 
         # Detect whether Clerk auth is configured at startup.
