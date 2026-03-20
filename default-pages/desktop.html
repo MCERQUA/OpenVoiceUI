@@ -847,7 +847,10 @@ let windows = new Map();
 let nextWinId = 1;
 let nextZ = 100;
 let recycleBin = [];
-let iconPositions = {};
+let iconPositions = {};         // desktop (>1024px)
+let iconPositionsTablet = {};   // tablet (481-1024px)
+let iconPositionsPhone = {};    // phone (≤480px)
+let currentBreakpoint = 'desktop'; // set in init after loadState
 let dragState = null;
 let selectedIcons = new Set();
 let startMenuOpen = false;
@@ -860,12 +863,26 @@ let _manifestTimer = null;
 let wallpaperUrl = null;   // server URL of custom desktop wallpaper
 let savedPageCategories = {}; // { pageId: catId } — persists drag-to-folder assignments across fetchManifest cycles
 
+// Breakpoint helpers
+function getBreakpoint() {
+  const w = window.innerWidth;
+  if (w <= 480) return 'phone';
+  if (w <= 1024) return 'tablet';
+  return 'desktop';
+}
+function getActivePositions() {
+  if (currentBreakpoint === 'tablet') return iconPositionsTablet;
+  if (currentBreakpoint === 'phone') return iconPositionsPhone;
+  return iconPositions;
+}
+
 // Save state to server (debounced)
 function saveState() {
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(_doSaveState, 500);
 }
 function _doSaveState() {
+  // Always save full state to master desktop entry (iconPositions = desktop positions)
   const state = JSON.stringify({
     theme: currentTheme, iconPositions, recycleBin,
     customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories,
@@ -875,25 +892,65 @@ function _doSaveState() {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({description: state}),
   }).catch(() => {});
+  // Save breakpoint-specific positions to their own manifest entries
+  if (currentBreakpoint === 'tablet') {
+    fetch('/api/canvas/manifest/page/desktop-tablet', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsTablet})}),
+    }).catch(() => {});
+  } else if (currentBreakpoint === 'phone') {
+    fetch('/api/canvas/manifest/page/desktop-phone', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsPhone})}),
+    }).catch(() => {});
+  }
 }
 
-// Load state from server
+// Load state from server — fetch all three breakpoint entries in parallel
 async function loadState() {
   try {
-    const resp = await fetch('/api/canvas/manifest/page/desktop');
-    if (!resp.ok) return;
-    const data = await resp.json();
-    if (data.description) {
+    const [desktopResp, tabletResp, phoneResp] = await Promise.all([
+      fetch('/api/canvas/manifest/page/desktop'),
+      fetch('/api/canvas/manifest/page/desktop-tablet'),
+      fetch('/api/canvas/manifest/page/desktop-phone'),
+    ]);
+    // Master desktop state (shared state + desktop positions)
+    if (desktopResp.ok) {
       try {
-        const state = JSON.parse(data.description);
-        if (state.theme) currentTheme = state.theme;
-        if (state.iconPositions) iconPositions = state.iconPositions;
-        if (state.recycleBin) recycleBin = state.recycleBin;
-        if (state.customFolders) customFolders = state.customFolders;
-        if (state.desktopPages) desktopPages = state.desktopPages;
-        if (state.knownPages) knownPages = state.knownPages;
-        if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
-        if (state.savedPageCategories) savedPageCategories = state.savedPageCategories;
+        const data = await desktopResp.json();
+        if (data.description) {
+          const state = JSON.parse(data.description);
+          if (state.theme) currentTheme = state.theme;
+          if (state.iconPositions) iconPositions = state.iconPositions;
+          if (state.recycleBin) recycleBin = state.recycleBin;
+          if (state.customFolders) customFolders = state.customFolders;
+          if (state.desktopPages) desktopPages = state.desktopPages;
+          if (state.knownPages) knownPages = state.knownPages;
+          if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
+          if (state.savedPageCategories) savedPageCategories = state.savedPageCategories;
+        }
+      } catch(e) {}
+    }
+    // Tablet-specific positions
+    if (tabletResp.ok) {
+      try {
+        const data = await tabletResp.json();
+        if (data.description) {
+          const state = JSON.parse(data.description);
+          if (state.iconPositions) iconPositionsTablet = state.iconPositions;
+        }
+      } catch(e) {}
+    }
+    // Phone-specific positions
+    if (phoneResp.ok) {
+      try {
+        const data = await phoneResp.json();
+        if (data.description) {
+          const state = JSON.parse(data.description);
+          if (state.iconPositions) iconPositionsPhone = state.iconPositions;
+        }
       } catch(e) {}
     }
   } catch(e) {}
@@ -1107,7 +1164,7 @@ function buildDesktopIcons() {
     if (recycleBin.includes(item.id) && item.action !== 'recycle') return;
     const col = Math.floor(i / maxPerCol);
     const row = i % maxPerCol;
-    const saved = iconPositions[item.id];
+    const saved = getActivePositions()[item.id];
     const x = saved ? saved.x : (isRightToLeft ? startX - col * cellW : startX + col * cellW);
     const y = saved ? saved.y : startY + row * cellH;
 
@@ -1175,7 +1232,7 @@ function onIconTouchStart(e, item) {
         el.style.left = origLeft + 'px';
         el.style.top = origTop + 'px';
       } else {
-        iconPositions[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
+        getActivePositions()[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
         saveState();
       }
     } else {
@@ -1234,7 +1291,7 @@ function onIconMouseDown(e, item) {
         el.style.left = origLeft + 'px';
         el.style.top = origTop + 'px';
       } else {
-        iconPositions[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
+        getActivePositions()[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
         saveState();
       }
     }
@@ -2839,11 +2896,24 @@ function buildWallpaperSection() {
    ══════════════════════════════════════════════════════════════ */
 async function init() {
   await loadState();
+  currentBreakpoint = getBreakpoint();
   await fetchManifest();
   // Ensure DOM is fully laid out before measuring
   requestAnimationFrame(() => {
     setTheme(currentTheme);
     updateClock();
+  });
+  // Rebuild icons when viewport crosses a breakpoint boundary
+  let _resizeBpTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_resizeBpTimer);
+    _resizeBpTimer = setTimeout(() => {
+      const newBp = getBreakpoint();
+      if (newBp !== currentBreakpoint) {
+        currentBreakpoint = newBp;
+        buildDesktopIcons();
+      }
+    }, 300);
   });
   // Poll for new pages every 30 seconds, pause when tab hidden
   _manifestTimer = setInterval(fetchManifest, 30000);

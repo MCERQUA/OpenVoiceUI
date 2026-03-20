@@ -280,6 +280,7 @@ class DeepgramStreamingSTT {
         this._micMuted = false;
         this._pttHolding = false;
         this.isProcessing = false;
+        this._muteActive = false;  // clear stuck TTS mute from when TTS played during PTT mode
         this.accumulatedText = '';
 
         if (this.isListening && (!this._ws || this._ws.readyState !== WebSocket.OPEN)) {

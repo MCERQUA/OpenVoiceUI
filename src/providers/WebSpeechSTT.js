@@ -224,9 +224,15 @@ class WebSpeechSTT {
 
     /**
      * Mute STT immediately — called when TTS starts speaking.
-     * Sets isProcessing=true so onresult ignores all incoming audio,
-     * and clears any pending silence timer so queued echo text is discarded.
-     * onend will not restart the engine while muted, stopping the abort loop.
+     * Aborts the recognition engine entirely so it stops capturing mic audio.
+     * This prevents speaker echo from being transcribed during TTS playback.
+     * onend fires after abort but won't restart (isProcessing=true blocks it).
+     * resume() will call recognition.start() when TTS is done.
+     *
+     * NOTE: abort() vs stop() — abort() discards in-flight results,
+     * stop() finalizes them. We use abort() to discard TTS echo.
+     * isProcessing=true alone is not enough — recognition keeps running
+     * and physically captures speaker audio via mic when only flagged.
      */
     mute() {
         this.isProcessing = true;
@@ -235,6 +241,9 @@ class WebSpeechSTT {
             this.silenceTimer = null;
         }
         this.accumulatedText = '';
+        if (this.recognition) {
+            try { this.recognition.abort(); } catch (e) {}
+        }
     }
 
     /**

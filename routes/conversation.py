@@ -550,6 +550,20 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'\[SOUND:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SESSION_RESET\]', '', text, flags=re.IGNORECASE)
 
+    # Remove browser companion command tags (executed by extension, not spoken)
+    # Pattern handles nested brackets in CSS selectors: [CLICK:[role="button"]]
+    _nb = r'(?:[^\[\]]|\[[^\]]*\])*'  # non-bracket chars OR [bracket-pairs]
+    text = re.sub(r'\[SCROLL:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[CLICK:{_nb}\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[FILL:{_nb}\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[HIGHLIGHT:{_nb}\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[NAVIGATE:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[OPEN_TAB:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[READ_PAGE\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[WAIT:\d+\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[START_TASK:{_nb}\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[TASK_COMPLETE:{_nb}\]', '', text, flags=re.IGNORECASE)
+
     # Remove code blocks (complete fences first, then any unclosed fence to end of text)
     text = re.sub(r'```[\s\S]*?```', '', text)
     text = re.sub(r'```[\s\S]*', '', text)
@@ -713,6 +727,7 @@ def _conversation_inner():
     gateway_id = data.get('gateway_id') or None  # plugin gateway id; None = 'openclaw'
     max_response_chars = data.get('max_response_chars') or None  # profile cap, truncates at sentence boundary
     image_path = data.get('image_path') or None  # uploaded image for vision analysis
+    skip_tts = data.get('skip_tts', False)  # browser extension skips TTS during task steps
     metrics['session_id'] = session_id
     metrics['user_message_len'] = len(user_message)
     metrics['tts_provider'] = tts_provider
@@ -732,8 +747,10 @@ def _conversation_inner():
         return Response(_noop_stream(), mimetype='text/event-stream')
 
     # Input length guard (P7-T3 security audit)
-    if len(user_message) > 4000:
-        return jsonify({'error': 'Message too long (max 4000 characters)'}), 400
+    # Browser companion task loop sends page context (~5K) + prompt — allow 8K for those
+    _max_msg_len = 8000 if ui_context and ui_context.get('source') == 'jambot_extension' else 4000
+    if len(user_message) > _max_msg_len:
+        return jsonify({'error': f'Message too long (max {_max_msg_len} characters)'}), 400
 
     wants_stream = (
         request.args.get('stream') == '1'
@@ -809,6 +826,108 @@ def _conversation_inner():
             context_parts.append('[UPLOADED IMAGE: Vision analysis failed — the image was uploaded but could not be analyzed.]')
 
     if ui_context:
+        # ── Browser Extension context ────────────────────────────────────────
+        if ui_context.get('source') == 'jambot_extension':
+            context_parts.append(
+                '[BROWSER COMPANION MODE]\n'
+                'You are operating the user\'s real Chrome browser through the JamBot extension sidebar.\n'
+                'The page content below is LIVE — it updates after every action you take.\n\n'
+                'BROWSER ACTIONS YOU CAN EXECUTE (include in your response, they run immediately):\n'
+                '  [NAVIGATE:https://url] — navigate the browser to any URL (page loads then you see it)\n'
+                '  [OPEN_TAB:https://url] — open URL in a new tab\n'
+                '  [SCROLL:+1200]         — scroll down 1200px (USE THIS for feeds — loads new content)\n'
+                '  [SCROLL:+800]          — scroll down 800px\n'
+                '  [SCROLL:-400]          — scroll up 400px\n'
+                '  [SCROLL:top]           — jump to top of page\n'
+                '  [SCROLL:bottom]        — jump to absolute bottom (NOT for infinite feeds — use +1200 instead)\n'
+                '  [SCROLL:selector]      — scroll to a specific element\n'
+                '  [CLICK:selector]       — click an element (button, link, tab, etc.)\n'
+                '  [FILL:selector:value]  — type into an input field\n'
+                '  [HIGHLIGHT:selector]   — draw a cyan outline around an element\n'
+                '  [READ_PAGE]            — request full page text (up to 15000 chars)\n'
+                '  [WAIT:3]               — wait 3 seconds (for page loads, animations)\n\n'
+                'CREATING CANVAS PAGES (to save collected data):\n'
+                '  You have full tool access (file_write, bash, etc.) through your agent runtime.\n'
+                '  To create a canvas page with collected data:\n'
+                '  1. Use your file_write tool to write an HTML file to ~/Canvas/<page-name>.html\n'
+                '  2. The HTML should be self-contained with inline CSS (no external deps)\n'
+                '  3. Include [CANVAS:<page-name>] in your text response so the app navigates to it\n'
+                '  4. Do NOT say [TASK_COMPLETE] until the file is ACTUALLY WRITTEN — saying\n'
+                '     "I\'ll create it" is NOT creating it. USE THE TOOL.\n\n'
+                'AUTONOMOUS TASK MODE:\n'
+                '  When the user asks you to perform a multi-step task (scroll through a feed,\n'
+                '  find leads, fill out forms, etc.), you MUST activate the task loop:\n'
+                '  1. Include [START_TASK:brief description] in your FIRST response\n'
+                '  2. Then include your first command tag (e.g. [SCROLL:+1200])\n'
+                '  3. After each command, I will automatically send you the updated page state\n'
+                '  4. Keep outputting command tags on every response — the loop continues as long as you do\n'
+                '  5. Use [TASK_COMPLETE:summary] when finished\n\n'
+                '  WITHOUT [START_TASK:], commands execute ONCE and stop. Use it for ANY multi-step action:\n'
+                '  - "scroll the page" → [START_TASK:Scroll through page] [SCROLL:+1200]\n'
+                '  - "find leads" → [START_TASK:Find leads in feed] [SCROLL:+1200]\n'
+                '  - "fill out this form" → [START_TASK:Fill form fields] [FILL:selector:value]\n\n'
+                'ACTION JUDGMENT:\n'
+                '  Read the user\'s intent. If they say "comment on posts" — fill AND submit, don\'t stop to ask.\n'
+                '  If they say "draft a comment for me" — fill it and wait. Use common sense.\n'
+                '  "Find leads and comment" = autonomous. "Show me what you\'d say" = review mode.\n'
+                '  Only confirm before DESTRUCTIVE actions (delete, unfollow, block, unfriend).\n'
+                '  The user can STOP the task at any time using the Stop button.\n\n'
+                '⚠️ CRITICAL: The tags are NOT descriptions — they are EXECUTABLE COMMANDS.\n'
+                'Including [SCROLL:+1200] in your response IMMEDIATELY scrolls the page.\n'
+                'Simply saying "I will scroll" does NOTHING. You MUST output the tag.\n\n'
+                'CORRECT response to "scroll through this page":\n'
+                '  "[START_TASK:Scroll through page] Scrolling down now. [SCROLL:+1200]"\n'
+                '  (Then I will send you the updated page content automatically, and you keep scrolling.)\n\n'
+                'CORRECT response to "click the like button" (one-shot, no task loop needed):\n'
+                '  "Clicking the like button. [CLICK:[aria-label=\\"Like\\"]]"\n\n'
+                'WRONG response:\n'
+                '  "I will scroll through the page for you." ← does nothing, no tag\n\n'
+                'CSS selector hints for common sites:\n'
+                '  Facebook:\n'
+                '    Comment box: [contenteditable="true"][role="textbox"]  (NOT placeholder-based)\n'
+                '    Post button: [aria-label="Comment"], div[aria-label="Comment"][role="button"]\n'
+                '    Articles: [role="article"]\n'
+                '    To comment on a post: first [CLICK] the "Comment" link under the post,\n'
+                '    then [WAIT:1], then [FILL:[contenteditable="true"][role="textbox"]:your text],\n'
+                '    then [WAIT:1], then press Enter: [CLICK:[aria-label="Comment"][role="button"]]\n'
+                '  LinkedIn feed: .feed-shared-update-v2, [data-id]\n'
+                '  Generic: article, .post, main\n\n'
+                'Current page shown below. Canvas pages are separate HTML files YOU build inside the app — '
+                'do NOT confuse them with external websites the user is browsing.]'
+            )
+            page_url   = ui_context.get('page_url', '')
+            page_title = ui_context.get('page_title', '')
+            page_text  = ui_context.get('page_text', '')
+            sel_text   = ui_context.get('selected_text', '')
+            actions    = ui_context.get('action_history', [])
+            if page_url:
+                context_parts.append(f'[Browser tab: "{page_title or "untitled"}" — {page_url}]')
+            if page_text:
+                context_parts.append(f'[Page content: {page_text[:4000]}]')
+            interactive = ui_context.get('interactive', [])
+            if interactive:
+                lines = []
+                for el in interactive[:30]:
+                    t = el.get('t', '')
+                    sel = el.get('sel', '')
+                    if t == 'button':
+                        lines.append(f'  BUTTON "{el.get("text","")}" → [CLICK:{sel}]')
+                    elif t == 'link':
+                        lines.append(f'  LINK "{el.get("text","")}" → {el.get("href","")}')
+                    else:
+                        hint = el.get('hint', '')
+                        lines.append(f'  {t.upper()} {sel}{(" " + repr(hint)) if hint else ""} → [FILL:{sel}:your text]')
+                context_parts.append('[Interactive elements on this page — use these exact selectors:\n' + '\n'.join(lines) + ']')
+            if sel_text:
+                context_parts.append(f'[User highlighted: "{sel_text}"]')
+            if actions:
+                recent = actions[-8:]
+                acts = ' → '.join(
+                    f"{a.get('type','?')} {(a.get('text') or a.get('url') or a.get('selector') or '')[:35]}"
+                    for a in recent
+                )
+                context_parts.append(f'[Recent browser actions: {acts}]')
+
         # Canvas state
         if ui_context.get('canvasVisible') and ui_context.get('canvasDisplayed'):
             page_name = (ui_context['canvasDisplayed']
@@ -1030,6 +1149,9 @@ def _conversation_inner():
                         """Start TTS for raw_text in background. Returns (done_event, result)."""
                         done = threading.Event()
                         result = {'audio': None, 'error': None}
+                        if skip_tts:
+                            done.set()
+                            return (done, result)
                         def _run():
                             try:
                                 t0 = time.time()
@@ -1182,6 +1304,14 @@ def _conversation_inner():
                             if evt.get('error') and not evt.get('response'):
                                 error_msg = evt['error']
                                 logger.error(f"### GATEWAY ERROR → fallback: {error_msg}")
+                                # Detect rate limit specifically so the UI can surface it
+                                if 'rate limit' in error_msg.lower():
+                                    yield json.dumps({
+                                        'type': 'rate_limit',
+                                        'provider': 'Z.AI',
+                                        'message': error_msg,
+                                    }) + '\n'
+                                    metrics['rate_limited'] = 1
                                 evt['response'] = "One moment, still working on that."
                                 metrics['fallback_used'] = 1
                             full_response = evt.get('response')
@@ -1329,6 +1459,25 @@ def _conversation_inner():
 
                                 if not full_response or not full_response.strip():
                                     full_response = "I had a brief connection issue. I'm reconnecting now — please try again."
+
+                            # ── Timeout empty: agent ran but produced nothing in 300s ──
+                            # This is NOT session poisoning — the session is healthy but the
+                            # agent ran out of time (long tool chain, image gen, website build).
+                            # Return a graceful spoken message; do NOT enter recovery.
+                            if _is_empty and not getattr(stream_response, '_retried', False) \
+                                    and metrics.get('llm_inference_ms', 0) >= 30000:
+                                if user_message == '__session_start__':
+                                    full_response = "Hey, give me just a moment — I'm getting started."
+                                else:
+                                    full_response = (
+                                        "That took a bit longer than expected on my end. "
+                                        "I'm still here — try again and I'll get right to it."
+                                    )
+                                metrics['fallback_used'] = 1
+                                logger.warning(
+                                    f"### TIMEOUT EMPTY ({metrics['llm_inference_ms']}ms) — "
+                                    f"graceful fallback, no session recovery"
+                                )
 
                             yield json.dumps({
                                 'type': 'text_done',

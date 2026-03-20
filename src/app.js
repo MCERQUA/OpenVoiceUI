@@ -3305,6 +3305,12 @@ inject();
                         console.log('Ignoring transcript during TTS:', transcript);
                         return;
                     }
+                    // Echo cooldown: ignore STT for 2.5s after TTS ends to prevent
+                    // TTS audio from being picked up by the mic and re-submitted.
+                    if (this._ttsEchoCooldownUntil && Date.now() < this._ttsEchoCooldownUntil) {
+                        console.log('Ignoring transcript in echo cooldown:', transcript);
+                        return;
+                    }
                     if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     if (transcript && transcript.trim()) {
                         console.log('Voice input:', transcript);
@@ -3889,6 +3895,14 @@ inject();
                                     this.addSystemMessage('Session reset — next response may be slow.');
                                 }
 
+                                // AI provider rate limited — surface clearly
+                                if (data.type === 'rate_limit') {
+                                    const provider = data.provider || 'AI provider';
+                                    console.warn('[Conversation] Rate limited by', provider, data.message);
+                                    ActionConsole.addEntry('error', `⚠️ ${provider} throttled — using fallback model`);
+                                    this.addSystemMessage(`⚠️ ${provider} is temporarily throttled. Response came from fallback model.`);
+                                }
+
                                 // Generic server error — surface prominently
                                 if (data.type === 'error') {
                                     console.error('Stream error:', data.error);
@@ -4042,12 +4056,16 @@ inject();
             }
 
             async _sendGreetingTrigger() {
-                // Cooldown: prevent rapid greeting triggers that poison the session
-                if (Date.now() - (this._lastGreetingSent || 0) < 5000) {
-                    console.warn('[Session] Skipping greeting — cooldown active');
+                // Global cooldown: prevent any __session_start__ from firing within 60s of
+                // the last one — across ALL modes (ClawdbotMode + VoiceConversation).
+                // Without this, a reconnect can cause two simultaneous starts which triggers
+                // Z.AI empty_response → double_empty → session crash cascade.
+                const now = Date.now();
+                if (now - (window._lastSessionStartSentMs || 0) < 60000) {
+                    console.warn('[Session] Skipping greeting — global 60s cooldown active');
                     return;
                 }
-                this._lastGreetingSent = Date.now();
+                window._lastSessionStartSentMs = now;
                 // Send a session start signal to the agent — generates its own greeting
                 // based on face recognition, memory (MEMORY.md / clawd/memory/), and GREETINGS.md
                 // Face recognition context is automatically included via sendMessage() → identified_person
@@ -4526,9 +4544,13 @@ inject();
                         AgentActivityChip.setSpeaking(false);
                         // Cancel guard timer — TTS finished normally
                         if (this.clawdbotMode._ttsGuardTimer) { clearTimeout(this.clawdbotMode._ttsGuardTimer); this.clawdbotMode._ttsGuardTimer = null; }
+                        // Set echo cooldown: Chrome SpeechRecognition can deliver buffered
+                        // results up to 2-3s after TTS ends. Block STT results for 2.5s
+                        // to prevent TTS audio from being re-submitted as user speech.
+                        this.clawdbotMode._ttsEchoCooldownUntil = Date.now() + 2500;
                         // _ttsPlaying stays true through brief delay to block echo.
-                        // 300ms is enough — DeepgramStreamingSTT mutes its audio pipeline
-                        // during TTS so speaker audio can't be captured. Reduced from 1500ms.
+                        // 300ms for UI state updates — _ttsEchoCooldownUntil handles
+                        // the longer STT delivery lag independently.
                         setTimeout(() => {
                             this.clawdbotMode._ttsPlaying = false;
                             if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt) {
@@ -4839,6 +4861,14 @@ inject();
             }
 
             async _sendSessionGreeting() {
+                // Global cooldown: same 60s guard as ClawdbotMode._sendGreetingTrigger()
+                // prevents double __session_start__ when both modes fire on reconnect.
+                const now = Date.now();
+                if (now - (window._lastSessionStartSentMs || 0) < 60000) {
+                    console.warn('[VoiceConversation] Skipping greeting — global 60s cooldown active');
+                    return;
+                }
+                window._lastSessionStartSentMs = now;
                 // Pause STT so it doesn't pick up the agent's own greeting audio
                 this.stt.pause?.();
 
