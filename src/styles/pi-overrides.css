@@ -85,5 +85,5 @@ button span,
 .console-button span,
 .transcript-button span {
     font-family: 'Noto Color Emoji', 'Apple Color Emoji', 'Segoe UI Emoji',
-                 'Segoe UI Symbol', emoji, sans-serif !important;
+                 'Segoe UI Symbol', emoji, var(--font-body) !important;
 }

@@ -12,13 +12,13 @@ export function inject() {
     document.body.insertAdjacentHTML('afterbegin', SHELL_HTML);
     // Activity chip style — light grey on dark grey, no backdrop-filter
     const chipStyle = document.createElement('style');
-    chipStyle.textContent = `.agent-activity-chip{background:rgba(50,55,65,0.95)!important;border:1px solid rgba(180,190,210,0.3)!important;color:#e8eaed!important;backdrop-filter:none!important;box-shadow:0 2px 12px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.07)!important;overflow:hidden!important;}`;
+    chipStyle.textContent = `.agent-activity-chip{background:var(--bg-elevated)!important;border:1px solid rgba(180,190,210,0.3)!important;color:var(--text-primary)!important;backdrop-filter:none!important;box-shadow:0 2px 12px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.07)!important;overflow:hidden!important;}`;
     document.head.appendChild(chipStyle);
 }
 
 const SHELL_HTML = `
     <!-- Canvas Menu Button - Top Left Corner (Desktop) -->
-    <button id="canvas-menu-button" title="Desktop"><svg viewBox="0 0 48 48" width="22" height="22" style="vertical-align:middle;filter:drop-shadow(0 0 2px rgba(0,200,255,0.4))"><circle cx="24" cy="24" r="20" fill="#1a8a4a"/><circle cx="24" cy="24" r="20" fill="url(#globe-g)" opacity="0.7"/><ellipse cx="24" cy="24" rx="10" ry="20" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/><line x1="4" y1="24" x2="44" y2="24" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/><ellipse cx="24" cy="15" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/><ellipse cx="24" cy="33" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/><circle cx="24" cy="24" r="20" fill="none" stroke="#2dd4bf" stroke-width="1" opacity="0.5"/><defs><radialGradient id="globe-g" cx="35%" cy="35%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#059669"/></radialGradient></defs></svg></button>
+    <button id="canvas-menu-button" title="Desktop"><svg viewBox="0 0 48 48" width="22" height="22" style="vertical-align:middle;filter:drop-shadow(0 0 2px rgba(0,200,255,0.4))"><circle cx="24" cy="24" r="20" style="fill:var(--green)"/><circle cx="24" cy="24" r="20" fill="url(#globe-g)" opacity="0.7"/><ellipse cx="24" cy="24" rx="10" ry="20" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/><line x1="4" y1="24" x2="44" y2="24" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/><ellipse cx="24" cy="15" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/><ellipse cx="24" cy="33" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/><circle cx="24" cy="24" r="20" fill="none" style="stroke:var(--cyan)" stroke-width="1" opacity="0.5"/><defs><radialGradient id="globe-g" cx="35%" cy="35%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#059669"/></radialGradient></defs></svg></button>
 
     <!-- Canvas Menu Modal -->
     <div id="canvas-menu-modal" class="canvas-menu-modal" style="display: none;">
@@ -58,7 +58,7 @@ const SHELL_HTML = `
     </div>
 
     <!-- Canvas System - Full Screen Visual Display -->
-    <div id="canvas-container" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 150; background: #000; touch-action: manipulation;">
+    <div id="canvas-container" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 150; background: var(--bg-deep); touch-action: manipulation;">
         <iframe
             id="canvas-iframe"
             src="about:blank"
@@ -79,7 +79,7 @@ const SHELL_HTML = `
             <span>Actions</span>
             <div style="display:flex;gap:6px;align-items:center;">
                 <button class="ac-clear" onclick="ActionConsole.showSessionInfo()" title="Session Info" style="font-size:13px;">ℹ️ Session</button>
-                <button class="ac-clear" style="color:#f85149;" onclick="ActionConsole.resetSession()" title="Reset Session">🔄 Reset</button>
+                <button class="ac-clear" style="color:var(--red);" onclick="ActionConsole.resetSession()" title="Reset Session">🔄 Reset</button>
                 <button class="ac-clear" onclick="ActionConsole.clear()" title="Clear console">Clear</button>
                 <button class="ac-close" onclick="ActionConsole.hide()" title="Close console">&times;</button>
             </div>
@@ -373,7 +373,7 @@ const SHELL_HTML = `
             <button class="listen-clear-btn" onclick="window.ListenPanel?.clear()" title="Clear transcript">Clear</button>
         </div>
         <div class="listen-transcript" id="listen-transcript">
-            <span id="listen-empty" style="color:#3d3d3d;font-style:italic">Start speaking — transcript will appear here</span>
+            <span id="listen-empty" style="color:var(--text-dim);font-style:italic">Start speaking - transcript will appear here</span>
         </div>
         <div class="listen-interim" id="listen-interim"></div>
         <div class="listen-actions">
@@ -502,7 +502,7 @@ const SHELL_HTML = `
         <div class="irm-box">
             <div class="irm-header">
                 <span class="irm-title">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;color:#f59e0b">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;color:var(--yellow)">
                         <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
                         <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
                     </svg>
