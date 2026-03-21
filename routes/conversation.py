@@ -1035,6 +1035,7 @@ def _conversation_inner():
     # prompt so the LLM produces a real greeting instead of a system sentinel ("NO").
     # user_message is kept as-is so the sentinel suppression logic still works.
     if user_message == '__session_start__':
+        logger.info(f"### CALL_START session={session_id}")
         _face = identified_person or {}
         _face_name = _face.get('name', '') if _face.get('name', '') != 'unknown' else ''
         if _face_name:
@@ -1347,11 +1348,19 @@ def _conversation_inner():
                             )
                             metrics['profile'] = 'gateway'
                             metrics['model'] = 'glm-4.7-flash'
-                            logger.debug(f"[GW] Gateway response ({len(full_response or '')} chars): {repr((full_response or '')[:300])}")
+                            # Estimate tokens: ~4 chars/token for English text
+                            _resp_chars = len(full_response or '')
+                            _ctx_chars = len(context_prefix) if context_prefix else 0
+                            _est_input = _ctx_chars // 4
+                            _est_output = _resp_chars // 4
+                            metrics['est_input_tokens'] = _est_input
+                            metrics['est_output_tokens'] = _est_output
+                            logger.debug(f"[GW] Gateway response ({_resp_chars} chars): {repr((full_response or '')[:300])}")
                             logger.info(
                                 f"### LLM inference completed in "
                                 f"{metrics['llm_inference_ms']}ms "
-                                f"(tools={metrics['tool_count']})"
+                                f"(tools={metrics['tool_count']}) "
+                                f"(tokens~{_est_input}in/{_est_output}out)"
                             )
 
                             # ── Clear recovery mode on successful gateway response ──
@@ -1669,9 +1678,14 @@ def _conversation_inner():
                 )
                 metrics['profile'] = 'gateway'
                 metrics['model'] = 'glm-4.7-flash'
+                _resp_chars2 = len(ai_response or '')
+                _ctx_chars2 = len(context_prefix) if context_prefix else 0
+                metrics['est_input_tokens'] = _ctx_chars2 // 4
+                metrics['est_output_tokens'] = _resp_chars2 // 4
                 logger.info(
                     f"### LLM inference completed in {metrics['llm_inference_ms']}ms "
-                    f"(tools={metrics['tool_count']})"
+                    f"(tools={metrics['tool_count']}) "
+                    f"(tokens~{metrics['est_input_tokens']}in/{metrics['est_output_tokens']}out)"
                 )
 
         except Exception as e:
@@ -1777,6 +1791,8 @@ def conversation_abort():
     if gw and hasattr(gw, 'abort_active_run'):
         aborted = gw.abort_active_run(session_key)
     logger.info(f"### ABORT request session={session_key} aborted={aborted} source={source} text={source_text!r}")
+    if source == 'stopVoiceInput':
+        logger.info(f"### CALL_END session={session_key}")
     return jsonify({'ok': True, 'aborted': aborted})
 
 

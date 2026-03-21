@@ -120,6 +120,7 @@ def create_app(config_override: dict = None):
             '/api/music',     # music track list — loaded before Clerk init
             '/api/faces',     # face list — loaded before Clerk init
             '/api/icons/',    # icon library + generated icons — static images, no secrets
+            '/api/suno',      # Suno song generation — status polling + song list (no secrets)
             '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
             '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
             '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
