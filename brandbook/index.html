@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenVoiceUI - Brand System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+:root {
+  /* ── Core Palette (extracted from existing codebase) ── */
+  --bg-deep: #050508;
+  --bg-panel: #0a0a12;
+  --bg-surface: #0f1018;
+  --bg-elevated: #141420;
+  --bg-hover: #1a1a2e;
+
+  --fg: #e8e8f0;
+  --fg-muted: #8888a0;
+  --fg-dim: #555570;
+
+  --blue: #0088ff;
+  --blue-dim: #0055aa;
+  --blue-bright: #00aaff;
+  --cyan: #00ffff;
+  --green: #00ff66;
+  --yellow: #ffdd00;
+  --orange: #ff6600;
+  --red: #ff2244;
+
+  --border: rgba(0, 136, 255, 0.12);
+  --border-strong: rgba(0, 136, 255, 0.25);
+  --glow-blue: rgba(0, 136, 255, 0.15);
+  --glow-cyan: rgba(0, 255, 255, 0.1);
+
+  /* ── Typography ── */
+  --font-display: 'Space Grotesk', -apple-system, sans-serif;
+  --font-body: 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+  /* ── Spacing (4px base) ── */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-6: 24px; --sp-8: 32px; --sp-12: 48px; --sp-16: 64px;
+
+  /* ── Radii ── */
+  --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px;
+}
+
+html { font-size: 16px; scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+body { background: var(--bg-deep); color: var(--fg); font-family: var(--font-body); line-height: 1.6; overflow-x: hidden; }
+::selection { background: var(--blue); color: #fff; }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 3px; }
+
+/* ── Scroll Progress ── */
+.scroll-progress { position: fixed; top: 0; left: 0; height: 2px; background: var(--blue); z-index: 200; width: 0; transition: width 0.05s linear; }
+
+/* ── Nav ── */
+.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 clamp(16px, 4vw, 48px); background: rgba(5, 5, 8, 0.88); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); transform: translateY(-100%); transition: transform 0.4s cubic-bezier(0, 0, 0.2, 1); }
+.nav.visible { transform: translateY(0); }
+.nav-logo { font-family: var(--font-display); font-weight: 700; font-size: 16px; color: var(--fg); letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px; }
+.nav-logo .eye { width: 20px; height: 20px; }
+.nav-links { display: flex; gap: 24px; list-style: none; }
+.nav-links a { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-muted); text-decoration: none; transition: color 0.2s; }
+.nav-links a:hover { color: var(--cyan); }
+@media(max-width:768px){.nav-links{display:none}}
+
+/* ── Sections ── */
+section { position: relative; min-height: 100vh; }
+.section-inner { max-width: 1080px; margin: 0 auto; padding: clamp(80px, 10vh, 140px) clamp(20px, 5vw, 64px); }
+
+/* ── Reveals ── */
+.reveal { opacity: 0; transform: translateY(32px); transition: opacity 0.7s cubic-bezier(0, 0, 0.2, 1), transform 0.7s cubic-bezier(0, 0, 0.2, 1); }
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.delay-1 { transition-delay: 0.1s; } .delay-2 { transition-delay: 0.2s; } .delay-3 { transition-delay: 0.3s; } .delay-4 { transition-delay: 0.4s; }
+
+/* ── Section Labels ── */
+.section-label { font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--blue); margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+.section-label::before { content: ''; width: 20px; height: 1px; background: var(--blue); }
+.section-title { font-family: var(--font-display); font-weight: 700; font-size: clamp(32px, 5.5vw, 64px); line-height: 1.05; letter-spacing: -0.03em; color: var(--fg); margin-bottom: 16px; }
+.section-subtitle { font-size: clamp(15px, 1.8vw, 18px); line-height: 1.6; color: var(--fg-muted); max-width: 560px; }
+
+/* ── Hero ── */
+.hero { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; position: relative; }
+.hero-eyes { width: clamp(80px, 15vw, 140px); height: auto; margin-bottom: 32px; filter: drop-shadow(0 0 30px rgba(0, 136, 255, 0.4)); animation: eyePulse 3s ease-in-out infinite; }
+@keyframes eyePulse { 0%,100%{ filter: drop-shadow(0 0 30px rgba(0,136,255,0.4)); } 50%{ filter: drop-shadow(0 0 50px rgba(0,136,255,0.6)); } }
+.hero-name { font-family: var(--font-display); font-weight: 700; font-size: clamp(40px, 10vw, 96px); letter-spacing: -0.04em; line-height: 0.95; opacity: 0; transform: scale(0.96); animation: heroIn 1s cubic-bezier(0,0,0.2,1) 0.3s forwards; }
+.hero-name .accent { color: var(--blue); }
+@keyframes heroIn { to { opacity: 1; transform: scale(1); } }
+.hero-tagline { font-family: var(--font-mono); font-size: clamp(12px, 1.5vw, 14px); letter-spacing: 0.15em; text-transform: uppercase; color: var(--fg-muted); margin-top: 20px; opacity: 0; animation: fadeUp 0.8s cubic-bezier(0,0,0.2,1) 0.8s forwards; }
+.hero-version { font-family: var(--font-mono); font-size: 10px; color: var(--fg-dim); margin-top: 12px; opacity: 0; animation: fadeUp 0.8s cubic-bezier(0,0,0.2,1) 1.1s forwards; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Color Swatches ── */
+.swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px; border-radius: var(--r-lg); overflow: hidden; }
+.swatch { padding: 20px 16px; min-height: 90px; display: flex; flex-direction: column; justify-content: flex-end; cursor: pointer; transition: transform 0.15s; position: relative; }
+.swatch:active { transform: scale(0.97); }
+.swatch-name { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
+.swatch-hex { font-family: var(--font-mono); font-size: 10px; opacity: 0.6; }
+.swatch-copied { position: absolute; top: 8px; right: 8px; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0; transition: opacity 0.2s; }
+.swatch-copied.show { opacity: 1; }
+
+/* ── Type Specimens ── */
+.type-family { margin-bottom: 64px; padding-bottom: 64px; border-bottom: 1px solid var(--border); }
+.type-family:last-child { border-bottom: none; }
+.type-family-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+.type-family-name { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--blue); font-weight: 500; }
+.type-family-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim); }
+.type-weights { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 24px; }
+.type-weight-sample { font-size: 28px; line-height: 1.2; }
+.type-weight-label { font-family: var(--font-mono); font-size: 9px; color: var(--fg-dim); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 4px; }
+
+/* ── Scale Row ── */
+.scale-row { display: flex; align-items: baseline; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.scale-label { font-family: var(--font-mono); font-size: 10px; color: var(--fg-dim); letter-spacing: 0.06em; text-transform: uppercase; width: 64px; flex-shrink: 0; }
+
+/* ── Emoji vs Icon ── */
+.icon-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; border-radius: var(--r-lg); overflow: hidden; margin-top: 32px; }
+.icon-before, .icon-after { padding: 32px; }
+.icon-before { background: rgba(255, 34, 68, 0.04); }
+.icon-after { background: rgba(0, 136, 255, 0.04); }
+.icon-verdict { font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 16px; }
+.icon-before .icon-verdict { color: var(--red); }
+.icon-after .icon-verdict { color: var(--green); }
+.icon-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.icon-item { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--r-md); font-size: 20px; }
+.icon-item svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── Component Showcase ── */
+.comp-group { margin-bottom: 48px; }
+.comp-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--blue); margin-bottom: 16px; font-weight: 500; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 20px; font-family: var(--font-body); font-size: 13px; font-weight: 500; border-radius: var(--r-md); border: none; cursor: pointer; transition: all 0.15s; min-height: 40px; }
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: var(--blue); color: #fff; }
+.btn-primary:hover { background: var(--blue-bright); box-shadow: 0 0 20px var(--glow-blue); }
+.btn-secondary { background: transparent; color: var(--fg); border: 1px solid var(--border-strong); }
+.btn-secondary:hover { border-color: var(--blue); }
+.btn-ghost { background: transparent; color: var(--fg-muted); }
+.btn-ghost:hover { color: var(--fg); background: rgba(255,255,255,0.04); }
+.btn-danger { background: var(--red); color: #fff; }
+
+/* ── Cards ── */
+.card-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.card { padding: 24px; border-radius: var(--r-lg); transition: transform 0.2s, box-shadow 0.2s; }
+.card:hover { transform: translateY(-2px); }
+.card-glow { background: var(--bg-panel); border: 1px solid var(--border); box-shadow: 0 0 0 1px var(--border), 0 4px 20px rgba(0,0,0,0.3); }
+.card-glow:hover { box-shadow: 0 0 0 1px var(--border-strong), 0 8px 32px rgba(0,136,255,0.1); }
+.card-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-dim); margin-bottom: 10px; }
+.card h4 { font-family: var(--font-display); font-weight: 600; font-size: 16px; margin-bottom: 6px; }
+.card p { font-size: 13px; line-height: 1.5; color: var(--fg-muted); }
+
+/* ── Status Dots ── */
+.status-row { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 24px; }
+.status-item { display: flex; align-items: center; gap: 8px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.status-dot.connected { background: var(--green); box-shadow: 0 0 8px rgba(0,255,102,0.4); }
+.status-dot.connecting { background: var(--yellow); box-shadow: 0 0 8px rgba(255,221,0,0.4); }
+.status-dot.error { background: var(--red); box-shadow: 0 0 8px rgba(255,34,68,0.4); }
+.status-dot.idle { background: var(--blue); box-shadow: 0 0 8px var(--glow-blue); }
+.status-label { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); }
+
+/* ── Spacing Visual ── */
+.spacing-row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.spacing-label { font-family: var(--font-mono); font-size: 10px; color: var(--fg-dim); width: 56px; text-align: right; flex-shrink: 0; }
+.spacing-bar { height: 20px; background: var(--blue); border-radius: 3px; opacity: 0.6; transition: opacity 0.2s; }
+.spacing-bar:hover { opacity: 1; }
+.spacing-value { font-family: var(--font-mono); font-size: 10px; color: var(--fg-dim); width: 36px; flex-shrink: 0; }
+
+/* ── Footer ── */
+.footer { padding: 64px clamp(20px, 5vw, 64px); border-top: 1px solid var(--border); text-align: center; }
+.footer-name { font-family: var(--font-display); font-weight: 700; font-size: 24px; margin-bottom: 12px; }
+.footer-name .accent { color: var(--blue); }
+.footer-text { font-size: 13px; color: var(--fg-dim); max-width: 400px; margin: 0 auto; line-height: 1.6; }
+.footer-meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-dim); margin-top: 24px; }
+
+/* ── Glow Line ── */
+.glow-line { height: 1px; background: linear-gradient(90deg, transparent, var(--blue), var(--cyan), var(--blue), transparent); opacity: 0.4; }
+
+/* ── Editable Input ── */
+.type-input { background: transparent; border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 12px; font-family: var(--font-body); font-size: 14px; color: var(--fg); width: 100%; outline: none; }
+.type-input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px var(--glow-blue); }
+.type-preview { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<!-- Scroll Progress -->
+<div class="scroll-progress" id="scrollProgress"></div>
+
+<!-- Nav -->
+<nav class="nav" id="nav">
+  <div class="nav-logo">
+    <svg class="eye" viewBox="0 0 32 32" width="20" height="20">
+      <rect width="32" height="32" rx="7" fill="#050508"/>
+      <ellipse cx="10" cy="17" rx="5.5" ry="7" fill="#e0e0e0"/>
+      <circle cx="10" cy="18" r="2.8" fill="#000"/>
+      <circle cx="8.8" cy="16.5" r="1.1" fill="rgba(255,255,255,0.85)"/>
+      <ellipse cx="22" cy="17" rx="5.5" ry="7" fill="#e0e0e0"/>
+      <circle cx="22" cy="18" r="2.8" fill="#000"/>
+      <circle cx="20.8" cy="16.5" r="1.1" fill="rgba(255,255,255,0.85)"/>
+    </svg>
+    Open<span class="accent" style="color:var(--blue)">Voice</span>UI
+  </div>
+  <ul class="nav-links">
+    <li><a href="#identity">Identity</a></li>
+    <li><a href="#color">Color</a></li>
+    <li><a href="#typography">Type</a></li>
+    <li><a href="#icons">Icons</a></li>
+    <li><a href="#components">Components</a></li>
+    <li><a href="#motion">Motion</a></li>
+  </ul>
+</nav>
+
+<!-- ═══ HERO ═══ -->
+<section class="hero">
+  <svg class="hero-eyes" viewBox="0 0 140 60" fill="none">
+    <ellipse cx="30" cy="30" rx="24" ry="28" fill="rgba(0,136,255,0.08)"/>
+    <ellipse cx="30" cy="30" rx="18" ry="22" fill="#e0e0e0"/>
+    <circle cx="30" cy="33" r="9" fill="#111"/>
+    <circle cx="26" cy="28" r="3.5" fill="rgba(255,255,255,0.9)"/>
+    <circle cx="34" cy="36" r="2" fill="rgba(255,255,255,0.3)"/>
+    <ellipse cx="110" cy="30" rx="24" ry="28" fill="rgba(0,136,255,0.08)"/>
+    <ellipse cx="110" cy="30" rx="18" ry="22" fill="#e0e0e0"/>
+    <circle cx="110" cy="33" r="9" fill="#111"/>
+    <circle cx="106" cy="28" r="3.5" fill="rgba(255,255,255,0.9)"/>
+    <circle cx="114" cy="36" r="2" fill="rgba(255,255,255,0.3)"/>
+  </svg>
+  <div class="hero-name">Open<span class="accent">Voice</span>UI</div>
+  <div class="hero-tagline">Brand System v1.0</div>
+  <div class="hero-version">Voice-powered AI assistant platform</div>
+</section>
+
+<div class="glow-line"></div>
+
+<!-- ═══ 01 - IDENTITY ═══ -->
+<section id="identity" style="border-top: 1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label reveal"><span>01 - Brand Identity</span></div>
+    <h2 class="section-title reveal delay-1">The face that listens.</h2>
+    <p class="section-subtitle reveal delay-2">OpenVoiceUI is a modular voice assistant platform. The brand is defined by the eye avatar, neon-on-dark aesthetics, and a cyberpunk-meets-clinical sensibility.</p>
+
+    <div class="reveal delay-3" style="margin-top: 48px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">
+      <div class="card card-glow">
+        <div class="card-label">Mark</div>
+        <h4>The Eyes</h4>
+        <p>Two animated eyes with blue glow, expressive pupils, and mood states. The eyes ARE the logo. No wordmark needed in small contexts.</p>
+      </div>
+      <div class="card card-glow">
+        <div class="card-label">Wordmark</div>
+        <h4>Open<span style="color:var(--blue)">Voice</span>UI</h4>
+        <p>Space Grotesk 700. "Voice" rendered in primary blue (#0088ff). Always one word, never hyphenated.</p>
+      </div>
+      <div class="card card-glow">
+        <div class="card-label">Personality</div>
+        <h4>Ambient Intelligence</h4>
+        <p>Always listening, never intrusive. The UI is dark, the feedback is subtle, the voice is the primary interface. Technology that disappears.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 02 - COLOR ═══ -->
+<section id="color" style="border-top: 1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label reveal"><span>02 - Color System</span></div>
+    <h2 class="section-title reveal delay-1">Neon on void.</h2>
+    <p class="section-subtitle reveal delay-2">Dark-first palette designed for ambient voice interfaces. High contrast signals on near-black backgrounds. Every color has a function.</p>
+
+    <div class="reveal delay-3">
+      <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin:32px 0 12px;font-weight:500">Backgrounds</div>
+      <div class="swatch-grid">
+        <div class="swatch" style="background:#050508;color:#e8e8f0" onclick="copySwatch('#050508',this)"><span class="swatch-copied">Copied</span><span class="swatch-name">Deep</span><span class="swatch-hex">#050508</span></div>
+        <div class="swatch" style="background:#0a0a12;color:#e8e8f0" onclick="copySwatch('#0a0a12',this)"><span class="swatch-copied">Copied</span><span class="swatch-name">Panel</span><span class="swatch-hex">#0a0a12</span></div>
+        <div class="swatch" style="background:#0f1018;color:#e8e8f0" onclick="copySwatch('#0f1018',this)"><span class="swatch-copied">Copied</span><span class="swatch-name">Surface</span><span class="swatch-hex">#0f1018</span></div>
+        <div class="swatch" style="background:#141420;color:#e8e8f0" onclick="copySwatch('#141420',this)"><span class="swatch-copied">Copied</span><span class="swatch-name">Elevated</span><span class="swatch-hex">#141420</span></div>
+        <div class="swatch" style="background:#1a1a2e;color:#e8e8f0" onclick="copySwatch('#1a1a2e',this)"><span class="swatch-copied">Copied</span><span class="swatch-name">Hover</span><span class="swatch-hex">#1a1a2e</span></div>
+      </div>
+    </div>
+
+    <div class="reveal delay-3">
+      <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin:32px 0 12px;font-weight:500">Signal Colors</div>
+      <div class="swatch-grid">
+        <div class="swatch" style="background:#0088ff;color:#fff" onclick="copySwatch('#0088ff',this)"><span class="swatch-copied" style="color:#fff">Copied</span><span class="swatch-name">Blue (Primary)</span><span class="swatch-hex">#0088ff</span></div>
+        <div class="swatch" style="background:#00ffff;color:#050508" onclick="copySwatch('#00ffff',this)"><span class="swatch-copied">Copied</span><span class="swatch-name">Cyan (Accent)</span><span class="swatch-hex">#00ffff</span></div>
+        <div class="swatch" style="background:#00ff66;color:#050508" onclick="copySwatch('#00ff66',this)"><span class="swatch-copied">Copied</span><span class="swatch-name">Green (Success)</span><span class="swatch-hex">#00ff66</span></div>
+        <div class="swatch" style="background:#ffdd00;color:#050508" onclick="copySwatch('#ffdd00',this)"><span class="swatch-copied">Copied</span><span class="swatch-name">Yellow (Warning)</span><span class="swatch-hex">#ffdd00</span></div>
+        <div class="swatch" style="background:#ff6600;color:#fff" onclick="copySwatch('#ff6600',this)"><span class="swatch-copied" style="color:#fff">Copied</span><span class="swatch-name">Orange (Accent)</span><span class="swatch-hex">#ff6600</span></div>
+        <div class="swatch" style="background:#ff2244;color:#fff" onclick="copySwatch('#ff2244',this)"><span class="swatch-copied" style="color:#fff">Copied</span><span class="swatch-name">Red (Error)</span><span class="swatch-hex">#ff2244</span></div>
+      </div>
+    </div>
+
+    <div class="reveal delay-4">
+      <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin:32px 0 12px;font-weight:500">Status Indicators</div>
+      <div class="status-row">
+        <div class="status-item"><div class="status-dot connected"></div><span class="status-label">Connected</span></div>
+        <div class="status-item"><div class="status-dot connecting"></div><span class="status-label">Connecting</span></div>
+        <div class="status-item"><div class="status-dot error"></div><span class="status-label">Error</span></div>
+        <div class="status-item"><div class="status-dot idle"></div><span class="status-label">Idle</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="glow-line"></div>
+
+<!-- ═══ 03 - TYPOGRAPHY ═══ -->
+<section id="typography" style="border-top: 1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label reveal"><span>03 - Typography</span></div>
+    <h2 class="section-title reveal delay-1">Three fonts.<br>Zero decoration.</h2>
+
+    <div class="reveal delay-2">
+      <div class="type-family">
+        <div class="type-family-header">
+          <span class="type-family-name">Display - Space Grotesk</span>
+          <span class="type-family-meta">Variable, 400-700</span>
+        </div>
+        <div style="font-family:var(--font-display);font-size:clamp(40px,8vw,80px);font-weight:700;line-height:1;letter-spacing:-0.03em;margin-bottom:16px">
+          Voice-first.<br>Dark-first.
+        </div>
+        <p style="font-size:14px;color:var(--fg-dim);max-width:500px;line-height:1.6">Geometric sans-serif with technical character. Replaces Courier New for headings. Clean, modern, machine-readable.</p>
+        <div class="type-weights">
+          <div><span class="type-weight-sample" style="font-family:var(--font-display);font-weight:400">Ag</span><div class="type-weight-label">400</div></div>
+          <div><span class="type-weight-sample" style="font-family:var(--font-display);font-weight:500">Ag</span><div class="type-weight-label">500</div></div>
+          <div><span class="type-weight-sample" style="font-family:var(--font-display);font-weight:600">Ag</span><div class="type-weight-label">600</div></div>
+          <div><span class="type-weight-sample" style="font-family:var(--font-display);font-weight:700">Ag</span><div class="type-weight-label">700</div></div>
+        </div>
+      </div>
+
+      <div class="type-family">
+        <div class="type-family-header">
+          <span class="type-family-name">Body - Inter</span>
+          <span class="type-family-meta">Variable, 400-600</span>
+        </div>
+        <p style="font-size:16px;line-height:1.7;color:var(--fg-muted);max-width:580px;margin-bottom:16px">
+          OpenVoiceUI is a modular voice assistant platform. The interface is dark, the feedback is subtle, the voice is the primary channel. Designed for ambient intelligence that disappears into the environment.
+        </p>
+      </div>
+
+      <div class="type-family" style="border-bottom:none">
+        <div class="type-family-header">
+          <span class="type-family-name">Mono - JetBrains Mono</span>
+          <span class="type-family-meta">400-600</span>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:14px;line-height:1.7;color:var(--fg-muted);max-width:500px;background:var(--bg-panel);padding:20px;border-radius:var(--r-md);border:1px solid var(--border)">
+<pre style="margin:0;font-family:inherit">const voice = new OpenVoiceUI({
+  mode: "ambient",
+  wake_word: "hey voice",
+  theme: "classic-blue",
+});</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Type Specimen Input -->
+    <div class="reveal delay-3" style="margin-top:48px">
+      <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin-bottom:12px;font-weight:500">Type Specimen</div>
+      <input class="type-input" id="typeInput" type="text" value="The face that listens." placeholder="Type to preview...">
+      <div class="type-preview" id="typePreview">
+        <span style="font-family:var(--font-display);font-size:32px;font-weight:700;letter-spacing:-0.02em" id="previewDisplay">The face that listens.</span>
+        <span style="font-family:var(--font-body);font-size:16px;color:var(--fg-muted)" id="previewBody">The face that listens.</span>
+        <span style="font-family:var(--font-mono);font-size:13px;color:var(--fg-dim)" id="previewMono">The face that listens.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 04 - ICONS ═══ -->
+<section id="icons" style="border-top: 1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label reveal"><span>04 - Iconography</span></div>
+    <h2 class="section-title reveal delay-1">Icons, not emoji.</h2>
+    <p class="section-subtitle reveal delay-2">Replace emoji characters with Lucide-style SVG icons. Consistent 1.5px stroke, 20px default size, inherit parent color.</p>
+
+    <div class="icon-compare reveal delay-3">
+      <div class="icon-before">
+        <div class="icon-verdict">Current (Emoji)</div>
+        <div class="icon-row">
+          <div class="icon-item">&#128222;</div>
+          <div class="icon-item">&#9209;&#65039;</div>
+          <div class="icon-item">&#128066;</div>
+          <div class="icon-item">&#127911;</div>
+          <div class="icon-item">&#127908;&#65039;</div>
+          <div class="icon-item">&#127925;</div>
+          <div class="icon-item">&#128187;&#65039;</div>
+          <div class="icon-item">&#128172;</div>
+        </div>
+      </div>
+      <div class="icon-after">
+        <div class="icon-verdict">Proposed (SVG Icons)</div>
+        <div class="icon-row">
+          <div class="icon-item" style="color:var(--green)"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></div>
+          <div class="icon-item" style="color:var(--red)"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></div>
+          <div class="icon-item" style="color:var(--cyan)"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></div>
+          <div class="icon-item" style="color:var(--blue)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+          <div class="icon-item" style="color:var(--yellow)"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg></div>
+          <div class="icon-item" style="color:var(--orange)"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+          <div class="icon-item" style="color:var(--fg-muted)"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+          <div class="icon-item" style="color:var(--fg)"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="reveal delay-4" style="margin-top:32px;padding:20px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--r-lg)">
+      <p style="font-size:14px;color:var(--fg-muted);line-height:1.6"><strong style="color:var(--fg)">Recommendation:</strong> Adopt Lucide Icons (lucide.dev). Same 1.5px stroke weight, open source, tree-shakeable. Drop-in replacement for each emoji used in edge tabs, settings, and action console.</p>
+    </div>
+  </div>
+</section>
+
+<div class="glow-line"></div>
+
+<!-- ═══ 05 - COMPONENTS ═══ -->
+<section id="components" style="border-top: 1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label reveal"><span>05 - Components</span></div>
+    <h2 class="section-title reveal delay-1">UI primitives.</h2>
+
+    <div class="comp-group reveal delay-2">
+      <div class="comp-label">Buttons</div>
+      <div class="btn-row">
+        <button class="btn btn-primary">Primary</button>
+        <button class="btn btn-secondary">Secondary</button>
+        <button class="btn btn-ghost">Ghost</button>
+        <button class="btn btn-danger">Danger</button>
+      </div>
+    </div>
+
+    <div class="comp-group reveal delay-3">
+      <div class="comp-label">Cards</div>
+      <div class="card-row">
+        <div class="card card-glow">
+          <div class="card-label">Glow</div>
+          <h4>Voice Session</h4>
+          <p>Active session with blue glow border on hover. Primary card style.</p>
+        </div>
+        <div class="card" style="background:var(--bg-elevated);border:1px solid var(--border)">
+          <div class="card-label">Flat</div>
+          <h4>Settings Panel</h4>
+          <p>Elevated surface for secondary content. No glow effect.</p>
+        </div>
+        <div class="card" style="background:transparent;border:1px solid var(--border-strong)">
+          <div class="card-label">Outlined</div>
+          <h4>Edge Control</h4>
+          <p>Transparent background with strong border. For inline controls.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="comp-group reveal delay-4">
+      <div class="comp-label">Spacing Scale</div>
+      <div>
+        <div class="spacing-row"><span class="spacing-label">sp-1</span><div class="spacing-bar" style="width:4px"></div><span class="spacing-value">4px</span></div>
+        <div class="spacing-row"><span class="spacing-label">sp-2</span><div class="spacing-bar" style="width:8px"></div><span class="spacing-value">8px</span></div>
+        <div class="spacing-row"><span class="spacing-label">sp-3</span><div class="spacing-bar" style="width:12px"></div><span class="spacing-value">12px</span></div>
+        <div class="spacing-row"><span class="spacing-label">sp-4</span><div class="spacing-bar" style="width:16px"></div><span class="spacing-value">16px</span></div>
+        <div class="spacing-row"><span class="spacing-label">sp-6</span><div class="spacing-bar" style="width:24px"></div><span class="spacing-value">24px</span></div>
+        <div class="spacing-row"><span class="spacing-label">sp-8</span><div class="spacing-bar" style="width:32px"></div><span class="spacing-value">32px</span></div>
+        <div class="spacing-row"><span class="spacing-label">sp-12</span><div class="spacing-bar" style="width:48px"></div><span class="spacing-value">48px</span></div>
+        <div class="spacing-row"><span class="spacing-label">sp-16</span><div class="spacing-bar" style="width:64px"></div><span class="spacing-value">64px</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 06 - MOTION ═══ -->
+<section id="motion" style="border-top: 1px solid var(--border)">
+  <div class="section-inner">
+    <div class="section-label reveal"><span>06 - Motion</span></div>
+    <h2 class="section-title reveal delay-1">Ambient, not performative.</h2>
+    <p class="section-subtitle reveal delay-2">Animations serve feedback, not decoration. Eye blinks confirm attention. Glow pulses indicate state. Panels slide, never bounce.</p>
+
+    <div class="reveal delay-3" style="margin-top:48px; display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:16px">
+      <div class="card card-glow">
+        <div class="card-label">Eye Blink</div>
+        <h4>0.15s ease</h4>
+        <p>Eyelid close/open. Confirms the system heard you.</p>
+      </div>
+      <div class="card card-glow">
+        <div class="card-label">Panel Slide</div>
+        <h4>0.3s ease</h4>
+        <p>Settings, transcript, and action panels slide in from edges.</p>
+      </div>
+      <div class="card card-glow">
+        <div class="card-label">Status Pulse</div>
+        <h4>0.8s infinite</h4>
+        <p>Listening indicator, PTT button. Rhythmic feedback during active state.</p>
+      </div>
+      <div class="card card-glow">
+        <div class="card-label">Glow Breathe</div>
+        <h4>3s infinite</h4>
+        <p>Eye glow intensity. Ambient presence when idle. Subtle, never distracting.</p>
+      </div>
+    </div>
+
+    <div class="reveal delay-4" style="margin-top:32px;padding:20px;background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--r-lg)">
+      <p style="font-size:14px;color:var(--fg-muted);line-height:1.6"><strong style="color:var(--fg)">Rules:</strong> Never exceed 0.3s for UI transitions. Looping animations must have a purpose (state feedback). Disable all non-essential animations on Raspberry Pi via pi-overrides.css.</p>
+    </div>
+  </div>
+</section>
+
+<div class="glow-line"></div>
+
+<!-- ═══ FOOTER ═══ -->
+<footer class="footer">
+  <div class="footer-name reveal">Open<span class="accent">Voice</span>UI</div>
+  <p class="footer-text reveal delay-1">Brand System v1.0. This document concentrates the existing design language into a formal system for consistent implementation.</p>
+  <p class="footer-meta reveal delay-2">Proposed - March 2026</p>
+</footer>
+
+<script>
+// Scroll reveal
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Nav
+window.addEventListener('scroll', () => {
+  const y = window.scrollY;
+  document.getElementById('nav').classList.toggle('visible', y > 200);
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  document.getElementById('scrollProgress').style.width = (max > 0 ? (y / max) * 100 : 0) + '%';
+}, { passive: true });
+
+// Copy swatch
+function copySwatch(hex, el) {
+  navigator.clipboard.writeText(hex);
+  const badge = el.querySelector('.swatch-copied');
+  badge.classList.add('show');
+  setTimeout(() => badge.classList.remove('show'), 1200);
+}
+
+// Type specimen
+document.getElementById('typeInput').addEventListener('input', e => {
+  const v = e.target.value || 'The face that listens.';
+  document.getElementById('previewDisplay').textContent = v;
+  document.getElementById('previewBody').textContent = v;
+  document.getElementById('previewMono').textContent = v;
+});
+
+// Smooth nav links
+document.querySelectorAll('.nav-links a').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelector(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+</script>
+</body>
+</html>
