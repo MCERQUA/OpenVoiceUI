@@ -1005,6 +1005,8 @@ def _conversation_inner():
     # Inject active profile's custom system_prompt (admin editor → runtime)
     # Also read min_sentence_chars for TTS sentence extraction.
     _min_sentence_chars = 40  # default — prevents choppy short TTS fragments
+    _parallel_sentences = True  # default — fire all TTS in parallel threads
+    _inter_sentence_gap_ms = 0  # default — no gap between audio chunks
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
@@ -1012,8 +1014,14 @@ def _conversation_inner():
         _prof = _mgr.get_profile(_active_profile_id)
         if _prof and _prof.system_prompt and _prof.system_prompt.strip():
             context_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
-        if _prof and hasattr(_prof, 'voice') and _prof.voice and _prof.voice.min_sentence_chars:
-            _min_sentence_chars = _prof.voice.min_sentence_chars
+        if _prof and hasattr(_prof, 'voice') and _prof.voice:
+            _vc = _prof.voice
+            if _vc.min_sentence_chars:
+                _min_sentence_chars = _vc.min_sentence_chars
+            if _vc.parallel_sentences is not None:
+                _parallel_sentences = _vc.parallel_sentences
+            if _vc.inter_sentence_gap_ms:
+                _inter_sentence_gap_ms = _vc.inter_sentence_gap_ms
     except Exception:
         pass  # Profile system not available — skip gracefully
 
@@ -1147,7 +1155,8 @@ def _conversation_inner():
                         return None, text
 
                     def _fire_tts(raw_text):
-                        """Start TTS for raw_text in background. Returns (done_event, result)."""
+                        """Start TTS for raw_text. Parallel or sequential per profile config.
+                        Returns (done_event, result)."""
                         done = threading.Event()
                         result = {'audio': None, 'error': None}
                         if skip_tts:
@@ -1174,8 +1183,28 @@ def _conversation_inner():
                                 result['error'] = str(e)
                             finally:
                                 done.set()
-                        threading.Thread(target=_run, daemon=True).start()
+                        if _parallel_sentences:
+                            threading.Thread(target=_run, daemon=True).start()
+                        else:
+                            _run()  # sequential — block until this sentence is done
                         return done, result
+
+                    def _audio_event(audio_b64, chunk_idx, tts_ms=0):
+                        """Build an audio SSE event dict with gap config."""
+                        evt = {
+                            'type': 'audio',
+                            'audio': audio_b64,
+                            'audio_format': _audio_fmt,
+                            'chunk': chunk_idx,
+                            'total_chunks': None,
+                            'timing': {
+                                'tts_ms': tts_ms,
+                                'total_ms': int((time.time() - t_request_start) * 1000),
+                            },
+                        }
+                        if _inter_sentence_gap_ms:
+                            evt['gap_ms'] = _inter_sentence_gap_ms
+                        return json.dumps(evt) + '\n'
 
                     # Mid-stream TTS state
                     _tts_buf = ''       # raw incremental text buffer
@@ -1215,17 +1244,7 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield json.dumps({
-                                        'type': 'audio',
-                                        'audio': _res['audio'],
-                                        'audio_format': _audio_fmt,
-                                        'chunk': _chunks_sent,
-                                        'total_chunks': None,
-                                        'timing': {
-                                            'tts_ms': 0,
-                                            'total_ms': int((time.time() - t_request_start) * 1000),
-                                        },
-                                    }) + '\n'
+                                    yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
                             continue
 
@@ -1255,17 +1274,7 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield json.dumps({
-                                        'type': 'audio',
-                                        'audio': _res['audio'],
-                                        'audio_format': _audio_fmt,
-                                        'chunk': _chunks_sent,
-                                        'total_chunks': None,
-                                        'timing': {
-                                            'tts_ms': 0,
-                                            'total_ms': int((time.time() - t_request_start) * 1000),
-                                        },
-                                    }) + '\n'
+                                    yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
                             continue
 
@@ -1279,17 +1288,7 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield json.dumps({
-                                        'type': 'audio',
-                                        'audio': _res['audio'],
-                                        'audio_format': _audio_fmt,
-                                        'chunk': _chunks_sent,
-                                        'total_chunks': None,
-                                        'timing': {
-                                            'tts_ms': 0,
-                                            'total_ms': int((time.time() - t_request_start) * 1000),
-                                        },
-                                    }) + '\n'
+                                    yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
                             yield json.dumps({'type': 'action', 'action': evt['action']}) + '\n'
                             continue
@@ -1605,17 +1604,7 @@ def _conversation_inner():
                                     tts_ok = False
                                     break
                                 if res['audio']:
-                                    yield json.dumps({
-                                        'type': 'audio',
-                                        'audio': res['audio'],
-                                        'audio_format': _audio_fmt,
-                                        'chunk': _chunks_sent + i,
-                                        'total_chunks': total_chunks,
-                                        'timing': {
-                                            'tts_ms': int((time.time() - t_tts_start) * 1000),
-                                            'total_ms': int((time.time() - t_request_start) * 1000),
-                                        },
-                                    }) + '\n'
+                                    yield _audio_event(res['audio'], _chunks_sent + i, tts_ms=int((time.time() - t_tts_start) * 1000))
 
                             metrics['tts_generation_ms'] = int((time.time() - t_tts_start) * 1000)
                             metrics['tts_text_len'] = metrics['response_len']

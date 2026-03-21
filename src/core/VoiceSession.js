@@ -339,7 +339,7 @@ export class VoiceSession {
                             // Mute STT before queuing audio — onSpeakingChange(true) will
                             // also mute, but muting here ensures no echo from audio buffering lag
                             if (this.stt.mute) this.stt.mute();
-                            this.tts.queue(data.audio);
+                            this.tts.queue(data.audio, data.audio_format === 'mp3' ? 'audio/mpeg' : 'audio/wav', data.gap_ms || 0);
                         } else {
                             console.warn('[VoiceSession] Audio event had no audio data');
                         }
