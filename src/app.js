@@ -146,7 +146,7 @@ inject();
                 const statusEl = document.getElementById('provider-status');
                 if (statusEl && provider) {
                     statusEl.textContent = provider.status === 'active' ? '✓ Active' : '✗ Inactive';
-                    statusEl.style.color = provider.status === 'active' ? '#4ade80' : '#ef4444';
+                    statusEl.style.color = provider.status === 'active' ? 'var(--green)' : 'var(--red)';
                 }
             },
 
@@ -551,7 +551,7 @@ inject();
                     const halfH = h * 0.45; // vertical range
 
                     // Main waveform — draw actual time-domain audio
-                    this.ctx.strokeStyle = '#00ffff';
+                    this.ctx.strokeStyle = '#00ffff'; // matches --cyan token
                     this.ctx.lineWidth = 2.5;
                     this.ctx.lineCap = 'round';
                     this.ctx.lineJoin = 'round';
@@ -573,14 +573,14 @@ inject();
                     this.ctx.stroke();
 
                     // Glow layer
-                    this.ctx.strokeStyle = `rgba(0, 255, 255, ${0.15 + this.amplitude * 0.2})`;
+                    this.ctx.strokeStyle = `rgba(0, 255, 255, ${0.15 + this.amplitude * 0.2})`; // --cyan with dynamic alpha
                     this.ctx.lineWidth = 7;
                     this.ctx.stroke();
 
                 } else if (this.amplitude > 0.1) {
                     // Fallback chaotic waveform (no analyser)
                     this.wavePhase += 0.12 + this.amplitude * 0.1;
-                    this.ctx.strokeStyle = '#00ffff';
+                    this.ctx.strokeStyle = '#00ffff'; // matches --cyan token
                     this.ctx.lineWidth = 3;
                     this.ctx.lineCap = 'round';
                     this.ctx.lineJoin = 'round';
@@ -601,13 +601,13 @@ inject();
                         else this.ctx.lineTo(x, y);
                     }
                     this.ctx.stroke();
-                    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
+                    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)'; // --cyan with alpha
                     this.ctx.lineWidth = 8;
                     this.ctx.stroke();
 
                 } else {
                     // Quiet/idle state - gentle flat line with subtle pulse
-                    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)';
+                    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)'; // --cyan with alpha
                     this.ctx.lineWidth = 2;
                     this.ctx.lineCap = 'round';
                     this.ctx.beginPath();
@@ -1329,10 +1329,10 @@ inject();
                 el.id = 'suno-status';
                 el.style.cssText = [
                     'display:none', 'position:fixed', 'bottom:80px', 'left:50%',
-                    'transform:translateX(-50%)', 'background:#1a1a2e', 'color:#a78bfa',
-                    'border:1px solid #7c3aed', 'border-radius:8px', 'padding:8px 16px',
+                    'transform:translateX(-50%)', 'background:var(--bg-elevated)', 'color:var(--blue-bright)',
+                    'border:1px solid var(--blue)', 'border-radius:8px', 'padding:8px 16px',
                     'font-size:13px', 'z-index:9999', 'white-space:nowrap',
-                    'box-shadow:0 4px 12px rgba(124,58,237,0.3)',
+                    'box-shadow:0 4px 12px rgba(0,136,255,0.3)',
                 ].join(';');
                 document.body.appendChild(el);
                 this.statusEl = el;
@@ -1917,7 +1917,7 @@ inject();
 
                 // Draw glow layer first (thicker, more transparent)
                 ctx.beginPath();
-                ctx.strokeStyle = 'rgba(0, 255, 255, 0.25)';
+                ctx.strokeStyle = 'rgba(0, 255, 255, 0.25)'; // --cyan with alpha
                 ctx.lineWidth = 20;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
@@ -1936,7 +1936,7 @@ inject();
 
                 // Draw main bright line on top
                 ctx.beginPath();
-                ctx.strokeStyle = '#00ffff';
+                ctx.strokeStyle = '#00ffff'; // matches --cyan token
                 ctx.lineWidth = 6;
                 x = 0;
 
@@ -2449,12 +2449,12 @@ inject();
                     gate.style.cssText = [
                         'position:fixed;inset:0;z-index:99999',
                         'display:flex;align-items:center;justify-content:center',
-                        'background:#0d1117;flex-direction:column;gap:24px',
+                        'background:var(--bg-deep);flex-direction:column;gap:24px',
                     ].join(';');
                     gate.innerHTML = [
                         '<div style="text-align:center;margin-bottom:8px">',
-                        '  <div style="font-size:28px;font-weight:700;color:#58a6ff;letter-spacing:-0.5px">OpenVoiceUI</div>',
-                        '  <div style="color:#8b949e;font-size:14px;margin-top:6px">Sign in to continue</div>',
+                        '  <div style="font-size:28px;font-weight:700;color:var(--blue-bright);letter-spacing:-0.5px">OpenVoiceUI</div>',
+                        '  <div style="color:var(--text-muted);font-size:14px;margin-top:6px">Sign in to continue</div>',
                         '</div>',
                         '<div id="auth-gate-signin"></div>',
                     ].join('');
@@ -2491,18 +2491,18 @@ inject();
                     gate.style.cssText = [
                         'position:fixed;inset:0;z-index:99999',
                         'display:flex;align-items:center;justify-content:center',
-                        'background:#0d1117;flex-direction:column;gap:24px;padding:32px',
+                        'background:var(--bg-deep);flex-direction:column;gap:24px;padding:32px',
                     ].join(';');
                     document.body.appendChild(gate);
                 }
                 gate.style.display = 'flex';
                 gate.innerHTML = `
                     <div style="text-align:center;max-width:440px">
-                        <div style="font-size:28px;font-weight:700;color:#58a6ff;letter-spacing:-0.5px;margin-bottom:20px">OpenVoiceUI</div>
-                        <div style="font-size:15px;font-weight:600;color:#f85149;margin-bottom:12px">Authentication Error</div>
-                        <div style="color:#8b949e;font-size:14px;line-height:1.7;margin-bottom:24px;white-space:pre-line">${message}</div>
+                        <div style="font-size:28px;font-weight:700;color:var(--blue-bright);letter-spacing:-0.5px;margin-bottom:20px">OpenVoiceUI</div>
+                        <div style="font-size:15px;font-weight:600;color:var(--red);margin-bottom:12px">Authentication Error</div>
+                        <div style="color:var(--text-muted);font-size:14px;line-height:1.7;margin-bottom:24px;white-space:pre-line">${message}</div>
                         <button onclick="location.reload()" style="
-                            background:#238636;color:#fff;border:1px solid #2ea043;
+                            background:var(--green);color:var(--neutral-900);border:1px solid var(--green);
                             padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;
                         ">Refresh Page</button>
                     </div>
@@ -2519,21 +2519,21 @@ inject();
                     gate.style.cssText = [
                         'position:fixed;inset:0;z-index:99999',
                         'display:flex;align-items:center;justify-content:center',
-                        'background:#0d1117;flex-direction:column;gap:20px;padding:32px',
+                        'background:var(--bg-deep);flex-direction:column;gap:20px;padding:32px',
                     ].join(';');
                     document.body.appendChild(gate);
                 }
                 gate.style.display = 'flex';
                 gate.innerHTML = `
                     <div style="text-align:center;max-width:440px">
-                        <div style="font-size:26px;font-weight:700;color:#58a6ff;letter-spacing:-0.5px;margin-bottom:20px">OpenVoiceUI</div>
-                        <div style="font-size:15px;font-weight:600;color:#e6edf3;margin-bottom:12px">We're still in development</div>
-                        <div style="color:#8b949e;font-size:14px;line-height:1.7;margin-bottom:24px">
-                            ${email ? `<strong style="color:#c9d1d9">${email}</strong> has been added to the waitlist.<br>` : ''}
+                        <div style="font-size:26px;font-weight:700;color:var(--blue-bright);letter-spacing:-0.5px;margin-bottom:20px">OpenVoiceUI</div>
+                        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:12px">We're still in development</div>
+                        <div style="color:var(--text-muted);font-size:14px;line-height:1.7;margin-bottom:24px">
+                            ${email ? `<strong style="color:var(--text-secondary)">${email}</strong> has been added to the waitlist.<br>` : ''}
                             We'll reach out with updates as we get closer to launch.
                         </div>
                         <button onclick="Clerk.signOut().then(()=>location.reload())" style="
-                            background:#21262d;color:#8b949e;border:1px solid #30363d;
+                            background:var(--bg-elevated);color:var(--text-muted);border:1px solid var(--neutral-700);
                             padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;
                         ">Sign out</button>
                     </div>
@@ -4092,7 +4092,7 @@ inject();
                 // HTML-escape first, then apply code block and newline formatting
                 text = escapeHtml(text);
                 if (text.includes('```')) {
-                    text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre style="background:#111;padding:8px;border-radius:4px;overflow-x:auto;"><code>$2</code></pre>');
+                    text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre style="background:var(--bg-deep);padding:8px;border-radius:4px;overflow-x:auto;"><code>$2</code></pre>');
                 }
 
                 // Handle line breaks
@@ -6275,12 +6275,12 @@ inject();
                             if (doc) {
                                 const style = doc.createElement('style');
                                 style.textContent = `
-                                    * { scrollbar-width: thin; scrollbar-color: #1a2a3a #0d1117; }
+                                    * { scrollbar-width: thin; scrollbar-color: var(--neutral-800) var(--bg-deep); }
                                     ::-webkit-scrollbar { width: 6px; height: 6px; }
-                                    ::-webkit-scrollbar-track { background: #0d1117; }
-                                    ::-webkit-scrollbar-thumb { background: #1a2a3a; border-radius: 3px; }
-                                    ::-webkit-scrollbar-thumb:hover { background: #254060; }
-                                    ::-webkit-scrollbar-corner { background: #0d1117; }
+                                    ::-webkit-scrollbar-track { background: var(--bg-deep); }
+                                    ::-webkit-scrollbar-thumb { background: var(--neutral-800); border-radius: 3px; }
+                                    ::-webkit-scrollbar-thumb:hover { background: var(--neutral-700); }
+                                    ::-webkit-scrollbar-corner { background: var(--bg-deep); }
                                 `;
                                 doc.head.appendChild(style);
                             }
@@ -6961,7 +6961,7 @@ inject();
                     // Allow dropping on other category headers
                     header.addEventListener('dragover', (e) => {
                         e.preventDefault();
-                        header.style.background = 'rgba(74, 158, 255, 0.1)';
+                        header.style.background = 'rgba(0, 136, 255, 0.1)'; // matches --blue with alpha
                     });
 
                     header.addEventListener('dragleave', () => {
@@ -7011,7 +7011,7 @@ inject();
                     this.manifest.categories[newCategory] = {
                         name: newCategory.charAt(0).toUpperCase() + newCategory.slice(1),
                         icon: '📄',
-                        color: '#4a9eff',
+                        color: '#00aaff', // matches --blue-bright
                         pages: []
                     };
                 }
@@ -7924,16 +7924,16 @@ inject();
                     const faces = data.faces || [];
                     const list = document.getElementById('fp-face-list');
                     if (faces.length === 0) {
-                        list.innerHTML = '<li style="color:#6e7681">No faces registered</li>';
+                        list.innerHTML = '<li style="color:var(--text-dim)">No faces registered</li>';
                         return;
                     }
                     list.innerHTML = faces.map(f => {
                         const count = f.photo_count || 0;
-                        return `<li><span>${f.name}</span><span class="confidence" style="color:#6e7681">${count} photo${count !== 1 ? 's' : ''}</span>` +
-                               `<button onclick="FacePanel.deleteFace('${f.name}')" style="margin-left:8px;font-size:10px;padding:2px 6px;background:transparent;border:1px solid #f85149;color:#f85149;border-radius:3px;cursor:pointer">&#x2715;</button></li>`;
+                        return `<li><span>${f.name}</span><span class="confidence" style="color:var(--text-dim)">${count} photo${count !== 1 ? 's' : ''}</span>` +
+                               `<button onclick="FacePanel.deleteFace('${f.name}')" style="margin-left:8px;font-size:10px;padding:2px 6px;background:transparent;border:1px solid var(--red);color:var(--red);border-radius:3px;cursor:pointer">&#x2715;</button></li>`;
                     }).join('');
                 } catch (e) {
-                    document.getElementById('fp-face-list').innerHTML = '<li style="color:#6e7681">Could not load faces</li>';
+                    document.getElementById('fp-face-list').innerHTML = '<li style="color:var(--text-dim)">Could not load faces</li>';
                 }
             },
 
@@ -7975,7 +7975,7 @@ inject();
                     }
                 } catch (error) {
                     statusEl.textContent = 'Error: ' + error.message;
-                    statusEl.style.color = '#f85149';
+                    statusEl.style.color = 'var(--red)';
                 }
             },
 
@@ -8027,7 +8027,7 @@ inject();
                     window.FaceID.loadKnownFaces();
                 } catch (error) {
                     statusEl.textContent = 'Error: ' + error.message;
-                    statusEl.style.color = '#f85149';
+                    statusEl.style.color = 'var(--red)';
                 }
             }
         };
@@ -8217,7 +8217,7 @@ inject();
                 const full = this._buffer + (this._interim ? (this._buffer ? ' ' : '') + this._interim : '');
 
                 if (!full) {
-                    container.innerHTML = '<span id="listen-empty" style="color:#3d3d3d;font-style:italic">Start speaking — transcript will appear here</span>';
+                    container.innerHTML = '<span id="listen-empty" style="color:var(--text-dim);font-style:italic">Start speaking - transcript will appear here</span>';
                     this._shownLen = 0;
                     return;
                 }

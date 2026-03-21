@@ -6,6 +6,7 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
+            /* ── Brand Colors ── */
             --blue: #0088ff;
             --blue-dim: #0055aa;
             --blue-bright: #00aaff;
@@ -14,37 +15,101 @@
             --yellow: #ffdd00;
             --orange: #ff6600;
             --red: #ff2244;
-            --purple: #aa00ff;
-            --dark-bg: #050508;
-            --panel-bg: #0a0a12;
+
+            /* ── Neutrals ── */
+            --neutral-50: #e8e8f0;
+            --neutral-100: #cdd9e5;
+            --neutral-200: #c9d1d9;
+            --neutral-300: #8b949e;
+            --neutral-400: #6e7681;
+            --neutral-500: #555570;
+            --neutral-600: #4d5260;
+            --neutral-700: #3d3d3d;
+            --neutral-800: #2a2a30;
+            --neutral-900: #1a1a2e;
+
+            /* ── Surfaces ── */
+            --bg-deep: #050508;
+            --bg-panel: #0a0a12;
+            --bg-surface: #0f1018;
+            --bg-elevated: #141420;
+            --bg-hover: #1a1a2e;
+
+            /* Backward-compat aliases */
+            --dark-bg: var(--bg-deep);
+            --panel-bg: var(--bg-panel);
+
+            /* ── Text ── */
+            --text-primary: var(--neutral-50);
+            --text-secondary: var(--neutral-200);
+            --text-muted: var(--neutral-300);
+            --text-dim: var(--neutral-400);
+            --text-disabled: var(--neutral-600);
+
+            /* ── Borders ── */
+            --border-subtle: rgba(0, 136, 255, 0.08);
+            --border-default: rgba(0, 136, 255, 0.15);
+            --border-strong: rgba(0, 136, 255, 0.25);
+            --border-accent: rgba(0, 136, 255, 0.4);
+
+            /* ── Spacing ── */
+            --sp-1: 4px;
+            --sp-2: 8px;
+            --sp-3: 12px;
+            --sp-4: 16px;
+            --sp-6: 24px;
+            --sp-8: 32px;
+            --sp-12: 48px;
+            --sp-16: 64px;
+
+            /* ── Border Radius ── */
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --radius-full: 50%;
+
+            /* ── Typography ── */
+            --font-display: 'Space Grotesk', -apple-system, sans-serif;
+            --font-body: 'Inter', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+
+            /* ── Font Sizes ── */
+            --text-xs: 10px;
+            --text-sm: 12px;
+            --text-md: 13px;
+            --text-lg: 14px;
+            --text-xl: 16px;
+            --text-2xl: 18px;
+            --text-3xl: 24px;
         }
 
-        /* Global scrollbar theme — dark charcoal/blue matching app palette */
+        /* Global scrollbar theme - dark charcoal/blue matching app palette */
         * {
             scrollbar-width: thin;
-            scrollbar-color: #1a2a3a #0a0a12;
+            scrollbar-color: var(--neutral-900) var(--bg-panel);
         }
         ::-webkit-scrollbar {
             width: 6px;
             height: 6px;
         }
         ::-webkit-scrollbar-track {
-            background: #0a0a12;
+            background: var(--bg-panel);
         }
         ::-webkit-scrollbar-thumb {
-            background: #1a2a3a;
-            border-radius: 3px;
+            background: var(--neutral-900);
+            border-radius: var(--radius-sm);
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: #254060;
+            background: var(--neutral-600);
         }
         ::-webkit-scrollbar-corner {
-            background: #0a0a12;
+            background: var(--bg-panel);
         }
 
         body {
-            background: var(--dark-bg);
-            font-family: 'Courier New', monospace;
+            background: var(--bg-deep);
+            font-family: var(--font-mono);
             color: var(--blue);
             height: 100vh;
             overflow: hidden;
@@ -59,8 +124,8 @@
             top: 0; left: 0;
             width: 100%; height: 100%;
             background-image:
-                linear-gradient(rgba(0,136,255,0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0,136,255,0.03) 1px, transparent 1px);
+                linear-gradient(var(--border-subtle) 1px, transparent 1px),
+                linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
             background-size: 50px 50px;
             pointer-events: none;
             z-index: -1;

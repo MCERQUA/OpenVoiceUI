@@ -199,8 +199,8 @@ window.FaceRenderer = {
 
         // Get theme colors
         const theme = window.ThemeManager?.getCurrentTheme() || {};
-        const primaryColor = theme.primary || '#0088ff';
-        const accentColor = theme.accent || '#00ffff';
+        const primaryColor = theme.primary || '#0088ff'; // fallback matches --blue
+        const accentColor = theme.accent || '#00ffff'; // fallback matches --cyan
 
         // Pulsing effect
         this.orb.pulsePhase += 0.02;

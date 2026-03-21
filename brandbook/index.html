@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenVoiceUI - Brand System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#050508;--panel:#0a0a12;--surface:#0f1018;--elevated:#141420;--hover:#1a1a2e;--fg:#e8e8f0;--fg-m:#8888a0;--fg-d:#555570;--blue:#0088ff;--blue-d:#0055aa;--blue-b:#00aaff;--cyan:#00ffff;--green:#00ff66;--yellow:#ffdd00;--orange:#ff6600;--red:#ff2244;--bdr:rgba(0,136,255,0.12);--bdr-s:rgba(0,136,255,0.25);--fd:'Space Grotesk',-apple-system,sans-serif;--fi:'Inter',-apple-system,sans-serif;--fm:'JetBrains Mono',monospace;--r:8px;--rl:12px}
+html{font-size:16px;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--fg);font-family:var(--fi);overflow:hidden;height:100dvh;width:100vw}
+::selection{background:var(--blue);color:#fff}
+
+/* ── Slide System ── */
+.app{display:flex;flex-direction:column;height:100dvh;width:100vw;overflow:hidden}
+.topbar{height:48px;background:var(--panel);border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex-shrink:0;z-index:10}
+.topbar-logo{font-family:var(--fd);font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px}
+.topbar-logo .accent{color:var(--blue)}
+.topbar-nav{display:flex;align-items:center;gap:16px}
+.topbar-hint{font-family:var(--fm);font-size:10px;color:var(--fg-d);letter-spacing:0.04em}
+@media(max-width:600px){.topbar-hint{display:none}}
+
+.slide-area{flex:1;position:relative;overflow:hidden}
+.slide{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:clamp(24px,5vw,64px);opacity:0;transform:translateX(40px);transition:opacity 0.4s cubic-bezier(0,0,0.2,1),transform 0.4s cubic-bezier(0,0,0.2,1);pointer-events:none}
+.slide.active{opacity:1;transform:translateX(0);pointer-events:auto}
+.slide.prev{transform:translateX(-40px)}
+.slide-content{max-width:900px;width:100%;max-height:100%;overflow-y:auto;scrollbar-width:thin}
+.slide-content::-webkit-scrollbar{width:4px}
+.slide-content::-webkit-scrollbar-thumb{background:var(--hover);border-radius:2px}
+
+/* ── Bottom Controls ── */
+.controls{height:56px;background:var(--panel);border-top:1px solid var(--bdr);display:flex;align-items:center;justify-content:center;gap:16px;flex-shrink:0;z-index:10}
+.ctrl-btn{width:36px;height:36px;border-radius:var(--r);border:1px solid var(--bdr);background:var(--surface);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--fg);transition:all 0.15s}
+.ctrl-btn:hover{border-color:var(--bdr-s);background:var(--elevated)}
+.ctrl-btn:active{transform:scale(0.95)}
+.ctrl-btn:disabled{opacity:0.25;cursor:default}
+.ctrl-btn:disabled:hover{border-color:var(--bdr);background:var(--surface)}
+.ctrl-counter{font-family:var(--fm);font-size:12px;color:var(--fg-m);min-width:48px;text-align:center}
+.dots{display:flex;gap:5px;position:absolute;bottom:20px;left:50%;transform:translateX(-50%)}
+.dot{width:6px;height:6px;border-radius:3px;background:var(--fg-d);transition:all 0.2s;cursor:pointer}
+.dot.active{width:20px;background:var(--blue)}
+
+/* ── Shared Styles ── */
+.label{font-family:var(--fm);font-size:10px;font-weight:500;letter-spacing:0.14em;text-transform:uppercase;color:var(--blue);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.label::before{content:'';width:16px;height:1px;background:var(--blue)}
+.title{font-family:var(--fd);font-weight:700;font-size:clamp(28px,5vw,56px);line-height:1.05;letter-spacing:-0.03em;margin-bottom:12px}
+.subtitle{font-size:clamp(14px,1.6vw,17px);line-height:1.6;color:var(--fg-m);max-width:520px;margin-bottom:32px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:2px;border-radius:var(--rl);overflow:hidden}
+@media(max-width:600px){.grid2{grid-template-columns:1fr}}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--bdr);border-radius:var(--rl);padding:20px}
+.card-label{font-family:var(--fm);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--fg-d);margin-bottom:8px}
+.card h4{font-family:var(--fd);font-weight:600;font-size:15px;margin-bottom:4px}
+.card p{font-size:12px;line-height:1.5;color:var(--fg-m)}
+
+/* Swatch */
+.swatch-row{display:flex;gap:2px;border-radius:var(--r);overflow:hidden}
+.sw{flex:1;min-height:70px;padding:10px;display:flex;flex-direction:column;justify-content:flex-end;cursor:pointer;transition:transform 0.1s}
+.sw:active{transform:scale(0.97)}
+.sw-n{font-family:var(--fm);font-size:9px;font-weight:600;letter-spacing:0.03em;text-transform:uppercase}
+.sw-h{font-family:var(--fm);font-size:9px;opacity:0.6}
+
+/* Icon compare */
+.ico-box{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--elevated);border:1px solid var(--bdr);border-radius:var(--r);font-size:18px}
+.ico-box svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.5;fill:none;stroke-linecap:round;stroke-linejoin:round}
+
+/* Before/After */
+.ba-label{font-family:var(--fm);font-size:9px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:14px}
+.ba-before .ba-label{color:var(--red)}
+.ba-after .ba-label{color:var(--green)}
+
+/* Btn */
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:9px 18px;font-family:var(--fi);font-size:13px;font-weight:500;border-radius:var(--r);border:none;cursor:pointer;transition:all 0.15s;min-height:38px}
+.btn:active{transform:scale(0.97)}
+.btn-p{background:var(--blue);color:#fff}
+.btn-p:hover{background:var(--blue-b);box-shadow:0 0 16px rgba(0,136,255,0.15)}
+.btn-s{background:transparent;color:var(--fg);border:1px solid var(--bdr-s)}
+.btn-s:hover{border-color:var(--blue)}
+.btn-g{background:transparent;color:var(--fg-m)}
+.btn-g:hover{color:var(--fg);background:rgba(255,255,255,0.04)}
+.btn-d{background:var(--red);color:#fff}
+
+/* Type input */
+.ti{background:transparent;border:1px solid var(--bdr);border-radius:var(--r);padding:8px 12px;font-family:var(--fi);font-size:14px;color:var(--fg);width:100%;outline:none}
+.ti:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(0,136,255,0.1)}
+
+/* Status */
+.sdot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.sdot.on{background:var(--green);box-shadow:0 0 8px rgba(0,255,102,0.4)}
+.sdot.warn{background:var(--yellow);box-shadow:0 0 8px rgba(255,221,0,0.4)}
+.sdot.err{background:var(--red);box-shadow:0 0 8px rgba(255,34,68,0.4)}
+.sdot.idle{background:var(--blue);box-shadow:0 0 8px rgba(0,136,255,0.3)}
+
+/* Spacing bar */
+.sp-row{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.sp-label{font-family:var(--fm);font-size:10px;color:var(--fg-d);width:48px;text-align:right;flex-shrink:0}
+.sp-bar{height:16px;background:var(--blue);border-radius:3px;opacity:0.5}
+.sp-val{font-family:var(--fm);font-size:10px;color:var(--fg-d);width:32px;flex-shrink:0}
+
+/* Eye hero */
+.eye-hero{filter:drop-shadow(0 0 30px rgba(0,136,255,0.4));animation:pulse 3s ease-in-out infinite}
+@keyframes pulse{0%,100%{filter:drop-shadow(0 0 30px rgba(0,136,255,0.4))}50%{filter:drop-shadow(0 0 50px rgba(0,136,255,0.6))}}
+.glow-line{height:1px;background:linear-gradient(90deg,transparent,var(--blue),var(--cyan),var(--blue),transparent);opacity:0.3;margin:24px 0}
+
+/* Edge tab mockup */
+.etab{width:44px;height:48px;background:rgba(0,136,255,0.06);border:1px solid rgba(0,136,255,0.2);border-radius:0 10px 10px 0;display:flex;align-items:center;justify-content:center;color:var(--blue);transition:all 0.2s;cursor:pointer}
+.etab:hover{background:rgba(0,136,255,0.14);width:50px;box-shadow:0 0 12px rgba(0,136,255,0.15)}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="topbar-logo">
+      <svg width="20" height="20" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#050508"/><ellipse cx="10" cy="17" rx="5.5" ry="7" fill="#e0e0e0"/><circle cx="10" cy="18" r="2.8" fill="#000"/><circle cx="8.8" cy="16.5" r="1.1" fill="rgba(255,255,255,0.85)"/><ellipse cx="22" cy="17" rx="5.5" ry="7" fill="#e0e0e0"/><circle cx="22" cy="18" r="2.8" fill="#000"/><circle cx="20.8" cy="16.5" r="1.1" fill="rgba(255,255,255,0.85)"/></svg>
+      Open<span class="accent">Voice</span>UI
+    </div>
+    <div class="topbar-nav">
+      <span class="topbar-hint">Arrow keys to navigate</span>
+    </div>
+  </div>
+
+  <!-- Slides -->
+  <div class="slide-area" id="slideArea">
+
+    <!-- 0: Cover -->
+    <div class="slide active" data-slide="0">
+      <div class="slide-content" style="text-align:center">
+        <svg class="eye-hero" width="120" height="52" viewBox="0 0 140 60" fill="none" style="margin:0 auto 28px">
+          <ellipse cx="30" cy="30" rx="24" ry="28" fill="rgba(0,136,255,0.08)"/>
+          <ellipse cx="30" cy="30" rx="18" ry="22" fill="#e0e0e0"/>
+          <circle cx="30" cy="33" r="9" fill="#111"/><circle cx="26" cy="28" r="3.5" fill="rgba(255,255,255,0.9)"/>
+          <ellipse cx="110" cy="30" rx="24" ry="28" fill="rgba(0,136,255,0.08)"/>
+          <ellipse cx="110" cy="30" rx="18" ry="22" fill="#e0e0e0"/>
+          <circle cx="110" cy="33" r="9" fill="#111"/><circle cx="106" cy="28" r="3.5" fill="rgba(255,255,255,0.9)"/>
+        </svg>
+        <div class="title">Open<span style="color:var(--blue)">Voice</span>UI</div>
+        <div style="font-family:var(--fm);font-size:clamp(11px,1.3vw,13px);letter-spacing:0.15em;text-transform:uppercase;color:var(--fg-m);margin-top:8px">Brand System v1.0</div>
+        <div class="glow-line" style="max-width:200px;margin:24px auto"></div>
+        <div style="font-size:14px;color:var(--fg-d)">Voice-powered AI assistant platform</div>
+      </div>
+    </div>
+
+    <!-- 1: Identity -->
+    <div class="slide" data-slide="1">
+      <div class="slide-content">
+        <div class="label">01 - Brand Identity</div>
+        <div class="title">The face that listens.</div>
+        <div class="subtitle">OpenVoiceUI is defined by the eye avatar, neon-on-dark aesthetics, and a cyberpunk-meets-clinical sensibility. The eyes ARE the logo.</div>
+        <div class="grid3">
+          <div class="card"><div class="card-label">Mark</div><h4>The Eyes</h4><p>Two animated eyes with blue glow, expressive pupils, and mood states. The eyes are the logo. No wordmark needed in small contexts.</p></div>
+          <div class="card"><div class="card-label">Wordmark</div><h4>Open<span style="color:var(--blue)">Voice</span>UI</h4><p>Space Grotesk 700. "Voice" rendered in primary blue (#0088ff). Always one word, never hyphenated.</p></div>
+          <div class="card"><div class="card-label">Personality</div><h4>Ambient Intelligence</h4><p>Always listening, never intrusive. The UI is dark, the feedback is subtle, the voice is the primary interface.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2: Logo Discovery -->
+    <div class="slide" data-slide="2">
+      <div class="slide-content">
+        <div class="label">02 - Logo Discovery</div>
+        <div class="title">Constructing the mark.</div>
+        <div class="subtitle">The eye avatar is built from layered ellipses with radial gradients, a blue glow filter, and pupil highlights for dimensionality.</div>
+        <div style="display:flex;gap:32px;align-items:center;flex-wrap:wrap;justify-content:center;margin-top:24px">
+          <!-- Construction steps -->
+          <div style="text-align:center">
+            <svg width="80" height="80" viewBox="0 0 100 100"><ellipse cx="50" cy="50" rx="40" ry="48" fill="rgba(0,136,255,0.08)" stroke="var(--blue)" stroke-width="0.5" stroke-dasharray="4 4"/></svg>
+            <div style="font-family:var(--fm);font-size:10px;color:var(--fg-d);margin-top:8px">1. Glow field</div>
+          </div>
+          <div style="text-align:center">
+            <svg width="80" height="80" viewBox="0 0 100 100"><ellipse cx="50" cy="50" rx="40" ry="48" fill="rgba(0,136,255,0.08)"/><ellipse cx="50" cy="50" rx="32" ry="40" fill="#e0e0e0"/></svg>
+            <div style="font-family:var(--fm);font-size:10px;color:var(--fg-d);margin-top:8px">2. Sclera</div>
+          </div>
+          <div style="text-align:center">
+            <svg width="80" height="80" viewBox="0 0 100 100"><ellipse cx="50" cy="50" rx="40" ry="48" fill="rgba(0,136,255,0.08)"/><ellipse cx="50" cy="50" rx="32" ry="40" fill="#e0e0e0"/><circle cx="50" cy="55" r="16" fill="#111"/></svg>
+            <div style="font-family:var(--fm);font-size:10px;color:var(--fg-d);margin-top:8px">3. Pupil</div>
+          </div>
+          <div style="text-align:center">
+            <svg width="80" height="80" viewBox="0 0 100 100"><ellipse cx="50" cy="50" rx="40" ry="48" fill="rgba(0,136,255,0.08)"/><ellipse cx="50" cy="50" rx="32" ry="40" fill="#e0e0e0"/><circle cx="50" cy="55" r="16" fill="#111"/><circle cx="44" cy="48" r="6" fill="rgba(255,255,255,0.9)"/><circle cx="57" cy="60" r="3.5" fill="rgba(255,255,255,0.3)"/></svg>
+            <div style="font-family:var(--fm);font-size:10px;color:var(--fg-d);margin-top:8px">4. Highlights</div>
+          </div>
+        </div>
+        <div style="margin-top:32px;padding:16px;background:var(--panel);border:1px solid var(--bdr);border-radius:var(--rl)">
+          <p style="font-size:13px;color:var(--fg-m);line-height:1.6"><strong style="color:var(--fg)">Why eyes?</strong> Voice interfaces have no visible output. The eyes give the AI a face without a body. They express state (listening, thinking, speaking, error) through blinks, pupil dilation, and mood shapes. The user always knows what the system is doing.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3: Colors -->
+    <div class="slide" data-slide="3">
+      <div class="slide-content">
+        <div class="label">03 - Color System</div>
+        <div class="title">Neon on void.</div>
+        <div class="subtitle">Dark-first palette. High contrast signals on near-black backgrounds. Every color has a function.</div>
+        <div style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin-bottom:8px;font-weight:500">Backgrounds</div>
+        <div class="swatch-row" style="margin-bottom:16px">
+          <div class="sw" style="background:#050508;color:var(--fg)" onclick="navigator.clipboard.writeText('#050508')"><span class="sw-n">Deep</span><span class="sw-h">#050508</span></div>
+          <div class="sw" style="background:#0a0a12;color:var(--fg)" onclick="navigator.clipboard.writeText('#0a0a12')"><span class="sw-n">Panel</span><span class="sw-h">#0a0a12</span></div>
+          <div class="sw" style="background:#0f1018;color:var(--fg)" onclick="navigator.clipboard.writeText('#0f1018')"><span class="sw-n">Surface</span><span class="sw-h">#0f1018</span></div>
+          <div class="sw" style="background:#141420;color:var(--fg)" onclick="navigator.clipboard.writeText('#141420')"><span class="sw-n">Elevated</span><span class="sw-h">#141420</span></div>
+          <div class="sw" style="background:#1a1a2e;color:var(--fg)" onclick="navigator.clipboard.writeText('#1a1a2e')"><span class="sw-n">Hover</span><span class="sw-h">#1a1a2e</span></div>
+        </div>
+        <div style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin-bottom:8px;font-weight:500">Signal Colors</div>
+        <div class="swatch-row" style="margin-bottom:16px">
+          <div class="sw" style="background:#0088ff;color:#fff"><span class="sw-n">Blue</span><span class="sw-h">#0088ff</span></div>
+          <div class="sw" style="background:#00ffff;color:#050508"><span class="sw-n">Cyan</span><span class="sw-h">#00ffff</span></div>
+          <div class="sw" style="background:#00ff66;color:#050508"><span class="sw-n">Green</span><span class="sw-h">#00ff66</span></div>
+          <div class="sw" style="background:#ffdd00;color:#050508"><span class="sw-n">Yellow</span><span class="sw-h">#ffdd00</span></div>
+          <div class="sw" style="background:#ff6600;color:#fff"><span class="sw-n">Orange</span><span class="sw-h">#ff6600</span></div>
+          <div class="sw" style="background:#ff2244;color:#fff"><span class="sw-n">Red</span><span class="sw-h">#ff2244</span></div>
+        </div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:8px">
+          <div style="display:flex;align-items:center;gap:6px"><span class="sdot on"></span><span style="font-family:var(--fm);font-size:11px;color:var(--fg-m)">Connected</span></div>
+          <div style="display:flex;align-items:center;gap:6px"><span class="sdot warn"></span><span style="font-family:var(--fm);font-size:11px;color:var(--fg-m)">Connecting</span></div>
+          <div style="display:flex;align-items:center;gap:6px"><span class="sdot err"></span><span style="font-family:var(--fm);font-size:11px;color:var(--fg-m)">Error</span></div>
+          <div style="display:flex;align-items:center;gap:6px"><span class="sdot idle"></span><span style="font-family:var(--fm);font-size:11px;color:var(--fg-m)">Idle</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4: Typography -->
+    <div class="slide" data-slide="4">
+      <div class="slide-content">
+        <div class="label">04 - Typography</div>
+        <div class="title">Three fonts. Zero decoration.</div>
+        <div style="margin-bottom:32px;padding-bottom:32px;border-bottom:1px solid var(--bdr)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;flex-wrap:wrap;gap:8px"><span style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);font-weight:500">Display - Space Grotesk</span><span style="font-family:var(--fm);font-size:10px;color:var(--fg-d)">400-700</span></div>
+          <div style="font-family:var(--fd);font-size:clamp(32px,6vw,56px);font-weight:700;line-height:1;letter-spacing:-0.03em;margin-bottom:12px">Voice-first. Dark-first.</div>
+          <p style="font-size:12px;color:var(--fg-d);max-width:420px">Geometric sans-serif with technical character. Replaces Courier New for headings.</p>
+        </div>
+        <div style="margin-bottom:32px;padding-bottom:32px;border-bottom:1px solid var(--bdr)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;flex-wrap:wrap;gap:8px"><span style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);font-weight:500">Body - Inter</span><span style="font-family:var(--fm);font-size:10px;color:var(--fg-d)">400-600</span></div>
+          <p style="font-size:15px;line-height:1.7;color:var(--fg-m);max-width:500px">OpenVoiceUI is a modular voice assistant platform. The interface is dark, the feedback is subtle, the voice is the primary channel.</p>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;flex-wrap:wrap;gap:8px"><span style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);font-weight:500">Mono - JetBrains Mono</span><span style="font-family:var(--fm);font-size:10px;color:var(--fg-d)">400-600</span></div>
+          <div style="font-family:var(--fm);font-size:13px;line-height:1.7;color:var(--fg-m);background:var(--panel);padding:16px;border-radius:var(--r);border:1px solid var(--bdr)"><pre style="margin:0;font-family:inherit">const voice = new OpenVoiceUI({
+  mode: "ambient",
+  wake_word: "hey voice",
+  theme: "classic-blue",
+});</pre></div>
+        </div>
+        <div style="margin-top:24px">
+          <div style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin-bottom:8px;font-weight:500">Type Specimen</div>
+          <input class="ti" id="typeInput" value="The face that listens." placeholder="Type to preview...">
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+            <span id="pD" style="font-family:var(--fd);font-size:24px;font-weight:700;letter-spacing:-0.02em">The face that listens.</span>
+            <span id="pB" style="font-family:var(--fi);font-size:14px;color:var(--fg-m)">The face that listens.</span>
+            <span id="pM" style="font-family:var(--fm);font-size:12px;color:var(--fg-d)">The face that listens.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5: Icons -->
+    <div class="slide" data-slide="5">
+      <div class="slide-content">
+        <div class="label">05 - Iconography</div>
+        <div class="title">Icons, not emoji.</div>
+        <div class="subtitle">Replace emoji characters with Lucide-style SVG icons. Consistent 1.5px stroke, 18px default, inherit parent color.</div>
+        <div class="grid2">
+          <div style="background:var(--panel);padding:28px" class="ba-before">
+            <div class="ba-label">Current (Emoji)</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <div class="ico-box">&#128222;</div><div class="ico-box">&#9209;&#65039;</div><div class="ico-box">&#128066;</div><div class="ico-box">&#127911;&#65039;</div><div class="ico-box">&#127908;&#65039;</div><div class="ico-box">&#127925;</div><div class="ico-box">&#128187;&#65039;</div><div class="ico-box">&#128172;</div>
+            </div>
+          </div>
+          <div style="background:var(--panel);padding:28px" class="ba-after">
+            <div class="ba-label">Proposed (SVG)</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <div class="ico-box" style="color:var(--green)"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></div>
+              <div class="ico-box" style="color:var(--red)"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></div>
+              <div class="ico-box" style="color:var(--cyan)"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></div>
+              <div class="ico-box" style="color:var(--blue)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+              <div class="ico-box" style="color:var(--yellow)"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg></div>
+              <div class="ico-box" style="color:var(--orange)"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+              <div class="ico-box" style="color:var(--fg-m)"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+              <div class="ico-box" style="color:var(--fg)"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:16px;padding:16px;background:var(--panel);border:1px solid var(--bdr);border-radius:var(--rl)">
+          <p style="font-size:13px;color:var(--fg-m);line-height:1.5"><strong style="color:var(--fg)">Recommendation:</strong> Adopt Lucide Icons (lucide.dev). Same 1.5px stroke, open source, tree-shakeable. Drop-in replacement for each emoji.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6: Components -->
+    <div class="slide" data-slide="6">
+      <div class="slide-content">
+        <div class="label">06 - Components</div>
+        <div class="title">UI primitives.</div>
+        <div style="margin-bottom:32px">
+          <div style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin-bottom:12px;font-weight:500">Buttons</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">
+            <button class="btn btn-p">Primary</button>
+            <button class="btn btn-s">Secondary</button>
+            <button class="btn btn-g">Ghost</button>
+            <button class="btn btn-d">Danger</button>
+          </div>
+        </div>
+        <div style="margin-bottom:32px">
+          <div style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin-bottom:12px;font-weight:500">Cards</div>
+          <div class="grid3">
+            <div class="card" style="box-shadow:0 0 0 1px var(--bdr),0 4px 20px rgba(0,0,0,0.3)"><div class="card-label">Glow</div><h4>Voice Session</h4><p>Primary card with blue glow on hover.</p></div>
+            <div class="card" style="background:var(--elevated)"><div class="card-label">Flat</div><h4>Settings</h4><p>Elevated surface, no glow.</p></div>
+            <div class="card" style="background:transparent;border-color:var(--bdr-s)"><div class="card-label">Outlined</div><h4>Control</h4><p>Transparent with strong border.</p></div>
+          </div>
+        </div>
+        <div>
+          <div style="font-family:var(--fm);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--blue);margin-bottom:12px;font-weight:500">Spacing Scale (4px base)</div>
+          <div class="sp-row"><span class="sp-label">sp-1</span><div class="sp-bar" style="width:4px"></div><span class="sp-val">4px</span></div>
+          <div class="sp-row"><span class="sp-label">sp-2</span><div class="sp-bar" style="width:8px"></div><span class="sp-val">8px</span></div>
+          <div class="sp-row"><span class="sp-label">sp-4</span><div class="sp-bar" style="width:16px"></div><span class="sp-val">16px</span></div>
+          <div class="sp-row"><span class="sp-label">sp-8</span><div class="sp-bar" style="width:32px"></div><span class="sp-val">32px</span></div>
+          <div class="sp-row"><span class="sp-label">sp-16</span><div class="sp-bar" style="width:64px"></div><span class="sp-val">64px</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7: Motion -->
+    <div class="slide" data-slide="7">
+      <div class="slide-content">
+        <div class="label">07 - Motion</div>
+        <div class="title">Ambient, not performative.</div>
+        <div class="subtitle">Animations serve feedback, not decoration. Eye blinks confirm attention. Glow pulses indicate state.</div>
+        <div class="grid3" style="margin-top:16px">
+          <div class="card"><div class="card-label">Eye Blink</div><h4>0.15s ease</h4><p>Eyelid close/open. Confirms the system heard you.</p></div>
+          <div class="card"><div class="card-label">Panel Slide</div><h4>0.3s ease</h4><p>Settings, transcript panels slide in from edges.</p></div>
+          <div class="card"><div class="card-label">Status Pulse</div><h4>0.8s infinite</h4><p>Listening indicator. Rhythmic feedback during active state.</p></div>
+          <div class="card"><div class="card-label">Glow Breathe</div><h4>3s infinite</h4><p>Eye glow intensity. Ambient presence when idle.</p></div>
+        </div>
+        <div style="margin-top:24px;padding:16px;background:var(--panel);border:1px solid var(--bdr);border-radius:var(--rl)">
+          <p style="font-size:13px;color:var(--fg-m);line-height:1.6"><strong style="color:var(--fg)">Rules:</strong> Never exceed 0.3s for UI transitions. Looping animations must have a purpose. Disable all non-essential animations on Raspberry Pi via pi-overrides.css.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8: Edge Tabs Before/After -->
+    <div class="slide" data-slide="8">
+      <div class="slide-content">
+        <div class="label">08 - Edge Tabs Refinement</div>
+        <div class="title">Before and after.</div>
+        <div class="grid2">
+          <div style="background:var(--panel);padding:28px" class="ba-before">
+            <div class="ba-label">Before</div>
+            <div style="display:flex;flex-direction:column;gap:4px;width:44px">
+              <div style="width:44px;height:52px;background:rgba(0,136,255,0.08);border:1px solid rgba(0,136,255,0.25);border-radius:0 14px 14px 0;display:flex;align-items:center;justify-content:center;font-size:20px">&#128222;</div>
+              <div style="width:44px;height:52px;background:rgba(0,136,255,0.08);border:1px solid rgba(0,136,255,0.25);border-radius:0 14px 14px 0;display:flex;align-items:center;justify-content:center;font-size:20px">&#128066;</div>
+              <div style="width:44px;height:52px;background:rgba(0,136,255,0.08);border:1px solid rgba(0,136,255,0.25);border-radius:0 14px 14px 0;display:flex;align-items:center;justify-content:center;font-size:20px">&#127925;</div>
+              <div style="width:44px;height:52px;background:rgba(0,136,255,0.08);border:1px solid rgba(0,136,255,0.25);border-radius:0 14px 14px 0;display:flex;align-items:center;justify-content:center;font-size:20px">&#128187;&#65039;</div>
+            </div>
+            <p style="font-family:var(--fm);font-size:10px;color:var(--fg-d);margin-top:12px">Emoji, inconsistent sizing, 52px height</p>
+          </div>
+          <div style="background:var(--panel);padding:28px" class="ba-after">
+            <div class="ba-label">After</div>
+            <div style="display:flex;flex-direction:column;gap:4px;width:44px">
+              <div class="etab"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg></div>
+              <div class="etab"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></div>
+              <div class="etab"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+              <div class="etab"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+            </div>
+            <p style="font-family:var(--fm);font-size:10px;color:var(--fg-d);margin-top:12px">SVG 18px, 48px height, hover glow</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9: Transcript Panel Before/After -->
+    <div class="slide" data-slide="9">
+      <div class="slide-content">
+        <div class="label">09 - Transcript Panel</div>
+        <div class="title">Panel refinement.</div>
+        <div class="grid2">
+          <div style="background:var(--panel);padding:20px" class="ba-before">
+            <div class="ba-label">Before</div>
+            <div style="width:100%;max-width:260px;background:rgba(12,18,24,0.97);border-left:1px solid rgba(20,184,166,0.3);padding:14px;display:flex;flex-direction:column;gap:10px;font-family:'Courier New',monospace">
+              <div style="display:flex;justify-content:space-between"><span style="font-size:12px;font-weight:600;color:#2dd4bf;text-transform:uppercase;letter-spacing:0.08em">&#128066; LISTEN</span><span style="font-size:16px;color:#4d5260;cursor:pointer">x</span></div>
+              <div style="font-size:12px;color:#cdd9e5;line-height:1.6;min-height:60px"><div style="margin-bottom:4px">Hello, can you hear me?</div><div style="margin-bottom:4px">Yes, I can hear you.</div><div style="color:#4d5260;font-style:italic">Listening...</div></div>
+              <div style="display:flex;gap:4px"><div style="flex:1;padding:8px;background:rgba(20,184,166,0.12);border:1px solid rgba(20,184,166,0.35);border-radius:6px;color:#2dd4bf;font-size:11px;text-align:center">&#128172; Talk</div><div style="flex:1;padding:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#8b949e;font-size:11px;text-align:center">&#128190; Save</div></div>
+            </div>
+          </div>
+          <div style="background:var(--panel);padding:20px" class="ba-after">
+            <div class="ba-label">After</div>
+            <div style="width:100%;max-width:260px;background:var(--surface);border-left:2px solid var(--blue);border-radius:0 var(--rl) var(--rl) 0;padding:16px;display:flex;flex-direction:column;gap:12px;box-shadow:0 0 32px rgba(0,0,0,0.4)">
+              <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:var(--fm);font-size:10px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:0.1em;display:flex;align-items:center;gap:5px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/></svg>Transcript</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--fg-d)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="cursor:pointer"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
+              <div style="font-family:var(--fi);font-size:13px;color:var(--fg);line-height:1.7;min-height:60px"><div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--bdr)">Hello, can you hear me?</div><div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--bdr)">Yes, I can hear you.</div><div style="color:var(--fg-d);display:flex;align-items:center;gap:5px"><span class="sdot idle" style="width:6px;height:6px"></span>Listening...</div></div>
+              <div style="display:flex;gap:6px"><div style="flex:1;padding:9px;background:rgba(0,136,255,0.08);border:1px solid rgba(0,136,255,0.25);border-radius:var(--r);color:var(--blue);font-family:var(--fm);font-size:10px;text-align:center;cursor:pointer;font-weight:500;display:flex;align-items:center;justify-content:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Talk</div><div style="flex:1;padding:9px;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--r);color:var(--fg-m);font-family:var(--fm);font-size:10px;text-align:center;cursor:pointer;font-weight:500;display:flex;align-items:center;justify-content:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>Save</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10: Mode Picker + Action Console Before/After -->
+    <div class="slide" data-slide="10">
+      <div class="slide-content">
+        <div class="label">10 - Panels Refinement</div>
+        <div class="title">Mode picker and console.</div>
+        <div class="grid2">
+          <div style="background:var(--panel);padding:20px" class="ba-before">
+            <div class="ba-label">Mode Picker (Before)</div>
+            <div style="width:200px;background:rgba(10,8,20,0.97);border:1px solid rgba(160,80,255,0.35);border-radius:12px;padding:8px 6px;font-family:'Courier New',monospace">
+              <div style="font-size:9px;font-weight:700;letter-spacing:0.1em;color:rgba(160,80,255,0.6);padding:4px 10px 6px;text-transform:uppercase">Mode</div>
+              <div style="padding:8px 10px;border-radius:8px;display:flex;align-items:center;gap:8px;background:rgba(160,80,255,0.12)"><span style="font-size:16px;width:20px">&#128172;</span><div><div style="font-size:12px;font-weight:600;color:#e2e8f0">Chat</div><div style="font-size:10px;color:#6e7681">General</div></div><span style="font-size:11px;color:#c084fc">&#10003;</span></div>
+              <div style="padding:8px 10px;display:flex;align-items:center;gap:8px"><span style="font-size:16px;width:20px">&#128187;</span><div><div style="font-size:12px;font-weight:600;color:#e2e8f0">Code</div><div style="font-size:10px;color:#6e7681">Dev help</div></div></div>
+            </div>
+          </div>
+          <div style="background:var(--panel);padding:20px" class="ba-after">
+            <div class="ba-label">Mode Picker (After)</div>
+            <div style="width:200px;background:var(--surface);border:1px solid var(--bdr-s);border-radius:var(--rl);padding:6px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
+              <div style="font-family:var(--fm);font-size:9px;font-weight:600;letter-spacing:0.12em;color:var(--blue);padding:6px 10px 8px;text-transform:uppercase;opacity:0.7">Mode</div>
+              <div style="padding:9px 10px;border-radius:var(--r);display:flex;align-items:center;gap:8px;background:rgba(0,136,255,0.08);border:1px solid rgba(0,136,255,0.2);margin-bottom:2px;cursor:pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><div style="flex:1"><div style="font-family:var(--fi);font-size:12px;font-weight:600;color:var(--fg)">Chat</div><div style="font-family:var(--fi);font-size:10px;color:var(--fg-d)">General</div></div><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
+              <div style="padding:9px 10px;border-radius:var(--r);display:flex;align-items:center;gap:8px;cursor:pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--fg-m)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><div style="flex:1"><div style="font-family:var(--fi);font-size:12px;font-weight:600;color:var(--fg)">Code</div><div style="font-family:var(--fi);font-size:10px;color:var(--fg-d)">Dev help</div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 11: Summary -->
+    <div class="slide" data-slide="11">
+      <div class="slide-content" style="text-align:center">
+        <svg class="eye-hero" width="80" height="36" viewBox="0 0 140 60" fill="none" style="margin:0 auto 24px">
+          <ellipse cx="30" cy="30" rx="24" ry="28" fill="rgba(0,136,255,0.08)"/><ellipse cx="30" cy="30" rx="18" ry="22" fill="#e0e0e0"/><circle cx="30" cy="33" r="9" fill="#111"/><circle cx="26" cy="28" r="3.5" fill="rgba(255,255,255,0.9)"/>
+          <ellipse cx="110" cy="30" rx="24" ry="28" fill="rgba(0,136,255,0.08)"/><ellipse cx="110" cy="30" rx="18" ry="22" fill="#e0e0e0"/><circle cx="110" cy="33" r="9" fill="#111"/><circle cx="106" cy="28" r="3.5" fill="rgba(255,255,255,0.9)"/>
+        </svg>
+        <div class="title">Open<span style="color:var(--blue)">Voice</span>UI</div>
+        <div class="glow-line" style="max-width:200px;margin:20px auto"></div>
+        <p style="font-size:14px;color:var(--fg-m);max-width:440px;margin:0 auto 32px;line-height:1.6">Same brand direction. Polished execution. Consistent typography, proper iconography, formalized spacing. Ready for team review.</p>
+        <div style="font-family:var(--fm);font-size:10px;color:var(--fg-d);letter-spacing:0.05em">Brand System v1.0 - Proposed March 2026</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Controls -->
+  <div class="controls">
+    <button class="ctrl-btn" id="prevBtn" disabled aria-label="Previous">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+    </button>
+    <span class="ctrl-counter" id="counter">1 / 12</span>
+    <button class="ctrl-btn" id="nextBtn" aria-label="Next">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+    </button>
+  </div>
+
+  <!-- Dots -->
+  <div class="dots" id="dots"></div>
+</div>
+
+<script>
+const TOTAL = 12;
+let current = 0;
+const slides = document.querySelectorAll('.slide');
+const counter = document.getElementById('counter');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const dotsEl = document.getElementById('dots');
+
+// Create dots
+for (let i = 0; i < TOTAL; i++) {
+  const d = document.createElement('div');
+  d.className = 'dot' + (i === 0 ? ' active' : '');
+  d.onclick = () => goTo(i);
+  dotsEl.appendChild(d);
+}
+
+function goTo(n) {
+  if (n < 0 || n >= TOTAL || n === current) return;
+  const prev = current;
+  current = n;
+  slides.forEach((s, i) => {
+    s.classList.remove('active', 'prev');
+    if (i === current) s.classList.add('active');
+    else if (i < current) s.classList.add('prev');
+  });
+  counter.textContent = `${current + 1} / ${TOTAL}`;
+  prevBtn.disabled = current === 0;
+  nextBtn.disabled = current === TOTAL - 1;
+  document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === current));
+}
+
+prevBtn.onclick = () => goTo(current - 1);
+nextBtn.onclick = () => goTo(current + 1);
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); goTo(current + 1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(current - 1); }
+  else if (e.key === 'Home') { e.preventDefault(); goTo(0); }
+  else if (e.key === 'End') { e.preventDefault(); goTo(TOTAL - 1); }
+  else if (e.key >= '1' && e.key <= '9') { e.preventDefault(); goTo(parseInt(e.key) - 1); }
+  else if (e.key === '0') { e.preventDefault(); goTo(9); }
+});
+
+// Touch swipe
+let tx = 0, te = 0;
+document.getElementById('slideArea').addEventListener('touchstart', e => { tx = e.touches[0].clientX; });
+document.getElementById('slideArea').addEventListener('touchmove', e => { te = e.touches[0].clientX; });
+document.getElementById('slideArea').addEventListener('touchend', () => { const d = tx - te; if (Math.abs(d) > 50) { d > 0 ? goTo(current + 1) : goTo(current - 1); } });
+
+// Type specimen
+document.getElementById('typeInput')?.addEventListener('input', e => {
+  const v = e.target.value || 'The face that listens.';
+  document.getElementById('pD').textContent = v;
+  document.getElementById('pB').textContent = v;
+  document.getElementById('pM').textContent = v;
+});
+</script>
+</body>
+</html>

@@ -503,7 +503,7 @@ window.VisualizerModule = {
 
         // Draw glow layer
         ctx.beginPath();
-        ctx.strokeStyle = 'rgba(0, 255, 255, 0.25)';
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.25)'; // --cyan with alpha
         ctx.lineWidth = 20;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -520,7 +520,7 @@ window.VisualizerModule = {
 
         // Draw main bright line
         ctx.beginPath();
-        ctx.strokeStyle = '#00ffff';
+        ctx.strokeStyle = '#00ffff'; // matches --cyan token
         ctx.lineWidth = 6;
         x = 0;
 

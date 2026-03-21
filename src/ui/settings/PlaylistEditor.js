@@ -347,7 +347,7 @@ export class PlaylistEditor {
         const el = this._root ? this._root.querySelector('#pe-upload-status') : null;
         if (!el) return;
         el.textContent = msg;
-        el.style.color = isError ? '#ff6666' : '#88ffaa';
+        el.style.color = isError ? 'var(--red)' : 'var(--green)';
     }
 
     _formatSize(bytes) {

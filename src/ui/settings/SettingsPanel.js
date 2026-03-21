@@ -187,11 +187,11 @@ window.SettingsPanel = {
                 <div class="color-pickers">
                     <div class="color-picker-group">
                         <label>Primary</label>
-                        <input type="color" id="theme-primary" value="${theme.primary || '#0088ff'}">
+                        <input type="color" id="theme-primary" value="${theme.primary || '#0088ff'}"> <!-- fallback matches --blue -->
                     </div>
                     <div class="color-picker-group">
                         <label>Accent</label>
-                        <input type="color" id="theme-accent" value="${theme.accent || '#00ffff'}">
+                        <input type="color" id="theme-accent" value="${theme.accent || '#00ffff'}"> <!-- fallback matches --cyan -->
                     </div>
                 </div>
                 <button class="reset-btn" onclick="SettingsPanel.resetTheme()">Reset to Default</button>
