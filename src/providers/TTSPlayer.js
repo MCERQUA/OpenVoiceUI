@@ -146,15 +146,20 @@ export class TTSPlayer {
      * @param {string} base64Audio
      * @param {string} [mimeType='audio/wav']
      */
-    queue(base64Audio, mimeType = 'audio/wav') {
+    queue(base64Audio, mimeType = 'audio/wav', gapMs = 0) {
         try {
             const blob = this._base64ToBlob(base64Audio, mimeType);
             const url = URL.createObjectURL(blob);
             const audio = new Audio(url);
+            audio._gapMs = gapMs || 0;  // inter-sentence gap from profile
 
             audio.onended = () => {
                 URL.revokeObjectURL(url);
-                this._playNext();
+                if (audio._gapMs > 0 && this.audioQueue.length > 0) {
+                    setTimeout(() => this._playNext(), audio._gapMs);
+                } else {
+                    this._playNext();
+                }
             };
 
             audio.onerror = (e) => {
