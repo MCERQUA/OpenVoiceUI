@@ -229,7 +229,7 @@ def get_csp_policy(nonce: str, page_type: str = 'main') -> str:
             f"style-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
             f"img-src 'self' data: blob: https:; "
             f"font-src 'self' data: https://cdn.jsdelivr.net; "
-            f"connect-src 'self' ws: wss:; "
+            f"connect-src 'self' ws: wss: https:; "
             f"media-src 'self' blob:; "
             f"object-src 'none'; "
             f"base-uri 'self'; "

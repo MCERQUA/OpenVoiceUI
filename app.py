@@ -167,11 +167,6 @@ def create_app(config_override: dict = None):
         _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
 
         @app.before_request
-        def generate_request_nonce():
-            """Generate CSP nonce for this request (2026-03-23 security hardening)."""
-            g.csp_nonce = generate_csp_nonce()
-
-        @app.before_request
         def require_auth():
             """Block unauthenticated requests to all non-exempt routes.
 
@@ -208,6 +203,16 @@ def create_app(config_override: dict = None):
                 # HTML page request — redirect to root (login gate)
                 return redirect('/')
 
+    # ── Generate CSP nonce for all requests (2026-03-23 security hardening) ───
+    @app.before_request
+    def generate_request_nonce():
+        """Generate CSP nonce for this request.
+        
+        Must run for all requests (not just authenticated) so HTML rendering
+        can access a stable per-request nonce value.
+        """
+        g.csp_nonce = generate_csp_nonce()
+
     # ── JSON error handler for 413 (file too large) ────────────────────────
     @app.errorhandler(413)
     def handle_413(e):
@@ -225,11 +230,27 @@ def create_app(config_override: dict = None):
         # Determine page type for CSP policy
         page_type = 'canvas' if request.path.startswith('/pages/') or request.path.startswith('/canvas-proxy') else 'main'
         
-        # Get CSP nonce from request context (generated in before_request)
-        nonce = getattr(g, 'csp_nonce', generate_csp_nonce())
+        # Get CSP nonce from request context (generated in before_request).
+        # Do NOT generate a new nonce here, to avoid mismatches with any
+        # nonce that may have been injected into HTML earlier in the request.
+        nonce = getattr(g, 'csp_nonce', None)
         
-        # Set CSP policy with nonce
-        csp_policy = get_csp_policy(nonce, page_type)
+        # Set CSP policy with nonce (or without if nonce is None)
+        csp_policy = get_csp_policy(nonce, page_type) if nonce else get_csp_policy(generate_csp_nonce(), page_type)
+        
+        # Temporary compatibility: allow existing inline <script>/<style> blocks
+        # on main HTML pages until the HTML shell is fully nonce/hashes-based.
+        # This prevents breaking index.html which has inline scripts for iOS audio unlock,
+        # Clerk loader, and inline styles.
+        content_type = response.headers.get('Content-Type', '') or ''
+        if page_type == 'main' and 'text/html' in content_type:
+            # Add 'unsafe-inline' to script-src if present and not already allowed
+            if 'script-src' in csp_policy and "'unsafe-inline'" not in csp_policy:
+                csp_policy = csp_policy.replace('script-src', "script-src 'unsafe-inline'", 1)
+            # Add 'unsafe-inline' to style-src if present and not already allowed
+            if 'style-src' in csp_policy and "'unsafe-inline'" not in csp_policy:
+                csp_policy = csp_policy.replace('style-src', "style-src 'unsafe-inline'", 1)
+        
         response.headers.setdefault('Content-Security-Policy', csp_policy)
         
         return response

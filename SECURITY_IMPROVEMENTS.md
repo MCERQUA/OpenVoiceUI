@@ -152,7 +152,7 @@ python-magic==0.4.27  # File upload content validation
 curl -I http://localhost:5001
 
 # Test file upload validation
-curl -X POST http://localhost:5001/api/canvas/upload \
+curl -X POST http://localhost:5001/api/upload \
   -F "file=@test.exe"  # Should reject
 
 # Test production config validation
@@ -272,7 +272,7 @@ Monitor these in your observability platform:
 
 ### Security Audit
 
-Original audit report: `/root/pentest-lab/loot/openvoiceui-audit/`
+Original audit report: Internal document (available upon request from the security team)
 
 ## Credits
 
