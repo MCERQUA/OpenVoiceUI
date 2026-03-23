@@ -36,3 +36,6 @@ google-generativeai==0.8.6  # Only if using Gemini
 # onnxruntime>=1.23.1
 # soundfile>=0.12.1
 # librosa>=0.10.0
+
+# File upload security (content type validation)
+python-magic==0.4.27

@@ -15,13 +15,22 @@ server.py module-level decorators (@app.route, @sock.route) keep working.
 """
 import logging
 import os
+import sys
 
-from flask import Flask, jsonify, redirect, request
+from flask import Flask, jsonify, redirect, request, g
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_sock import Sock
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+# Import security utilities
+from services.security import (
+    generate_csp_nonce,
+    get_security_headers,
+    get_csp_policy,
+    validate_production_config
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +55,24 @@ def create_app(config_override: dict = None):
         static_folder=None,
     )
 
+    # Validate production configuration
+    try:
+        validate_production_config()
+    except SystemExit as e:
+        # Re-raise if in production, log warning in development
+        if os.getenv('ENVIRONMENT', '').lower() == 'production':
+            raise
+        else:
+            logger.warning(f"Configuration validation would fail in production: {e}")
+    
     # Core Flask config
     secret_key = os.getenv('SECRET_KEY')
+    env = os.getenv('ENVIRONMENT', 'development').lower()
+    
     if not secret_key:
+        if env == 'production':
+            logger.critical('SECRET_KEY must be set in production!')
+            sys.exit(1)
         import secrets as _secrets
         secret_key = _secrets.token_hex(32)
         logger.warning(
@@ -143,6 +167,11 @@ def create_app(config_override: dict = None):
         _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
 
         @app.before_request
+        def generate_request_nonce():
+            """Generate CSP nonce for this request."""
+            g.csp_nonce = generate_csp_nonce()
+
+        @app.before_request
         def require_auth():
             """Block unauthenticated requests to all non-exempt routes.
 
@@ -179,29 +208,25 @@ def create_app(config_override: dict = None):
                 # HTML page request — redirect to root (login gate)
                 return redirect('/')
 
-    # ── Security headers (P7-T3 security audit) ──────────────────────────────
+    # ── Security headers (P7-T3 security audit + 2026-03-23 hardening) ────────
     @app.after_request
     def add_security_headers(response):
         """Add defensive HTTP security headers to every response."""
-        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
-        response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
-        response.headers.setdefault('X-XSS-Protection', '1; mode=block')
-        response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
-        # Allow microphone and camera for voice/vision app; block geolocation
-        response.headers.setdefault(
-            'Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()'
-        )
-        response.headers.setdefault(
-            'Content-Security-Policy',
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://*.clerk.accounts.dev https://*.jam-bot.com; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com; "
-            "media-src 'self' blob:; "
-            "connect-src 'self' wss: https:; "
-            "frame-src 'self' https://*.clerk.accounts.dev https://*.jam-bot.com https:; "
-            "worker-src 'self' blob:"
-        )
+        # Apply base security headers
+        security_headers = get_security_headers()
+        for header, value in security_headers.items():
+            response.headers.setdefault(header, value)
+        
+        # Determine page type for CSP policy
+        page_type = 'canvas' if request.path.startswith('/pages/') or request.path.startswith('/canvas-proxy') else 'main'
+        
+        # Get CSP nonce from request context (generated in before_request)
+        nonce = getattr(g, 'csp_nonce', generate_csp_nonce())
+        
+        # Set CSP policy with nonce
+        csp_policy = get_csp_policy(nonce, page_type)
+        response.headers.setdefault('Content-Security-Policy', csp_policy)
+        
         return response
 
     # ── CDN cache cleanup (MUST run after flask_cors) ──────────────────────

@@ -1,0 +1,88 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  schedule:
+    # Run weekly on Mondays at 9am UTC
+    - cron: '0 9 * * 1'
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+          pip install -r requirements.txt
+      
+      - name: Run Bandit (SAST)
+        run: |
+          bandit -r . \
+            -f json \
+            -o bandit-report.json \
+            --exclude ./venv,./node_modules,./.git,./tests \
+            --skip B101,B601 \
+            || true
+      
+      - name: Upload Bandit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+      
+      - name: Run pip-audit (dependency vulnerabilities)
+        run: |
+          pip-audit \
+            --desc \
+            --format json \
+            --output pip-audit-report.json \
+            || true
+      
+      - name: Upload pip-audit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+      
+      - name: Check for high-severity issues
+        run: |
+          echo "Security scan complete. Check artifacts for detailed reports."
+          # Fail if critical issues found (optional - uncomment to enforce)
+          # python -c "import json; report=json.load(open('bandit-report.json')); exit(1 if any(r['issue_severity']=='HIGH' for r in report['results']) else 0)"
+
+  docker-security:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+      
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
