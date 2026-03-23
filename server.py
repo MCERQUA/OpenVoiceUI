@@ -119,6 +119,9 @@ from routes.conversation import conversation_bp, clean_for_tts
 app.register_blueprint(conversation_bp)
 
 from routes.profiles import profiles_bp
+
+# Import security validation (2026-03-23 security hardening)
+from services.security import validate_upload
 app.register_blueprint(profiles_bp)
 
 from routes.elevenlabs_hybrid import elevenlabs_hybrid_bp
@@ -1079,27 +1082,19 @@ def list_commands():
 @app.route("/api/upload", methods=["POST"])
 def upload_file():
     """Upload a file for the voice agent (images, text, code, etc.)."""
-    if "file" not in request.files:
-        return jsonify({"error": "No file provided"}), 400
+    # Use centralized security validation (2026-03-23 security hardening)
+    file = request.files.get("file")
+    valid, safe_filename, error = validate_upload(file, max_size=100*1024*1024)  # 100MB limit
+    if not valid:
+        return jsonify({"error": error}), 400
 
-    file = request.files["file"]
-    if not file.filename:
-        return jsonify({"error": "No filename"}), 400
-
-    allowed_exts = {
-        ".png", ".jpg", ".jpeg", ".gif", ".webp",
-        ".pdf", ".txt", ".md", ".json", ".csv",
-        ".html", ".js", ".py", ".ts", ".css",
-    }
-    ext = Path(file.filename).suffix.lower()
-    if ext not in allowed_exts:
-        return jsonify({"error": f"File type '{ext}' not allowed"}), 400
-
-    safe_name = re.sub(r"[^\w\-.]", "_", file.filename)[:80]
-    save_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
+    # Generate timestamped filename
+    save_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_filename}"
     save_path = UPLOADS_DIR / save_name
     file.save(save_path)
 
+    # Determine file type from extension
+    ext = Path(safe_filename).suffix.lower()
     is_image = ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
     result = {
         "filename": save_name,
