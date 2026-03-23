@@ -14,6 +14,9 @@ from .base_provider import TTSProvider
 logger = logging.getLogger(__name__)
 
 MODEL = "canopylabs/orpheus-v1-english"
+# If a single TTS call exceeds this, abort and let fallback handle it.
+# Normal Groq latency is 130-700ms. Rate-limited calls take 12-27s.
+GROQ_TTS_TIMEOUT_SECONDS = 5.0
 
 AVAILABLE_VOICES = [
     "autumn",  # Female (default)
@@ -46,7 +49,10 @@ class GroqProvider(TTSProvider):
         if self._client is None:
             try:
                 from groq import Groq
-                self._client = Groq(api_key=self.api_key)
+                self._client = Groq(
+                    api_key=self.api_key,
+                    timeout=GROQ_TTS_TIMEOUT_SECONDS,
+                )
             except ImportError:
                 raise RuntimeError("groq package not installed — run: pip install groq")
         return self._client

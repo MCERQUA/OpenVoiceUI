@@ -1,0 +1,1623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Website Setup</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#13141a;--surface:#1a1b23;--surface-2:#21222c;--surface-hover:#282936;--surface-3:#2e3040;
+  --border:#2a2b37;--border-light:#353648;--border-heavy:#42445a;
+  --text:#e8eaf0;--text-2:#9498ab;--text-3:#5f6380;
+  --brand:#3b82f6;--brand-light:#60a5fa;--brand-dim:rgba(59,130,246,.12);--brand-glow:rgba(59,130,246,.15);--brand-border:rgba(59,130,246,.25);
+  --green:#34d399;--green-dim:rgba(52,211,153,.1);--green-border:rgba(52,211,153,.2);
+  --red:#f87171;--red-dim:rgba(248,113,113,.1);
+  --amber:#fbbf24;--amber-dim:rgba(251,191,36,.1);
+  --cyan:#22d3ee;--cyan-dim:rgba(34,211,238,.1);
+  --r:14px;--r-sm:10px;--r-xs:6px;
+}
+html{font-size:15px}
+body{
+  font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text-2);
+  min-height:100vh;padding:0;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── Layout ── */
+.container{max-width:840px;margin:0 auto;padding:16px;padding-bottom:80px}
+
+/* ── Header ── */
+.page-header{
+  position:sticky;top:0;z-index:100;
+  background:rgba(19,20,26,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  padding:14px 16px;margin:0 -16px 20px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.hdr-left{display:flex;align-items:center;gap:12px}
+.hdr-icon{
+  width:40px;height:40px;background:var(--brand-dim);border:1px solid var(--brand-border);
+  border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.hdr-icon svg{width:20px;height:20px;stroke:var(--brand);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.hdr-title{font-size:1.1rem;font-weight:700;color:var(--text);letter-spacing:-.01em}
+.hdr-sub{font-size:.72rem;color:var(--text-3)}
+.status-badge{
+  font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
+  padding:4px 10px;border-radius:20px;white-space:nowrap;
+}
+.status-badge.draft{background:rgba(95,99,128,.15);color:var(--text-3)}
+.status-badge.ready{background:var(--green-dim);color:var(--green)}
+.status-badge.running{background:var(--brand-dim);color:var(--brand-light);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* ── Section ── */
+.section{margin-bottom:16px}
+.section-card{
+  background:linear-gradient(145deg,var(--surface) 0%,var(--surface-2) 100%);
+  border:1px solid var(--border);border-radius:var(--r);overflow:hidden;
+  position:relative;
+}
+.section-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(59,130,246,.2),transparent);
+}
+.section-card.essential{border-color:var(--brand-border);box-shadow:0 0 20px var(--brand-glow)}
+.section-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px;cursor:pointer;user-select:none;transition:background .15s;
+}
+.section-header:hover{background:var(--surface-hover)}
+.section-header h2{font-size:.82rem;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
+.section-header .chevron{
+  width:16px;height:16px;stroke:var(--text-3);fill:none;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round;transition:transform .2s;
+}
+.section-header.open .chevron{transform:rotate(180deg)}
+.section-body{padding:0 16px 16px;display:none}
+.section-body.open{display:block}
+
+/* ── Form Fields ── */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-grid.full{grid-template-columns:1fr}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-group.span-2{grid-column:1/-1}
+label{font-size:.72rem;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+input[type="text"],input[type="email"],input[type="tel"],input[type="url"],textarea{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-xs);
+  padding:9px 12px;color:var(--text);font-size:.85rem;font-family:inherit;
+  outline:none;transition:border-color .15s;width:100%;
+}
+input:focus,textarea:focus{border-color:var(--brand-border)}
+textarea{resize:vertical;min-height:60px}
+.char-count{font-size:.65rem;color:var(--text-3);text-align:right}
+
+/* ── AI Buttons ── */
+.field-with-ai{display:flex;gap:6px;align-items:flex-start}
+.field-with-ai input,.field-with-ai textarea{flex:1}
+.ai-btn{
+  display:inline-flex;align-items:center;gap:4px;
+  padding:7px 10px;border-radius:var(--r-xs);border:1px solid var(--brand-border);
+  background:var(--brand-dim);color:var(--brand-light);font-size:.72rem;font-weight:600;
+  cursor:pointer;transition:all .15s;white-space:nowrap;flex-shrink:0;
+}
+.ai-btn:hover{background:rgba(59,130,246,.2)}
+.ai-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Selectable Cards (Site Type) ── */
+.card-select{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.sel-card{
+  background:var(--surface-2);border:1.5px solid var(--border);border-radius:var(--r-sm);
+  padding:12px;cursor:pointer;transition:all .15s;text-align:center;
+}
+.sel-card:hover{border-color:var(--border-light);background:var(--surface-hover)}
+.sel-card.active{border-color:var(--brand);background:var(--brand-dim);box-shadow:0 0 12px var(--brand-glow)}
+.sel-card .ic{font-size:1.4rem;margin-bottom:4px}
+.sel-card .nm{font-size:.78rem;font-weight:600;color:var(--text)}
+.sel-card .desc{font-size:.65rem;color:var(--text-3);margin-top:2px}
+
+/* ── Theme Dropdown ── */
+.theme-select{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-xs);
+  padding:9px 12px;color:var(--text);font-size:.85rem;font-family:inherit;
+  outline:none;width:100%;cursor:pointer;appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239498ab' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center;
+}
+.theme-select:focus{border-color:var(--brand-border)}
+.swatch-bar{display:flex;height:20px;border-radius:4px;overflow:hidden;margin-top:6px}
+.swatch-bar>div{flex:1}
+.swatch-labels{display:flex;margin-top:2px}
+.swatch-labels span{flex:1;font-size:.5rem;color:var(--text-3);text-align:center}
+
+/* ── Style Builder Layout ── */
+.style-builder{display:flex;gap:14px;margin-top:12px}
+.style-preview-col{flex:1;min-width:0}
+.style-controls-col{width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:6px}
+@media(max-width:700px){.style-builder{flex-direction:column}.style-controls-col{width:100%}}
+
+/* ── Live Preview ── */
+.preview-frame{
+  border:1px solid var(--border);border-radius:var(--r);overflow:hidden;
+  background:#fff;transition:all .3s;position:sticky;top:80px;
+}
+.pv-nav{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;transition:all .3s}
+.pv-logo{font-size:.8rem;font-weight:700;letter-spacing:-.02em}
+.pv-links{display:flex;gap:10px}
+.pv-links span{font-size:.62rem;font-weight:500;opacity:.8;cursor:default}
+.pv-btn{font-size:.62rem;font-weight:600;padding:5px 12px;border:none;cursor:default;transition:all .3s}
+.pv-hero{padding:22px 14px;text-align:center;transition:all .3s}
+.pv-hero h2{font-size:.95rem;font-weight:800;letter-spacing:-.03em;margin-bottom:3px}
+.pv-hero p{font-size:.65rem;opacity:.7;margin:0 auto 10px}
+.pv-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 14px 14px}
+.pv-card{padding:10px;text-align:center;transition:all .3s}
+.pv-card .pv-card-title{font-size:.68rem;font-weight:700;margin-bottom:2px}
+.pv-card .pv-card-text{font-size:.55rem;opacity:.6;line-height:1.4}
+
+/* ── Style Controls ── */
+.ctrl-group{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xs);
+  padding:8px 10px;
+}
+.ctrl-group-title{font-size:.62rem;font-weight:700;color:var(--brand-light);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+.ctrl-row{display:flex;gap:6px;align-items:center;margin-bottom:5px}
+.ctrl-row:last-child{margin-bottom:0}
+.ctrl-row label{font-size:.62rem;color:var(--text-3);width:68px;flex-shrink:0}
+.ctrl-row select,.ctrl-row input[type="range"]{
+  flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;
+  padding:4px 6px;color:var(--text);font-size:.7rem;font-family:inherit;
+  outline:none;cursor:pointer;min-width:0;
+}
+.ctrl-row select{
+  appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239498ab' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 6px center;padding-right:20px;
+}
+.ctrl-row input[type="range"]{padding:2px 0;background:none;border:none}
+.range-val{font-size:.58rem;color:var(--text-3);width:28px;text-align:right;flex-shrink:0}
+
+/* ── Pill Buttons ── */
+.pill-row{display:flex;flex-wrap:wrap;gap:6px}
+.pill{
+  font-size:.75rem;font-weight:500;padding:6px 14px;border-radius:20px;
+  border:1px solid var(--border);color:var(--text-2);background:var(--surface-2);
+  cursor:pointer;transition:all .15s;
+}
+.pill:hover{border-color:var(--border-light);color:var(--text)}
+.pill.active{background:var(--brand-dim);border-color:var(--brand-border);color:var(--brand-light)}
+
+/* ── Chip Input ── */
+.chip-input-wrap{
+  display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-xs);
+  padding:6px 8px;min-height:38px;cursor:text;transition:border-color .15s;
+}
+.chip-input-wrap:focus-within{border-color:var(--brand-border)}
+.chip{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:.75rem;font-weight:500;padding:3px 8px;border-radius:12px;
+  background:var(--brand-dim);border:1px solid var(--brand-border);color:var(--brand-light);
+}
+.chip .x{cursor:pointer;opacity:.6;font-size:.85em}
+.chip .x:hover{opacity:1}
+.chip-input{
+  background:none;border:none;outline:none;color:var(--text);
+  font-size:.8rem;min-width:80px;flex:1;
+}
+.chip-input::placeholder{color:var(--text-3)}
+
+/* ── Toggle Chips ── */
+.toggle-chip{
+  font-size:.75rem;font-weight:500;padding:6px 12px;border-radius:20px;
+  border:1px solid var(--border);color:var(--text-2);background:var(--surface-2);
+  cursor:pointer;transition:all .15s;user-select:none;
+}
+.toggle-chip:hover{border-color:var(--border-light)}
+.toggle-chip.on{background:var(--brand-dim);border-color:var(--brand-border);color:var(--brand-light)}
+
+/* ── List Input ── */
+.list-items{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.list-item{
+  display:flex;align-items:center;gap:8px;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-xs);padding:8px 10px;
+}
+.list-item input{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:.8rem}
+.list-item .rm{
+  width:20px;height:20px;display:flex;align-items:center;justify-content:center;
+  border:none;background:none;color:var(--text-3);cursor:pointer;font-size:.9rem;
+}
+.list-item .rm:hover{color:var(--red)}
+.add-item-btn{
+  font-size:.75rem;color:var(--brand-light);background:none;border:1px dashed var(--brand-border);
+  border-radius:var(--r-xs);padding:7px 12px;cursor:pointer;width:100%;transition:all .15s;
+}
+.add-item-btn:hover{background:var(--brand-dim)}
+
+/* ── Drop Zone (uploads) ── */
+.drop-zone{
+  border:1.5px dashed var(--border);border-radius:var(--r-sm);
+  padding:20px;text-align:center;cursor:pointer;
+  transition:all .2s;background:var(--surface-2);position:relative;
+}
+.drop-zone:hover,.drop-zone.hover{border-color:var(--brand);background:var(--brand-glow)}
+.drop-zone.small{padding:16px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.drop-zone .dz-label{font-size:.78rem;color:var(--text);font-weight:500}
+.drop-zone .dz-hint{font-size:.65rem;color:var(--text-3)}
+.drop-zone input[type="file"]{display:none}
+.drop-zone.has-img{padding:0;border-style:solid;border-color:var(--brand-border);overflow:hidden}
+.drop-zone.has-img img{width:100%;height:100%;object-fit:cover;display:block}
+.logo-zone{width:120px;height:120px}
+.favicon-zone{width:48px;height:48px}
+.hero-zone{width:100%;min-height:160px}
+.team-zone{width:200px;height:140px}
+
+/* ── Upload Preview Grid ── */
+.upload-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+  gap:8px;margin-top:10px;
+}
+.upload-card{
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-xs);
+  overflow:hidden;
+}
+.upload-card .thumb{aspect-ratio:1;overflow:hidden;background:var(--surface-3)}
+.upload-card .thumb img{width:100%;height:100%;object-fit:cover}
+.upload-card .meta{padding:6px 8px}
+.upload-card .fname{font-size:.68rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.upload-card input{
+  width:100%;background:none;border:none;border-top:1px solid var(--border);
+  padding:4px 8px;font-size:.68rem;color:var(--text-2);outline:none;
+}
+.upload-card .tag-row{display:flex;flex-wrap:wrap;gap:3px;padding:4px 8px}
+.upload-card .tag{
+  font-size:.58rem;padding:2px 6px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--border);color:var(--text-3);transition:all .12s;
+}
+.upload-card .tag.on{background:var(--brand-dim);border-color:var(--brand-border);color:var(--brand-light)}
+
+/* ── Color Picker ── */
+.color-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.color-pick{display:flex;align-items:center;gap:6px}
+.color-pick label{text-transform:none;font-size:.72rem}
+.color-pick input[type="color"]{
+  width:32px;height:32px;border:1px solid var(--border);border-radius:var(--r-xs);
+  background:none;cursor:pointer;padding:2px;
+}
+.reset-link{font-size:.72rem;color:var(--brand-light);cursor:pointer;text-decoration:underline}
+
+/* ── Details toggle ── */
+details{margin-top:8px}
+details summary{
+  font-size:.75rem;color:var(--text-3);cursor:pointer;list-style:none;
+  display:flex;align-items:center;gap:4px;
+}
+details summary::-webkit-details-marker{display:none}
+details[open] summary .arrow{transform:rotate(90deg)}
+.arrow{display:inline-block;transition:transform .15s;font-size:.7rem}
+
+/* ── Action Bar ── */
+.action-bar{
+  position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:rgba(19,20,26,.95);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-top:1px solid var(--border);
+  padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.save-indicator{display:flex;align-items:center;gap:6px;font-size:.72rem;color:var(--text-3)}
+.save-dot{width:6px;height:6px;border-radius:50%;background:var(--text-3);flex-shrink:0;transition:background .3s}
+.save-dot.saving{background:var(--brand);animation:pulse 1s infinite}
+.save-dot.saved{background:var(--green)}
+.save-dot.error{background:var(--red)}
+.action-buttons{display:flex;gap:8px}
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:9px 18px;border-radius:var(--r-sm);border:1px solid var(--border);
+  background:var(--surface);color:var(--text);font-size:.8rem;font-weight:600;
+  cursor:pointer;transition:all .15s;font-family:inherit;
+}
+.btn:hover{border-color:var(--border-light);background:var(--surface-hover)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 4px 12px rgba(59,130,246,.25)}
+.btn.primary:hover{background:#2563eb;box-shadow:0 6px 20px rgba(59,130,246,.35)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+
+/* ── Toast ── */
+.toast{
+  position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(60px);
+  background:var(--surface-3);border:1px solid var(--border);color:var(--text);
+  padding:8px 18px;border-radius:var(--r-sm);font-size:.78rem;font-weight:500;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);transition:transform .25s;z-index:300;pointer-events:none;
+}
+.toast.on{transform:translateX(-50%) translateY(0)}
+
+/* ── Responsive ── */
+@media(max-width:768px){
+  .form-grid{grid-template-columns:1fr}
+  .form-group.span-2{grid-column:auto}
+  .card-select{grid-template-columns:1fr 1fr}
+  .theme-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .page-header{flex-wrap:wrap}
+}
+@media(max-width:480px){
+  .card-select{grid-template-columns:1fr}
+  .theme-grid{grid-template-columns:1fr 1fr}
+  .action-buttons{flex-direction:column;width:100%}
+  .action-buttons .btn{justify-content:center}
+  .action-bar{flex-direction:column;align-items:stretch}
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ═══════════ SECTION 1: HEADER ═══════════ -->
+<div class="page-header">
+  <div class="hdr-left">
+    <div class="hdr-icon"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+    <div>
+      <div class="hdr-title">Website Setup</div>
+      <div class="hdr-sub">Fill in what you know. AI handles the rest.</div>
+    </div>
+  </div>
+  <span class="status-badge draft" id="statusBadge">Draft</span>
+</div>
+
+<!-- ═══════════ SECTION 2: THE ESSENTIALS ═══════════ -->
+<div class="section">
+  <div class="section-card essential">
+    <div class="section-header open" onclick="toggleSection(this)">
+      <h2>The Essentials</h2>
+      <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="section-body open">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Business Name *</label>
+          <div class="field-with-ai">
+            <input type="text" id="f-businessName" data-field="basics.businessName" placeholder="e.g. Acme Roofing">
+            <button class="ai-btn" onclick="aiEnhance('businessName',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Enhance</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Domain</label>
+          <input type="text" id="f-domain" data-field="basics.domain" placeholder="e.g. acmeroofing.com">
+        </div>
+        <div class="form-group">
+          <label>Industry / Niche *</label>
+          <div class="field-with-ai">
+            <input type="text" id="f-industry" data-field="basics.industry" placeholder="e.g. Residential Roofing">
+            <button class="ai-btn" onclick="aiSuggest('industry',event)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Suggest</button>
+          </div>
+        </div>
+        <div class="form-group span-2">
+          <label>One-Line Description * <span class="char-count" id="descCount">0/160</span></label>
+          <div class="field-with-ai">
+            <textarea id="f-description" data-field="basics.description" rows="2" maxlength="160" placeholder="What does this business do? One sentence." oninput="updDescCount()"></textarea>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <button class="ai-btn" onclick="aiGenerate('description',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+              <button class="ai-btn" onclick="aiEnhance('description',event)"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Enhance</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-group span-2">
+          <label>Site Type *</label>
+          <div class="card-select" id="siteTypeCards">
+            <div class="sel-card" data-val="local-service" onclick="selectCard(this,'siteType')">
+              <div class="ic">&#128222;</div><div class="nm">Local Service</div><div class="desc">Contractor / local SEO</div>
+            </div>
+            <div class="sel-card" data-val="ecommerce" onclick="selectCard(this,'siteType')">
+              <div class="ic">&#128722;</div><div class="nm">E-Commerce</div><div class="desc">Merch / national + global SEO</div>
+            </div>
+            <div class="sel-card" data-val="portfolio" onclick="selectCard(this,'siteType')">
+              <div class="ic">&#128100;</div><div class="nm">Portfolio</div><div class="desc">Personal / author brand SEO</div>
+            </div>
+            <div class="sel-card" data-val="webapp" onclick="selectCard(this,'siteType')">
+              <div class="ic">&#128187;</div><div class="nm">Web App</div><div class="desc">SaaS / interactive tool</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 3: BRANDING & STYLE ═══════════ -->
+<div class="section">
+  <div class="section-card">
+    <div class="section-header open" onclick="toggleSection(this)">
+      <h2>Branding &amp; Style</h2>
+      <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="section-body open">
+
+      <!-- Theme Dropdown + Color Pickers -->
+      <div class="form-grid">
+        <div class="form-group span-2">
+          <label>Color Theme</label>
+          <select class="theme-select" id="themeSelect" onchange="selectTheme(this.value)">
+            <option value="">-- Pick a theme --</option>
+          </select>
+          <div class="swatch-bar" id="swatchBar"><div></div><div></div><div></div><div></div></div>
+          <div class="swatch-labels"><span>Primary</span><span>Secondary</span><span>Accent</span><span>Background</span></div>
+        </div>
+      </div>
+
+      <!-- Color Pickers (always visible) -->
+      <div style="margin-top:10px">
+        <div class="color-row">
+          <div class="color-pick"><label>Primary</label><input type="color" id="f-colorPrimary" value="#4F46E5" oninput="setCustomColor('primary',this.value)"></div>
+          <div class="color-pick"><label>Secondary</label><input type="color" id="f-colorSecondary" value="#0F172A" oninput="setCustomColor('secondary',this.value)"></div>
+          <div class="color-pick"><label>Accent</label><input type="color" id="f-colorAccent" value="#F59E0B" oninput="setCustomColor('accent',this.value)"></div>
+          <div class="color-pick"><label>Background</label><input type="color" id="f-colorBg" value="#F8FAFC" oninput="setCustomColor('background',this.value)"></div>
+        </div>
+      </div>
+
+      <!-- Style Builder: Preview + Controls side by side -->
+      <div class="style-builder">
+        <div class="style-preview-col">
+          <div class="preview-frame" id="previewFrame">
+            <div class="pv-nav" id="pvNav">
+              <div class="pv-logo" id="pvLogo">Business Name</div>
+              <div class="pv-links"><span>Home</span><span>Services</span><span>About</span><span>Contact</span></div>
+              <div class="pv-btn" id="pvCta">Get a Quote</div>
+            </div>
+            <div class="pv-hero" id="pvHero">
+              <h2 id="pvHeadline">Your Headline Goes Here</h2>
+              <p id="pvSubtext">A short description of what you do and why customers should choose you.</p>
+              <div class="pv-btn" id="pvHeroCta" style="display:inline-block">Call to Action</div>
+            </div>
+            <div class="pv-cards" id="pvCards">
+              <div class="pv-card" id="pvCard1"><div class="pv-card-title">Service One</div><div class="pv-card-text">Brief description of this offering.</div></div>
+              <div class="pv-card" id="pvCard2"><div class="pv-card-title">Service Two</div><div class="pv-card-text">Brief description of this offering.</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="style-controls-col">
+
+          <!-- Fonts -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Typography</div>
+            <div class="ctrl-row"><label>Headings</label><select id="f-fontHeading" onchange="setStyle('fontHeading',this.value)"><option value="system-ui, sans-serif">System Default</option><option value="'Inter', sans-serif">Inter</option><option value="'Poppins', sans-serif">Poppins</option><option value="'Montserrat', sans-serif">Montserrat</option><option value="'Playfair Display', serif">Playfair Display</option><option value="'Merriweather', serif">Merriweather</option><option value="'Roboto Slab', serif">Roboto Slab</option><option value="'Space Grotesk', sans-serif">Space Grotesk</option><option value="'DM Sans', sans-serif">DM Sans</option></select></div>
+            <div class="ctrl-row"><label>Body</label><select id="f-fontBody" onchange="setStyle('fontBody',this.value)"><option value="system-ui, sans-serif">System Default</option><option value="'Inter', sans-serif">Inter</option><option value="'Open Sans', sans-serif">Open Sans</option><option value="'Lato', sans-serif">Lato</option><option value="'Nunito', sans-serif">Nunito</option><option value="'DM Sans', sans-serif">DM Sans</option><option value="'IBM Plex Sans', sans-serif">IBM Plex Sans</option></select></div>
+            <div class="ctrl-row"><label>Weight</label><select id="f-fontWeight" onchange="setStyle('fontWeight',this.value)"><option value="normal">Normal</option><option value="bold" selected>Bold</option><option value="extra">Extra Bold</option><option value="light">Light</option></select></div>
+            <div class="ctrl-row"><label>Style</label><select id="f-fontStyle" onchange="setStyle('fontStyle',this.value)"><option value="none" selected>None</option><option value="shadow">Shadow</option><option value="outline">Outline</option><option value="glow">Glow</option></select></div>
+          </div>
+
+          <!-- Navigation -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Navigation</div>
+            <div class="ctrl-row"><label>Corners</label><select id="f-navRadius" onchange="setStyle('navRadius',this.value)"><option value="0">Square</option><option value="6">Slight</option><option value="12" selected>Rounded</option><option value="24">Pill</option></select></div>
+            <div class="ctrl-row"><label>Shadow</label><select id="f-navShadow" onchange="setStyle('navShadow',this.value)"><option value="none">None</option><option value="sm" selected>Subtle</option><option value="lg">Strong</option></select></div>
+            <div class="ctrl-row"><label>Glow</label><select id="f-navGlow" onchange="setStyle('navGlow',this.value)"><option value="none" selected>None</option><option value="soft">Soft</option><option value="bright">Bright</option></select></div>
+            <div class="ctrl-row"><label>Transparency</label><input type="range" id="f-navOpacity" min="70" max="100" value="100" oninput="setStyle('navOpacity',this.value)"><span class="range-val" id="navOpacityVal">100%</span></div>
+          </div>
+
+          <!-- Buttons -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Buttons</div>
+            <div class="ctrl-row"><label>Fill</label><select id="f-btnFill" onchange="setStyle('btnFill',this.value)"><option value="filled" selected>Filled</option><option value="outline">Outline</option><option value="ghost">Ghost</option><option value="gradient">Gradient</option></select></div>
+            <div class="ctrl-row"><label>Corners</label><select id="f-btnRadius" onchange="setStyle('btnRadius',this.value)"><option value="0">Square</option><option value="6" selected>Rounded</option><option value="12">More Rounded</option><option value="50">Pill</option></select></div>
+            <div class="ctrl-row"><label>Shadow</label><select id="f-btnShadow" onchange="setStyle('btnShadow',this.value)"><option value="none" selected>None</option><option value="sm">Subtle</option><option value="lg">Strong</option></select></div>
+            <div class="ctrl-row"><label>Glow</label><select id="f-btnGlow" onchange="setStyle('btnGlow',this.value)"><option value="none" selected>None</option><option value="soft">Soft</option><option value="bright">Bright</option></select></div>
+            <div class="ctrl-row"><label>Border</label><input type="range" id="f-btnBorder" min="0" max="4" value="0" oninput="setStyle('btnBorder',this.value)"><span class="range-val" id="btnBorderVal">0px</span></div>
+          </div>
+
+          <!-- Cards / Containers -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Cards / Containers</div>
+            <div class="ctrl-row"><label>Corners</label><select id="f-cardRadius" onchange="setStyle('cardRadius',this.value)"><option value="0">Square</option><option value="6">Slight</option><option value="12" selected>Rounded</option><option value="20">Very Round</option></select></div>
+            <div class="ctrl-row"><label>Shadow</label><select id="f-cardShadow" onchange="setStyle('cardShadow',this.value)"><option value="none">None</option><option value="sm" selected>Subtle</option><option value="md">Medium</option><option value="lg">Strong</option><option value="xl">Dramatic</option></select></div>
+            <div class="ctrl-row"><label>Glow</label><select id="f-cardGlow" onchange="setStyle('cardGlow',this.value)"><option value="none" selected>None</option><option value="soft">Soft</option><option value="bright">Bright</option></select></div>
+            <div class="ctrl-row"><label>Inner Glow</label><select id="f-cardInnerGlow" onchange="setStyle('cardInnerGlow',this.value)"><option value="none" selected>None</option><option value="soft">Soft</option><option value="bright">Bright</option></select></div>
+            <div class="ctrl-row"><label>Border</label><input type="range" id="f-cardBorder" min="0" max="4" value="1" oninput="setStyle('cardBorder',this.value)"><span class="range-val" id="cardBorderVal">1px</span></div>
+            <div class="ctrl-row"><label>Transparency</label><input type="range" id="f-cardOpacity" min="50" max="100" value="100" oninput="setStyle('cardOpacity',this.value)"><span class="range-val" id="cardOpacityVal">100%</span></div>
+            <div class="ctrl-row"><label>Glass</label><select id="f-cardGlass" onchange="setStyle('cardGlass',this.value)"><option value="none" selected>None</option><option value="light">Light</option><option value="heavy">Heavy</option></select></div>
+          </div>
+
+          <!-- Page / Layout -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Page Layout</div>
+            <div class="ctrl-row"><label>Max Width</label><select id="f-pageWidth" onchange="setStyle('pageWidth',this.value)"><option value="narrow">Narrow (960px)</option><option value="standard" selected>Standard (1200px)</option><option value="wide">Wide (1400px)</option><option value="full">Full Width</option></select></div>
+            <div class="ctrl-row"><label>Spacing</label><select id="f-spacing" onchange="setStyle('spacing',this.value)"><option value="tight">Tight</option><option value="normal" selected>Normal</option><option value="airy">Airy</option><option value="spacious">Spacious</option></select></div>
+            <div class="ctrl-row"><label>Animations</label><select id="f-animations" onchange="setStyle('animations',this.value)"><option value="none">None</option><option value="subtle" selected>Subtle</option><option value="smooth">Smooth</option><option value="playful">Playful</option></select></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Tone -->
+      <label style="margin:14px 0 6px;display:block">Tone</label>
+      <div class="pill-row" id="tonePills">
+        <span class="pill" data-val="professional" onclick="selectPill(this,'tone')">Professional</span>
+        <span class="pill" data-val="friendly" onclick="selectPill(this,'tone')">Friendly</span>
+        <span class="pill" data-val="bold" onclick="selectPill(this,'tone')">Bold</span>
+        <span class="pill" data-val="playful" onclick="selectPill(this,'tone')">Playful</span>
+        <span class="pill" data-val="luxury" onclick="selectPill(this,'tone')">Luxury</span>
+        <span class="pill" data-val="technical" onclick="selectPill(this,'tone')">Technical</span>
+      </div>
+
+      <!-- Logo / Favicon -->
+      <div style="display:flex;gap:16px;margin-top:14px;flex-wrap:wrap;align-items:flex-start">
+        <div>
+          <label style="margin-bottom:6px;display:block">Logo</label>
+          <div class="drop-zone small logo-zone" id="logoZone" onclick="document.getElementById('logoFile').click()">
+            <span class="dz-label">Drop logo</span><span class="dz-hint">120x120</span>
+            <input type="file" id="logoFile" accept="image/*" onchange="handleUpload('logo',this.files[0])">
+          </div>
+        </div>
+        <div>
+          <label style="margin-bottom:6px;display:block">Favicon</label>
+          <div class="drop-zone small favicon-zone" id="faviconZone" onclick="document.getElementById('faviconFile').click()">
+            <span class="dz-label">+</span>
+            <input type="file" id="faviconFile" accept="image/*" onchange="handleUpload('favicon',this.files[0])">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 4: KEY IMAGES ═══════════ -->
+<div class="section">
+  <div class="section-card">
+    <div class="section-header open" onclick="toggleSection(this)">
+      <h2>Key Images</h2>
+      <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="section-body open">
+      <label style="margin-bottom:6px;display:block">Hero Image</label>
+      <div class="drop-zone hero-zone" id="heroZone" onclick="document.getElementById('heroFile').click()">
+        <span class="dz-label">Drop hero image here</span><span class="dz-hint">Main banner image</span>
+        <input type="file" id="heroFile" accept="image/*" onchange="handleUpload('hero',this.files[0])">
+      </div>
+      <div class="form-group" style="margin-top:8px">
+        <div class="field-with-ai">
+          <textarea id="f-heroNotes" data-field="images.hero.notes" rows="2" placeholder="How should this image be used? Any context for the AI..."></textarea>
+          <button class="ai-btn" onclick="aiEnhance('heroNotes',event)"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Enhance</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label style="margin-bottom:6px;display:block">Team Photo (optional)</label>
+        <div class="drop-zone small team-zone" id="teamZone" onclick="document.getElementById('teamFile').click()">
+          <span class="dz-label">Drop team photo</span><span class="dz-hint">Optional</span>
+          <input type="file" id="teamFile" accept="image/*" onchange="handleUpload('team',this.files[0])">
+        </div>
+      </div>
+
+      <details style="margin-top:12px">
+        <summary><span class="arrow">&#9654;</span> Add More Images</summary>
+        <div style="padding-top:10px">
+          <div class="drop-zone" id="bulkZone" onclick="document.getElementById('bulkFiles').click()">
+            <span class="dz-label">Drop additional images here</span>
+            <span class="dz-hint">Service photos, gallery images, backgrounds</span>
+            <input type="file" id="bulkFiles" accept="image/*" multiple onchange="handleBulkUpload(this.files)">
+          </div>
+          <div class="upload-grid" id="galleryGrid"></div>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 5: COMPANY INFO ═══════════ -->
+<div class="section">
+  <div class="section-card">
+    <div class="section-header open" onclick="toggleSection(this)">
+      <h2>Company Info</h2>
+      <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="section-body open">
+      <div class="form-grid">
+        <div class="form-group"><label>Phone</label><input type="tel" id="f-phone" data-field="basics.phone" placeholder="(555) 123-4567"></div>
+        <div class="form-group"><label>Email</label><input type="email" id="f-email" data-field="basics.email" placeholder="info@business.com"></div>
+        <div class="form-group span-2"><label>Address</label><input type="text" id="f-address" data-field="basics.address" placeholder="123 Main St, City, State ZIP"></div>
+        <div class="form-group span-2">
+          <label>About the Business</label>
+          <div class="field-with-ai">
+            <textarea id="f-aboutBusiness" data-field="basics.about" rows="3" placeholder="What does the business do? History, mission, what makes it different..."></textarea>
+            <button class="ai-btn" onclick="aiGenerate('aboutBusiness',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+          </div>
+        </div>
+        <div class="form-group"><label>Owner / Contact Name</label><input type="text" id="f-ownerName" data-field="basics.ownerName" placeholder="e.g. John Smith"></div>
+        <div class="form-group"><label>Years in Business</label><input type="text" id="f-yearsInBusiness" data-field="basics.yearsInBusiness" placeholder="e.g. 15"></div>
+        <div class="form-group"><label>License / Certification</label><input type="text" id="f-license" data-field="basics.license" placeholder="e.g. ROC #123456, Licensed & Insured"></div>
+        <div class="form-group"><label>Google Business Profile URL</label><input type="url" id="f-gbpUrl" data-field="basics.gbpUrl" placeholder="https://g.page/your-business"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 5B: SERVICES, AREAS & TOPICS ═══════════ -->
+<div class="section">
+  <div class="section-card">
+    <div class="section-header open" onclick="toggleSection(this)">
+      <h2>Services, Areas &amp; Topics</h2>
+      <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="section-body open">
+      <div class="form-group">
+        <label>Services Offered</label>
+        <div class="field-with-ai">
+          <div class="chip-input-wrap" id="servicesChips" onclick="this.querySelector('input').focus()">
+            <input type="text" class="chip-input" placeholder="Type a service + Enter" onkeydown="chipKey(event,'services')">
+          </div>
+          <button class="ai-btn" onclick="aiGenerate('services',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:10px">
+        <label>Target Areas / Cities</label>
+        <div class="field-with-ai">
+          <div class="chip-input-wrap" id="targetMarketsChips" onclick="this.querySelector('input').focus()">
+            <input type="text" class="chip-input" placeholder="City, State + Enter" onkeydown="chipKey(event,'targetMarkets')">
+          </div>
+          <button class="ai-btn" onclick="aiGenerate('targetMarkets',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:10px">
+        <label>Topics to Cover</label>
+        <div class="field-with-ai">
+          <div class="chip-input-wrap" id="topicsChips" onclick="this.querySelector('input').focus()">
+            <input type="text" class="chip-input" placeholder="Blog/content topic + Enter" onkeydown="chipKey(event,'topics')">
+          </div>
+          <button class="ai-btn" onclick="aiGenerate('topics',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+        </div>
+      </div>
+
+      <label style="margin:12px 0 6px;display:block">Geographic Scope</label>
+      <div class="pill-row" id="geoPills">
+        <span class="pill" data-val="local" onclick="selectPill(this,'geo')">Local</span>
+        <span class="pill" data-val="regional" onclick="selectPill(this,'geo')">Regional</span>
+        <span class="pill" data-val="statewide" onclick="selectPill(this,'geo')">Statewide</span>
+        <span class="pill" data-val="nationwide" onclick="selectPill(this,'geo')">Nationwide</span>
+        <span class="pill" data-val="worldwide" onclick="selectPill(this,'geo')">Worldwide</span>
+      </div>
+
+      <div class="form-group" style="margin-top:12px">
+        <label>Ideal Customer</label>
+        <div class="field-with-ai">
+          <textarea id="f-idealCustomer" data-field="targetAudience.idealCustomer" rows="3" placeholder="Who is the perfect customer? Age, profession, problem they're solving..."></textarea>
+          <button class="ai-btn" onclick="aiGenerate('idealCustomer',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:10px">
+        <label>Primary Call-to-Action</label>
+        <div class="field-with-ai">
+          <input type="text" id="f-primaryCTA" data-field="siteConfig.primaryCTA" placeholder="e.g. Get a Free Quote">
+          <button class="ai-btn" onclick="aiSuggest('primaryCTA',event)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Suggest</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 6: SEO & COMPETITION ═══════════ -->
+<div class="section">
+  <div class="section-card">
+    <div class="section-header" onclick="toggleSection(this)">
+      <h2>SEO &amp; Competition</h2>
+      <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="section-body">
+      <div class="form-group">
+        <label>Primary Keywords</label>
+        <div class="field-with-ai">
+          <div class="chip-input-wrap" id="keywordsChips" onclick="this.querySelector('input').focus()">
+            <input type="text" class="chip-input" placeholder="Keyword + Enter" onkeydown="chipKey(event,'keywords')">
+          </div>
+          <button class="ai-btn" onclick="aiGenerate('keywords',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:10px">
+        <label>Competitor URLs</label>
+        <div class="list-items" id="competitorsList"></div>
+        <button class="add-item-btn" onclick="addListItem('competitors')">+ Add competitor URL</button>
+      </div>
+
+      <div class="form-group" style="margin-top:10px">
+        <label>Reference Sites (sites you like)</label>
+        <div class="list-items" id="referencesList"></div>
+        <button class="add-item-btn" onclick="addListItem('references')">+ Add reference site</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 7: PAGES & FEATURES ═══════════ -->
+<div class="section">
+  <div class="section-card">
+    <div class="section-header" onclick="toggleSection(this)">
+      <h2>Pages &amp; Features</h2>
+      <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="section-body">
+      <label style="margin-bottom:6px;display:block">Pages</label>
+      <div class="pill-row" id="pagesRow"></div>
+
+      <label style="margin:14px 0 6px;display:block">Special Features</label>
+      <div class="pill-row" id="featuresRow"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ SECTION 8: ADDITIONAL NOTES ═══════════ -->
+<div class="section">
+  <div class="section-card">
+    <div class="section-header open" onclick="toggleSection(this)">
+      <h2>Additional Notes</h2>
+      <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="section-body open">
+      <div class="field-with-ai">
+        <textarea id="f-notes" data-field="notes" rows="6" placeholder="Anything else the AI should know? Special requirements, brand guidelines, content you already have..."></textarea>
+        <button class="ai-btn" onclick="aiEnhance('notes',event)"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Enhance</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<!-- ═══════════ SECTION 9: ACTION BAR ═══════════ -->
+<div class="action-bar">
+  <div class="save-indicator">
+    <span class="save-dot" id="saveDot"></span>
+    <span id="saveLabel">All changes saved</span>
+  </div>
+  <div class="action-buttons">
+    <button class="btn" onclick="saveNow()">Save Draft</button>
+    <button class="btn primary" id="startResearchBtn" disabled onclick="startResearch()">Start Research</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>{const d=document.createElement('div');d.textContent=s;return d.innerHTML};
+
+// ── Theme Definitions ──
+// Real palettes sourced from brand design systems + Tailwind/Material defaults
+// [primary, secondary, accent, background]
+const THEMES = [
+  {id:'stripe',name:'Stripe',sub:'SaaS, fintech, dev tools',colors:['#635BFF','#0A2540','#00D4AA','#F6F9FC']},
+  {id:'tailwind-indigo',name:'Tailwind Indigo',sub:'Dashboards, B2B apps',colors:['#4F46E5','#0F172A','#F59E0B','#F8FAFC']},
+  {id:'material-blue',name:'Material Blue',sub:'Enterprise, corporate',colors:['#1976D2','#424242','#FF9800','#FAFAFA']},
+  {id:'airbnb',name:'Airbnb Coral',sub:'Marketplaces, lifestyle',colors:['#FF5A5F','#484848','#00A699','#FFFFFF']},
+  {id:'shopify',name:'Shopify Green',sub:'E-commerce, retail',colors:['#95BF47','#5E8E3E','#F49342','#F4F6F8']},
+  {id:'supabase-dark',name:'Supabase Dark',sub:'Dev tools, dark theme',colors:['#3ECF8E','#1C1C1C','#6EE7B7','#111827']},
+  {id:'hubspot',name:'HubSpot Warm',sub:'Marketing, CRM, lead gen',colors:['#FF7A59','#33475B','#00BDA5','#F5F8FA']},
+  {id:'tailwind-emerald',name:'Tailwind Emerald',sub:'Health, finance, eco',colors:['#10B981','#1E293B','#F43F5E','#F8FAFC']},
+  {id:'calendly',name:'Calendly Blue',sub:'Scheduling, professional',colors:['#006BFF','#004796','#0AE8F0','#FFFFFF']},
+  {id:'navy-gold',name:'Navy & Gold',sub:'Law, consulting, luxury',colors:['#0A1628','#1E3A5F','#D4A843','#F8F6F2']},
+  {id:'intercom',name:'Intercom Blue',sub:'Support, chat, comms',colors:['#0057FF','#1F2D3D','#47C7F0','#FFFFFF']},
+  {id:'slack',name:'Slack Aubergine',sub:'Collaboration, community',colors:['#4A154B','#1A1D21','#E01E5A','#FFFFFF']},
+];
+
+// ── Data Model ──
+let formData = {
+  basics:{businessName:'',domain:'',industry:'',description:'',phone:'',email:'',address:'',about:'',ownerName:'',yearsInBusiness:'',license:'',gbpUrl:''},
+  branding:{theme:'',customColors:{primary:'',secondary:'',accent:'',background:''},tone:'professional',logoUrl:'',faviconUrl:'',
+    style:{
+      fontHeading:'system-ui, sans-serif',fontBody:'system-ui, sans-serif',fontWeight:'bold',fontStyle:'none',
+      navRadius:'12',navShadow:'sm',navGlow:'none',navOpacity:100,
+      btnFill:'filled',btnRadius:'6',btnShadow:'none',btnGlow:'none',btnBorder:0,
+      cardRadius:'12',cardShadow:'sm',cardGlow:'none',cardInnerGlow:'none',cardBorder:1,cardOpacity:100,cardGlass:'none',
+      pageWidth:'standard',spacing:'normal',animations:'subtle'
+    }},
+  siteConfig:{siteType:'',primaryCTA:'',pages:['home','about','services','contact'],specialFeatures:[]},
+  targetAudience:{idealCustomer:'',geographicScope:'',targetMarkets:[],services:[],topics:[]},
+  seo:{primaryKeywords:[],competitors:[],referenceSites:[]},
+  images:{logo:{url:'',notes:''},hero:{url:'',notes:''},team:{url:'',notes:''},gallery:[]},
+  notes:''
+};
+
+let saveTimer=null, isSaving=false;
+
+// ── Init ──
+function init(){
+  renderThemeDropdown();
+  renderPages();
+  renderFeatures();
+  loadData();
+  setupDragDrop();
+  bindInputs();
+  // Defer preview render until after loadData populates formData
+  setTimeout(()=>{updateSwatchBar();updatePreview()},300);
+}
+
+// ── Section toggle ──
+function toggleSection(hdr){
+  hdr.classList.toggle('open');
+  const body=hdr.nextElementSibling;
+  body.classList.toggle('open');
+}
+
+// ── Theme rendering ──
+// ── Theme dropdown + live preview ──
+function renderThemeDropdown(){
+  const sel=$('themeSelect');
+  sel.innerHTML='<option value="">-- Pick a theme --</option>'+
+    THEMES.map(t=>`<option value="${t.id}"${formData.branding.theme===t.id?' selected':''}>${t.name} — ${t.sub}</option>`).join('');
+}
+
+function selectTheme(id){
+  formData.branding.theme=id;
+  const t=THEMES.find(x=>x.id===id);
+  if(t){
+    $('f-colorPrimary').value=t.colors[0];
+    $('f-colorSecondary').value=t.colors[1];
+    $('f-colorAccent').value=t.colors[2];
+    $('f-colorBg').value=t.colors[3];
+    formData.branding.customColors={primary:'',secondary:'',accent:'',background:''};
+  }
+  updateSwatchBar();
+  updatePreview();
+  scheduleSave();
+}
+
+function getColors(){
+  const c=formData.branding.customColors;
+  const t=THEMES.find(x=>x.id===formData.branding.theme);
+  return{
+    primary:c.primary||t?.colors[0]||'#4F46E5',
+    secondary:c.secondary||t?.colors[1]||'#0F172A',
+    accent:c.accent||t?.colors[2]||'#F59E0B',
+    bg:c.background||t?.colors[3]||'#F8FAFC'
+  };
+}
+
+function updateSwatchBar(){
+  const cl=getColors();
+  const bar=$('swatchBar');
+  bar.children[0].style.background=cl.primary;
+  bar.children[1].style.background=cl.secondary;
+  bar.children[2].style.background=cl.accent;
+  bar.children[3].style.background=cl.bg;
+}
+
+// ── Style controls ──
+function setStyle(prop,val){
+  const intProps=['navOpacity','cardOpacity','cardBorder','btnBorder'];
+  formData.branding.style[prop]=intProps.includes(prop)?parseInt(val):val;
+  // Update range labels
+  if(prop==='navOpacity')$('navOpacityVal').textContent=val+'%';
+  if(prop==='btnBorder')$('btnBorderVal').textContent=val+'px';
+  if(prop==='cardBorder')$('cardBorderVal').textContent=val+'px';
+  if(prop==='cardOpacity')$('cardOpacityVal').textContent=val+'%';
+  updatePreview();
+  scheduleSave();
+}
+
+// ── Helpers ──
+function textOn(hex){
+  const c=(hex||'#ffffff').replace('#','');
+  const lum=(parseInt(c.substr(0,2),16)*299+parseInt(c.substr(2,2),16)*587+parseInt(c.substr(4,2),16)*114)/1000;
+  return lum>140?'#1a1a2e':'#ffffff';
+}
+function alpha(hex,a){const c=(hex||'#000000').replace('#','');return`rgba(${parseInt(c.substr(0,2),16)},${parseInt(c.substr(2,2),16)},${parseInt(c.substr(4,2),16)},${a})`}
+function shadowCSS(level,color){
+  const c=color||'0,0,0';
+  const m={none:'none',sm:`0 1px 4px rgba(${c},.1)`,md:`0 4px 12px rgba(${c},.12)`,lg:`0 8px 24px rgba(${c},.18)`,xl:`0 16px 48px rgba(${c},.25)`};
+  return m[level]||'none';
+}
+function glowCSS(level,hex){
+  if(level==='none'||!hex)return'';
+  const c=hex.replace('#','');
+  const r=parseInt(c.substr(0,2),16),g=parseInt(c.substr(2,2),16),b=parseInt(c.substr(4,2),16);
+  if(level==='soft')return`0 0 15px rgba(${r},${g},${b},.25)`;
+  return`0 0 25px rgba(${r},${g},${b},.5),0 0 8px rgba(${r},${g},${b},.3)`;
+}
+
+// ── Live preview ──
+function updatePreview(){
+  const cl=getColors();
+  const s=formData.branding.style||{};
+  const fH=s.fontHeading||'system-ui, sans-serif';
+  const fB=s.fontBody||'system-ui, sans-serif';
+  const hW=s.fontWeight==='extra'?900:s.fontWeight==='light'?300:s.fontWeight==='bold'?700:400;
+
+  const textPri=textOn(cl.bg);
+  const textSec=alpha(textPri,.6);
+
+  // Font style (heading text effects)
+  let headingExtra='';
+  if(s.fontStyle==='shadow')headingExtra='text-shadow:2px 2px 4px rgba(0,0,0,.3);';
+  else if(s.fontStyle==='outline')headingExtra=`-webkit-text-stroke:1px ${textPri};color:transparent;`;
+  else if(s.fontStyle==='glow')headingExtra=`text-shadow:0 0 10px ${cl.primary},0 0 20px ${alpha(cl.primary,.4)};`;
+
+  // ── Nav ──
+  const navR=s.navRadius||'12';
+  let navSh=[shadowCSS(s.navShadow||'sm'),glowCSS(s.navGlow||'none',cl.secondary)].filter(x=>x&&x!=='none').join(',')||'none';
+  const navAlpha=(s.navOpacity??100)/100;
+
+  const frame=$('previewFrame');
+  frame.style.cssText=`border:1px solid ${alpha(cl.secondary,.15)};border-radius:${navR}px;overflow:hidden;background:${cl.bg}`;
+
+  const nav=$('pvNav');
+  nav.style.cssText=`display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:${alpha(cl.secondary,navAlpha)};font-family:${fB};box-shadow:${navSh}`;
+  $('pvLogo').style.cssText=`font-family:${fH};color:${textOn(cl.secondary)};font-size:.8rem;font-weight:${hW}`;
+  $('pvLogo').textContent=formData.basics.businessName||'Business Name';
+  nav.querySelectorAll('.pv-links span').forEach(sp=>sp.style.color=alpha(textOn(cl.secondary),.7));
+
+  // ── Buttons ──
+  function btnCSS(bgColor){
+    const br=(s.btnRadius||'6')+'px';
+    const fill=s.btnFill||'filled';
+    const bw=(s.btnBorder||0)+'px';
+    let sh=[shadowCSS(s.btnShadow||'none'),glowCSS(s.btnGlow||'none',bgColor)].filter(x=>x&&x!=='none').join(',')||'none';
+    let css=`border-radius:${br};padding:5px 12px;box-shadow:${sh};cursor:default;`;
+    if(fill==='outline')css+=`background:transparent;color:${bgColor};border:${Math.max(parseInt(bw),2)}px solid ${bgColor};`;
+    else if(fill==='ghost')css+=`background:${alpha(bgColor,.1)};color:${bgColor};border:none;`;
+    else if(fill==='gradient')css+=`background:linear-gradient(135deg,${bgColor},${alpha(bgColor,.7)});color:${textOn(bgColor)};border:${bw} solid transparent;`;
+    else css+=`background:${bgColor};color:${textOn(bgColor)};border:${bw} solid ${alpha(bgColor,.3)};`;
+    return css;
+  }
+  $('pvCta').style.cssText=btnCSS(cl.accent)+';font-size:.62rem;font-weight:600';
+  $('pvHeroCta').style.cssText=btnCSS(cl.primary)+';font-size:.68rem;font-weight:600;display:inline-block';
+  $('pvHeroCta').textContent=formData.siteConfig.primaryCTA||'Call to Action';
+
+  // ── Hero ──
+  const hero=$('pvHero');
+  hero.style.cssText=`padding:22px 14px;text-align:center;background:${cl.bg};font-family:${fB}`;
+  $('pvHeadline').style.cssText=`font-family:${fH};color:${textPri};font-size:.95rem;font-weight:${hW};letter-spacing:-.03em;margin-bottom:3px;${headingExtra}`;
+  $('pvSubtext').style.cssText=`font-size:.65rem;color:${textSec};margin:0 auto 10px`;
+
+  // ── Cards ──
+  const cR=(s.cardRadius||'12')+'px';
+  const cBw=(s.cardBorder??1)+'px';
+  const cAlpha=(s.cardOpacity??100)/100;
+  let cSh=[shadowCSS(s.cardShadow||'sm'),glowCSS(s.cardGlow||'none',cl.primary)].filter(x=>x&&x!=='none').join(',')||'none';
+  let innerGlow='';
+  if(s.cardInnerGlow==='soft')innerGlow=`inset 0 0 12px ${alpha(cl.primary,.08)}`;
+  else if(s.cardInnerGlow==='bright')innerGlow=`inset 0 0 20px ${alpha(cl.primary,.18)}`;
+  if(innerGlow)cSh=cSh==='none'?innerGlow:cSh+','+innerGlow;
+  let glass='';
+  if(s.cardGlass==='light')glass='backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
+  else if(s.cardGlass==='heavy')glass='backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);';
+  const cardBg=cAlpha<1?alpha(cl.bg,cAlpha):cl.bg;
+
+  const cards=$('pvCards');
+  cards.style.cssText=`display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 14px 14px;background:${cl.bg}`;
+  const svcNames=(formData.targetAudience.services||[]).slice(0,2);
+  ['pvCard1','pvCard2'].forEach((id,i)=>{
+    const card=$(id);
+    card.style.cssText=`border-radius:${cR};padding:10px;text-align:center;background:${cardBg};border:${cBw} solid ${alpha(cl.secondary,.12)};box-shadow:${cSh};${glass}`;
+    card.querySelector('.pv-card-title').style.cssText=`font-family:${fH};color:${textPri};font-size:.68rem;font-weight:${hW};margin-bottom:2px`;
+    card.querySelector('.pv-card-title').textContent=svcNames[i]||['Service One','Service Two'][i];
+    card.querySelector('.pv-card-text').style.cssText=`font-size:.55rem;color:${textSec};line-height:1.4`;
+  });
+}
+
+// ── Card selection (site type) ──
+function selectCard(el,field){
+  el.parentElement.querySelectorAll('.sel-card').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  if(field==='siteType') formData.siteConfig.siteType=el.dataset.val;
+  scheduleSave();
+  updateStatus();
+}
+
+// ── Pill selection ──
+function selectPill(el,group){
+  el.parentElement.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  if(group==='tone') formData.branding.tone=el.dataset.val;
+  if(group==='geo') formData.targetAudience.geographicScope=el.dataset.val;
+  scheduleSave();
+}
+
+// ── Pages & Features toggles ──
+const ALL_PAGES=['home','about','services','contact','blog','faq','portfolio','pricing','team','testimonials','service-areas'];
+const ALL_FEATURES=['booking-form','newsletter','e-commerce','gallery','map','live-chat','calculator','social-feed'];
+
+function renderPages(){
+  $('pagesRow').innerHTML=ALL_PAGES.map(p=>{
+    const on=formData.siteConfig.pages.includes(p);
+    return`<span class="toggle-chip${on?' on':''}" data-val="${p}" onclick="togglePage(this)">${p.replace(/-/g,' ')}</span>`;
+  }).join('');
+}
+function togglePage(el){
+  const v=el.dataset.val;
+  el.classList.toggle('on');
+  if(el.classList.contains('on')){if(!formData.siteConfig.pages.includes(v))formData.siteConfig.pages.push(v)}
+  else{formData.siteConfig.pages=formData.siteConfig.pages.filter(x=>x!==v)}
+  scheduleSave();
+}
+
+function renderFeatures(){
+  $('featuresRow').innerHTML=ALL_FEATURES.map(f=>{
+    const on=formData.siteConfig.specialFeatures.includes(f);
+    return`<span class="toggle-chip${on?' on':''}" data-val="${f}" onclick="toggleFeature(this)">${f.replace(/-/g,' ')}</span>`;
+  }).join('');
+}
+function toggleFeature(el){
+  const v=el.dataset.val;
+  el.classList.toggle('on');
+  if(el.classList.contains('on')){if(!formData.siteConfig.specialFeatures.includes(v))formData.siteConfig.specialFeatures.push(v)}
+  else{formData.siteConfig.specialFeatures=formData.siteConfig.specialFeatures.filter(x=>x!==v)}
+  scheduleSave();
+}
+
+// ── Chip inputs ──
+function chipKey(e,field){
+  if(e.key!=='Enter'||!e.target.value.trim())return;
+  e.preventDefault();
+  const val=e.target.value.trim();
+  e.target.value='';
+  let arr;
+  if(field==='services')arr=formData.targetAudience.services;
+  else if(field==='targetMarkets')arr=formData.targetAudience.targetMarkets;
+  else if(field==='keywords')arr=formData.seo.primaryKeywords;
+  else if(field==='topics')arr=formData.targetAudience.topics;
+  else return;
+  if(!arr.includes(val)){arr.push(val);renderChips(field);scheduleSave()}
+}
+function removeChip(field,idx){
+  let arr;
+  if(field==='services')arr=formData.targetAudience.services;
+  else if(field==='targetMarkets')arr=formData.targetAudience.targetMarkets;
+  else if(field==='keywords')arr=formData.seo.primaryKeywords;
+  else if(field==='topics')arr=formData.targetAudience.topics;
+  arr.splice(idx,1);renderChips(field);scheduleSave();
+}
+function renderChips(field){
+  let arr,container;
+  if(field==='services'){arr=formData.targetAudience.services;container=$('servicesChips')}
+  else if(field==='targetMarkets'){arr=formData.targetAudience.targetMarkets;container=$('targetMarketsChips')}
+  else if(field==='keywords'){arr=formData.seo.primaryKeywords;container=$('keywordsChips')}
+  else if(field==='topics'){arr=formData.targetAudience.topics;container=$('topicsChips')}
+  const input=container.querySelector('input');
+  container.querySelectorAll('.chip').forEach(c=>c.remove());
+  arr.forEach((v,i)=>{
+    const c=document.createElement('span');c.className='chip';
+    c.innerHTML=`${esc(v)} <span class="x" onclick="removeChip('${field}',${i})">&times;</span>`;
+    container.insertBefore(c,input);
+  });
+}
+
+// ── List inputs (competitors, references) ──
+function addListItem(type,url='',notes=''){
+  const container=$(type+'List');
+  const div=document.createElement('div');div.className='list-item';
+  if(type==='references'){
+    div.innerHTML=`<input type="url" placeholder="https://example.com" value="${esc(url)}" oninput="updateList('${type}')">
+      <input type="text" placeholder="What do you like?" style="max-width:180px" value="${esc(notes)}" oninput="updateList('${type}')">
+      <button class="rm" onclick="this.parentElement.remove();updateList('${type}')">&times;</button>`;
+  }else{
+    div.innerHTML=`<input type="url" placeholder="https://competitor.com" value="${esc(url)}" oninput="updateList('${type}')">
+      <button class="rm" onclick="this.parentElement.remove();updateList('${type}')">&times;</button>`;
+  }
+  container.appendChild(div);
+  if(!url)div.querySelector('input').focus();
+}
+function updateList(type){
+  const items=$(type+'List').querySelectorAll('.list-item');
+  if(type==='competitors'){
+    formData.seo.competitors=Array.from(items).map(el=>el.querySelector('input').value.trim()).filter(Boolean);
+  }else{
+    formData.seo.referenceSites=Array.from(items).map(el=>{
+      const inputs=el.querySelectorAll('input');
+      return{url:inputs[0].value.trim(),notes:inputs[1]?inputs[1].value.trim():''};
+    }).filter(r=>r.url);
+  }
+  scheduleSave();
+}
+
+// ── Color overrides ──
+function setCustomColor(which,val){
+  formData.branding.customColors[which]=val;
+  updateSwatchBar();updatePreview();scheduleSave();
+}
+function resetColors(){
+  formData.branding.customColors={primary:'',secondary:'',accent:'',background:''};
+  const t=THEMES.find(x=>x.id===formData.branding.theme);
+  $('f-colorPrimary').value=t?.colors[0]||'#4F46E5';
+  $('f-colorSecondary').value=t?.colors[1]||'#0F172A';
+  $('f-colorAccent').value=t?.colors[2]||'#F59E0B';
+  $('f-colorBg').value=t?.colors[3]||'#F8FAFC';
+  updateSwatchBar();updatePreview();scheduleSave();
+}
+
+// ── File uploads ──
+async function handleUpload(type,file){
+  if(!file)return;
+  const fd=new FormData();fd.append('file',file);
+  try{
+    const resp=await authUpload('/api/upload',fd);
+    const r=await resp.json();
+    if(!resp.ok||r.error){toast('Upload failed: '+(r.error||''));return}
+    const url=r.url;
+    if(type==='logo'){formData.images.logo.url=url;showUploadPreview('logoZone',url)}
+    else if(type==='favicon'){formData.branding.faviconUrl=url;showUploadPreview('faviconZone',url)}
+    else if(type==='hero'){formData.images.hero.url=url;showUploadPreview('heroZone',url)}
+    else if(type==='team'){formData.images.team.url=url;showUploadPreview('teamZone',url)}
+    scheduleSave();
+    toast('Uploaded: '+file.name);
+  }catch(e){toast('Upload error: '+e.message)}
+}
+
+function showUploadPreview(zoneId,url){
+  const zone=$(zoneId);
+  zone.classList.add('has-img');
+  const fileInput=zone.querySelector('input[type="file"]');
+  zone.innerHTML='';
+  zone.appendChild(fileInput);
+  const img=document.createElement('img');img.src=url;
+  zone.appendChild(img);
+}
+
+async function handleBulkUpload(files){
+  for(const file of files){
+    const fd=new FormData();fd.append('file',file);
+    try{
+      const resp=await authUpload('/api/upload',fd);
+      const r=await resp.json();
+      if(resp.ok&&r.url){
+        formData.images.gallery.push({url:r.url,name:file.name,notes:'',tags:[]});
+        renderGallery();
+        scheduleSave();
+      }
+    }catch(e){}
+  }
+}
+
+const IMG_TAGS=['hero','service','team','gallery','background'];
+function renderGallery(){
+  const g=$('galleryGrid');
+  g.innerHTML=formData.images.gallery.map((img,i)=>`
+    <div class="upload-card">
+      <div class="thumb"><img src="${img.url}" loading="lazy"></div>
+      <div class="meta"><div class="fname">${esc(img.name||'image')}</div></div>
+      <input type="text" placeholder="Notes..." value="${esc(img.notes||'')}" oninput="formData.images.gallery[${i}].notes=this.value;scheduleSave()">
+      <div class="tag-row">${IMG_TAGS.map(t=>`<span class="tag${(img.tags||[]).includes(t)?' on':''}" onclick="toggleImgTag(${i},'${t}',this)">${t}</span>`).join('')}</div>
+    </div>
+  `).join('');
+}
+function toggleImgTag(idx,tag,el){
+  const img=formData.images.gallery[idx];
+  if(!img.tags)img.tags=[];
+  if(img.tags.includes(tag))img.tags=img.tags.filter(t=>t!==tag);
+  else img.tags.push(tag);
+  el.classList.toggle('on');
+  scheduleSave();
+}
+
+// ── Drag & Drop for all zones ──
+function setupDragDrop(){
+  const zones=[
+    {id:'logoZone',type:'logo'},{id:'faviconZone',type:'favicon'},
+    {id:'heroZone',type:'hero'},{id:'teamZone',type:'team'},{id:'bulkZone',type:'bulk'}
+  ];
+  zones.forEach(({id,type})=>{
+    const el=$(id);if(!el)return;
+    el.addEventListener('dragover',e=>{e.preventDefault();el.classList.add('hover')});
+    el.addEventListener('dragleave',()=>el.classList.remove('hover'));
+    el.addEventListener('drop',e=>{
+      e.preventDefault();el.classList.remove('hover');
+      if(!e.dataTransfer.files.length)return;
+      if(type==='bulk')handleBulkUpload(e.dataTransfer.files);
+      else handleUpload(type,e.dataTransfer.files[0]);
+    });
+  });
+}
+
+// ── Input binding ──
+function bindInputs(){
+  document.querySelectorAll('[data-field]').forEach(el=>{
+    el.addEventListener('input',()=>{
+      setNestedVal(formData,el.dataset.field,el.value);
+      scheduleSave();
+      updateStatus();
+    });
+  });
+}
+
+function setNestedVal(obj,path,val){
+  const parts=path.split('.');
+  let cur=obj;
+  for(let i=0;i<parts.length-1;i++){cur=cur[parts[i]]=cur[parts[i]]||{}}
+  cur[parts[parts.length-1]]=val;
+}
+function getNestedVal(obj,path){
+  return path.split('.').reduce((o,k)=>o&&o[k],obj);
+}
+
+// ── Description char count ──
+function updDescCount(){
+  const v=$('f-description').value;
+  $('descCount').textContent=v.length+'/160';
+}
+
+// ── Status badge ──
+function updateStatus(){
+  const b=formData.basics;
+  const ready=b.businessName.trim()&&b.industry.trim()&&b.description.trim()&&formData.siteConfig.siteType;
+  const badge=$('statusBadge');
+  const btn=$('startResearchBtn');
+  if(ready){
+    badge.className='status-badge ready';badge.textContent='Ready';
+    btn.disabled=false;
+  }else{
+    badge.className='status-badge draft';badge.textContent='Draft';
+    btn.disabled=true;
+  }
+}
+
+// ── Auto-save ──
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  $('saveDot').className='save-dot saving';
+  $('saveLabel').textContent='Saving...';
+  saveTimer=setTimeout(()=>doSave(),2000);
+}
+
+async function doSave(){
+  if(isSaving)return;
+  isSaving=true;
+  try{
+    const resp=await authPost('/api/canvas/data/website-setup.json',formData);
+    if(resp.ok){
+      $('saveDot').className='save-dot saved';
+      $('saveLabel').textContent='All changes saved';
+      setTimeout(()=>{if($('saveDot').classList.contains('saved'))$('saveDot').className='save-dot'},3000);
+    }else throw new Error('save failed');
+  }catch(e){
+    $('saveDot').className='save-dot error';
+    $('saveLabel').textContent='Save failed';
+  }
+  isSaving=false;
+}
+
+function saveNow(){clearTimeout(saveTimer);doSave()}
+
+// ── Load data ──
+async function loadData(){
+  try{
+    const resp=await authGet('/api/canvas/data/website-setup.json');
+    if(!resp.ok)return;
+    const data=await resp.json();
+    if(!data||!data.basics)return;
+    formData=mergeDeep(formData,data);
+    populateUI();
+  }catch(e){}
+}
+
+function mergeDeep(target,source){
+  const out={...target};
+  for(const key in source){
+    if(source[key]&&typeof source[key]==='object'&&!Array.isArray(source[key])){
+      out[key]=mergeDeep(target[key]||{},source[key]);
+    }else{out[key]=source[key]}
+  }
+  return out;
+}
+
+function populateUI(){
+  // Text fields
+  document.querySelectorAll('[data-field]').forEach(el=>{
+    const v=getNestedVal(formData,el.dataset.field);
+    if(v!==undefined&&v!==null)el.value=v;
+  });
+  updDescCount();
+
+  // Site type
+  if(formData.siteConfig.siteType){
+    document.querySelectorAll('#siteTypeCards .sel-card').forEach(c=>{
+      c.classList.toggle('active',c.dataset.val===formData.siteConfig.siteType);
+    });
+  }
+
+  // Theme dropdown
+  renderThemeDropdown();
+  if(formData.branding.theme)$('themeSelect').value=formData.branding.theme;
+
+  // Style controls — restore all values
+  const st=formData.branding.style||{};
+  const _sv=(id,v)=>{const el=$(id);if(el&&v!==undefined&&v!==null)el.value=v};
+  _sv('f-fontHeading',st.fontHeading);_sv('f-fontBody',st.fontBody);
+  _sv('f-fontWeight',st.fontWeight);_sv('f-fontStyle',st.fontStyle);
+  _sv('f-navRadius',st.navRadius);_sv('f-navShadow',st.navShadow);_sv('f-navGlow',st.navGlow);
+  _sv('f-navOpacity',st.navOpacity);if(st.navOpacity!==undefined)$('navOpacityVal').textContent=st.navOpacity+'%';
+  _sv('f-btnFill',st.btnFill);_sv('f-btnRadius',st.btnRadius);_sv('f-btnShadow',st.btnShadow);_sv('f-btnGlow',st.btnGlow);
+  _sv('f-btnBorder',st.btnBorder);if(st.btnBorder!==undefined)$('btnBorderVal').textContent=st.btnBorder+'px';
+  _sv('f-cardRadius',st.cardRadius);_sv('f-cardShadow',st.cardShadow);_sv('f-cardGlow',st.cardGlow);_sv('f-cardInnerGlow',st.cardInnerGlow);
+  _sv('f-cardBorder',st.cardBorder);if(st.cardBorder!==undefined)$('cardBorderVal').textContent=st.cardBorder+'px';
+  _sv('f-cardOpacity',st.cardOpacity);if(st.cardOpacity!==undefined)$('cardOpacityVal').textContent=st.cardOpacity+'%';
+  _sv('f-cardGlass',st.cardGlass);
+  _sv('f-pageWidth',st.pageWidth);_sv('f-spacing',st.spacing);_sv('f-animations',st.animations);
+
+  // Tone
+  document.querySelectorAll('#tonePills .pill').forEach(p=>{
+    p.classList.toggle('active',p.dataset.val===formData.branding.tone);
+  });
+
+  // Geo
+  if(formData.targetAudience.geographicScope){
+    document.querySelectorAll('#geoPills .pill').forEach(p=>{
+      p.classList.toggle('active',p.dataset.val===formData.targetAudience.geographicScope);
+    });
+  }
+
+  // Custom colors
+  if(formData.branding.customColors.primary)$('f-colorPrimary').value=formData.branding.customColors.primary;
+  if(formData.branding.customColors.secondary)$('f-colorSecondary').value=formData.branding.customColors.secondary;
+  if(formData.branding.customColors.accent)$('f-colorAccent').value=formData.branding.customColors.accent;
+  if(formData.branding.customColors.background)$('f-colorBg').value=formData.branding.customColors.background;
+
+  // Chips
+  renderChips('services');
+  renderChips('targetMarkets');
+  renderChips('keywords');
+  renderChips('topics');
+
+  // Pages & Features
+  renderPages();
+  renderFeatures();
+
+  // Lists
+  formData.seo.competitors.forEach(u=>addListItem('competitors',u));
+  (formData.seo.referenceSites||[]).forEach(r=>addListItem('references',r.url||'',r.notes||''));
+
+  // Images
+  if(formData.images.logo.url)showUploadPreview('logoZone',formData.images.logo.url);
+  if(formData.branding.faviconUrl)showUploadPreview('faviconZone',formData.branding.faviconUrl);
+  if(formData.images.hero.url)showUploadPreview('heroZone',formData.images.hero.url);
+  if(formData.images.team.url)showUploadPreview('teamZone',formData.images.team.url);
+  if(formData.images.gallery&&formData.images.gallery.length)renderGallery();
+
+  updateStatus();
+  updateSwatchBar();
+  updatePreview();
+}
+
+// ── AI Engine (calls /api/chat → Groq LLM → updates field directly) ──
+let _aiPending=new Set();
+
+function buildContext(){
+  const b=formData.basics,t=formData.targetAudience,s=formData.siteConfig;
+  let ctx='';
+  if(b.businessName)ctx+=`- Business: ${b.businessName}\n`;
+  if(b.industry)ctx+=`- Industry: ${b.industry}\n`;
+  if(b.description)ctx+=`- Description: ${b.description}\n`;
+  if(s.siteType)ctx+=`- Site Type: ${s.siteType}\n`;
+  if(t.services.length)ctx+=`- Services: ${t.services.join(', ')}\n`;
+  if(t.targetMarkets.length)ctx+=`- Target Markets: ${t.targetMarkets.join(', ')}\n`;
+  if(t.geographicScope)ctx+=`- Geographic Scope: ${t.geographicScope}\n`;
+  if(t.idealCustomer)ctx+=`- Ideal Customer: ${t.idealCustomer}\n`;
+  if(formData.seo.primaryKeywords.length)ctx+=`- Keywords: ${formData.seo.primaryKeywords.join(', ')}\n`;
+  if(b.about)ctx+=`- About: ${b.about}\n`;
+  if(b.ownerName)ctx+=`- Owner: ${b.ownerName}\n`;
+  if(b.yearsInBusiness)ctx+=`- Years in business: ${b.yearsInBusiness}\n`;
+  if(b.license)ctx+=`- License: ${b.license}\n`;
+  if(b.phone)ctx+=`- Phone: ${b.phone}\n`;
+  if(b.address)ctx+=`- Address: ${b.address}\n`;
+  if(t.topics&&t.topics.length)ctx+=`- Topics: ${t.topics.join(', ')}\n`;
+  return ctx||'(No business info filled in yet)\n';
+}
+
+const PROMPTS={
+  businessName:{enhance:c=>`Based on this business info, suggest a more professional or memorable business name variation:\n${c}Current name: ${formData.basics.businessName}\nReply with ONLY the suggested name, nothing else. No quotes, no explanation.`},
+  industry:{suggest:c=>`Based on this business info, suggest the most specific industry/niche classification:\n${c}Reply with ONLY the industry/niche (2-4 words), nothing else. No quotes, no explanation.`},
+  description:{
+    generate:c=>`Based on this business info, write a concise SEO-optimized one-line description:\n${c}Requirements: Include primary service keywords naturally. Under 160 chars.\nNO marketing fluff, NO storytelling — clear, keyword-rich, factual.\nReply with ONLY the description text, nothing else. No quotes.`,
+    enhance:c=>`Improve this business description for SEO while keeping it under 160 chars:\n${c}Current: ${formData.basics.description}\nRequirements: Better keywords, clearer value prop, still factual.\nReply with ONLY the improved description, nothing else. No quotes.`
+  },
+  aboutBusiness:{generate:c=>`Based on this business info, write a 2-3 sentence About section for the website:\n${c}Cover: what they do, who they serve, what makes them different.\nWrite it in third person. Professional but approachable.\nReply with ONLY the about text, nothing else.`},
+  services:{generate:c=>`Based on this business info, suggest 8-12 specific services this business likely offers:\n${c}Reply with ONLY a comma-separated list of services, nothing else. No numbering, no bullets.`},
+  topics:{generate:c=>`Based on this business info, suggest 10-15 blog/content topics this website should cover for SEO:\n${c}Think about: common customer questions, how-to guides, industry tips, buying guides, comparison content, seasonal topics.\nReply with ONLY a comma-separated list of topics, nothing else. No numbering, no bullets.`},
+  targetMarkets:{generate:c=>`Based on this business info, suggest 5-8 target geographic markets (City, State format):\n${c}Reply with ONLY a comma-separated list of markets, nothing else.`},
+  idealCustomer:{generate:c=>`Based on this business info, describe the ideal customer in 2-3 sentences:\n${c}Include: demographics, pain points, what they search for online.\nReply with ONLY the customer description, nothing else.`},
+  primaryCTA:{suggest:c=>`Based on this business info, suggest the best primary call-to-action button text:\n${c}Reply with ONLY the CTA text (3-5 words), nothing else.`},
+  keywords:{generate:c=>`Based on this business info, suggest 10-15 primary SEO keywords a customer would search on Google:\n${c}Include: service keywords, location keywords, long-tail phrases.\nReply with ONLY a comma-separated list of keywords, nothing else. No numbering, no bullets.`},
+  notes:{enhance:c=>`Polish these notes into clear structured requirements for a web developer building this website:\n${c}Notes: ${formData.notes}\nReply with ONLY the structured requirements, nothing else.`},
+  heroNotes:{enhance:c=>`Improve this hero image usage description so a web designer knows exactly how to use it:\n${c}Current: ${formData.images.hero.notes}\nReply with ONLY the improved description, nothing else.`}
+};
+
+// Field → element ID mapping for applying AI results
+const FIELD_ELEMENTS={
+  businessName:'f-businessName', industry:'f-industry', description:'f-description',
+  aboutBusiness:'f-aboutBusiness', idealCustomer:'f-idealCustomer', primaryCTA:'f-primaryCTA',
+  notes:'f-notes', heroNotes:'f-heroNotes'
+};
+// Fields that produce comma-separated lists → chips
+const CHIP_FIELDS={services:'services',targetMarkets:'targetMarkets',keywords:'keywords',topics:'topics'};
+
+async function callAI(prompt){
+  const resp=await fetch('/api/chat',{
+    method:'POST',headers:_authHeaders({'Content-Type':'application/json'}),
+    credentials:'same-origin',
+    body:JSON.stringify({message:prompt})
+  });
+  if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error(e.error||'AI request failed')}
+  const data=await resp.json();
+  return(data.response||'').trim();
+}
+function getCookie(name){
+  const m=document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
+  return m?decodeURIComponent(m[1]):'';
+}
+function _authHeaders(extra){
+  const hdrs=Object.assign({},extra||{});
+  const token=window._canvasAuthToken||getCookie('__session');
+  if(token)hdrs['Authorization']='Bearer '+token;
+  return hdrs;
+}
+function authGet(url){return fetch(url,{headers:_authHeaders(),credentials:'same-origin'})}
+function authPost(url,data){return fetch(url,{method:'POST',headers:_authHeaders({'Content-Type':'application/json'}),credentials:'same-origin',body:JSON.stringify(data)})}
+function authUpload(url,formData){return fetch(url,{method:'POST',headers:_authHeaders(),credentials:'same-origin',body:formData})}
+
+function setAIBtnLoading(btn,loading){
+  if(loading){
+    btn._origHTML=btn.innerHTML;
+    btn.innerHTML='<span style="animation:pulse 1s infinite">...</span>';
+    btn.disabled=true;btn.style.opacity='.6';
+  }else{
+    btn.innerHTML=btn._origHTML||btn.innerHTML;
+    btn.disabled=false;btn.style.opacity='';
+  }
+}
+
+function _getBtn(e){
+  if(!e)return null;
+  // onclick handler: e is the Event. Find closest .ai-btn from target.
+  const ev=e instanceof Event?e:null;
+  if(ev)return ev.target.closest('.ai-btn');
+  return null;
+}
+
+async function aiGenerate(field,e){
+  const btn=_getBtn(e);
+  if(_aiPending.has(field))return;
+  _aiPending.add(field);
+  if(btn)setAIBtnLoading(btn,true);
+  try{
+    const ctx=buildContext();
+    const fn=PROMPTS[field]?.generate;if(!fn){toast('No generate prompt for '+field);return}
+    const result=await callAI(fn(ctx));
+    if(!result){toast('AI returned empty response');return}
+    applyAIResult(field,result);
+    scheduleSave();
+  }catch(err){toast('AI error: '+err.message)}
+  finally{_aiPending.delete(field);if(btn)setAIBtnLoading(btn,false)}
+}
+
+async function aiEnhance(field,e){
+  const btn=_getBtn(e);
+  if(_aiPending.has(field))return;
+  _aiPending.add(field);
+  if(btn)setAIBtnLoading(btn,true);
+  try{
+    const ctx=buildContext();
+    const fn=PROMPTS[field]?.enhance;if(!fn){toast('No enhance prompt for '+field);return}
+    const result=await callAI(fn(ctx));
+    if(!result){toast('AI returned empty response');return}
+    applyAIResult(field,result);
+    scheduleSave();
+  }catch(err){toast('AI error: '+err.message)}
+  finally{_aiPending.delete(field);if(btn)setAIBtnLoading(btn,false)}
+}
+
+async function aiSuggest(field,e){
+  const btn=_getBtn(e);
+  if(_aiPending.has(field))return;
+  _aiPending.add(field);
+  if(btn)setAIBtnLoading(btn,true);
+  try{
+    const ctx=buildContext();
+    const fn=PROMPTS[field]?.suggest;if(!fn){toast('No suggest prompt for '+field);return}
+    const result=await callAI(fn(ctx));
+    if(!result){toast('AI returned empty response');return}
+    applyAIResult(field,result);
+    scheduleSave();
+  }catch(err){toast('AI error: '+err.message)}
+  finally{_aiPending.delete(field);if(btn)setAIBtnLoading(btn,false)}
+}
+
+function applyAIResult(field,result){
+  // Clean up common LLM artifacts
+  result=result.replace(/^["']|["']$/g,'').trim();
+
+  // Chip fields: split comma-separated list into chips
+  if(CHIP_FIELDS[field]){
+    const items=result.split(',').map(s=>s.trim()).filter(Boolean);
+    let arr;
+    if(field==='services')arr=formData.targetAudience.services;
+    else if(field==='targetMarkets')arr=formData.targetAudience.targetMarkets;
+    else if(field==='keywords')arr=formData.seo.primaryKeywords;
+    else if(field==='topics')arr=formData.targetAudience.topics;
+    // Add only new items
+    items.forEach(item=>{if(!arr.includes(item))arr.push(item)});
+    renderChips(field);
+    return;
+  }
+  // Text fields: set value directly
+  const elId=FIELD_ELEMENTS[field];
+  if(elId){
+    const el=$(elId);if(!el)return;
+    el.value=result;
+    // Update the data model
+    if(el.dataset.field)setNestedVal(formData,el.dataset.field,result);
+    // Trigger related updates
+    if(field==='description')updDescCount();
+    updateStatus();
+  }
+}
+
+// ── Start Research ──
+async function startResearch(){
+  await doSave();
+  // Build config.json for init-website.sh
+  const config={
+    business:{
+      name:formData.basics.businessName,
+      industry:formData.basics.industry,
+      description:formData.basics.description,
+      about:formData.basics.about,
+      owner:formData.basics.ownerName,
+      years_in_business:formData.basics.yearsInBusiness,
+      license:formData.basics.license,
+      target_markets:formData.targetAudience.targetMarkets,
+      services:formData.targetAudience.services,
+      topics:formData.targetAudience.topics,
+      competitors:formData.seo.competitors,
+      primary_keywords:formData.seo.primaryKeywords
+    },
+    website:{
+      domain:formData.basics.domain,
+      site_type:formData.siteConfig.siteType,
+      pages:formData.siteConfig.pages,
+      features:formData.siteConfig.specialFeatures
+    },
+    branding:{
+      theme:formData.branding.theme,
+      tone:formData.branding.tone,
+      colors:getColors(),
+      style:formData.branding.style,
+      logo:formData.images.logo.url
+    },
+    seo:{
+      keywords:formData.seo.primaryKeywords,
+      competitors:formData.seo.competitors,
+      reference_sites:formData.seo.referenceSites.map(r=>r.url)
+    },
+    contact:{
+      phone:formData.basics.phone,
+      email:formData.basics.email,
+      address:formData.basics.address
+    }
+  };
+  // Save research config
+  await authPost('/api/canvas/data/website-setup-config.json',config);
+  // Tell agent
+  const msg=`The website setup form for "${formData.basics.businessName}" has been saved to _data/website-setup.json. Config for autonomous research is at _data/website-setup-config.json. Please run the website research system: create the project folder structure, generate config.json from the saved data, and execute the 8 research tasks.`;
+  window.parent.postMessage({type:'canvas-action',action:'speak',text:msg},'*');
+  // Update status
+  $('statusBadge').className='status-badge running';
+  $('statusBadge').textContent='Research Running';
+  toast('Research request sent to AI agent');
+}
+
+// ── Toast ──
+let toastTimer;
+function toast(msg){
+  const t=$('toast');t.textContent=msg;t.classList.add('on');
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('on'),3000);
+}
+
+// ── Boot ──
+if(window._canvasAuthToken){init()}else{
+  let inited=false;
+  window.addEventListener('message',function(e){
+    if(e.data&&e.data.type==='auth-token'&&!inited){inited=true;init()}
+  });
+  setTimeout(()=>{if(!inited){inited=true;init()}},200);
+}
+</script>
+</body>
+</html>

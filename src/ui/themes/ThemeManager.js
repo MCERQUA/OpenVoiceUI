@@ -1,6 +1,7 @@
 /**
  * ThemeManager - Handles dynamic color theming
  * Allows users to pick custom primary/accent colors
+ * Updates all CSS variable tokens proportionally
  */
 
 window.ThemeManager = {
@@ -19,7 +20,6 @@ window.ThemeManager = {
         yellow: '#ffdd00',
         orange: '#ff6600',
         red: '#ff2244',
-        purple: '#aa00ff',
     },
 
     // Default theme
@@ -33,7 +33,7 @@ window.ThemeManager = {
         'Classic Blue': { primary: '#0088ff', accent: '#00ffff' },
         'Neon Pink': { primary: '#ff0088', accent: '#ff66cc' },
         'Cyber Green': { primary: '#00ff88', accent: '#88ffcc' },
-        'Purple Haze': { primary: '#8800ff', accent: '#cc66ff' },
+        'Deep Ocean': { primary: '#0044cc', accent: '#4488ff' },
         'Sunset Orange': { primary: '#ff6600', accent: '#ffaa00' },
         'Blood Red': { primary: '#cc0033', accent: '#ff6666' },
         'Matrix': { primary: '#00ff00', accent: '#88ff88' },
@@ -79,7 +79,7 @@ window.ThemeManager = {
                 }
             })
             .catch(() => {
-                // Server unavailable — localStorage fallback already applied
+                // Server unavailable - localStorage fallback already applied
             });
     },
 
@@ -129,6 +129,21 @@ window.ThemeManager = {
         }).join('');
     },
 
+    /**
+     * Generate border token rgba strings from a primary color hex
+     */
+    borderTokensFromPrimary(hex) {
+        const rgb = this.hexToRgb(hex);
+        if (!rgb) return null;
+        const c = `${rgb.r}, ${rgb.g}, ${rgb.b}`;
+        return {
+            subtle: `rgba(${c}, 0.08)`,
+            default: `rgba(${c}, 0.15)`,
+            strong: `rgba(${c}, 0.25)`,
+            accent: `rgba(${c}, 0.4)`,
+        };
+    },
+
     setPrimaryColor(hex) {
         this.colors.primary = hex;
         this.updateDerivedColors();
@@ -157,13 +172,13 @@ window.ThemeManager = {
     applyTheme() {
         const root = document.documentElement;
 
-        // Update CSS variables
+        // ── Brand color variables ──
         root.style.setProperty('--blue', this.colors.primary);
         root.style.setProperty('--blue-dim', this.colors.primaryDim);
         root.style.setProperty('--blue-bright', this.colors.primaryBright);
         root.style.setProperty('--cyan', this.colors.accent);
 
-        // Also set as RGB values for rgba() usage
+        // RGB values for rgba() usage
         const primaryRgb = this.hexToRgb(this.colors.primary);
         const accentRgb = this.hexToRgb(this.colors.accent);
 
@@ -173,6 +188,59 @@ window.ThemeManager = {
         if (accentRgb) {
             root.style.setProperty('--cyan-rgb', `${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}`);
         }
+
+        // ── Surface tokens ──
+        // Derive surfaces from primary color with very low saturation tints
+        const pRgb = primaryRgb || { r: 0, g: 136, b: 255 };
+        // Mix a tiny amount of primary into the dark backgrounds
+        const tint = (base, amount) => {
+            return Math.min(255, Math.floor(base + pRgb.r * amount * 0.02 + pRgb.g * amount * 0.01 + pRgb.b * amount * 0.01));
+        };
+
+        const bgDeep = this.rgbToHex(tint(5, 0), tint(5, 0), tint(8, 0));
+        const bgPanel = this.rgbToHex(tint(10, 1), tint(10, 1), tint(18, 1));
+        const bgSurface = this.rgbToHex(tint(15, 1.5), tint(16, 1.5), tint(24, 1.5));
+        const bgElevated = this.rgbToHex(tint(20, 2), tint(20, 2), tint(32, 2));
+        const bgHover = this.rgbToHex(tint(26, 3), tint(26, 3), tint(46, 3));
+
+        root.style.setProperty('--bg-deep', bgDeep);
+        root.style.setProperty('--bg-panel', bgPanel);
+        root.style.setProperty('--bg-surface', bgSurface);
+        root.style.setProperty('--bg-elevated', bgElevated);
+        root.style.setProperty('--bg-hover', bgHover);
+
+        // Backward-compat aliases
+        root.style.setProperty('--dark-bg', bgDeep);
+        root.style.setProperty('--panel-bg', bgPanel);
+
+        // ── Border tokens (tinted to primary) ──
+        const borders = this.borderTokensFromPrimary(this.colors.primary);
+        if (borders) {
+            root.style.setProperty('--border-subtle', borders.subtle);
+            root.style.setProperty('--border-default', borders.default);
+            root.style.setProperty('--border-strong', borders.strong);
+            root.style.setProperty('--border-accent', borders.accent);
+        }
+
+        // ── Neutral tokens ──
+        // Neutrals get a very subtle hue shift toward the primary
+        const neutralShift = (r, g, b, strength) => {
+            const sr = Math.min(255, Math.floor(r + (pRgb.r - 128) * strength));
+            const sg = Math.min(255, Math.floor(g + (pRgb.g - 128) * strength));
+            const sb = Math.min(255, Math.floor(b + (pRgb.b - 128) * strength));
+            return this.rgbToHex(Math.max(0, sr), Math.max(0, sg), Math.max(0, sb));
+        };
+
+        root.style.setProperty('--neutral-50', neutralShift(232, 232, 240, 0.02));
+        root.style.setProperty('--neutral-100', neutralShift(205, 217, 229, 0.02));
+        root.style.setProperty('--neutral-200', neutralShift(201, 209, 217, 0.02));
+        root.style.setProperty('--neutral-300', neutralShift(139, 148, 158, 0.03));
+        root.style.setProperty('--neutral-400', neutralShift(110, 118, 129, 0.03));
+        root.style.setProperty('--neutral-500', neutralShift(85, 85, 112, 0.03));
+        root.style.setProperty('--neutral-600', neutralShift(77, 82, 96, 0.03));
+        root.style.setProperty('--neutral-700', neutralShift(61, 61, 61, 0.02));
+        root.style.setProperty('--neutral-800', neutralShift(42, 42, 48, 0.02));
+        root.style.setProperty('--neutral-900', neutralShift(26, 26, 46, 0.02));
 
         // Dispatch event for other modules to react
         window.dispatchEvent(new CustomEvent('themeChanged', { detail: this.colors }));

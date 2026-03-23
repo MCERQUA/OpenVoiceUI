@@ -1,0 +1,36 @@
+{
+  "name": "OpenVoiceUI Dev",
+  "dockerComposeFile": [
+    "../docker-compose.yml",
+    "docker-compose.devcontainer.yml"
+  ],
+  "service": "openvoiceui",
+  "workspaceFolder": "/app",
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [5001, 18791],
+  "portsAttributes": {
+    "5001": { "label": "OpenVoiceUI", "onAutoForward": "openBrowser" },
+    "18791": { "label": "OpenClaw Gateway" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "ms-python.pylint",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "ms-azuretools.vscode-docker",
+        "humao.rest-client"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "ms-python.python"
+        }
+      }
+    }
+  },
+  "postCreateCommand": "pip install -r requirements.txt"
+}

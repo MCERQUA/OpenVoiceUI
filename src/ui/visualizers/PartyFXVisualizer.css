@@ -9,7 +9,7 @@
     margin-left: 10px;
 }
 .autoplay-toggle label {
-    color: #888;
+    color: var(--text-muted);
     font-size: 0.7rem;
     cursor: pointer;
 }
@@ -31,7 +31,7 @@
     margin-left: 10px;
 }
 .visualizer-toggle label {
-    color: #888;
+    color: var(--text-muted);
     font-size: 0.7rem;
     cursor: pointer;
 }
@@ -39,10 +39,10 @@
     width: 14px;
     height: 14px;
     cursor: pointer;
-    accent-color: #aa00ff;
+    accent-color: var(--blue-bright);
 }
 .visualizer-toggle.enabled label {
-    color: #aa00ff;
+    color: var(--blue-bright);
 }
 
 /* ===== PARTY EFFECTS ===== */
@@ -162,7 +162,7 @@
     position: absolute;
     width: 15px;
     height: 15px;
-    background: white;
+    background: var(--text-primary);
     border-radius: 50%;
     filter: blur(3px);
     opacity: 0;
@@ -228,7 +228,7 @@
     background: linear-gradient(to top,
         var(--cyan) 0%,
         var(--blue) 40%,
-        #aa00ff 70%,
+        var(--blue-bright) 70%,
         var(--red) 100%);
     background-size: 100% 55px;
     background-position: bottom;
@@ -238,7 +238,7 @@
     background: linear-gradient(to bottom,
         var(--cyan) 0%,
         var(--blue) 40%,
-        #aa00ff 70%,
+        var(--blue-bright) 70%,
         var(--red) 100%);
     background-size: 100% 55px;
     background-position: top;
@@ -273,7 +273,7 @@
     background: linear-gradient(to left,
         var(--cyan) 0%,
         var(--blue) 40%,
-        #aa00ff 70%,
+        var(--blue-bright) 70%,
         var(--red) 100%);
     background-size: 85px 100%;
     background-position: right;
@@ -283,7 +283,7 @@
     background: linear-gradient(to right,
         var(--cyan) 0%,
         var(--blue) 40%,
-        #aa00ff 70%,
+        var(--blue-bright) 70%,
         var(--red) 100%);
     background-size: 85px 100%;
     background-position: left;

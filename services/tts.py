@@ -181,6 +181,7 @@ def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) 
 _FALLBACK_CHAIN = {
     'groq': 'supertonic',
     'qwen3': 'supertonic',
+    'resemble': 'supertonic',
 }
 
 _MAX_RETRIES = 2
@@ -193,15 +194,17 @@ def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
     provider_info = provider.get_info()
     audio_format = provider_info.get('audio_format', 'wav')
 
-    if audio_format == 'mp3':
+    # Cloud providers that return WAV handle their own chunking/limits
+    if audio_format == 'mp3' or tts_provider in ('resemble',):
         return provider.generate_speech(text=text, voice=voice)
+    # Local WAV providers (supertonic) need ONNX overflow chunking
     return generate_tts_chunked(provider, text, voice)
 
 
 def generate_tts_b64(
     text: str,
     voice: Optional[str] = None,
-    tts_provider: str = 'supertonic',
+    tts_provider: str = 'groq',
     **kwargs,
 ) -> Optional[str]:
     """
@@ -220,21 +223,25 @@ def generate_tts_b64(
     """
     voice = voice or 'M1'
 
-    # ── Try primary provider with retries ────────────────────────────
+    # ── Try primary provider (single attempt for cloud, retries for local) ──
     last_err = None
-    for attempt in range(_MAX_RETRIES + 1):
+    # Cloud providers (groq, qwen3) have their own timeout — don't retry
+    # on timeout, fall back immediately. Only retry local providers.
+    is_cloud = tts_provider in ('groq', 'qwen3', 'resemble')
+    max_attempts = 1 if is_cloud else _MAX_RETRIES + 1
+    for attempt in range(max_attempts):
         try:
             audio_bytes = _generate_with_provider(tts_provider, text, voice)
             logger.info(f"TTS generated: provider={tts_provider}, voice={voice}, attempt={attempt + 1}")
             return base64.b64encode(audio_bytes).decode('utf-8')
         except Exception as e:
             last_err = e
-            if attempt < _MAX_RETRIES:
+            if attempt < max_attempts - 1:
                 delay = _RETRY_DELAYS[attempt]
                 logger.warning(f"TTS attempt {attempt + 1} failed (provider={tts_provider}): {e} — retrying in {delay}s")
                 time.sleep(delay)
             else:
-                logger.error(f"TTS retries exhausted (provider={tts_provider}): {e}")
+                logger.warning(f"TTS failed (provider={tts_provider}): {e} — trying fallback")
 
     # ── Fallback to alternate provider ───────────────────────────────
     fallback_id = _FALLBACK_CHAIN.get(tts_provider)

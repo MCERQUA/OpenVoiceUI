@@ -411,6 +411,8 @@ def _action_status(job_id: str):
 
                 if gen_status == 'SUCCESS':
                     songs = status_data.get('response', {}).get('sunoData', [])
+                    # Suno returns 2 clips per generation — only take the first one
+                    songs = songs[:1] if songs else []
                     for song in songs:
                         audio_url = song.get('audioUrl') or song.get('audio_url')
                         if not audio_url:
@@ -554,11 +556,15 @@ def suno_callback():
             task_id = data.get('data', {}).get('taskId', '')
 
             # sunoapi.org sends: "text" (lyrics ready), "first"/"second" (audio ready), "complete"
-            # Handle any callback that carries audio_url, not just "complete"
-            if callback_type in ('complete', 'first', 'second') or (
-                callback_type not in ('text',) and data.get('data', {}).get('data')
+            # Only process 'complete' to avoid duplicates (first/second are partial deliveries
+            # of the same songs that appear again in complete).
+            if callback_type == 'complete' or (
+                callback_type not in ('text', 'first', 'second') and data.get('data', {}).get('data')
             ):
                 songs = data.get('data', {}).get('data', [])
+                # Suno returns 2 clips per generation — only take the first one
+                # (user asked for 1 song, not 2 variations)
+                songs = songs[:1] if songs else []
                 for song in songs:
                     audio_url = song.get('audioUrl') or song.get('audio_url')
                     if not audio_url:

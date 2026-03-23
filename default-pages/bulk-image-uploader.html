@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Upload Center</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--bg-1:#111113;--bg-2:#19191b;--bg-3:#222225;
+  --border:#2a2a2d;--border-h:#3a3a3d;
+  --tx:#ececef;--tx-2:#a0a0a6;--tx-3:#6e6e76;
+  --blue:#3b82f6;--blue-dim:rgba(59,130,246,.1);--blue-glow:rgba(59,130,246,.08);
+  --green:#22c55e;--green-dim:rgba(34,197,94,.1);
+  --red:#ef4444;--red-dim:rgba(239,68,68,.1);
+  --amber:#f59e0b;--amber-dim:rgba(245,158,11,.1);
+  --cyan:#06b6d4;--cyan-dim:rgba(6,182,212,.1);
+  --r:8px;--r-lg:12px;
+}
+html{font-size:15px}
+body{
+  font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--tx-2);
+  min-height:100vh;padding:16px;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── Layout ── */
+.container{max-width:920px;margin:0 auto}
+
+/* ── Header ── */
+.hdr{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.hdr-left{display:flex;align-items:center;gap:12px}
+.hdr-icon{width:38px;height:38px;background:var(--blue-dim);border:1px solid rgba(59,130,246,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.hdr-icon svg{width:20px;height:20px;stroke:var(--blue);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.hdr h1{font-size:1.15rem;font-weight:600;color:var(--tx);letter-spacing:-.01em}
+.hdr-sub{font-size:.75rem;color:var(--tx-3)}
+.stor{display:flex;align-items:center;gap:8px;font-size:.73rem;color:var(--tx-3)}
+.stor-bar{width:80px;height:4px;background:var(--bg-3);border-radius:2px;overflow:hidden}
+.stor-fill{height:100%;background:var(--blue);border-radius:2px;transition:width .4s}
+
+/* ── Drop Zone ── */
+.drop{
+  border:1.5px dashed var(--border);border-radius:var(--r-lg);
+  padding:36px 20px;text-align:center;cursor:pointer;
+  transition:all .2s;position:relative;margin-bottom:20px;
+  background:var(--bg-1);
+}
+.drop:hover,.drop.hover{border-color:var(--blue);background:var(--blue-glow)}
+.drop.hover{border-style:solid;box-shadow:0 0 0 4px rgba(59,130,246,.06)}
+.drop-ic{
+  width:48px;height:48px;margin:0 auto 12px;
+  background:var(--bg-2);border:1px solid var(--border);border-radius:12px;
+  display:flex;align-items:center;justify-content:center;
+}
+.drop-ic svg{width:22px;height:22px;stroke:var(--tx-3);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;transition:stroke .2s}
+.drop:hover .drop-ic svg,.drop.hover .drop-ic svg{stroke:var(--blue)}
+.drop h2{font-size:.92rem;color:var(--tx);font-weight:600;margin-bottom:2px}
+.drop p{font-size:.78rem;color:var(--tx-3);margin-bottom:14px}
+.drop-btns{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.btn{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:7px 16px;border-radius:6px;border:1px solid var(--border);
+  background:var(--bg-2);color:var(--tx);font-size:.78rem;font-weight:500;
+  cursor:pointer;transition:all .15s;white-space:nowrap;
+}
+.btn:hover{border-color:var(--border-h);background:var(--bg-3)}
+.btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.pri:hover{background:#2563eb}
+.btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.drop-hint{font-size:.68rem;color:var(--tx-3);margin-top:10px}
+.drop-hint kbd{background:var(--bg-3);border:1px solid var(--border);border-radius:3px;padding:0 4px;font-family:inherit;font-size:.9em}
+input[type="file"]{display:none}
+
+/* ── Queue ── */
+.queue{margin-bottom:20px;display:none}
+.queue.on{display:block}
+.lbl{font-size:.72rem;font-weight:600;color:var(--tx-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.lbl .ct{background:var(--blue-dim);color:var(--blue);padding:0 7px;border-radius:8px;font-size:.85em}
+.q-list{display:flex;flex-direction:column;gap:4px}
+.qi{
+  display:grid;grid-template-columns:36px 1fr auto auto;align-items:center;gap:10px;
+  background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r);
+  padding:8px 12px;transition:border-color .15s;
+}
+.qi:hover{border-color:var(--border-h)}
+.qi-ic{
+  width:36px;height:36px;border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;flex-shrink:0;
+}
+.qi-ic img{width:100%;height:100%;object-fit:cover;border-radius:6px}
+.qi-ic svg{width:18px;height:18px;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.qi-ic.t-img{background:var(--blue-dim)}.qi-ic.t-img svg{stroke:var(--blue)}
+.qi-ic.t-doc{background:var(--cyan-dim)}.qi-ic.t-doc svg{stroke:var(--cyan)}
+.qi-ic.t-aud{background:var(--amber-dim)}.qi-ic.t-aud svg{stroke:var(--amber)}
+.qi-ic.t-vid{background:var(--red-dim)}.qi-ic.t-vid svg{stroke:var(--red)}
+.qi-ic.t-code{background:var(--green-dim)}.qi-ic.t-code svg{stroke:var(--green)}
+.qi-ic.t-oth{background:rgba(255,255,255,.04)}.qi-ic.t-oth svg{stroke:var(--tx-3)}
+.qi-body{min-width:0}
+.qi-name{font-size:.8rem;color:var(--tx);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qi-row{display:flex;align-items:center;gap:8px;margin-top:3px}
+.qi-size{font-size:.7rem;color:var(--tx-3);white-space:nowrap}
+.qi-bar{flex:1;height:3px;background:var(--bg-3);border-radius:2px;overflow:hidden;min-width:60px}
+.qi-bar-f{height:100%;border-radius:2px;transition:width .12s linear;background:var(--blue)}
+.qi-bar-f.ok{background:var(--green)}.qi-bar-f.err{background:var(--red)}
+.qi-st{font-size:.72rem;font-weight:600;white-space:nowrap;min-width:36px;text-align:right}
+.qi-st.up{color:var(--blue)}.qi-st.ok{color:var(--green)}.qi-st.err{color:var(--red)}
+.q-btn{
+  width:26px;height:26px;display:flex;align-items:center;justify-content:center;
+  border-radius:5px;border:none;background:none;color:var(--tx-3);cursor:pointer;transition:all .12s;
+}
+.q-btn:hover{background:var(--bg-3);color:var(--tx)}
+.q-btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Filters ── */
+.gal-hdr{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.tabs{display:flex;gap:2px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r);padding:2px;flex-wrap:wrap}
+.tab{
+  padding:5px 12px;border-radius:6px;border:none;
+  background:none;color:var(--tx-3);font-size:.75rem;font-weight:500;
+  cursor:pointer;transition:all .15s;white-space:nowrap;
+}
+.tab:hover{color:var(--tx-2)}
+.tab.on{background:var(--bg-3);color:var(--tx)}
+.tab .n{font-size:.85em;opacity:.6;margin-left:3px}
+.search{
+  display:flex;align-items:center;gap:6px;
+  background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r);
+  padding:5px 10px;transition:border-color .15s;
+}
+.search:focus-within{border-color:var(--blue)}
+.search svg{width:14px;height:14px;stroke:var(--tx-3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.search input{background:none;border:none;outline:none;color:var(--tx);font-size:.78rem;width:120px}
+.search input::placeholder{color:var(--tx-3)}
+
+/* ── Gallery Grid ── */
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+  gap:8px;margin-bottom:20px;
+}
+.card{
+  background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r);
+  overflow:hidden;cursor:pointer;transition:all .15s;
+}
+.card:hover{border-color:var(--border-h);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.card-thumb{
+  width:100%;aspect-ratio:1;background:var(--bg-2);
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;position:relative;
+}
+.card-thumb img{width:100%;height:100%;object-fit:cover}
+.card-thumb .ct-ic{display:flex;flex-direction:column;align-items:center;gap:4px}
+.card-thumb .ct-ic svg{width:28px;height:28px;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.card-thumb .ct-ext{font-size:.6rem;font-weight:700;text-transform:uppercase;padding:1px 5px;border-radius:3px}
+.card-info{padding:7px 9px}
+.card-name{font-size:.72rem;color:var(--tx);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-meta{font-size:.65rem;color:var(--tx-3);display:flex;justify-content:space-between;margin-top:1px}
+.card-badge{
+  position:absolute;top:5px;right:5px;padding:1px 6px;border-radius:3px;
+  font-size:.58rem;font-weight:700;text-transform:uppercase;
+  background:rgba(0,0,0,.6);backdrop-filter:blur(4px);
+}
+
+/* Type colors */
+.c-img{color:var(--blue);stroke:var(--blue)}.bg-img{background:var(--blue-dim)}
+.c-doc{color:var(--cyan);stroke:var(--cyan)}.bg-doc{background:var(--cyan-dim)}
+.c-aud{color:var(--amber);stroke:var(--amber)}.bg-aud{background:var(--amber-dim)}
+.c-vid{color:var(--red);stroke:var(--red)}.bg-vid{background:var(--red-dim)}
+.c-code{color:var(--green);stroke:var(--green)}.bg-code{background:var(--green-dim)}
+.c-oth{color:var(--tx-3);stroke:var(--tx-3)}.bg-oth{background:rgba(255,255,255,.04)}
+
+/* ── Empty ── */
+.empty{text-align:center;padding:48px 20px;color:var(--tx-3)}
+.empty svg{width:40px;height:40px;stroke:var(--border);fill:none;stroke-width:1.2;margin-bottom:10px;stroke-linecap:round;stroke-linejoin:round}
+.empty p{font-size:.82rem}
+
+/* ── Storage ── */
+.stor-card{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px 16px;margin-bottom:20px}
+.stor-main{width:100%;height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden;display:flex;margin-top:8px}
+.stor-main>div{height:100%;transition:width .4s}
+.stor-rows{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.stor-row{display:flex;align-items:center;gap:8px;font-size:.73rem}
+.stor-row .d{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.stor-row .l{flex:1;color:var(--tx-2)}
+.stor-row .v{color:var(--tx-3);font-variant-numeric:tabular-nums}
+
+/* ── Lightbox ── */
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;z-index:200;backdrop-filter:blur(4px)}
+.lb.on{display:flex}
+.lb img,.lb video,.lb audio{max-width:90vw;max-height:82vh;border-radius:6px}
+.lb-x{position:absolute;top:14px;right:14px;width:32px;height:32px;background:rgba(255,255,255,.08);border:none;border-radius:6px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.lb-x svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lb-bar{
+  position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+  background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r);
+  padding:8px 14px;display:flex;align-items:center;gap:10px;font-size:.78rem;
+}
+.lb-bar .nm{color:var(--tx);font-weight:500}
+.lb-bar .sz{color:var(--tx-3)}
+.lb-btn{
+  padding:4px 10px;border-radius:5px;border:1px solid var(--border);
+  background:var(--bg-2);color:var(--tx);font-size:.75rem;cursor:pointer;
+  display:inline-flex;align-items:center;gap:4px;text-decoration:none;transition:all .12s;
+}
+.lb-btn:hover{border-color:var(--border-h);background:var(--bg-3)}
+.lb-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Toast ── */
+.toast{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);
+  background:var(--bg-2);border:1px solid var(--border);color:var(--tx);
+  padding:8px 18px;border-radius:var(--r);font-size:.78rem;font-weight:500;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);transition:transform .25s;z-index:300;pointer-events:none;
+}
+.toast.on{transform:translateX(-50%) translateY(0)}
+
+/* ── Responsive ── */
+@media(max-width:640px){
+  body{padding:12px}
+  .hdr{flex-direction:column;align-items:flex-start}
+  .drop{padding:28px 16px}
+  .drop-btns{flex-direction:column;align-items:stretch}
+  .btn{justify-content:center}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px}
+  .gal-hdr{flex-direction:column;align-items:stretch}
+  .tabs{overflow-x:auto;flex-wrap:nowrap}
+  .search input{width:100%}
+  .qi{grid-template-columns:32px 1fr auto;gap:8px}
+  .qi .q-btn{display:none}
+}
+@media(max-width:380px){
+  .grid{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- Header -->
+<div class="hdr">
+  <div class="hdr-left">
+    <div class="hdr-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M7.5 13v2.5a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2V13"/><line x1="12" y1="15" x2="12" y2="7.5"/><polyline points="9 10 12 7 15 10"/></svg></div>
+    <div><h1>Upload Center</h1><div class="hdr-sub">Get files into your workspace</div></div>
+  </div>
+  <div class="stor" id="storPill"><div class="stor-bar"><div class="stor-fill" id="storFill" style="width:0"></div></div><span id="storLabel">--</span></div>
+</div>
+
+<!-- Drop Zone -->
+<div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop files here or click to browse">
+  <div class="drop-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M7.5 13v2.5a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2V13"/><line x1="12" y1="15" x2="12" y2="7.5"/><polyline points="9 10 12 7 15 10"/></svg></div>
+  <h2>Drop files here</h2>
+  <p>Images, documents, audio, video, code</p>
+  <div class="drop-btns">
+    <button class="btn pri" onclick="$('fi').click()"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Browse Files</button>
+    <button class="btn" onclick="$('fo').click()"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Folder</button>
+    <button class="btn" onclick="urlImport()"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>URL</button>
+  </div>
+  <div class="drop-hint"><kbd>Ctrl</kbd>+<kbd>V</kbd> to paste from clipboard</div>
+  <input type="file" id="fi" multiple>
+  <input type="file" id="fo" webkitdirectory multiple>
+</div>
+
+<!-- Upload Queue -->
+<div class="queue" id="queue">
+  <div class="lbl">Uploading <span class="ct" id="qCt">0</span></div>
+  <div class="q-list" id="qList"></div>
+</div>
+
+<!-- Storage -->
+<div class="stor-card" id="storCard">
+  <div class="lbl">Storage</div>
+  <div class="stor-main" id="storBar"></div>
+  <div class="stor-rows" id="storRows"></div>
+</div>
+
+<!-- Gallery -->
+<div class="gal-hdr">
+  <div class="tabs" id="tabs" role="tablist"></div>
+  <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" id="srch" placeholder="Search files..." aria-label="Search files"></div>
+</div>
+<div class="grid" id="grid"></div>
+<div class="empty" id="empty" style="display:none"><svg viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg><p>No files yet — drop something above</p></div>
+
+<!-- Lightbox -->
+<div class="lb" id="lb"><button class="lb-x" onclick="lbClose()"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button><div id="lbC"></div><div class="lb-bar" id="lbBar"></div></div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const IMG=new Set('jpg jpeg png gif webp bmp tiff svg'.split(' '));
+const DOC=new Set('pdf docx xlsx pptx txt md csv log'.split(' '));
+const AUD=new Set('mp3 wav ogg flac m4a aac'.split(' '));
+const VID=new Set('mp4 webm mov avi mkv'.split(' '));
+const COD=new Set('py js ts json yaml yml html css'.split(' '));
+
+let files=[],filter='all',qid=0,ups=[];
+
+function ext(n){return(n.split('.').pop()||'').toLowerCase()}
+function cat(e){return IMG.has(e)?'img':DOC.has(e)?'doc':AUD.has(e)?'aud':VID.has(e)?'vid':COD.has(e)?'code':'oth'}
+function sz(b){if(!b)return'0 B';const k=1024,s=['B','KB','MB','GB'],i=Math.floor(Math.log(b)/Math.log(k));return(b/Math.pow(k,i)).toFixed(i?1:0)+' '+s[i]}
+function ago(t){const d=Date.now()/1000-t;return d<60?'now':d<3600?Math.floor(d/60)+'m':d<86400?Math.floor(d/3600)+'h':d<604800?Math.floor(d/86400)+'d':new Date(t*1000).toLocaleDateString()}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2e3)}
+function cpUrl(u){navigator.clipboard.writeText(u).then(()=>toast('URL copied'))}
+
+// SVG icons per type
+const IC={
+  img:'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+  doc:'<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+  aud:'<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  vid:'<svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>',
+  code:'<svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  oth:'<svg viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>'
+};
+const COLORS={img:'var(--blue)',doc:'var(--cyan)',aud:'var(--amber)',vid:'var(--red)',code:'var(--green)',oth:'var(--tx-3)'};
+
+// ── Drag & Drop ──
+let dc=0;const dz=$('drop');
+document.addEventListener('dragenter',e=>{e.preventDefault();dc++;dz.classList.add('hover')});
+document.addEventListener('dragleave',e=>{e.preventDefault();dc--;if(dc<=0){dc=0;dz.classList.remove('hover')}});
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>{e.preventDefault();dc=0;dz.classList.remove('hover');if(e.dataTransfer.files.length)handle(e.dataTransfer.files)});
+$('fi').onchange=e=>{if(e.target.files.length)handle(e.target.files);e.target.value=''};
+$('fo').onchange=e=>{if(e.target.files.length)handle(e.target.files);e.target.value=''};
+
+// ── Clipboard ──
+document.addEventListener('paste',e=>{
+  const items=e.clipboardData?.items;if(!items)return;
+  const f=[];for(const i of items)if(i.kind==='file'){const file=i.getAsFile();if(file)f.push(file)}
+  if(f.length){e.preventDefault();handle(f)}
+});
+
+// ── URL Import ──
+function urlImport(){
+  const u=prompt('URL to download:');if(!u||!u.trim())return;
+  const id=++qid,name=u.trim().split('/').pop().split('?')[0]||'download';
+  addQI(id,name,0,'oth');
+  setQI(id,-1,'dl');
+  fetch(u.trim()).then(r=>{if(!r.ok)throw new Error(r.status);return r.blob()})
+  .then(b=>{upload(new File([b],name,{type:b.type}),id)})
+  .catch(e=>setQI(id,0,'err',e.message));
+}
+
+function handle(fl){Array.from(fl).forEach(f=>{const id=++qid;addQI(id,f.name,f.size,cat(ext(f.name)),f);upload(f,id)})}
+
+// ── Upload ──
+function upload(file,id){
+  const xhr=new XMLHttpRequest();ups.push({id,xhr});
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)setQI(id,Math.round(e.loaded/e.total*100),'up')};
+  xhr.onload=()=>{
+    ups=ups.filter(u=>u.id!==id);
+    if(xhr.status>=200&&xhr.status<300){
+      try{
+        const r=JSON.parse(xhr.responseText);
+        setQI(id,100,'ok',null,r);
+        const e=ext(r.original_name||file.name);
+        files.unshift({name:r.original_name||file.name,url:r.url,size:file.size,ext:e,cat:cat(e),modified:Date.now()/1000});
+        render();updateStor();
+      }catch(e){setQI(id,0,'err','Parse error')}
+    }else{
+      let m='Error '+xhr.status;try{m=JSON.parse(xhr.responseText).error||m}catch(e){}
+      setQI(id,0,'err',m);
+    }
+  };
+  xhr.onerror=()=>{setQI(id,0,'err','Network error');ups=ups.filter(u=>u.id!==id)};
+  const fd=new FormData();fd.append('file',file);xhr.open('POST','/api/upload');
+  if(window._canvasAuthToken)xhr.setRequestHeader('Authorization','Bearer '+window._canvasAuthToken);
+  xhr.send(fd);
+}
+
+// ── Queue UI ──
+function addQI(id,name,size,c,file){
+  $('queue').classList.add('on');
+  let th='';
+  if(file&&file.type&&file.type.startsWith('image/')){const u=URL.createObjectURL(file);th=`<img src="${u}" onload="try{URL.revokeObjectURL(this.src)}catch(e){}">`}
+  else th=IC[c]||IC.oth;
+  const el=document.createElement('div');el.className='qi';el.id='qi'+id;
+  el.innerHTML=`<div class="qi-ic t-${c}">${th}</div><div class="qi-body"><div class="qi-name">${esc(name)}</div><div class="qi-row"><span class="qi-size">${sz(size)}</span><div class="qi-bar"><div class="qi-bar-f" id="qb${id}"></div></div></div></div><div class="qi-st up" id="qs${id}">0%</div><button class="q-btn" title="Cancel" onclick="cancelQ(${id})"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
+  $('qList').prepend(el);updQCt();
+}
+
+function setQI(id,pct,st,msg,res){
+  const b=$('qb'+id),s=$('qs'+id);if(!b||!s)return;
+  if(st==='up'){b.style.width=pct+'%';b.className='qi-bar-f';s.textContent=pct+'%';s.className='qi-st up'}
+  else if(st==='dl'){b.style.width='50%';s.textContent='Fetching';s.className='qi-st up'}
+  else if(st==='ok'){
+    b.style.width='100%';b.className='qi-bar-f ok';s.textContent='Done';s.className='qi-st ok';
+    const el=$('qi'+id);if(el&&res){const a=el.querySelector('.q-btn');if(a)a.outerHTML=`<button class="q-btn" title="Copy URL" onclick="cpUrl('${res.url}')"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`}
+  }
+  else if(st==='err'){b.style.width='100%';b.className='qi-bar-f err';s.textContent=msg||'Error';s.className='qi-st err'}
+  updQCt();
+}
+
+function cancelQ(id){const u=ups.find(x=>x.id===id);if(u){u.xhr.abort();ups=ups.filter(x=>x.id!==id)}const el=$('qi'+id);if(el)el.remove();updQCt()}
+function updQCt(){const active=document.querySelectorAll('.qi-st.up').length;$('qCt').textContent=active;if(!document.querySelectorAll('.qi').length)$('queue').classList.remove('on')}
+
+// ── Tabs ──
+const TABS=[{k:'all',l:'All'},{k:'img',l:'Images'},{k:'doc',l:'Docs'},{k:'aud',l:'Audio'},{k:'vid',l:'Video'},{k:'code',l:'Code'}];
+function renderTabs(){
+  const cts={all:files.length};TABS.forEach(t=>{if(t.k!=='all')cts[t.k]=files.filter(f=>f.cat===t.k).length});
+  $('tabs').innerHTML=TABS.map(t=>`<button class="tab${filter===t.k?' on':''}" data-f="${t.k}" role="tab" aria-selected="${filter===t.k}">${t.l}<span class="n">${cts[t.k]||0}</span></button>`).join('');
+}
+$('tabs').onclick=e=>{const t=e.target.closest('.tab');if(!t)return;filter=t.dataset.f;render()};
+$('srch').oninput=()=>render();
+
+// ── Gallery ──
+function render(){
+  renderTabs();
+  const s=$('srch').value.toLowerCase();
+  let list=files;
+  if(filter!=='all')list=list.filter(f=>f.cat===filter);
+  if(s)list=list.filter(f=>f.name.toLowerCase().includes(s));
+  if(!list.length){$('grid').innerHTML='';$('empty').style.display='block';return}
+  $('empty').style.display='none';
+  $('grid').innerHTML=list.map((f,i)=>{
+    const isImg=f.cat==='img';const e=f.ext.toUpperCase();
+    return`<div class="card" onclick="lbOpen(${i},'${filter}','${s.replace(/'/g,"\\'")}')" role="button" tabindex="0" aria-label="${esc(f.name)}">
+      <div class="card-thumb">${isImg?`<img src="${f.url}" loading="lazy" alt="">`:`<div class="ct-ic">${IC[f.cat]?.replace(/stroke-width="[^"]*"/,'stroke-width="1.4"').replace(/<svg/,`<svg style="stroke:${COLORS[f.cat]}"`)}<span class="ct-ext bg-${f.cat} c-${f.cat}">${e}</span></div>`}<div class="card-badge c-${f.cat}">${e}</div></div>
+      <div class="card-info"><div class="card-name">${esc(f.name)}</div><div class="card-meta"><span>${sz(f.size)}</span><span>${ago(f.modified)}</span></div></div></div>`}).join('');
+}
+
+// ── Lightbox ──
+function lbOpen(i,flt,srch){
+  let list=files;if(flt!=='all')list=list.filter(f=>f.cat===flt);if(srch)list=list.filter(f=>f.name.toLowerCase().includes(srch));
+  const f=list[i];if(!f)return;
+  const c=$('lbC'),bar=$('lbBar');
+  if(f.cat==='img')c.innerHTML=`<img src="${f.url}" alt="${esc(f.name)}">`;
+  else if(f.cat==='vid')c.innerHTML=`<video src="${f.url}" controls autoplay style="max-width:90vw;max-height:80vh"></video>`;
+  else if(f.cat==='aud')c.innerHTML=`<div style="background:var(--bg-1);padding:32px 48px;border-radius:12px;text-align:center"><div style="opacity:.4;margin-bottom:12px">${IC.aud.replace(/<svg/,'<svg style="width:48px;height:48px;stroke:var(--tx-3)"')}</div><div style="color:var(--tx);font-weight:500;margin-bottom:14px">${esc(f.name)}</div><audio src="${f.url}" controls autoplay style="width:100%"></audio></div>`;
+  else c.innerHTML=`<div style="background:var(--bg-1);padding:32px 48px;border-radius:12px;text-align:center"><div style="opacity:.3;margin-bottom:10px">${(IC[f.cat]||IC.oth).replace(/<svg/,'<svg style="width:48px;height:48px;stroke:var(--tx-3)"')}</div><div style="color:var(--tx);font-weight:500">${esc(f.name)}</div><div style="color:var(--tx-3);font-size:.82rem;margin-top:4px">${f.ext.toUpperCase()} &middot; ${sz(f.size)}</div></div>`;
+  const full=location.origin+f.url;
+  bar.innerHTML=`<span class="nm">${esc(f.name)}</span><span class="sz">${sz(f.size)}</span><button class="lb-btn" onclick="cpUrl('${full}')"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button><a class="lb-btn" href="${f.url}" download="${esc(f.name)}" style="text-decoration:none"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>`;
+  $('lb').classList.add('on');
+}
+function lbClose(){$('lb').classList.remove('on');$('lb').querySelectorAll('video,audio').forEach(e=>{e.pause();e.src=''});$('lbC').innerHTML=''}
+$('lb').onclick=e=>{if(e.target===$('lb'))lbClose()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape')lbClose()});
+
+// ── Storage ──
+async function updateStor(){
+  try{
+    const r=await (window.authFetch||fetch)('/api/workspace/browse?path=Uploads');if(!r.ok)return;
+    const d=await r.json();
+    let tot=0;const bk={img:0,doc:0,aud:0,vid:0,code:0,oth:0};
+    (d.entries||[]).filter(e=>e.type==='file').forEach(e=>{
+      const c=cat(ext(e.name)),s=e.size||0;tot+=s;bk[c]+=s;
+    });
+    const max=10*1024*1024*1024,pct=Math.min(100,tot/max*100);
+    $('storFill').style.width=pct+'%';
+    $('storLabel').textContent=sz(tot)+' used';
+    const colors={img:'var(--blue)',doc:'var(--cyan)',aud:'var(--amber)',vid:'var(--red)',code:'var(--green)',oth:'var(--tx-3)'};
+    const names={img:'Images',doc:'Documents',aud:'Audio',vid:'Video',code:'Code',oth:'Other'};
+    let bHtml='',rHtml='';
+    for(const[k,v]of Object.entries(bk)){if(!v)continue;
+      bHtml+=`<div style="width:${Math.max(1,v/Math.max(tot,1)*100)}%;background:${colors[k]}"></div>`;
+      rHtml+=`<div class="stor-row"><div class="d" style="background:${colors[k]}"></div><div class="l">${names[k]}</div><div class="v">${sz(v)}</div></div>`;
+    }
+    $('storBar').innerHTML=bHtml;$('storRows').innerHTML=rHtml;
+  }catch(e){$('storLabel').textContent='--'}
+}
+
+// ── Load existing ──
+async function load(){
+  try{
+    const r=await (window.authFetch||fetch)('/api/workspace/browse?path=Uploads');if(!r.ok)return;
+    const d=await r.json();
+    files=(d.entries||[]).filter(e=>e.type==='file').map(e=>{
+      const x=ext(e.name);return{name:e.name,url:'/uploads/'+e.name,size:e.size||0,ext:x,cat:cat(x),modified:e.modified||0}
+    }).sort((a,b)=>b.modified-a.modified);
+    render();
+  }catch(e){}
+}
+
+// Wait briefly for auth token from parent before loading (token arrives via postMessage).
+// If no token arrives within 200ms (e.g. auth disabled), proceed without it.
+function init(){load();updateStor()}
+if(window._canvasAuthToken){init()}else{
+  let inited=false;
+  const origHandler=window.onmessage;
+  window.addEventListener('message',function onAuth(e){
+    if(e.data&&e.data.type==='auth-token'&&!inited){inited=true;init()}
+  });
+  setTimeout(()=>{if(!inited){inited=true;init()}},200);
+}
+</script>
+</body>
+</html>

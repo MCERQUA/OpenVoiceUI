@@ -33,24 +33,17 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from services.gateways.base import GatewayBase
+from services.gateways.compat import (
+    OPENCLAW_TESTED_VERSION, OPENCLAW_MIN_VERSION,
+    PROTOCOL_MIN, PROTOCOL_MAX,
+    match_event, match_stream, match_state,
+    is_noise_event, is_subagent_spawn_tool, is_subagent_tool,
+    is_stale_response_ex, is_system_response, is_subagent_session_key,
+    extract_server_version, extract_run_id, extract_text_content,
+    build_connect_params, is_challenge_event,
+)
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# OpenClaw version compatibility — the version this code was tested against.
-# Used for startup warnings when a mismatched gateway is detected.
-OPENCLAW_TESTED_VERSION = "2026.3.2"
-OPENCLAW_MIN_VERSION = "2026.3.1"
-
-# System/internal response strings that must never be surfaced to the user.
-_SYSTEM_RESPONSE_PATTERNS = frozenset({
-    'HEARTBEAT_OK',
-    'heartbeat_ok',
-    'HEARTBEAT OK',
-})
 
 # Lightweight prompt armor prepended to every user message.
 # Voice instructions (action tags, style rules) now live in the OpenClaw workspace
@@ -280,10 +273,11 @@ class EventDispatcher:
             evt = data.get('event', '')
 
             # Skip noise
-            if evt in ('health', 'tick', 'presence', 'ping'):
+            if is_noise_event(evt):
                 return
 
-            if evt in ('agent', 'chat'):
+            canonical_evt = match_event(evt)
+            if canonical_evt in ('agent', 'chat'):
                 payload = data.get('payload', {})
                 event_run_id = payload.get('runId', '')
                 event_state = payload.get('state', '')
@@ -291,7 +285,8 @@ class EventDispatcher:
 
                 # Track aborted runs so their subsequent events aren't
                 # delivered to new subscriptions (prevents stale replays).
-                if evt == 'chat' and event_state == 'aborted' and event_run_id:
+                canonical_state = match_state(event_state)
+                if canonical_evt == 'chat' and canonical_state == 'aborted' and event_run_id:
                     self._aborted_runs.add(event_run_id)
                     logger.info(f"### ABORTED run tracked: {event_run_id[:12]}")
                     # Cap set size to prevent unbounded growth
@@ -400,6 +395,7 @@ class GatewayConnection:
         self._backoff_idx = 0
         self._last_disconnect_time = 0.0
         self._server_version: str | None = None
+        self._reconnected_at: float = 0.0  # timestamp of last successful reconnect after failure
 
     @property
     def url(self):
@@ -444,10 +440,10 @@ class GatewayConnection:
             logger.info("### Gateway persistent WS background loop started")
 
     async def _handshake(self, ws):
+        # Step 1 — receive challenge (accept current and future event names)
         challenge_response = await asyncio.wait_for(ws.recv(), timeout=10.0)
         challenge_data = json.loads(challenge_response)
-        if (challenge_data.get('type') != 'event'
-                or challenge_data.get('event') != 'connect.challenge'):
+        if not is_challenge_event(challenge_data):
             raise RuntimeError(f"Expected connect.challenge, got: {challenge_data}")
 
         nonce = challenge_data.get('payload', {}).get('nonce', '')
@@ -456,39 +452,41 @@ class GatewayConnection:
         device_block = _sign_device_connect(
             identity, "cli", "cli", "operator", scopes, self.auth_token, nonce
         )
+
+        # Step 2 — send connect with protocol range (not pinned)
+        params = build_connect_params(
+            auth_token=self.auth_token,
+            client_id="cli",
+            client_mode="cli",
+            platform="linux",
+            user_agent="openvoice-ui-voice/1.0.0",
+            scopes=scopes,
+            caps=["tool-events"],
+            device_block=device_block,
+        )
         handshake = {
             "type": "req",
             "id": f"connect-{uuid.uuid4()}",
             "method": "connect",
-            "params": {
-                "minProtocol": 3, "maxProtocol": 3,
-                "client": {"id": "cli", "version": "1.0.0", "platform": "linux", "mode": "cli"},
-                "role": "operator",
-                "scopes": scopes,
-                "caps": ["tool-events"], "commands": [], "permissions": {},
-                "auth": {"token": self.auth_token},
-                "device": device_block,
-                "locale": "en-US",
-                "userAgent": "openvoice-ui-voice/1.0.0"
-            }
+            "params": params,
         }
         await ws.send(json.dumps(handshake))
+
+        # Step 3 — receive hello
         hello_response = await asyncio.wait_for(ws.recv(), timeout=10.0)
         hello_data = json.loads(hello_response)
         if hello_data.get('type') != 'res' or hello_data.get('error'):
             raise RuntimeError(f"Gateway auth failed: {hello_data.get('error')}")
-        # Try to extract server version from hello response
+
         result = hello_data.get('result', {}) or {}
-        server_version = (
-            result.get('serverVersion')
-            or result.get('version')
-            or (result.get('server', {}) or {}).get('version')
-        )
+        server_version = extract_server_version(result)
+        negotiated_protocol = result.get('protocol', PROTOCOL_MIN)
+        self._negotiated_protocol = negotiated_protocol
         return hello_data, server_version
 
     async def _connect(self):
         t_start = time.time()
-        ws = await websockets.connect(self.url)
+        ws = await websockets.connect(self.url, open_timeout=10)
         try:
             hello_data, server_version = await self._handshake(ws)
         except Exception:
@@ -603,6 +601,75 @@ class GatewayConnection:
         except Exception:
             return False
 
+    # ── Steer (inject message into active run) ─────────────────────────
+
+    async def _send_steer(self, message, session_key):
+        """Send a steer message (chat.send) fire-and-forget.
+
+        When openclaw.json has messages.queue.mode="steer", openclaw
+        injects a new chat.send into the active run at the next tool
+        boundary.  Remaining tool calls in the current batch are
+        skipped with "Skipped due to queued user message." and the
+        agent sees the user's correction immediately.
+
+        We do NOT create a Subscription — the active subscription's
+        _stream_events loop already receives events for the running
+        runId.  The steered output flows on that same run.
+
+        Returns True if the message was sent, False if skipped.
+        """
+        if not self._connected or not self._ws or not self._dispatcher:
+            logger.info("### STEER skipped: not connected")
+            return False
+
+        # Only steer if there's an active subscription (someone is
+        # listening for events).  Otherwise the steered output would
+        # have no consumer and the user would never see the response.
+        sub = self._dispatcher.find_active_sub_by_session(session_key)
+        if not sub:
+            logger.info(f"### STEER skipped: no active sub for session {session_key}")
+            return False
+
+        chat_id = str(uuid.uuid4())
+        full_message = _PROMPT_ARMOR + message
+        chat_request = {
+            "type": "req",
+            "id": f"steer-{chat_id}",
+            "method": "chat.send",
+            "params": {
+                "message": full_message,
+                "sessionKey": session_key,
+                "idempotencyKey": chat_id,
+            }
+        }
+        try:
+            await self._dispatcher.send(self._ws, chat_request)
+            logger.info(
+                f"### STEER sent ({len(message)} chars, "
+                f"active_run={sub.run_id[:12] if sub.run_id else 'none'}): "
+                f"{message[:80]}"
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"### STEER send failed: {e}")
+            return False
+
+    def send_steer(self, message, session_key):
+        """Send a steer message into the active run (sync wrapper).
+
+        See _send_steer for full documentation.
+        """
+        if not self._started or not self._loop:
+            return False
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_steer(message, session_key),
+            self._loop
+        )
+        try:
+            return future.result(timeout=5)
+        except Exception:
+            return False
+
     async def _stream_events(self, sub, event_queue, session_key,
                              captured_actions, agent_id=None):
         """Process events from a Subscription queue and emit to the HTTP event_queue.
@@ -660,16 +727,18 @@ class GatewayConnection:
 
             # Event logging (noise already filtered by dispatcher)
             evt = data.get('event', '')
-            if evt not in ('health', 'tick', 'presence', 'ping'):
+            canonical_evt = match_event(evt) if data.get('type') == 'event' else None
+            if not is_noise_event(evt):
                 payload = data.get('payload', {})
-                if not (evt == 'chat' and payload.get('state') == 'delta'):
+                if not (canonical_evt == 'chat' and match_state(payload.get('state', '')) == 'delta'):
                     logger.info(f"### GW EVENT: {json.dumps(data)[:800]}")
 
             # ── Agent events ──────────────────────────────────────────────
-            if data.get('type') == 'event' and data.get('event') == 'agent':
+            if data.get('type') == 'event' and canonical_evt == 'agent':
                 payload = data.get('payload', {})
+                canonical_stream = match_stream(payload.get('stream', ''))
 
-                if payload.get('stream') == 'assistant':
+                if canonical_stream == 'assistant':
                     d = payload.get('data', {})
                     full_text = d.get('text', '')
                     delta_text = d.get('delta', '')
@@ -683,7 +752,7 @@ class GatewayConnection:
                         collected_text = full_text
                         event_queue.put({'type': 'delta', 'text': delta_text})
 
-                if payload.get('stream') == 'tool':
+                if canonical_stream == 'tool':
                     tool_data = payload.get('data', {})
                     phase = tool_data.get('phase', '')
                     args = tool_data.get('args', {})
@@ -702,7 +771,7 @@ class GatewayConnection:
                     if phase == 'start':
                         tool_name = tool_data.get('name', '?')
                         logger.info(f"### TOOL START: {tool_name}")
-                        if tool_name in ('sessions_spawn', 'sessions-spawn', 'spawn_subagent'):
+                        if is_subagent_spawn_tool(tool_name):
                             subagent_active = True
                             logger.info(f"### SUBAGENT SPAWN DETECTED via tool call: {tool_name}")
                             event_queue.put({'type': 'action', 'action': {
@@ -712,10 +781,10 @@ class GatewayConnection:
                     elif phase == 'result':
                         logger.info(f"### TOOL RESULT: {tool_data.get('name', '?')}")
 
-                if payload.get('stream') == 'lifecycle':
+                if canonical_stream == 'lifecycle':
                     phase = payload.get('data', {}).get('phase', '')
                     sk = payload.get('sessionKey', '')
-                    is_subagent = 'subagent:' in sk
+                    is_subagent = is_subagent_session_key(sk)
                     action = {
                         'type': 'lifecycle', 'phase': phase,
                         'sessionKey': sk, 'ts': time.time()
@@ -752,7 +821,7 @@ class GatewayConnection:
                             prev_text_len = 0
                             collected_text = ''
                         elif collected_text:
-                            if collected_text.strip() in _SYSTEM_RESPONSE_PATTERNS:
+                            if is_system_response(collected_text):
                                 logger.info(f"### Suppressing system response (lifecycle end): {collected_text!r}")
                                 event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
                                 return
@@ -761,34 +830,38 @@ class GatewayConnection:
                             return
 
             # ── Chat events ───────────────────────────────────────────────
-            if data.get('type') == 'event' and data.get('event') == 'chat':
+            if data.get('type') == 'event' and canonical_evt == 'chat':
                 payload = data.get('payload', {})
+                chat_state = match_state(payload.get('state', ''))
 
-                # Handle aborted runs — the gateway sends chat state=aborted
-                # before the cleanup chat.final. Mark so we discard the final.
-                if payload.get('state') == 'aborted':
-                    run_was_aborted = True
+                # Handle aborted runs — exit immediately so heartbeat loop stops.
+                # The gateway may send a cleanup chat.final later but we don't
+                # need to wait for it; the abort is authoritative.
+                if chat_state == 'aborted':
                     logger.info(f"### RUN ABORTED: runId={payload.get('runId', '?')[:12]} "
                                 f"reason={payload.get('stopReason', '?')}")
-                    continue
+                    event_queue.put({
+                        'type': 'text_done',
+                        'response': collected_text if collected_text else None,
+                        'actions': captured_actions
+                    })
+                    return
 
-                if payload.get('state') == 'error':
+                if chat_state == 'error':
                     error_msg = payload.get('errorMessage', 'Unknown error')
                     logger.error(f"### CHAT ERROR: {error_msg}")
                     event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions,
                                      'error': error_msg})
                     return
 
-                if payload.get('state') == 'final':
+                if chat_state == 'final':
                     logger.info(f"### CHAT FINAL payload: {json.dumps(payload)[:1500]}")
 
                     # Detect gateway-injected stale replays from aborted runs.
-                    # These have model="gateway-injected" and totalTokens=0.
                     usage = payload.get('usage', {})
                     model = payload.get('model', '')
                     total_tokens = usage.get('totalTokens', -1)
-                    is_gateway_injected = (model == 'gateway-injected'
-                                           and total_tokens == 0)
+                    is_gateway_injected = is_stale_response_ex(model, total_tokens, payload)
 
                     if run_was_aborted or is_gateway_injected:
                         logger.info(
@@ -808,17 +881,12 @@ class GatewayConnection:
                     final_text = collected_text
                     if not final_text and 'message' in payload:
                         content = payload['message'].get('content', '')
-                        if isinstance(content, list):
-                            text_parts = [
-                                item['text'] for item in content
-                                if item.get('type') == 'text' and item.get('text', '').strip()
-                            ]
-                            content = ' '.join(text_parts)
+                        content = extract_text_content(content)
                         if content and content.strip():
                             final_text = content
 
                     if final_text:
-                        if final_text.strip() in _SYSTEM_RESPONSE_PATTERNS:
+                        if is_system_response(final_text):
                             logger.info(f"### Suppressing system response (chat final): {final_text!r}")
                             event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
                             return
@@ -829,10 +897,7 @@ class GatewayConnection:
                     # Also check if any captured actions suggest subagent activity
                     # even if the subagent_active flag wasn't set (tool name mismatch)
                     _has_subagent_tools = any(
-                        a.get('type') == 'tool' and a.get('name', '') in (
-                            'sessions_spawn', 'sessions-spawn', 'spawn_subagent',
-                            'agent_send', 'agent-send',
-                        )
+                        a.get('type') == 'tool' and is_subagent_tool(a.get('name', ''))
                         for a in captured_actions
                     )
                     if subagent_active or main_lifecycle_ended or _has_subagent_tools:
@@ -860,6 +925,27 @@ class GatewayConnection:
     async def _send_and_stream(self, event_queue, message, session_key,
                                captured_actions, agent_id=None):
         """Create a subscription, send chat.send, and process events."""
+
+        # ── Abort-before-send: ensure no stale run is active on this session ──
+        # If a previous run is still in-flight (user hit stop+start quickly),
+        # abort it and wait for the abort to settle before sending the new one.
+        # Without this, Z.AI accumulates stale abort states and returns empties.
+        existing_sub = self._dispatcher.find_active_sub_by_session(session_key)
+        if existing_sub and existing_sub.run_id:
+            logger.warning(f"### Abort-before-send: killing stale run {existing_sub.run_id[:8]} on session {session_key}")
+            await self._send_abort(existing_sub.run_id, session_key, "pre-send-cleanup")
+            # Wait for the stale subscription to finish (up to 2s)
+            for _ in range(20):
+                if not self._dispatcher.find_active_sub_by_session(session_key):
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                # Force-unsubscribe the stale sub if it didn't clear
+                logger.warning(f"### Abort-before-send: force-unsubscribing stale {existing_sub.chat_id[:8]}")
+                self._dispatcher.unsubscribe(existing_sub.chat_id)
+            # Brief settle after abort so Z.AI processes the state change
+            await asyncio.sleep(0.2)
+
         ws = self._ws
         chat_id = str(uuid.uuid4())
         sub = self._dispatcher.subscribe(chat_id, session_key)
@@ -902,6 +988,8 @@ class GatewayConnection:
             await self._disconnect()
             try:
                 await self._ensure_connected()
+                self._reconnected_at = time.time()
+                logger.info("### WS reconnected after failure — flagged for recovery message")
                 await self._send_and_stream(event_queue, message, session_key,
                                             captured_actions, agent_id=agent_id)
             except Exception as e2:
@@ -978,6 +1066,13 @@ class GatewayRouter:
                 return True
         return False
 
+    def send_steer(self, message, session_key):
+        """Send a steer message across all connections."""
+        for conn in self._connections.values():
+            if conn.send_steer(message, session_key):
+                return True
+        return False
+
 
 # ---------------------------------------------------------------------------
 # OpenClawGateway — GatewayBase wrapper
@@ -1013,3 +1108,27 @@ class OpenClawGateway(GatewayBase):
     def abort_active_run(self, session_key):
         """Abort the active run for the given session key."""
         return self._router.abort_active_run(session_key)
+
+    def send_steer(self, message, session_key):
+        """Inject a message into the active run (steer mode).
+
+        Fire-and-forget — openclaw's queue.mode=steer handles
+        injection at the next tool boundary.  The active streaming
+        response continues receiving the steered output.
+        """
+        return self._router.send_steer(message, session_key)
+
+    def consume_reconnection(self, max_age_seconds=120):
+        """Check if gateway recently reconnected after a failure.
+        Returns True (once) if reconnection happened within max_age_seconds.
+        Clears the flag after reading so it only fires once."""
+        for conn in self._router._connections.values():
+            if conn._reconnected_at > 0:
+                age = time.time() - conn._reconnected_at
+                if age < max_age_seconds:
+                    conn._reconnected_at = 0.0
+                    logger.info(f"### consume_reconnection: reconnected {age:.0f}s ago — injecting recovery")
+                    return True
+                else:
+                    conn._reconnected_at = 0.0  # expired, clear silently
+        return False

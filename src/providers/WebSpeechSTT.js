@@ -13,6 +13,18 @@
 // Detect iOS — affects mic stream lifetime and recognition restart timing
 const _isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
+// Post real STT errors to the server so session monitoring can track them.
+// no-speech and aborted are normal Chrome behaviour — don't report those.
+function _reportSTTError(error, message, source = 'stt') {
+    try {
+        fetch('/api/stt-events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ error, message, provider: 'webspeech', source }),
+        }).catch(() => {}); // fire-and-forget, never block STT
+    } catch (_) {}
+}
+
 // ===== WEB SPEECH STT =====
 // Browser-native speech recognition (free, no API keys needed)
 class WebSpeechSTT {
@@ -62,6 +74,7 @@ class WebSpeechSTT {
 
         this.recognition.onresult = (event) => {
             if (this.isProcessing) return;
+            if (this._micMuted) return;  // PTT mode — mic should be silent
 
             // ANY result (interim or final) means the user is still speaking.
             // Reset the silence timer on every event so we never cut off mid-speech.
@@ -113,10 +126,12 @@ class WebSpeechSTT {
             }
             if (event.error === 'audio-capture') {
                 console.error('STT: audio-capture — microphone hardware unavailable');
+                _reportSTTError('audio-capture', 'Microphone hardware unavailable', 'stt');
                 if (this.onError) this.onError('audio-capture');
                 return;
             }
             console.error('STT Error:', event.error);
+            _reportSTTError(event.error, `STT recognition error: ${event.error}`, 'stt');
             if (this.onError) this.onError(event.error);
         };
 
@@ -209,9 +224,15 @@ class WebSpeechSTT {
 
     /**
      * Mute STT immediately — called when TTS starts speaking.
-     * Sets isProcessing=true so onresult ignores all incoming audio,
-     * and clears any pending silence timer so queued echo text is discarded.
-     * onend will not restart the engine while muted, stopping the abort loop.
+     * Aborts the recognition engine entirely so it stops capturing mic audio.
+     * This prevents speaker echo from being transcribed during TTS playback.
+     * onend fires after abort but won't restart (isProcessing=true blocks it).
+     * resume() will call recognition.start() when TTS is done.
+     *
+     * NOTE: abort() vs stop() — abort() discards in-flight results,
+     * stop() finalizes them. We use abort() to discard TTS echo.
+     * isProcessing=true alone is not enough — recognition keeps running
+     * and physically captures speaker audio via mic when only flagged.
      */
     mute() {
         this.isProcessing = true;
@@ -220,6 +241,9 @@ class WebSpeechSTT {
             this.silenceTimer = null;
         }
         this.accumulatedText = '';
+        if (this.recognition) {
+            try { this.recognition.abort(); } catch (e) {}
+        }
     }
 
     /**
@@ -274,18 +298,35 @@ class WebSpeechSTT {
         this._micMuted = true;
         if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
 
-        // Force-send whatever we've accumulated
-        const text = this.accumulatedText.trim();
-        if (text && this.onResult) {
-            console.log('PTT release — sending:', text);
+        // Check if Chrome already finalized text during the hold
+        const immediate = this.accumulatedText.trim();
+        if (immediate && this.onResult) {
+            console.log('PTT release — sending:', immediate);
             this.isProcessing = true;
-            this.onResult(text);
+            this.onResult(immediate);
+            this.accumulatedText = '';
         }
-        this.accumulatedText = '';
 
-        // Stop recognition (muted state prevents onend restart)
+        // Stop recognition — Chrome finalizes any pending speech as isFinal
+        // (muted state prevents onend restart)
         if (this.recognition) {
             try { this.recognition.stop(); } catch (e) {}
+        }
+
+        // If nothing was finalized during hold, wait for Chrome's post-stop results.
+        // Chrome fires onresult with isFinal=true when recognition.stop() is called,
+        // but the event is async. Give it time to arrive, then send.
+        if (!immediate) {
+            setTimeout(() => {
+                if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+                const text = this.accumulatedText.trim();
+                if (text && this.onResult) {
+                    console.log('PTT release (delayed) — sending:', text);
+                    this.isProcessing = true;
+                    this.onResult(text);
+                }
+                this.accumulatedText = '';
+            }, 400);
         }
     }
 
@@ -368,6 +409,7 @@ class WakeWordDetector {
                 return; // Normal during passive listening
             }
             console.warn('Wake word detector error:', event.error);
+            _reportSTTError(event.error, `Wake word error: ${event.error}`, 'wake_word');
         };
 
         this.recognition.onend = () => {

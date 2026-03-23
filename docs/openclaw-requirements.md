@@ -16,7 +16,7 @@ installation.
 
 | | |
 |---|---|
-| **Tested** | `openclaw@2026.3.2` |
+| **Tested** | `openclaw@2026.3.13` |
 | **Minimum** | `openclaw@2026.3.1` |
 
 Check your version:
@@ -26,14 +26,14 @@ openclaw --version
 
 Install the tested version:
 ```bash
-npm i -g openclaw@2026.3.2
+npm i -g openclaw@2026.3.13
 ```
 
-> **Why pinned?** OpenClaw v2026.3.7+ introduced breaking changes to gateway
-> authentication ("fail closed" on config validation, mandatory `gateway.auth.mode`
-> when both token and password are set). These changes can prevent the gateway from
-> starting if your config isn't exactly right. We pin to a known-good version to
-> avoid surprises.
+> **Version compatibility:** OpenVoiceUI includes a protocol compatibility layer
+> (`services/gateways/compat.py`) that handles differences between OpenClaw versions
+> automatically. Earlier versions (2026.3.1–2026.3.6) and newer versions (2026.3.7+)
+> have different config key names and authentication requirements — the compat layer
+> translates between them so you don't have to worry about it.
 
 ---
 
@@ -165,7 +165,7 @@ Then register the agent in your `openclaw.json`:
 
 Before connecting OpenVoiceUI to your existing OpenClaw:
 
-- [ ] OpenClaw version is `2026.3.1` or `2026.3.2`
+- [ ] OpenClaw version is `2026.3.1` or newer
 - [ ] `gateway.auth.mode` is set to `"token"`
 - [ ] `gateway.auth.token` is set (same value as `CLAWDBOT_AUTH_TOKEN` in `.env`)
 - [ ] `gateway.controlUi.dangerouslyDisableDeviceAuth` is `true`

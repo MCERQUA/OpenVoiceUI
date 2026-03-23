@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Image Studio</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #080d18;
+            color: #e2e8f0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .page-header {
+            text-align: center;
+            margin-bottom: 28px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(148,163,184,0.1);
+        }
+        .page-header h1 {
+            font-size: 1.9em;
+            font-weight: 700;
+            background: linear-gradient(90deg, #6366f1, #a78bfa, #38bdf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 6px;
+        }
+        .page-header p { font-size: 0.86em; color: #64748b; }
+
+        /* ── Creator card ── */
+        .creator-card {
+            background: #111827;
+            border: 2px solid rgba(99,102,241,0.3);
+            border-radius: 16px;
+            padding: 22px;
+            margin-bottom: 32px;
+        }
+
+        /* ── Option buttons ── */
+        .opt-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+        .opt-label {
+            font-size: 0.78em;
+            color: #64748b;
+            white-space: nowrap;
+            min-width: 46px;
+        }
+
+        .model-btn {
+            background: rgba(30,41,59,0.7);
+            border: 1.5px solid rgba(148,163,184,0.2);
+            color: #94a3b8;
+            padding: 5px 11px;
+            border-radius: 6px;
+            font-size: 0.81em;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .model-btn:hover { border-color: #818cf8; color: #818cf8; }
+        .model-btn.active { background: rgba(99,102,241,0.18); border-color: #818cf8; color: #a5b4fc; font-weight: 600; }
+
+        .opt-btn {
+            background: rgba(30,41,59,0.7);
+            border: 1.5px solid rgba(148,163,184,0.18);
+            color: #94a3b8;
+            padding: 4px 9px;
+            border-radius: 6px;
+            font-size: 0.77em;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .opt-btn:hover { border-color: #818cf8; color: #818cf8; }
+        .opt-btn.active { background: rgba(99,102,241,0.12); border-color: rgba(99,102,241,0.55); color: #a5b4fc; font-weight: 600; }
+
+        .opt-hint { font-size: 0.68em; color: #475569; }
+
+        /* ── Prompt + refs layout ── */
+        .prompt-refs-grid {
+            display: grid;
+            grid-template-columns: 1fr 240px;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        @media (max-width: 680px) { .prompt-refs-grid { grid-template-columns: 1fr; } }
+
+        textarea#creator-prompt {
+            width: 100%;
+            height: 120px;
+            background: #0f172a;
+            border: 2px solid rgba(148,163,184,0.18);
+            border-radius: 10px;
+            padding: 12px;
+            color: #e2e8f0;
+            font-size: 0.93em;
+            resize: vertical;
+            font-family: inherit;
+            outline: none;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+        textarea#creator-prompt:focus { border-color: rgba(99,102,241,0.5); }
+
+        .prompt-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 6px;
+        }
+        .prompt-btns { display: flex; gap: 7px; }
+
+        .sm-btn {
+            background: rgba(30,41,59,0.7);
+            border: 1px solid rgba(148,163,184,0.18);
+            color: #94a3b8;
+            padding: 4px 9px;
+            border-radius: 5px;
+            font-size: 0.77em;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .sm-btn:hover { border-color: #60a5fa; color: #60a5fa; }
+        .sm-btn.purple { background: rgba(139,92,246,0.12); border-color: rgba(139,92,246,0.35); color: #a78bfa; }
+        .sm-btn.purple:hover { background: rgba(139,92,246,0.22); }
+
+        /* ── Reference image slots ── */
+        .ref-label { font-size: 0.77em; color: #64748b; margin-bottom: 6px; }
+        .ref-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+
+        .ref-slot {
+            background: #0a1020;
+            border: 2px dashed rgba(148,163,184,0.18);
+            border-radius: 8px;
+            height: 70px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+            transition: border-color 0.2s;
+        }
+        .ref-slot:hover { border-color: rgba(99,102,241,0.45); }
+        .ref-slot.loaded { border-style: solid; border-color: rgba(99,102,241,0.5); }
+        .ref-placeholder { color: #334155; font-size: 1.7em; font-weight: 300; }
+        .ref-slot img { width: 100%; height: 100%; object-fit: cover; }
+        .ref-remove { position: absolute; top: 2px; right: 4px; background: rgba(0,0,0,0.75); color: #ef4444; border: none; cursor: pointer; font-size: 0.85em; border-radius: 3px; padding: 1px 4px; display: none; }
+        .ref-slot.loaded .ref-remove { display: block; }
+
+        /* ── Generate button ── */
+        .gen-wrap { text-align: center; margin-bottom: 20px; }
+        #generate-btn {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: #fff;
+            border: none;
+            padding: 13px 52px;
+            border-radius: 10px;
+            font-size: 1.08em;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 20px rgba(99,102,241,0.35);
+        }
+        #generate-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(99,102,241,0.5); }
+        #generate-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        /* ── Loading ── */
+        #creator-loading { display: none; text-align: center; padding: 36px 20px; }
+        @keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+        .spinner { font-size: 2.4em; animation: spin 1s linear infinite; display: inline-block; }
+        #load-msg { margin-top: 14px; font-size: 1.05em; color: #818cf8; font-weight: 600; }
+
+        /* ── Result ── */
+        #creator-result {
+            display: none;
+            border-top: 1px solid rgba(148,163,184,0.12);
+            padding-top: 20px;
+        }
+        .result-grid {
+            display: grid;
+            grid-template-columns: 1fr 210px;
+            gap: 20px;
+            align-items: start;
+        }
+        @media (max-width: 680px) { .result-grid { grid-template-columns: 1fr; } }
+
+        #result-img-wrap {
+            background: #030710;
+            border: 2px solid rgba(99,102,241,0.25);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 220px;
+        }
+        #result-img { max-width: 100%; max-height: 520px; object-fit: contain; cursor: zoom-in; }
+        #result-text { font-size: 0.8em; color: #64748b; margin-top: 7px; font-style: italic; }
+        .result-label { font-size: 0.8em; color: #64748b; margin-bottom: 7px; }
+
+        .result-actions { display: flex; flex-direction: column; gap: 9px; padding-top: 16px; }
+        .result-actions-title { font-size: 0.83em; color: #94a3b8; font-weight: 600; margin-bottom: 2px; }
+
+        .rab {
+            width: 100%;
+            border: 2px solid;
+            border-radius: 9px;
+            padding: 9px 11px;
+            font-size: 0.86em;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.15s;
+            background: transparent;
+            line-height: 1.3;
+        }
+        .rab .sub { font-size: 0.75em; font-weight: 400; opacity: 0.75; margin-top: 2px; }
+        .rab.green  { border-color: rgba(34,197,94,0.45);  color: #4ade80; }
+        .rab.green:hover  { background: rgba(34,197,94,0.1); }
+        .rab.amber  { border-color: rgba(245,158,11,0.45); color: #f59e0b; }
+        .rab.amber:hover  { background: rgba(245,158,11,0.1); }
+        .rab.blue   { border-color: rgba(96,165,250,0.45); color: #60a5fa; }
+        .rab.blue:hover   { background: rgba(96,165,250,0.1); }
+        .rab.purple { border-color: rgba(167,139,250,0.45); color: #a78bfa; }
+        .rab.purple:hover { background: rgba(167,139,250,0.1); }
+        .rab.teal   { border-color: rgba(20,184,166,0.45); color: #2dd4bf; }
+        .rab.teal:hover   { background: rgba(20,184,166,0.1); }
+        .rab.gray   { border-color: rgba(100,116,139,0.35); color: #94a3b8; }
+        .rab.gray:hover   { background: rgba(100,116,139,0.1); }
+
+        /* ── Gallery ── */
+        .gallery-section { margin-top: 8px; }
+        .gallery-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 16px;
+        }
+        .gallery-title { font-size: 1.05em; font-weight: 700; color: #e2e8f0; }
+        .gallery-sub { font-size: 0.78em; color: #475569; margin-top: 2px; }
+        #gallery-count { font-size: 0.8em; color: #64748b; }
+
+        #gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 14px;
+        }
+
+        .gcard {
+            background: #111827;
+            border: 1.5px solid rgba(99,102,241,0.18);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+        .gcard:hover { border-color: rgba(99,102,241,0.5); transform: translateY(-2px); }
+
+        .gcard-img {
+            background: #060d1c;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .gcard-img img { width: 100%; height: 100%; object-fit: contain; cursor: zoom-in; transition: transform 0.2s; }
+        .gcard-img img:hover { transform: scale(1.03); }
+
+        .gcard-body { padding: 9px 11px; }
+        .gcard-name {
+            font-size: 0.8em;
+            font-weight: 600;
+            color: #cbd5e1;
+            margin-bottom: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .gcard-actions { display: flex; gap: 5px; }
+        .gcard-actions button {
+            flex: 1;
+            background: rgba(30,41,59,0.7);
+            border: 1.5px solid rgba(148,163,184,0.18);
+            color: #94a3b8;
+            border-radius: 6px;
+            padding: 5px 4px;
+            font-size: 0.72em;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .gcard-actions button:hover { border-color: #818cf8; color: #a5b4fc; }
+        .gcard-actions button.del:hover { border-color: #f87171; color: #f87171; }
+
+        #gallery-empty {
+            grid-column: 1/-1;
+            text-align: center;
+            padding: 50px 20px;
+            color: #334155;
+            font-size: 0.9em;
+            border: 2px dashed rgba(148,163,184,0.1);
+            border-radius: 12px;
+        }
+
+        /* ── Lightbox ── */
+        #lightbox {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.92);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            cursor: zoom-out;
+            flex-direction: column;
+            gap: 16px;
+        }
+        #lightbox.open { display: flex; }
+        #lightbox img { max-width: 90vw; max-height: 85vh; object-fit: contain; border-radius: 8px; }
+        #lightbox-actions { display: flex; gap: 10px; }
+        #lightbox-actions button {
+            background: rgba(99,102,241,0.2);
+            border: 1.5px solid rgba(99,102,241,0.5);
+            color: #a5b4fc;
+            padding: 8px 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.88em;
+            font-weight: 600;
+            transition: all 0.15s;
+        }
+        #lightbox-actions button:hover { background: rgba(99,102,241,0.35); }
+        #lightbox-actions button.close-btn { background: rgba(100,116,139,0.2); border-color: rgba(100,116,139,0.4); color: #94a3b8; }
+
+        /* ── Toast ── */
+        #toast {
+            position: fixed;
+            bottom: 22px;
+            left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: #1e293b;
+            border: 1px solid rgba(148,163,184,0.2);
+            border-radius: 8px;
+            padding: 9px 20px;
+            font-size: 0.86em;
+            color: #e2e8f0;
+            transition: transform 0.3s ease;
+            z-index: 8888;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); }
+        #toast.ok  { border-color: rgba(34,197,94,0.5); color: #4ade80; }
+        #toast.err { border-color: rgba(239,68,68,0.5); color: #f87171; }
+        #toast.info { border-color: rgba(99,102,241,0.5); color: #a5b4fc; }
+    </style>
+</head>
+<body>
+
+<div class="page-header">
+    <h1>✨ AI Image Studio</h1>
+    <p>Generate · Edit · Save · Download — powered by Nano Banana Pro, Imagen 4, and Gemini Flash</p>
+</div>
+
+<!-- ═══════════ CREATOR ═══════════ -->
+<div class="creator-card">
+
+    <!-- Model -->
+    <div class="opt-row">
+        <span class="opt-label">Google</span>
+        <button class="model-btn active" data-model="nano-banana-pro-preview" onclick="setModel(this)">🍌 Nano Banana Pro</button>
+        <button class="model-btn" data-model="gemini-3.1-flash-image-preview" onclick="setModel(this)">⚡ Gemini 3.1 Flash</button>
+        <button class="model-btn" data-model="imagen-4.0-generate-001" onclick="setModel(this)">🖼️ Imagen 4</button>
+        <button class="model-btn" data-model="imagen-4.0-fast-generate-001" onclick="setModel(this)">🚀 Imagen 4 Fast</button>
+        <button class="model-btn" data-model="gemini-2.0-flash-exp-image-generation" onclick="setModel(this)">🔬 Flash Exp</button>
+    </div>
+    <div class="opt-row">
+        <span class="opt-label">HF</span>
+        <button class="model-btn" data-model="hf:black-forest-labs/FLUX.1-schnell" onclick="setModel(this)">⚡ FLUX Schnell</button>
+        <button class="model-btn" data-model="hf:black-forest-labs/FLUX.1-dev" onclick="setModel(this)">🎨 FLUX Dev</button>
+        <button class="model-btn" data-model="hf:stabilityai/stable-diffusion-xl-base-1.0" onclick="setModel(this)">🖼️ SDXL</button>
+        <button class="model-btn" data-model="hf:stabilityai/stable-diffusion-3.5-large" onclick="setModel(this)">🌟 SD 3.5 Large</button>
+        <button class="model-btn" data-model="hf:stabilityai/stable-diffusion-3.5-large-turbo" onclick="setModel(this)">🚀 SD 3.5 Turbo</button>
+    </div>
+
+    <!-- Style -->
+    <div class="opt-row">
+        <span class="opt-label">Style</span>
+        <button class="opt-btn active" data-style="" onclick="setStyle(this)">Auto</button>
+        <button class="opt-btn" data-style="vintage tattoo flash art, bold outlines, fully colored, classic tattoo palette" onclick="setStyle(this)">🐉 Tattoo Flash</button>
+        <button class="opt-btn" data-style="retro 80s airbrush illustration, vibrant gradients, chrome text, neon colors" onclick="setStyle(this)">💡 80s Airbrush</button>
+        <button class="opt-btn" data-style="comic book illustration, ink outlines, vibrant flat colors, dynamic action pose" onclick="setStyle(this)">💥 Comic Book</button>
+        <button class="opt-btn" data-style="photorealistic digital render, cinematic lighting, film grain, ultra detailed" onclick="setStyle(this)">🎬 Cinematic</button>
+        <button class="opt-btn" data-style="heavy metal album cover art, dramatic lighting, dark and epic" onclick="setStyle(this)">🤘 Metal</button>
+        <button class="opt-btn" data-style="graffiti mural art, urban texture, spray paint style, bold outlines" onclick="setStyle(this)">🌆 Graffiti</button>
+        <button class="opt-btn" data-style="old-school hot rod pinstripe art, flames, chrome, retro americana" onclick="setStyle(this)">🔥 Hot Rod</button>
+        <button class="opt-btn" data-style="minimalist vector illustration, clean lines, flat design, bold shapes, limited palette" onclick="setStyle(this)">◼ Flat / Vector</button>
+        <button class="opt-btn" data-style="watercolor painting, soft edges, flowing color washes, artistic texture, impressionistic" onclick="setStyle(this)">🎨 Watercolor</button>
+        <button class="opt-btn" data-style="pixel art, 16-bit retro game style, vibrant colors, clean pixels" onclick="setStyle(this)">👾 Pixel Art</button>
+        <button class="opt-btn" data-style="sticker art style, thick white outline, bold flat colors, clean background, die-cut ready" onclick="setStyle(this)">⭐ Sticker</button>
+    </div>
+
+    <!-- Aspect + Quality -->
+    <div class="opt-row">
+        <span class="opt-label">Aspect</span>
+        <button class="opt-btn active" data-aspect="1:1" onclick="setAspect(this)">◼ 1:1 Square</button>
+        <button class="opt-btn" data-aspect="3:4" onclick="setAspect(this)">▯ 3:4 Portrait</button>
+        <button class="opt-btn" data-aspect="4:3" onclick="setAspect(this)">▭ 4:3 Landscape</button>
+        <button class="opt-btn" data-aspect="16:9" onclick="setAspect(this)">― 16:9 Wide</button>
+    </div>
+    <div class="opt-row">
+        <span class="opt-label">Quality</span>
+        <button class="opt-btn active" data-quality="standard" onclick="setQuality(this)">1K (1024px)</button>
+        <button class="opt-btn" data-quality="high" onclick="setQuality(this)">⬆ 1.5K (1536px)</button>
+        <button class="opt-btn" data-quality="ultra" onclick="setQuality(this)">★ 2K (2048px)</button>
+        <span class="opt-hint">&nbsp;HF models: actual resolution · Google models: prompt hint only</span>
+    </div>
+
+    <!-- Prompt + Refs -->
+    <div class="prompt-refs-grid">
+        <div>
+            <textarea id="creator-prompt" placeholder="Describe the image you want… e.g. 'a robot playing chess in a neon-lit café, cyberpunk style, t-shirt graphic, dark background'" oninput="updateCharCount(this)"></textarea>
+            <div class="prompt-meta">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span id="char-count" style="font-size:0.74em;color:#475569;">0 chars</span>
+                    <span id="enhance-status" style="display:none;font-size:0.74em;color:#a78bfa;">⏳ Enhancing...</span>
+                </div>
+                <div class="prompt-btns">
+                    <button class="sm-btn" onclick="clearPrompt()">Clear</button>
+                    <button class="sm-btn" onclick="randomPrompt()">✨ Inspire</button>
+                    <button class="sm-btn purple" id="enhance-btn" onclick="enhancePrompt()">🦥 Enhance</button>
+                </div>
+            </div>
+        </div>
+        <div>
+            <div class="ref-label">Reference images — upload to edit or combine (optional)</div>
+            <div class="ref-grid">
+                <div class="ref-slot" id="ref-0" onclick="document.getElementById('ref-input-0').click()">
+                    <input type="file" id="ref-input-0" accept="image/*" style="display:none" onchange="loadRefImage(0,this)">
+                    <div class="ref-placeholder">+</div>
+                </div>
+                <div class="ref-slot" id="ref-1" onclick="document.getElementById('ref-input-1').click()">
+                    <input type="file" id="ref-input-1" accept="image/*" style="display:none" onchange="loadRefImage(1,this)">
+                    <div class="ref-placeholder">+</div>
+                </div>
+                <div class="ref-slot" id="ref-2" onclick="document.getElementById('ref-input-2').click()">
+                    <input type="file" id="ref-input-2" accept="image/*" style="display:none" onchange="loadRefImage(2,this)">
+                    <div class="ref-placeholder">+</div>
+                </div>
+                <div class="ref-slot" id="ref-3" onclick="document.getElementById('ref-input-3').click()">
+                    <input type="file" id="ref-input-3" accept="image/*" style="display:none" onchange="loadRefImage(3,this)">
+                    <div class="ref-placeholder">+</div>
+                </div>
+            </div>
+            <button class="sm-btn" style="margin-top:7px;width:100%;" onclick="clearRefImages()">Clear all refs</button>
+        </div>
+    </div>
+
+    <!-- Generate -->
+    <div class="gen-wrap">
+        <button id="generate-btn" onclick="generateImage()">✨ Generate Image</button>
+    </div>
+
+    <!-- Loading -->
+    <div id="creator-loading">
+        <div class="spinner">🍌</div>
+        <div id="load-msg">Generating your image…</div>
+        <div style="margin-top:7px;font-size:0.83em;color:#475569;">Usually 5–20 seconds depending on model</div>
+    </div>
+
+    <!-- Result -->
+    <div id="creator-result">
+        <div class="result-grid">
+            <div>
+                <div class="result-label">Generated image — click to zoom</div>
+                <div id="result-img-wrap">
+                    <img id="result-img" onclick="openLightbox(this.src, currentResultName())" />
+                </div>
+                <div id="result-text"></div>
+            </div>
+            <div class="result-actions">
+                <div class="result-actions-title">Actions</div>
+                <button class="rab green" onclick="saveToGallery()">
+                    💾 Save to Gallery
+                    <div class="sub">Saves to server — always available</div>
+                </button>
+                <button class="rab teal" onclick="copyResultUrl()">
+                    📋 Copy Image URL
+                    <div class="sub">Copy server URL to clipboard</div>
+                </button>
+                <button class="rab purple" onclick="downloadResult()">
+                    ⬇️ Download
+                    <div class="sub">Save image to your device</div>
+                </button>
+                <button class="rab amber" onclick="tweakImage()">
+                    🔧 Use in Prompt
+                    <div class="sub">Load as reference for next generation</div>
+                </button>
+                <button class="rab blue" onclick="generateVariation()">
+                    🔀 Generate Variation
+                    <div class="sub">Same prompt, new generation</div>
+                </button>
+                <button class="rab gray" onclick="clearResult()">
+                    ✕ Clear
+                    <div class="sub">Start fresh</div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /creator-card -->
+
+<!-- ═══════════ GALLERY ═══════════ -->
+<div class="gallery-section">
+    <div class="gallery-header">
+        <div>
+            <div class="gallery-title">💾 Saved Images</div>
+            <div class="gallery-sub">Stored on server · Persistent across sessions</div>
+        </div>
+        <span id="gallery-count"></span>
+    </div>
+    <div id="gallery-grid">
+        <div id="gallery-empty">Generate an image and click <strong>Save to Gallery</strong> to see it here</div>
+    </div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox" onclick="closeLightboxOnBg(event)">
+    <img id="lightbox-img" src="" alt="">
+    <div id="lightbox-actions" onclick="event.stopPropagation()">
+        <button onclick="copyLightboxUrl()">📋 Copy URL</button>
+        <button onclick="downloadLightboxImg()">⬇️ Download</button>
+        <button onclick="useLightboxAsRef()">🔧 Use in Prompt</button>
+        <button class="close-btn" onclick="closeLightbox()">✕ Close</button>
+    </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────
+let selectedModel   = 'nano-banana-pro-preview';
+let selectedStyle   = '';
+let selectedAspect  = '1:1';
+let selectedQuality = 'standard';
+let refImages = [null, null, null, null]; // { mime_type, data, dataUrl }
+let lastResult = null; // { dataUrl, base64, mime, name }
+
+const INSPIRE_PROMPTS = [
+    "A cyberpunk robot hacker sitting at a terminal in a neon-lit underground bunker, holographic code streams, dark background, t-shirt graphic style, ultra detailed",
+    "Retro 80s airbrush illustration of a velociraptor playing electric guitar on stage, neon pink and cyan, chrome lettering 'ROCK OR DIE', dark background",
+    "Vintage tattoo flash art: a great white shark wearing sunglasses, bold outlines, fully colored in classic tattoo palette, off-white background",
+    "Comic book panel: a heroic corgi in superhero costume flying over a city skyline, bold ink outlines, vibrant flat colors, dynamic upward angle",
+    "Heavy metal album cover: a skeleton astronaut floating through a galaxy of neon nebulae, dramatic back-lighting, 'VOID WALKER' typography space",
+    "Pixel art 16-bit: a wizard casting a lightning spell in a dungeon, glowing runes, treasure chests, torchlight, classic JRPG aesthetic",
+    "Graffiti mural: giant portrait of a T-rex in a NASA spacesuit, urban brick wall texture, vivid spray paint colors, bold black outlines",
+    "Sticker art: a cheerful alien barista making coffee, thick white outline, bright flat colors, transparent background ready, die-cut style",
+    "Classic tattoo flash sheet: anchor, swallow, skull with roses, banner reading 'FOREVER', bold outlines, traditional red and green palette",
+    "Minimalist vector: a fox in a business suit holding a briefcase, dark navy background, single color highlight in orange, clean geometric style",
+    "Watercolor: a mythical koi fish leaping through cherry blossoms, soft pinks and blues, flowing ink outlines, traditional Japanese aesthetic",
+    "Old-school hot rod illustration: a flaming skull driving a 1955 chopped rod, chrome engine exposed, desert highway, pinstripe art style",
+    "80s retro sci-fi poster: an astronaut surfing on the rings of Saturn, vivid gradient sunset, chrome retro font 'RADICAL COSMOS'",
+    "Comic book villain: a sentient pizza slice wearing a monocle and top hat, world domination map in background, dramatic cape, bold colors",
+];
+
+// ── Option setters ─────────────────────────────────────────────────
+function setModel(btn)   { document.querySelectorAll('.model-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedModel=btn.dataset.model; }
+function setStyle(btn)   { document.querySelectorAll('[data-style]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedStyle=btn.dataset.style; }
+function setAspect(btn)  { document.querySelectorAll('[data-aspect]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedAspect=btn.dataset.aspect; }
+function setQuality(btn) { document.querySelectorAll('[data-quality]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedQuality=btn.dataset.quality; }
+
+// ── Prompt ─────────────────────────────────────────────────────────
+function updateCharCount(ta) { document.getElementById('char-count').textContent = ta.value.length + ' chars'; }
+function clearPrompt() { const ta=document.getElementById('creator-prompt'); ta.value=''; document.getElementById('char-count').textContent='0 chars'; }
+function randomPrompt() { const p=INSPIRE_PROMPTS[Math.floor(Math.random()*INSPIRE_PROMPTS.length)]; document.getElementById('creator-prompt').value=p; document.getElementById('char-count').textContent=p.length+' chars'; }
+
+async function enhancePrompt() {
+    const idea = document.getElementById('creator-prompt').value.trim();
+    if (!idea) { toast('Type your rough idea first, then click Enhance!', 'err'); return; }
+    const btn = document.getElementById('enhance-btn');
+    btn.disabled = true; btn.textContent = '...';
+    document.getElementById('enhance-status').style.display = 'inline';
+    try {
+        const resp = await fetch('/api/image-gen/enhance', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ idea, quality: selectedQuality, style: selectedStyle }),
+        });
+        const r = await resp.json();
+        if (!resp.ok || r.error) { toast('❌ Enhance failed: '+(r.error||'Unknown error'), 'err'); return; }
+        document.getElementById('creator-prompt').value = r.prompt;
+        document.getElementById('char-count').textContent = r.prompt.length + ' chars';
+        toast('✨ Prompt enhanced — review and generate!', 'ok');
+    } catch(e) { toast('❌ '+e.message, 'err'); }
+    finally { btn.disabled=false; btn.textContent='🦥 Enhance'; document.getElementById('enhance-status').style.display='none'; }
+}
+
+// ── Reference images ───────────────────────────────────────────────
+function loadRefImage(index, input) {
+    if (!input.files[0]) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+        const dataUrl = e.target.result;
+        refImages[index] = { mime_type: input.files[0].type||'image/png', data: dataUrl.split(',')[1], dataUrl };
+        const slot = document.getElementById('ref-'+index);
+        slot.classList.add('loaded');
+        slot.innerHTML = `
+            <input type="file" id="ref-input-${index}" accept="image/*" style="display:none" onchange="loadRefImage(${index},this)">
+            <img src="${dataUrl}">
+            <button class="ref-remove" onclick="removeRef(event,${index})">✕</button>
+        `;
+    };
+    reader.readAsDataURL(input.files[0]);
+}
+function removeRef(e, index) {
+    e.stopPropagation();
+    refImages[index] = null;
+    const slot = document.getElementById('ref-'+index);
+    slot.classList.remove('loaded');
+    slot.innerHTML = `
+        <input type="file" id="ref-input-${index}" accept="image/*" style="display:none" onchange="loadRefImage(${index},this)">
+        <div class="ref-placeholder">+</div>
+    `;
+    slot.onclick = () => document.getElementById('ref-input-'+index).click();
+}
+function clearRefImages() { for(let i=0;i<4;i++) removeRef({stopPropagation:()=>{}},i); }
+
+async function loadUrlAsRef(url, name) {
+    const slotIdx = refImages.findIndex(r=>!r);
+    const idx = slotIdx >= 0 ? slotIdx : 0;
+    try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const mime = blob.type || 'image/png';
+        const reader = new FileReader();
+        reader.onload = e => {
+            const dataUrl = e.target.result;
+            refImages[idx] = { mime_type: mime, data: dataUrl.split(',')[1], dataUrl };
+            const slot = document.getElementById('ref-'+idx);
+            slot.classList.add('loaded');
+            slot.innerHTML = `
+                <input type="file" id="ref-input-${idx}" accept="image/*" style="display:none" onchange="loadRefImage(${idx},this)">
+                <img src="${dataUrl}">
+                <button class="ref-remove" onclick="removeRef(event,${idx})">✕</button>
+            `;
+            document.querySelector('.creator-card').scrollIntoView({behavior:'smooth',block:'start'});
+            setTimeout(()=>document.getElementById('creator-prompt').focus(), 400);
+            toast(`"${name}" loaded as reference`, 'info');
+        };
+        reader.readAsDataURL(blob);
+    } catch(e) { toast('❌ Could not load image: '+e.message, 'err'); }
+}
+
+// Drag-and-drop
+['ref-0','ref-1','ref-2','ref-3'].forEach((id,i)=>{
+    const slot = document.getElementById(id);
+    if (!slot) return;
+    slot.addEventListener('dragover', e => { e.preventDefault(); slot.style.borderColor='#818cf8'; });
+    slot.addEventListener('dragleave', ()=>{ slot.style.borderColor=''; });
+    slot.addEventListener('drop', e => {
+        e.preventDefault(); slot.style.borderColor='';
+        const file = e.dataTransfer.files[0];
+        if (!file||!file.type.startsWith('image/')) return;
+        loadRefImage(i, {files:[file]});
+    });
+});
+
+// ── Generate ───────────────────────────────────────────────────────
+async function generateImage() {
+    let prompt = document.getElementById('creator-prompt').value.trim();
+    if (!prompt) { toast('Please enter a prompt first!', 'err'); return; }
+
+    if (selectedStyle) prompt += ', ' + selectedStyle;
+
+    // For Google models, append quality hints to the prompt (only way to influence resolution)
+    const isHF = selectedModel.startsWith('hf:');
+    if (!isHF) {
+        if (selectedQuality==='high' && !/high.res|high resolution/i.test(prompt))
+            prompt += ', high-resolution print quality, sharp fine detail';
+        else if (selectedQuality==='ultra' && !/ultra/i.test(prompt))
+            prompt += ', ultra-high-resolution, photorealistic detail, maximum sharpness';
+    }
+
+    const imgs = refImages.filter(Boolean).map(r=>({mime_type:r.mime_type, data:r.data}));
+    if ((selectedModel.startsWith('imagen-') || isHF) && imgs.length>0)
+        if (!confirm('This model is text-to-image only and ignores reference images. Continue without them?')) return;
+
+    document.getElementById('creator-result').style.display = 'none';
+    document.getElementById('creator-loading').style.display = 'block';
+    document.getElementById('generate-btn').disabled = true;
+
+    const msgs = ['Generating your image…','Applying model magic…','Almost there…','Rendering final details…'];
+    let mi = 0;
+    const msgTimer = setInterval(()=>{ document.getElementById('load-msg').textContent = msgs[mi++%msgs.length]; }, 4000);
+
+    try {
+        const resp = await fetch('/api/image-gen', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ prompt, images:imgs, model:selectedModel, aspect:selectedAspect, quality:selectedQuality }),
+        });
+        const result = await resp.json();
+        if (!resp.ok || result.error) { toast('❌ '+(result.error||'Generation failed'), 'err'); return; }
+
+        const img = result.images[0];
+        const originalPrompt = document.getElementById('creator-prompt').value.trim();
+        lastResult = {
+            dataUrl: img.url || `data:${img.mime_type};base64,${img.data}`,
+            base64:  img.data,
+            mime:    img.mime_type,
+            name:    originalPrompt.substring(0,50).replace(/[^a-zA-Z0-9 ]/g,'').trim() || 'AI Image',
+        };
+        if (!img.url) console.error('[ImageGen] No server url returned — image may be lost on page refresh');
+        else          console.log('[ImageGen] Saved to server:', img.url);
+
+        document.getElementById('result-img').src = lastResult.dataUrl;
+        document.getElementById('result-text').textContent = result.text || '';
+        document.getElementById('creator-result').style.display = 'block';
+    } catch(e) {
+        toast('❌ Network error: '+e.message, 'err');
+    } finally {
+        clearInterval(msgTimer);
+        document.getElementById('creator-loading').style.display = 'none';
+        document.getElementById('generate-btn').disabled = false;
+    }
+}
+
+function currentResultName() { return lastResult?.name || 'AI Image'; }
+function generateVariation() { generateImage(); }
+
+function tweakImage() {
+    if (!lastResult) return;
+    refImages[0] = { mime_type: lastResult.mime||'image/png', data: lastResult.base64, dataUrl: lastResult.dataUrl };
+    const slot = document.getElementById('ref-0');
+    slot.classList.add('loaded');
+    slot.innerHTML = `
+        <input type="file" id="ref-input-0" accept="image/*" style="display:none" onchange="loadRefImage(0,this)">
+        <img src="${lastResult.dataUrl}">
+        <button class="ref-remove" onclick="removeRef(event,0)">✕</button>
+    `;
+    document.getElementById('creator-result').style.display = 'none';
+    document.getElementById('creator-prompt').scrollIntoView({behavior:'smooth'});
+    setTimeout(()=>document.getElementById('creator-prompt').focus(), 300);
+    toast('Image loaded as reference — update the prompt to edit it', 'info');
+}
+
+function clearResult() {
+    document.getElementById('creator-result').style.display = 'none';
+    clearPrompt(); clearRefImages();
+    lastResult = null;
+}
+
+async function copyResultUrl() {
+    if (!lastResult) return;
+    if (lastResult.dataUrl.startsWith('data:')) { toast('⚠️ Image not yet saved to server', 'err'); return; }
+    try { await navigator.clipboard.writeText(window.location.origin + lastResult.dataUrl); toast('📋 URL copied!', 'ok'); }
+    catch(e) { toast('Copy failed — try right-clicking the image', 'err'); }
+}
+
+// ── Download ───────────────────────────────────────────────────────
+function _b64ToBlob(b64, mime) {
+    const bytes = atob(b64), arr = new Uint8Array(bytes.length);
+    for (let i=0;i<bytes.length;i++) arr[i]=bytes.charCodeAt(i);
+    return new Blob([arr],{type:mime});
+}
+async function downloadFromUrl(url, name) {
+    try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl; a.download = name;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(blobUrl), 2000);
+    } catch(e) { window.open(url,'_blank'); }
+}
+function downloadResult() {
+    if (!lastResult) return;
+    const ext = (lastResult.mime||'image/png').split('/')[1]||'png';
+    const name = (lastResult.name||'ai-image').replace(/\s+/g,'-') + '-' + Date.now() + '.' + ext;
+    if (lastResult.dataUrl.startsWith('data:')) {
+        const blob = _b64ToBlob(lastResult.base64, lastResult.mime||'image/png');
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href=blobUrl; a.download=name;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(blobUrl), 2000);
+    } else { downloadFromUrl(lastResult.dataUrl, name); }
+}
+
+// ── Gallery ────────────────────────────────────────────────────────
+let galleryItems = [];
+
+function _galleryCard(entry) {
+    const el = document.createElement('div');
+    el.className = 'gcard';
+    el.dataset.url = entry.url;
+    const sUrl  = (entry.url||'').replace(/'/g,"\\'");
+    const sName = (entry.name||'AI Image').replace(/'/g,"\\'");
+    el.innerHTML = `
+        <div class="gcard-img">
+            <img src="${entry.url}" alt="${entry.name||'AI Image'}" loading="lazy" onclick="openLightbox('${sUrl}','${sName}')">
+        </div>
+        <div class="gcard-body">
+            <div class="gcard-name" title="${entry.name||''}">${entry.name||'AI Image'}</div>
+            <div class="gcard-actions">
+                <button onclick="useLightboxUrlAsRef('${sUrl}','${sName}')">🔧 Use</button>
+                <button onclick="copyUrl('${sUrl}')">📋 Copy</button>
+                <button onclick="downloadFromUrl('${sUrl}','${sName}.png')">⬇️</button>
+                <button class="del" onclick="removeFromGallery('${sUrl}',this.closest('.gcard'))">✕</button>
+            </div>
+        </div>
+    `;
+    return el;
+}
+
+async function loadGallery() {
+    try {
+        const resp = await fetch('/api/image-gen/saved');
+        if (!resp.ok) throw new Error('server error');
+        galleryItems = await resp.json();
+        renderGallery();
+    } catch(e) { console.warn('[Gallery] Load failed:', e.message); }
+}
+
+function renderGallery() {
+    const grid = document.getElementById('gallery-grid');
+    const empty = document.getElementById('gallery-empty');
+    // Clear existing cards (keep empty placeholder)
+    grid.querySelectorAll('.gcard').forEach(c=>c.remove());
+    if (galleryItems.length === 0) { empty.style.display='block'; document.getElementById('gallery-count').textContent=''; return; }
+    empty.style.display = 'none';
+    document.getElementById('gallery-count').textContent = galleryItems.length + ' image' + (galleryItems.length===1?'':'s');
+    // Newest first
+    [...galleryItems].reverse().forEach(entry => grid.insertBefore(_galleryCard(entry), empty));
+}
+
+async function saveToGallery() {
+    if (!lastResult) return;
+    const entry = { name: lastResult.name, url: lastResult.dataUrl, ts: Date.now() };
+    if (lastResult.dataUrl.startsWith('data:')) { toast('⚠️ Image not saved to server yet — generation may have failed', 'err'); return; }
+    try {
+        await fetch('/api/image-gen/saved', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(entry),
+        });
+        galleryItems.push(entry);
+        renderGallery();
+        toast('✅ Saved to gallery!', 'ok');
+        // Scroll to gallery
+        document.querySelector('.gallery-section').scrollIntoView({behavior:'smooth',block:'start'});
+    } catch(e) { toast('❌ Save failed: '+e.message, 'err'); }
+}
+
+async function removeFromGallery(url, cardEl) {
+    cardEl?.remove();
+    galleryItems = galleryItems.filter(e=>e.url!==url);
+    document.getElementById('gallery-count').textContent = galleryItems.length + ' image' + (galleryItems.length===1?'':'s');
+    if (galleryItems.length===0) document.getElementById('gallery-empty').style.display='block';
+    try {
+        await fetch('/api/image-gen/saved', {
+            method:'DELETE', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({url}),
+        });
+    } catch(e) {}
+}
+
+async function copyUrl(url) {
+    try { await navigator.clipboard.writeText(window.location.origin+url); toast('📋 URL copied!', 'ok'); }
+    catch(e) { toast('Copy failed', 'err'); }
+}
+function useLightboxUrlAsRef(url, name) { loadUrlAsRef(url, name); closeLightbox(); }
+
+// ── Lightbox ───────────────────────────────────────────────────────
+let _lbUrl='', _lbName='';
+function openLightbox(src, name='') {
+    _lbUrl = src; _lbName = name;
+    document.getElementById('lightbox-img').src = src;
+    document.getElementById('lightbox').classList.add('open');
+}
+function closeLightbox() { document.getElementById('lightbox').classList.remove('open'); }
+function closeLightboxOnBg(e) { if(e.target===document.getElementById('lightbox')) closeLightbox(); }
+
+async function copyLightboxUrl() {
+    try { await navigator.clipboard.writeText(window.location.origin+_lbUrl); toast('📋 URL copied!','ok'); }
+    catch(e) { toast('Copy failed','err'); }
+}
+function downloadLightboxImg() { downloadFromUrl(_lbUrl, (_lbName||'image')+'.png'); }
+function useLightboxAsRef() { loadUrlAsRef(_lbUrl, _lbName); closeLightbox(); }
+
+// ── Toast ──────────────────────────────────────────────────────────
+let _toastTimer;
+function toast(msg, type='') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'show' + (type?' '+type:'');
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(()=>el.className='', 3200);
+}
+
+// ── Init ───────────────────────────────────────────────────────────
+loadGallery();
+</script>
+</body>
+</html>

@@ -847,7 +847,10 @@ let windows = new Map();
 let nextWinId = 1;
 let nextZ = 100;
 let recycleBin = [];
-let iconPositions = {};
+let iconPositions = {};         // desktop (>1024px)
+let iconPositionsTablet = {};   // tablet (481-1024px)
+let iconPositionsPhone = {};    // phone (≤480px)
+let currentBreakpoint = 'desktop'; // set in init after loadState
 let dragState = null;
 let selectedIcons = new Set();
 let startMenuOpen = false;
@@ -858,6 +861,20 @@ let desktopPages = [];     // page IDs shown as loose desktop icons
 let knownPages = [];       // all page IDs we've ever seen
 let _manifestTimer = null;
 let wallpaperUrl = null;   // server URL of custom desktop wallpaper
+let savedPageCategories = {}; // { pageId: catId } — persists drag-to-folder assignments across fetchManifest cycles
+
+// Breakpoint helpers
+function getBreakpoint() {
+  const w = window.innerWidth;
+  if (w <= 480) return 'phone';
+  if (w <= 1024) return 'tablet';
+  return 'desktop';
+}
+function getActivePositions() {
+  if (currentBreakpoint === 'tablet') return iconPositionsTablet;
+  if (currentBreakpoint === 'phone') return iconPositionsPhone;
+  return iconPositions;
+}
 
 // Save state to server (debounced)
 function saveState() {
@@ -865,33 +882,75 @@ function saveState() {
   _saveTimer = setTimeout(_doSaveState, 500);
 }
 function _doSaveState() {
+  // Always save full state to master desktop entry (iconPositions = desktop positions)
   const state = JSON.stringify({
     theme: currentTheme, iconPositions, recycleBin,
-    customFolders, desktopPages, knownPages, wallpaperUrl,
+    customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories,
   });
   fetch('/api/canvas/manifest/page/desktop', {
     method: 'PATCH',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({description: state}),
   }).catch(() => {});
+  // Save breakpoint-specific positions to their own manifest entries
+  if (currentBreakpoint === 'tablet') {
+    fetch('/api/canvas/manifest/page/desktop-tablet', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsTablet})}),
+    }).catch(() => {});
+  } else if (currentBreakpoint === 'phone') {
+    fetch('/api/canvas/manifest/page/desktop-phone', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsPhone})}),
+    }).catch(() => {});
+  }
 }
 
-// Load state from server
+// Load state from server — fetch all three breakpoint entries in parallel
 async function loadState() {
   try {
-    const resp = await fetch('/api/canvas/manifest/page/desktop');
-    if (!resp.ok) return;
-    const data = await resp.json();
-    if (data.description) {
+    const [desktopResp, tabletResp, phoneResp] = await Promise.all([
+      fetch('/api/canvas/manifest/page/desktop'),
+      fetch('/api/canvas/manifest/page/desktop-tablet'),
+      fetch('/api/canvas/manifest/page/desktop-phone'),
+    ]);
+    // Master desktop state (shared state + desktop positions)
+    if (desktopResp.ok) {
       try {
-        const state = JSON.parse(data.description);
-        if (state.theme) currentTheme = state.theme;
-        if (state.iconPositions) iconPositions = state.iconPositions;
-        if (state.recycleBin) recycleBin = state.recycleBin;
-        if (state.customFolders) customFolders = state.customFolders;
-        if (state.desktopPages) desktopPages = state.desktopPages;
-        if (state.knownPages) knownPages = state.knownPages;
-        if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
+        const data = await desktopResp.json();
+        if (data.description) {
+          const state = JSON.parse(data.description);
+          if (state.theme) currentTheme = state.theme;
+          if (state.iconPositions) iconPositions = state.iconPositions;
+          if (state.recycleBin) recycleBin = state.recycleBin;
+          if (state.customFolders) customFolders = state.customFolders;
+          if (state.desktopPages) desktopPages = state.desktopPages;
+          if (state.knownPages) knownPages = state.knownPages;
+          if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
+          if (state.savedPageCategories) savedPageCategories = state.savedPageCategories;
+        }
+      } catch(e) {}
+    }
+    // Tablet-specific positions
+    if (tabletResp.ok) {
+      try {
+        const data = await tabletResp.json();
+        if (data.description) {
+          const state = JSON.parse(data.description);
+          if (state.iconPositions) iconPositionsTablet = state.iconPositions;
+        }
+      } catch(e) {}
+    }
+    // Phone-specific positions
+    if (phoneResp.ok) {
+      try {
+        const data = await phoneResp.json();
+        if (data.description) {
+          const state = JSON.parse(data.description);
+          if (state.iconPositions) iconPositionsPhone = state.iconPositions;
+        }
       } catch(e) {}
     }
   } catch(e) {}
@@ -900,10 +959,11 @@ async function loadState() {
 /* ══════════════════════════════════════════════════════════════
    MANIFEST SYNC — fetch pages dynamically from server
    ══════════════════════════════════════════════════════════════ */
-async function fetchManifest() {
+async function fetchManifest(forceSync) {
   try {
-    const resp = await fetch('/api/canvas/manifest');
-    if (!resp.ok) return;
+    const url = '/api/canvas/manifest' + (forceSync ? '?sync=1' : '');
+    const resp = await fetch(url);
+    if (!resp.ok) { console.warn('[desktop] manifest fetch failed:', resp.status); return; }
     const data = await resp.json();
 
     // Categories to hide from desktop (system UI, empty, etc.)
@@ -930,10 +990,8 @@ async function fetchManifest() {
     }
     CATEGORIES = newCats;
 
-    // Rebuild PAGES from manifest (skip system/hidden pages, but keep uncategorized)
+    // Rebuild PAGES from manifest — include ALL user-visible pages
     const HIDDEN_PAGES = ['desktop','home','inbox','create','office'];
-    // Only hide system-internal categories from the page list — uncategorized pages
-    // should still appear as loose desktop icons so newly created pages are visible
     const PAGE_HIDDEN_CATS = ['system','test-dev'];
     const newPages = {};
     if (data.pages) {
@@ -944,10 +1002,16 @@ async function fetchManifest() {
         newPages[pageId] = {
           name: mp.display_name || pageId,
           cat: mp.category || 'uncategorized',
+          iconUrl: (mp.icon && /^(\/|https?:)/.test(mp.icon)) ? mp.icon : null,
         };
       });
     }
     PAGES = newPages;
+
+    // Apply saved category overrides (drag-to-folder assignments survive fetchManifest)
+    Object.keys(savedPageCategories).forEach(pageId => {
+      if (PAGES[pageId]) PAGES[pageId].cat = savedPageCategories[pageId];
+    });
 
     // Detect new pages
     const currentIds = Object.keys(PAGES);
@@ -968,7 +1032,7 @@ async function fetchManifest() {
 
     rebuildDesktopItems();
     buildDesktopIcons();
-  } catch(e) {}
+  } catch(e) { console.warn('[desktop] fetchManifest error:', e); }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1068,6 +1132,7 @@ function rebuildDesktopItems() {
       id: 'page-' + pageId,
       name: PAGES[pageId].name,
       icon: getPageIconType(PAGES[pageId].cat, pageId, PAGES[pageId].name),
+      iconUrl: PAGES[pageId].iconUrl || null,
       action: 'openPage',
       pageId: pageId,
     });
@@ -1099,7 +1164,7 @@ function buildDesktopIcons() {
     if (recycleBin.includes(item.id) && item.action !== 'recycle') return;
     const col = Math.floor(i / maxPerCol);
     const row = i % maxPerCol;
-    const saved = iconPositions[item.id];
+    const saved = getActivePositions()[item.id];
     const x = saved ? saved.x : (isRightToLeft ? startX - col * cellW : startX + col * cellW);
     const y = saved ? saved.y : startY + row * cellH;
 
@@ -1113,7 +1178,10 @@ function buildDesktopIcons() {
       ? (recycleBin.length > 0 ? 'recycle-full' : 'recycle')
       : item.icon;
 
-    el.innerHTML = `<div class="icon-img">${getIcon(recycleIcon)}</div><div class="icon-label">${getIconName(item)}</div>`;
+    const iconHtml = item.iconUrl
+      ? `<img src="${item.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
+      : getIcon(recycleIcon);
+    el.innerHTML = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
     el.addEventListener('mousedown', (e) => onIconMouseDown(e, item));
     el.addEventListener('touchstart', (e) => onIconTouchStart(e, item), {passive:false});
     el.addEventListener('dblclick', (e) => { e.stopPropagation(); onIconDblClick(item); });
@@ -1164,7 +1232,7 @@ function onIconTouchStart(e, item) {
         el.style.left = origLeft + 'px';
         el.style.top = origTop + 'px';
       } else {
-        iconPositions[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
+        getActivePositions()[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
         saveState();
       }
     } else {
@@ -1223,7 +1291,7 @@ function onIconMouseDown(e, item) {
         el.style.left = origLeft + 'px';
         el.style.top = origTop + 'px';
       } else {
-        iconPositions[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
+        getActivePositions()[item.id] = {x: parseInt(el.style.left), y: parseInt(el.style.top)};
         saveState();
       }
     }
@@ -1270,13 +1338,16 @@ function dropIntoFolder(draggedItem, targetId) {
   // Move into category folder
   if (targetItem.action === 'folder' && targetItem.category) {
     PAGES[pageId].cat = targetItem.category;
+    savedPageCategories[pageId] = targetItem.category; // persist across fetchManifest
   }
   // Move into custom folder
-  if (targetItem.action === 'customFolder' && targetItem.folderId) {
+  else if (targetItem.action === 'customFolder' && targetItem.folderId) {
     if (!customFolders[targetItem.folderId]) return;
     if (!customFolders[targetItem.folderId].pages.includes(pageId)) {
       customFolders[targetItem.folderId].pages.push(pageId);
     }
+  } else {
+    return; // not a valid folder target — don't remove from desktop
   }
 
   // Remove from desktopPages
@@ -1575,7 +1646,9 @@ function showContextMenu(x, y, items) {
   menu.innerHTML = '';
   items.forEach(item => {
     if (item === '---') {
-      menu.innerHTML += '<div class="ctx-separator"></div>';
+      const sep = document.createElement('div');
+      sep.className = 'ctx-separator';
+      menu.appendChild(sep);
       return;
     }
     const div = document.createElement('div');
@@ -1594,7 +1667,7 @@ function showContextMenu(x, y, items) {
       const subMenu = document.createElement('div');
       subMenu.className = 'ctx-submenu';
       item.sub.forEach(si => {
-        if (si === '---') { subMenu.innerHTML += '<div class="ctx-separator"></div>'; return; }
+        if (si === '---') { const sep = document.createElement('div'); sep.className = 'ctx-separator'; subMenu.appendChild(sep); return; }
         const sd = document.createElement('div');
         sd.className = 'ctx-item';
         sd.textContent = si.label;
@@ -1610,10 +1683,8 @@ function showContextMenu(x, y, items) {
     menu.appendChild(div);
   });
 
-  const container = document.getElementById('os-container');
-  const rect = container.getBoundingClientRect();
-  menu.style.left = Math.min(x, rect.right - 200) + 'px';
-  menu.style.top = Math.min(y, rect.bottom - items.length * 28) + 'px';
+  menu.style.left = Math.max(5, Math.min(x, window.innerWidth - 210)) + 'px';
+  menu.style.top = Math.max(5, Math.min(y, window.innerHeight - items.length * 28 - 10)) + 'px';
   menu.classList.add('show');
   contextMenuOpen = true;
 }
@@ -1785,6 +1856,7 @@ function buildMoveToSubmenu(item) {
       action: () => {
         if (item.pageId) {
           PAGES[item.pageId].cat = catId;
+          savedPageCategories[item.pageId] = catId; // persist
           desktopPages = desktopPages.filter(id => id !== item.pageId);
           saveState();
           rebuildDesktopItems();
@@ -1889,7 +1961,9 @@ function toggleLockIcons() {
   app.style.cursor = iconsLocked ? 'default' : '';
 }
 
-function createShortcut() {
+async function createShortcut() {
+  // Force-sync manifest to ensure ALL pages are shown (including newly created ones)
+  await fetchManifest(true);
   const available = Object.entries(PAGES).filter(([id]) =>
     !recycleBin.includes(id)
   );
@@ -2180,8 +2254,11 @@ function buildCustomFolderGrid(folderId) {
   pages.forEach(id => {
     const p = PAGES[id];
     if (!p) return;
+    const eiIconHtml = p.iconUrl
+      ? `<img src="${p.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
+      : getIcon(getPageIconType(p.cat, id, p.name));
     html += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showFolderItemMenu(event,'${id}','${folderId}')">
-      <div class="ei-icon">${getIcon(getPageIconType(p.cat, id, p.name))}</div>
+      <div class="ei-icon">${eiIconHtml}</div>
       <div class="ei-name">${p.name}</div>
     </div>`;
   });
@@ -2237,9 +2314,11 @@ function showFolderItemMenu(e, pageId, folderId) {
   ]);
 }
 
-function addPagesToFolder(folderId) {
+async function addPagesToFolder(folderId) {
   const folder = customFolders[folderId];
   if (!folder) return;
+  // Force-sync manifest to ensure ALL pages are shown (including newly created ones)
+  await fetchManifest(true);
   const available = Object.entries(PAGES).filter(([id]) =>
     !recycleBin.includes(id) && !folder.pages.includes(id)
   );
@@ -2291,8 +2370,11 @@ function buildExplorerGrid(catId) {
   let html = '<div class="explorer-grid">';
   pages.forEach(([id, p]) => {
     const iconType = getPageIconType(p.cat, id, p.name);
+    const catIconHtml = p.iconUrl
+      ? `<img src="${p.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
+      : getIcon(iconType);
     html += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showExplorerItemMenu(event,'${id}')">
-      <div class="ei-icon">${getIcon(iconType)}</div>
+      <div class="ei-icon">${catIconHtml}</div>
       <div class="ei-name">${p.name}</div>
     </div>`;
   });
@@ -2333,10 +2415,19 @@ function showExplorerItemMenu(e, pageId) {
   const page = PAGES[pageId];
   const pageName = page ? page.name : pageId;
 
+  const putOnDesktopAction = () => {
+    delete savedPageCategories[pageId];
+    if (!desktopPages.includes(pageId)) desktopPages.push(pageId);
+    if (!knownPages.includes(pageId)) knownPages.push(pageId);
+    saveState();
+    refreshExplorers();
+  };
   if (isMac || isUbuntu) {
     showContextMenu(e.clientX, e.clientY, [
       {label:'Open', action:()=>openCanvasPage(pageId)},
       {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
+      '---',
+      {label:'Put on Desktop', action:putOnDesktopAction},
       '---',
       {label:isMac?'Get Info':'Properties', action:()=>showPageProperties(pageId)},
       '---',
@@ -2348,6 +2439,8 @@ function showExplorerItemMenu(e, pageId) {
     showContextMenu(e.clientX, e.clientY, [
       {label:'Open', action:()=>openCanvasPage(pageId)},
       {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
+      '---',
+      {label:'Put on Desktop', action:putOnDesktopAction},
       '---',
       {label:'Cut', action:()=>{clipboard={action:'cut',id:pageId,pageId:pageId}}},
       {label:'Copy', action:()=>{clipboard={action:'copy',id:pageId,pageId:pageId}}},
@@ -2740,7 +2833,8 @@ function applyWallpaper(url) {
   wallpaperUrl = url || null;
   const desktop = document.getElementById('desktop');
   if (url) {
-    desktop.style.background = 'url(' + url + ') center/cover no-repeat';
+    // Include a dark fallback color so nothing shows through while the image loads
+    desktop.style.background = 'url(' + url + ') center/cover no-repeat #1a1a1a';
   } else {
     desktop.style.background = '';
   }
@@ -2751,7 +2845,9 @@ async function uploadWallpaper(file) {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+    const opts = { method: 'POST', body: fd };
+    if(window._canvasAuthToken) opts.headers = { 'Authorization': 'Bearer ' + window._canvasAuthToken };
+    const resp = await fetch('/api/upload', opts);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     const url = data.url || data.path;
@@ -2800,14 +2896,34 @@ function buildWallpaperSection() {
    ══════════════════════════════════════════════════════════════ */
 async function init() {
   await loadState();
+  currentBreakpoint = getBreakpoint();
   await fetchManifest();
   // Ensure DOM is fully laid out before measuring
   requestAnimationFrame(() => {
     setTheme(currentTheme);
     updateClock();
   });
-  // Poll for new pages every 30 seconds
+  // Rebuild icons when viewport crosses a breakpoint boundary
+  let _resizeBpTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_resizeBpTimer);
+    _resizeBpTimer = setTimeout(() => {
+      const newBp = getBreakpoint();
+      if (newBp !== currentBreakpoint) {
+        currentBreakpoint = newBp;
+        buildDesktopIcons();
+      }
+    }, 300);
+  });
+  // Poll for new pages every 30 seconds, pause when tab hidden
   _manifestTimer = setInterval(fetchManifest, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (_manifestTimer) { clearInterval(_manifestTimer); _manifestTimer = null; }
+    } else {
+      if (!_manifestTimer) { fetchManifest(); _manifestTimer = setInterval(fetchManifest, 30000); }
+    }
+  });
 }
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);

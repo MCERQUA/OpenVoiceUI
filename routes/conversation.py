@@ -35,6 +35,7 @@ from routes.canvas import canvas_context, update_canvas_context, CANVAS_PAGES_DI
 from routes.transcripts import save_conversation_turn
 from routes.music import current_music_state as _music_state
 from services.gateway_manager import gateway_manager
+from services.gateways.compat import is_system_response
 from services.tts import generate_tts_b64 as _tts_generate_b64
 from tts_providers import get_provider, list_providers
 
@@ -125,9 +126,9 @@ _VOICE_INSTRUCTIONS = (
 
     # --- Canvas: create a new page ---
     "CREATING A NEW CANVAS PAGE: "
-    "Step 1 — write the HTML file: write({path:'workspace/canvas/pagename.html', content:'<!DOCTYPE html>...'}). "
+    "Step 1 — write the HTML file: write({path:'workspace/canvas-pages/pagename.html', content:'<!DOCTYPE html>...'}). "
     "Step 2 — open it in your spoken response: 'Here it is. [CANVAS:pagename]' "
-    "Step 3 — verify it opened: exec('curl -s http://openvoiceui:5001/api/canvas/context') "
+    "Step 3 — verify it opened: exec('curl -s http://localhost:5001/api/canvas/context') "
     "returns {current_page, current_title}. If current_page matches → confirm to user. "
     "If still old page → say so and resend [CANVAS:pagename]. If null → say 'Opening canvas now.' and resend. "
 
@@ -150,7 +151,7 @@ _VOICE_INSTRUCTIONS = (
 
     # --- Canvas: make public ---
     "MAKE A PAGE PUBLIC (shareable without login): "
-    "exec('curl -s -X PATCH http://openvoiceui:5001/api/canvas/manifest/page/PAGE_ID "
+    "exec('curl -s -X PATCH http://localhost:5001/api/canvas/manifest/page/PAGE_ID "
     "-H \"Content-Type: application/json\" -d \\'{{\"is_public\": true}}\\'') "
     "Shareable URL format: https://DOMAIN/pages/pagename.html "
 
@@ -194,13 +195,16 @@ _VOICE_INSTRUCTIONS = (
     "yeah, lets_go, gunshot, bruh, sad_trombone. "
 
     # --- Onboarding notifications ---
-    "ONBOARDING NOTIFICATIONS (popup at top-center of screen): "
-    "[NOTIFY:message] — show/update popup message. "
-    "[NOTIFY_TITLE:text] — update popup title bar. "
-    "[NOTIFY_PROGRESS:N/M] — show step progress dots (e.g. [NOTIFY_PROGRESS:2/5]). "
-    "[NOTIFY_STATUS:text] — update small status line (e.g. '3 agents working...'). "
-    "[NOTIFY_CLOSE] — hide popup temporarily. "
-    "[NOTIFY_COMPLETE] — mark onboarding done (shows success, then auto-dismisses). "
+    # ⚠️ NOT IMPLEMENTED — frontend handler for these tags does not exist yet.
+    # Do NOT add to voice-system-prompt.md until the popup UI is built in app.js.
+    # Tracked in: docs/jambot/onboarding-and-video-system.md
+    # "ONBOARDING NOTIFICATIONS (popup at top-center of screen): "
+    # "[NOTIFY:message] — show/update popup message. "
+    # "[NOTIFY_TITLE:text] — update popup title bar. "
+    # "[NOTIFY_PROGRESS:N/M] — show step progress dots (e.g. [NOTIFY_PROGRESS:2/5]). "
+    # "[NOTIFY_STATUS:text] — update small status line (e.g. '3 agents working...'). "
+    # "[NOTIFY_CLOSE] — hide popup temporarily. "
+    # "[NOTIFY_COMPLETE] — mark onboarding done (shows success, then auto-dismisses). "
 
     # --- Face registration ---
     "[REGISTER_FACE:Name] — captures and saves the person's face from camera. "
@@ -332,6 +336,8 @@ def get_voice_session_key() -> str:
     Cache is invalidated by bump_voice_session() (explicit agent reset only).
     """
     global _session_key_cache
+    # Auto-clear stale recovery keys (stuck >60s)
+    _check_recovery_timeout()
     # If session is poisoned, use recovery key to escape
     if _session_recovery_key is not None:
         return _session_recovery_key
@@ -375,13 +381,22 @@ def bump_voice_session() -> str:
     return stable_key
 
 
+_recovery_entered_at: float = 0
+
+
 def _enter_session_recovery():
     """Switch to a temporary recovery session key after double-empty.
     Openclaw will create a fresh session for this key, escaping the
     poisoned state. The recovery key is cleared on the first successful
     (non-empty, non-fallback) response."""
-    global _session_recovery_key
+    global _session_recovery_key, _recovery_entered_at
     import datetime
+    # Cooldown: don't thrash recovery keys from rapid start/stop cycles
+    now = time.time()
+    if now - _recovery_entered_at < 30:
+        logger.info('### SESSION RECOVERY: skipping — cooldown active (entered <30s ago)')
+        return
+    _recovery_entered_at = now
     _session_recovery_key = f'recovery-{int(datetime.datetime.utcnow().timestamp())}'
     logger.warning(f'### SESSION RECOVERY: switching to key "{_session_recovery_key}" to escape poisoned session')
 
@@ -395,6 +410,16 @@ def _exit_session_recovery():
         _session_recovery_key = None
         stable = get_voice_session_key()
         logger.info(f'### SESSION RECOVERY CLEARED: "{old_recovery}" → back to stable key "{stable}"')
+
+
+def _check_recovery_timeout():
+    """Auto-clear stale recovery keys. If recovery has been active for >60s
+    without a successful response, the recovery key itself may be stuck.
+    Fall back to stable key."""
+    global _session_recovery_key, _recovery_entered_at
+    if _session_recovery_key is not None and time.time() - _recovery_entered_at > 60:
+        logger.warning(f'### SESSION RECOVERY TIMEOUT: "{_session_recovery_key}" active for >60s — clearing')
+        _session_recovery_key = None
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +550,20 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'\[SOUND:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SESSION_RESET\]', '', text, flags=re.IGNORECASE)
 
+    # Remove browser companion command tags (executed by extension, not spoken)
+    # Pattern handles nested brackets in CSS selectors: [CLICK:[role="button"]]
+    _nb = r'(?:[^\[\]]|\[[^\]]*\])*'  # non-bracket chars OR [bracket-pairs]
+    text = re.sub(r'\[SCROLL:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[CLICK:{_nb}\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[FILL:{_nb}\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[HIGHLIGHT:{_nb}\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[NAVIGATE:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[OPEN_TAB:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[READ_PAGE\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[WAIT:\d+\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[START_TASK:{_nb}\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\[TASK_COMPLETE:{_nb}\]', '', text, flags=re.IGNORECASE)
+
     # Remove code blocks (complete fences first, then any unclosed fence to end of text)
     text = re.sub(r'```[\s\S]*?```', '', text)
     text = re.sub(r'```[\s\S]*', '', text)
@@ -636,7 +675,7 @@ def conversation():
 
     Request JSON:
         message      : str  — transcribed user speech (required)
-        tts_provider : str  — 'supertonic' | 'groq' (default: supertonic)
+        tts_provider : str  — 'supertonic' | 'groq' (default: env DEFAULT_TTS_PROVIDER or groq)
         voice        : str  — voice ID, e.g. 'M1' (default: M1)
         session_id   : str  — session identifier (default: default)
         ui_context   : dict — canvas/music state from frontend (optional)
@@ -679,7 +718,7 @@ def _conversation_inner():
     logger.info(f'Received conversation request: {data}')
 
     user_message = data.get('message', '').strip()
-    tts_provider = data.get('tts_provider', 'supertonic')
+    tts_provider = data.get('tts_provider') or os.getenv('DEFAULT_TTS_PROVIDER', 'groq')
     voice = data.get('voice', 'M1')
     session_id = data.get('session_id', 'default')
     ui_context = data.get('ui_context', {})
@@ -688,6 +727,7 @@ def _conversation_inner():
     gateway_id = data.get('gateway_id') or None  # plugin gateway id; None = 'openclaw'
     max_response_chars = data.get('max_response_chars') or None  # profile cap, truncates at sentence boundary
     image_path = data.get('image_path') or None  # uploaded image for vision analysis
+    skip_tts = data.get('skip_tts', False)  # browser extension skips TTS during task steps
     metrics['session_id'] = session_id
     metrics['user_message_len'] = len(user_message)
     metrics['tts_provider'] = tts_provider
@@ -707,8 +747,10 @@ def _conversation_inner():
         return Response(_noop_stream(), mimetype='text/event-stream')
 
     # Input length guard (P7-T3 security audit)
-    if len(user_message) > 4000:
-        return jsonify({'error': 'Message too long (max 4000 characters)'}), 400
+    # Browser companion task loop sends page context (~5K) + prompt — allow 8K for those
+    _max_msg_len = 8000 if ui_context and ui_context.get('source') == 'jambot_extension' else 4000
+    if len(user_message) > _max_msg_len:
+        return jsonify({'error': f'Message too long (max {_max_msg_len} characters)'}), 400
 
     wants_stream = (
         request.args.get('stream') == '1'
@@ -784,6 +826,108 @@ def _conversation_inner():
             context_parts.append('[UPLOADED IMAGE: Vision analysis failed — the image was uploaded but could not be analyzed.]')
 
     if ui_context:
+        # ── Browser Extension context ────────────────────────────────────────
+        if ui_context.get('source') == 'jambot_extension':
+            context_parts.append(
+                '[BROWSER COMPANION MODE]\n'
+                'You are operating the user\'s real Chrome browser through the JamBot extension sidebar.\n'
+                'The page content below is LIVE — it updates after every action you take.\n\n'
+                'BROWSER ACTIONS YOU CAN EXECUTE (include in your response, they run immediately):\n'
+                '  [NAVIGATE:https://url] — navigate the browser to any URL (page loads then you see it)\n'
+                '  [OPEN_TAB:https://url] — open URL in a new tab\n'
+                '  [SCROLL:+1200]         — scroll down 1200px (USE THIS for feeds — loads new content)\n'
+                '  [SCROLL:+800]          — scroll down 800px\n'
+                '  [SCROLL:-400]          — scroll up 400px\n'
+                '  [SCROLL:top]           — jump to top of page\n'
+                '  [SCROLL:bottom]        — jump to absolute bottom (NOT for infinite feeds — use +1200 instead)\n'
+                '  [SCROLL:selector]      — scroll to a specific element\n'
+                '  [CLICK:selector]       — click an element (button, link, tab, etc.)\n'
+                '  [FILL:selector:value]  — type into an input field\n'
+                '  [HIGHLIGHT:selector]   — draw a cyan outline around an element\n'
+                '  [READ_PAGE]            — request full page text (up to 15000 chars)\n'
+                '  [WAIT:3]               — wait 3 seconds (for page loads, animations)\n\n'
+                'CREATING CANVAS PAGES (to save collected data):\n'
+                '  You have full tool access (file_write, bash, etc.) through your agent runtime.\n'
+                '  To create a canvas page with collected data:\n'
+                '  1. Use your file_write tool to write an HTML file to ~/Canvas/<page-name>.html\n'
+                '  2. The HTML should be self-contained with inline CSS (no external deps)\n'
+                '  3. Include [CANVAS:<page-name>] in your text response so the app navigates to it\n'
+                '  4. Do NOT say [TASK_COMPLETE] until the file is ACTUALLY WRITTEN — saying\n'
+                '     "I\'ll create it" is NOT creating it. USE THE TOOL.\n\n'
+                'AUTONOMOUS TASK MODE:\n'
+                '  When the user asks you to perform a multi-step task (scroll through a feed,\n'
+                '  find leads, fill out forms, etc.), you MUST activate the task loop:\n'
+                '  1. Include [START_TASK:brief description] in your FIRST response\n'
+                '  2. Then include your first command tag (e.g. [SCROLL:+1200])\n'
+                '  3. After each command, I will automatically send you the updated page state\n'
+                '  4. Keep outputting command tags on every response — the loop continues as long as you do\n'
+                '  5. Use [TASK_COMPLETE:summary] when finished\n\n'
+                '  WITHOUT [START_TASK:], commands execute ONCE and stop. Use it for ANY multi-step action:\n'
+                '  - "scroll the page" → [START_TASK:Scroll through page] [SCROLL:+1200]\n'
+                '  - "find leads" → [START_TASK:Find leads in feed] [SCROLL:+1200]\n'
+                '  - "fill out this form" → [START_TASK:Fill form fields] [FILL:selector:value]\n\n'
+                'ACTION JUDGMENT:\n'
+                '  Read the user\'s intent. If they say "comment on posts" — fill AND submit, don\'t stop to ask.\n'
+                '  If they say "draft a comment for me" — fill it and wait. Use common sense.\n'
+                '  "Find leads and comment" = autonomous. "Show me what you\'d say" = review mode.\n'
+                '  Only confirm before DESTRUCTIVE actions (delete, unfollow, block, unfriend).\n'
+                '  The user can STOP the task at any time using the Stop button.\n\n'
+                '⚠️ CRITICAL: The tags are NOT descriptions — they are EXECUTABLE COMMANDS.\n'
+                'Including [SCROLL:+1200] in your response IMMEDIATELY scrolls the page.\n'
+                'Simply saying "I will scroll" does NOTHING. You MUST output the tag.\n\n'
+                'CORRECT response to "scroll through this page":\n'
+                '  "[START_TASK:Scroll through page] Scrolling down now. [SCROLL:+1200]"\n'
+                '  (Then I will send you the updated page content automatically, and you keep scrolling.)\n\n'
+                'CORRECT response to "click the like button" (one-shot, no task loop needed):\n'
+                '  "Clicking the like button. [CLICK:[aria-label=\\"Like\\"]]"\n\n'
+                'WRONG response:\n'
+                '  "I will scroll through the page for you." ← does nothing, no tag\n\n'
+                'CSS selector hints for common sites:\n'
+                '  Facebook:\n'
+                '    Comment box: [contenteditable="true"][role="textbox"]  (NOT placeholder-based)\n'
+                '    Post button: [aria-label="Comment"], div[aria-label="Comment"][role="button"]\n'
+                '    Articles: [role="article"]\n'
+                '    To comment on a post: first [CLICK] the "Comment" link under the post,\n'
+                '    then [WAIT:1], then [FILL:[contenteditable="true"][role="textbox"]:your text],\n'
+                '    then [WAIT:1], then press Enter: [CLICK:[aria-label="Comment"][role="button"]]\n'
+                '  LinkedIn feed: .feed-shared-update-v2, [data-id]\n'
+                '  Generic: article, .post, main\n\n'
+                'Current page shown below. Canvas pages are separate HTML files YOU build inside the app — '
+                'do NOT confuse them with external websites the user is browsing.]'
+            )
+            page_url   = ui_context.get('page_url', '')
+            page_title = ui_context.get('page_title', '')
+            page_text  = ui_context.get('page_text', '')
+            sel_text   = ui_context.get('selected_text', '')
+            actions    = ui_context.get('action_history', [])
+            if page_url:
+                context_parts.append(f'[Browser tab: "{page_title or "untitled"}" — {page_url}]')
+            if page_text:
+                context_parts.append(f'[Page content: {page_text[:4000]}]')
+            interactive = ui_context.get('interactive', [])
+            if interactive:
+                lines = []
+                for el in interactive[:30]:
+                    t = el.get('t', '')
+                    sel = el.get('sel', '')
+                    if t == 'button':
+                        lines.append(f'  BUTTON "{el.get("text","")}" → [CLICK:{sel}]')
+                    elif t == 'link':
+                        lines.append(f'  LINK "{el.get("text","")}" → {el.get("href","")}')
+                    else:
+                        hint = el.get('hint', '')
+                        lines.append(f'  {t.upper()} {sel}{(" " + repr(hint)) if hint else ""} → [FILL:{sel}:your text]')
+                context_parts.append('[Interactive elements on this page — use these exact selectors:\n' + '\n'.join(lines) + ']')
+            if sel_text:
+                context_parts.append(f'[User highlighted: "{sel_text}"]')
+            if actions:
+                recent = actions[-8:]
+                acts = ' → '.join(
+                    f"{a.get('type','?')} {(a.get('text') or a.get('url') or a.get('selector') or '')[:35]}"
+                    for a in recent
+                )
+                context_parts.append(f'[Recent browser actions: {acts}]')
+
         # Canvas state
         if ui_context.get('canvasVisible') and ui_context.get('canvasDisplayed'):
             page_name = (ui_context['canvasDisplayed']
@@ -833,6 +977,16 @@ def _conversation_inner():
         except Exception:
             pass
 
+        # Recently completed Suno generations — agent gets notified on next turn
+        try:
+            from routes.suno import completed_songs_queue
+            if completed_songs_queue:
+                _pending = completed_songs_queue[-3:]
+                _titles = [s.get('title', 'Unknown Track') for s in _pending]
+                context_parts.append(f'[Suno just finished: {", ".join(repr(t) for t in _titles)} — now ready in Generated playlist]')
+        except Exception:
+            pass
+
         # Available canvas pages (agent needs IDs for [CANVAS:page-id])
         try:
             from routes.canvas import load_canvas_manifest
@@ -851,6 +1005,8 @@ def _conversation_inner():
     # Inject active profile's custom system_prompt (admin editor → runtime)
     # Also read min_sentence_chars for TTS sentence extraction.
     _min_sentence_chars = 40  # default — prevents choppy short TTS fragments
+    _parallel_sentences = True  # default — fire all TTS in parallel threads
+    _inter_sentence_gap_ms = 0  # default — no gap between audio chunks
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
@@ -858,8 +1014,14 @@ def _conversation_inner():
         _prof = _mgr.get_profile(_active_profile_id)
         if _prof and _prof.system_prompt and _prof.system_prompt.strip():
             context_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
-        if _prof and hasattr(_prof, 'voice') and _prof.voice and _prof.voice.min_sentence_chars:
-            _min_sentence_chars = _prof.voice.min_sentence_chars
+        if _prof and hasattr(_prof, 'voice') and _prof.voice:
+            _vc = _prof.voice
+            if _vc.min_sentence_chars:
+                _min_sentence_chars = _vc.min_sentence_chars
+            if _vc.parallel_sentences is not None:
+                _parallel_sentences = _vc.parallel_sentences
+            if _vc.inter_sentence_gap_ms:
+                _inter_sentence_gap_ms = _vc.inter_sentence_gap_ms
     except Exception:
         pass  # Profile system not available — skip gracefully
 
@@ -881,6 +1043,7 @@ def _conversation_inner():
     # prompt so the LLM produces a real greeting instead of a system sentinel ("NO").
     # user_message is kept as-is so the sentinel suppression logic still works.
     if user_message == '__session_start__':
+        logger.info(f"### CALL_START session={session_id}")
         _face = identified_person or {}
         _face_name = _face.get('name', '') if _face.get('name', '') != 'unknown' else ''
         if _face_name:
@@ -894,6 +1057,12 @@ def _conversation_inner():
                 'A new voice session has just started. Give a brief, friendly one-sentence greeting. '
                 'Do NOT address anyone by name — no face has been recognized and you do not know who is speaking.'
             )
+    elif user_message.startswith('__suno_complete__:'):
+        _song_title = user_message[len('__suno_complete__:'):].strip() or 'your track'
+        _gateway_message = (
+            f'The Suno song "{_song_title}" just finished generating and is now ready in the music player. '
+            f'Let the user know in one brief, friendly sentence and offer to play it for them.'
+        )
     else:
         _gateway_message = user_message
     message_with_context = context_prefix + _gateway_message if context_prefix else _gateway_message
@@ -907,9 +1076,24 @@ def _conversation_inner():
             event_queue: queue.Queue = queue.Queue()
             _session_key = get_voice_session_key()
 
+            # Check if gateway recently reconnected after a failure —
+            # inject a system note so the agent acknowledges the interruption
+            _recovery_prefix = ''
+            try:
+                _gw = gateway_manager.get(gateway_id)
+                if _gw and hasattr(_gw, 'consume_reconnection') and _gw.consume_reconnection():
+                    _recovery_prefix = (
+                        '[SYSTEM: The connection was briefly interrupted (server restart). '
+                        'Briefly acknowledge this to the user before responding to their message.]\n\n'
+                    )
+                    logger.info('### Injecting recovery prefix into message')
+            except Exception:
+                pass
+
             def _run_gateway():
+                _msg = _recovery_prefix + message_with_context if _recovery_prefix else message_with_context
                 gateway_manager.stream_to_queue(
-                    event_queue, message_with_context, _session_key, captured_actions,
+                    event_queue, _msg, _session_key, captured_actions,
                     gateway_id=gateway_id,
                     agent_id=agent_id,
                 )
@@ -971,9 +1155,13 @@ def _conversation_inner():
                         return None, text
 
                     def _fire_tts(raw_text):
-                        """Start TTS for raw_text in background. Returns (done_event, result)."""
+                        """Start TTS for raw_text. Parallel or sequential per profile config.
+                        Returns (done_event, result)."""
                         done = threading.Event()
                         result = {'audio': None, 'error': None}
+                        if skip_tts:
+                            done.set()
+                            return (done, result)
                         def _run():
                             try:
                                 t0 = time.time()
@@ -995,8 +1183,28 @@ def _conversation_inner():
                                 result['error'] = str(e)
                             finally:
                                 done.set()
-                        threading.Thread(target=_run, daemon=True).start()
+                        if _parallel_sentences:
+                            threading.Thread(target=_run, daemon=True).start()
+                        else:
+                            _run()  # sequential — block until this sentence is done
                         return done, result
+
+                    def _audio_event(audio_b64, chunk_idx, tts_ms=0):
+                        """Build an audio SSE event dict with gap config."""
+                        evt = {
+                            'type': 'audio',
+                            'audio': audio_b64,
+                            'audio_format': _audio_fmt,
+                            'chunk': chunk_idx,
+                            'total_chunks': None,
+                            'timing': {
+                                'tts_ms': tts_ms,
+                                'total_ms': int((time.time() - t_request_start) * 1000),
+                            },
+                        }
+                        if _inter_sentence_gap_ms:
+                            evt['gap_ms'] = _inter_sentence_gap_ms
+                        return json.dumps(evt) + '\n'
 
                     # Mid-stream TTS state
                     _tts_buf = ''       # raw incremental text buffer
@@ -1036,17 +1244,7 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield json.dumps({
-                                        'type': 'audio',
-                                        'audio': _res['audio'],
-                                        'audio_format': _audio_fmt,
-                                        'chunk': _chunks_sent,
-                                        'total_chunks': None,
-                                        'timing': {
-                                            'tts_ms': 0,
-                                            'total_ms': int((time.time() - t_request_start) * 1000),
-                                        },
-                                    }) + '\n'
+                                    yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
                             continue
 
@@ -1055,11 +1253,13 @@ def _conversation_inner():
                             # Don't fire TTS if buffer looks like a system response
                             # that will be suppressed at text_done. Wait for final
                             # confirmation before speaking.
-                            _buf_stripped = _tts_buf.strip().upper()
-                            _is_system_text = _buf_stripped in (
-                                'HEARTBEAT_OK', 'HEARTBEAT OK',
-                                'HEARTBEAT_O',  # partial match during streaming
-                            ) or _buf_stripped.startswith('HEARTBEAT')
+                            _buf_stripped = _tts_buf.strip()
+                            # Suppress system responses — uses regex from compat layer
+                            # plus partial match for mid-stream detection
+                            _is_system_text = (
+                                is_system_response(_buf_stripped)
+                                or _buf_stripped.upper().startswith('HEARTBEAT')
+                            )
                             # Fire TTS for complete sentences as they arrive
                             if not _is_system_text and not _has_open_tag(_tts_buf):
                                 sentence, _tts_buf = _extract_sentence(_tts_buf, min_len=_min_sentence_chars)
@@ -1074,17 +1274,7 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield json.dumps({
-                                        'type': 'audio',
-                                        'audio': _res['audio'],
-                                        'audio_format': _audio_fmt,
-                                        'chunk': _chunks_sent,
-                                        'total_chunks': None,
-                                        'timing': {
-                                            'tts_ms': 0,
-                                            'total_ms': int((time.time() - t_request_start) * 1000),
-                                        },
-                                    }) + '\n'
+                                    yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
                             continue
 
@@ -1098,17 +1288,7 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield json.dumps({
-                                        'type': 'audio',
-                                        'audio': _res['audio'],
-                                        'audio_format': _audio_fmt,
-                                        'chunk': _chunks_sent,
-                                        'total_chunks': None,
-                                        'timing': {
-                                            'tts_ms': 0,
-                                            'total_ms': int((time.time() - t_request_start) * 1000),
-                                        },
-                                    }) + '\n'
+                                    yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
                             yield json.dumps({'type': 'action', 'action': evt['action']}) + '\n'
                             continue
@@ -1124,7 +1304,15 @@ def _conversation_inner():
                             if evt.get('error') and not evt.get('response'):
                                 error_msg = evt['error']
                                 logger.error(f"### GATEWAY ERROR → fallback: {error_msg}")
-                                evt['response'] = "Sorry, I hit a temporary issue. Could you try that again?"
+                                # Detect rate limit specifically so the UI can surface it
+                                if 'rate limit' in error_msg.lower():
+                                    yield json.dumps({
+                                        'type': 'rate_limit',
+                                        'provider': 'Z.AI',
+                                        'message': error_msg,
+                                    }) + '\n'
+                                    metrics['rate_limited'] = 1
+                                evt['response'] = "One moment, still working on that."
                                 metrics['fallback_used'] = 1
                             full_response = evt.get('response')
                             if full_response and max_response_chars:
@@ -1159,11 +1347,19 @@ def _conversation_inner():
                             )
                             metrics['profile'] = 'gateway'
                             metrics['model'] = 'glm-4.7-flash'
-                            logger.debug(f"[GW] Gateway response ({len(full_response or '')} chars): {repr((full_response or '')[:300])}")
+                            # Estimate tokens: ~4 chars/token for English text
+                            _resp_chars = len(full_response or '')
+                            _ctx_chars = len(context_prefix) if context_prefix else 0
+                            _est_input = _ctx_chars // 4
+                            _est_output = _resp_chars // 4
+                            metrics['est_input_tokens'] = _est_input
+                            metrics['est_output_tokens'] = _est_output
+                            logger.debug(f"[GW] Gateway response ({_resp_chars} chars): {repr((full_response or '')[:300])}")
                             logger.info(
                                 f"### LLM inference completed in "
                                 f"{metrics['llm_inference_ms']}ms "
-                                f"(tools={metrics['tool_count']})"
+                                f"(tools={metrics['tool_count']}) "
+                                f"(tokens~{_est_input}in/{_est_output}out)"
                             )
 
                             # ── Clear recovery mode on successful gateway response ──
@@ -1271,6 +1467,25 @@ def _conversation_inner():
 
                                 if not full_response or not full_response.strip():
                                     full_response = "I had a brief connection issue. I'm reconnecting now — please try again."
+
+                            # ── Timeout empty: agent ran but produced nothing in 300s ──
+                            # This is NOT session poisoning — the session is healthy but the
+                            # agent ran out of time (long tool chain, image gen, website build).
+                            # Return a graceful spoken message; do NOT enter recovery.
+                            if _is_empty and not getattr(stream_response, '_retried', False) \
+                                    and metrics.get('llm_inference_ms', 0) >= 30000:
+                                if user_message == '__session_start__':
+                                    full_response = "Hey, give me just a moment — I'm getting started."
+                                else:
+                                    full_response = (
+                                        "That took a bit longer than expected on my end. "
+                                        "I'm still here — try again and I'll get right to it."
+                                    )
+                                metrics['fallback_used'] = 1
+                                logger.warning(
+                                    f"### TIMEOUT EMPTY ({metrics['llm_inference_ms']}ms) — "
+                                    f"graceful fallback, no session recovery"
+                                )
 
                             yield json.dumps({
                                 'type': 'text_done',
@@ -1389,17 +1604,7 @@ def _conversation_inner():
                                     tts_ok = False
                                     break
                                 if res['audio']:
-                                    yield json.dumps({
-                                        'type': 'audio',
-                                        'audio': res['audio'],
-                                        'audio_format': _audio_fmt,
-                                        'chunk': _chunks_sent + i,
-                                        'total_chunks': total_chunks,
-                                        'timing': {
-                                            'tts_ms': int((time.time() - t_tts_start) * 1000),
-                                            'total_ms': int((time.time() - t_request_start) * 1000),
-                                        },
-                                    }) + '\n'
+                                    yield _audio_event(res['audio'], _chunks_sent + i, tts_ms=int((time.time() - t_tts_start) * 1000))
 
                             metrics['tts_generation_ms'] = int((time.time() - t_tts_start) * 1000)
                             metrics['tts_text_len'] = metrics['response_len']
@@ -1462,9 +1667,14 @@ def _conversation_inner():
                 )
                 metrics['profile'] = 'gateway'
                 metrics['model'] = 'glm-4.7-flash'
+                _resp_chars2 = len(ai_response or '')
+                _ctx_chars2 = len(context_prefix) if context_prefix else 0
+                metrics['est_input_tokens'] = _ctx_chars2 // 4
+                metrics['est_output_tokens'] = _resp_chars2 // 4
                 logger.info(
                     f"### LLM inference completed in {metrics['llm_inference_ms']}ms "
-                    f"(tools={metrics['tool_count']})"
+                    f"(tools={metrics['tool_count']}) "
+                    f"(tokens~{metrics['est_input_tokens']}in/{metrics['est_output_tokens']}out)"
                 )
 
         except Exception as e:
@@ -1492,7 +1702,7 @@ def _conversation_inner():
     # ── LAST RESORT ───────────────────────────────────────────────────────
     if not ai_response:
         logger.warning('Both Gateway and Z.AI flash failed, using generic fallback')
-        ai_response = "Hmm, my brain glitched for a second there. Try that again?"
+        ai_response = "One moment, I'm still working on something."
 
     # Clean text for TTS
     tts_text = clean_for_tts(ai_response)
@@ -1570,7 +1780,61 @@ def conversation_abort():
     if gw and hasattr(gw, 'abort_active_run'):
         aborted = gw.abort_active_run(session_key)
     logger.info(f"### ABORT request session={session_key} aborted={aborted} source={source} text={source_text!r}")
+    if source == 'stopVoiceInput':
+        logger.info(f"### CALL_END session={session_key}")
     return jsonify({'ok': True, 'aborted': aborted})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversation/steer
+# ---------------------------------------------------------------------------
+
+
+@conversation_bp.route('/api/conversation/steer', methods=['POST'])
+def conversation_steer():
+    """Inject a user message into the active agent run (steer mode).
+
+    Fire-and-forget from client — used when the user speaks while the
+    agent is silently working (tools / sub-agents / heartbeat).  Instead
+    of aborting the active run and starting fresh, this sends a second
+    chat.send to the same session.  OpenClaw's messages.queue.mode=steer
+    injects the message at the next tool boundary so the agent sees the
+    user's correction and pivots immediately.
+
+    The active /api/conversation streaming response continues receiving
+    the steered output — no new streaming connection is needed.
+
+    Request body:
+        message  (str)  — the user's text to inject
+        source   (str)  — label for logging (e.g. 'clawdbot-sendMessage')
+
+    Returns:
+        { ok: true, steered: true/false }
+    """
+    body = request.get_json(silent=True) or {}
+    message = (body.get('message') or '').strip()
+    source = body.get('source', 'unknown')
+
+    if not message:
+        return jsonify({'ok': False, 'error': 'No message provided'}), 400
+
+    # Input length guard (same as main conversation endpoint)
+    if len(message) > 4000:
+        return jsonify({'ok': False, 'error': 'Message too long'}), 400
+
+    session_key = get_voice_session_key()
+
+    steered = gateway_manager.send_steer(message, session_key)
+
+    logger.info(
+        f"### STEER request session={session_key} steered={steered} "
+        f"source={source} text={message!r}"
+    )
+
+    # Log the steer message as a user turn so the transcript is preserved
+    log_conversation('user', message, session_id='default')
+
+    return jsonify({'ok': True, 'steered': steered})
 
 
 # ---------------------------------------------------------------------------
@@ -2028,3 +2292,24 @@ def tts_preview():
         logger.error(f'TTS preview error: {e}')
         logger.error(traceback.format_exc())
         return jsonify({'error': 'Internal server error'}), 500
+
+
+@conversation_bp.route('/api/stt-events', methods=['POST'])
+def stt_events():
+    """Receive STT error/status events from the browser.
+    Logs them in a format the session monitor can parse from container stdout.
+    Only real errors are sent (no-speech and aborted are filtered client-side).
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        error_code = data.get('error', 'unknown')
+        message = data.get('message', '')
+        provider = data.get('provider', 'webspeech')
+        source = data.get('source', 'stt')  # 'stt' or 'wake_word'
+
+        # Log in session-monitor-parseable format
+        print(f"### STT_ERROR: {error_code} — {message} (provider={provider} source={source})",
+              flush=True)
+        return jsonify({'ok': True})
+    except Exception:
+        return jsonify({'ok': False}), 500

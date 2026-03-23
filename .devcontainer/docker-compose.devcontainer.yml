@@ -1,0 +1,13 @@
+# Dev container override — bind-mounts source code for live editing
+services:
+  openvoiceui:
+    volumes:
+      - ..:/app:cached
+      - openvoiceui-runtime:/app/runtime
+    environment:
+      - FLASK_DEBUG=1
+      - FLASK_ENV=development
+    # Keep container alive for VS Code to attach to
+    command: sleep infinity
+    healthcheck:
+      disable: true

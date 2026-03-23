@@ -148,11 +148,19 @@ app.register_blueprint(onboarding_bp)
 from routes.image_gen import image_gen_bp
 app.register_blueprint(image_gen_bp)
 
+from routes.chat import chat_bp
+app.register_blueprint(chat_bp)
+
 from routes.workspace import workspace_bp
 app.register_blueprint(workspace_bp)
 
 from routes.icons import icons_bp
+from routes.report_issue import report_issue_bp
 app.register_blueprint(icons_bp)
+app.register_blueprint(report_issue_bp)
+
+from routes.registry import registry_bp
+app.register_blueprint(registry_bp)
 
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.
@@ -673,6 +681,25 @@ def groq_stt():
         return jsonify({"error": "Speech-to-text failed"}), 500
 
 
+@app.route("/api/stt/deepgram/token", methods=["GET"])
+def deepgram_stt_token():
+    """Return the Deepgram API key for browser-side WebSocket streaming.
+
+    The browser needs the key to open a direct WebSocket to Deepgram's
+    live transcription API.  The key is passed via the WebSocket sub-protocol
+    header so it never appears in URLs or logs.
+
+    NOTE: Deepgram supports scoped / short-lived project keys — if you want
+    tighter security, create a key with only 'usage:write' permission and
+    rotate it.  For now we hand out the configured key since the UI is
+    already authenticated.
+    """
+    api_key = os.environ.get("DEEPGRAM_API_KEY", "")
+    if not api_key:
+        return jsonify({"error": "DEEPGRAM_API_KEY not configured"}), 500
+    return jsonify({"token": api_key})
+
+
 @app.route("/api/stt/deepgram", methods=["POST"])
 def deepgram_stt():
     """Transcribe audio using Deepgram Nova-2 API (reliable, low-cost)."""
@@ -1172,21 +1199,20 @@ def clawdbot_websocket(ws):
                 challenge = json.loads(await asyncio.wait_for(gw.recv(), timeout=10.0))
                 logger.debug(f"Gateway challenge: {challenge.get('event')}")
 
+                from services.gateways.compat import build_connect_params
+                connect_params = build_connect_params(
+                    auth_token=auth_token,
+                    client_id="webchat",
+                    client_mode="webchat",
+                    platform="web",
+                    user_agent="openvoice-ui-webchat/1.0.0",
+                    caps=[],
+                )
                 await gw.send(json.dumps({
                     "type": "req",
                     "id": f"connect-{uuid.uuid4()}",
                     "method": "connect",
-                    "params": {
-                        "minProtocol": 3,
-                        "maxProtocol": 3,
-                        "client": {
-                            "id": "webchat",
-                            "version": "1.0.0",
-                            "platform": "web",
-                            "mode": "webchat",
-                        },
-                        "auth": {"token": auth_token},
-                    },
+                    "params": connect_params,
                 }))
 
                 resp = json.loads(await asyncio.wait_for(gw.recv(), timeout=10.0))
@@ -1290,7 +1316,7 @@ def openclaw_ui_websocket(ws):
         return
     logger.info(f"OpenClaw UI WebSocket authenticated: user_id={user_id}")
 
-    gateway_url = os.getenv("CLAWDBOT_GATEWAY_URL", "ws://127.0.0.1:18789")
+    gateway_url = os.getenv("CLAWDBOT_GATEWAY_URL", "ws://127.0.0.1:18791")
     auth_token = os.getenv("CLAWDBOT_AUTH_TOKEN")
 
     if not auth_token:

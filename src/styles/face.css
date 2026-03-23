@@ -42,10 +42,10 @@
             padding-bottom: min(40px, 8.4vw);
             margin: 0;
             box-shadow:
-                0 0 30px rgba(0, 136, 255, 0.3),
-                0 0 60px rgba(0, 136, 255, 0.1),
-                inset 0 0 30px rgba(0, 136, 255, 0.05);
-            border: 2px solid rgba(0, 136, 255, 0.3);
+                0 0 30px var(--border-strong),
+                0 0 60px var(--border-subtle),
+                inset 0 0 30px var(--border-subtle);
+            border: 2px solid var(--border-strong);
             z-index: 1;
             --shake-amount: 5px;
             pointer-events: none;
@@ -88,9 +88,9 @@
             position: absolute;
             width: 100%;
             height: 100%;
-            background: radial-gradient(ellipse at center, #ffffff 0%, #e8e8e8 70%, #cccccc 100%);
+            background: radial-gradient(ellipse at center, var(--neutral-50) 0%, var(--neutral-100) 70%, var(--neutral-200) 100%);
             border-radius: 50% 50% 45% 45%;
-            box-shadow: 0 0 30px rgba(0, 136, 255, 0.3), inset 0 -10px 30px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 0 30px var(--border-strong), inset 0 -10px 30px rgba(0, 0, 0, 0.1);
             overflow: hidden;
         }
 
@@ -204,7 +204,7 @@
             position: absolute;
             background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.9) 0%, rgba(200, 220, 255, 0.7) 100%);
             border-radius: 50%;
-            box-shadow: 0 0 10px rgba(0, 170, 255, 0.4), 0 0 20px rgba(0, 170, 255, 0.2);
+            box-shadow: 0 0 10px var(--border-accent), 0 0 20px var(--border-default);
             animation: thought-float 2s ease-in-out infinite;
         }
         .thought-bubble.tb-1 {
@@ -233,7 +233,7 @@
             position: absolute;
             width: 6px;
             height: 6px;
-            background: rgba(0, 136, 255, 0.5);
+            background: var(--border-accent);
             border-radius: 50%;
             top: 50%;
             left: 50%;
@@ -347,7 +347,7 @@
             background: linear-gradient(to top,
                 var(--cyan) 0%,
                 var(--blue) 40%,
-                #aa00ff 70%,
+                var(--blue-bright) 70%,
                 var(--red) 100%);
             background-size: 100% 55px;
             background-position: bottom;
@@ -357,7 +357,7 @@
             background: linear-gradient(to bottom,
                 var(--cyan) 0%,
                 var(--blue) 40%,
-                #aa00ff 70%,
+                var(--blue-bright) 70%,
                 var(--red) 100%);
             background-size: 100% 55px;
             background-position: top;
@@ -392,7 +392,7 @@
             background: linear-gradient(to left,
                 var(--cyan) 0%,
                 var(--blue) 40%,
-                #aa00ff 70%,
+                var(--blue-bright) 70%,
                 var(--red) 100%);
             background-size: 85px 100%;
             background-position: right;
@@ -402,7 +402,7 @@
             background: linear-gradient(to right,
                 var(--cyan) 0%,
                 var(--blue) 40%,
-                #aa00ff 70%,
+                var(--blue-bright) 70%,
                 var(--red) 100%);
             background-size: 85px 100%;
             background-position: left;

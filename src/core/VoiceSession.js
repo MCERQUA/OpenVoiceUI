@@ -40,9 +40,25 @@
 
 import { eventBus } from './EventBus.js';
 import { WebSpeechSTT, WakeWordDetector } from '../providers/WebSpeechSTT.js';
+import { DeepgramStreamingSTT } from '../providers/DeepgramStreamingSTT.js';
 import { TTSPlayer } from '../providers/TTSPlayer.js';
 import { faceManager } from '../face/BaseFace.js';
 import { emotionEngine } from './EmotionEngine.js';
+
+/**
+ * Create the STT instance based on the server profile setting.
+ * Falls back to WebSpeechSTT if no profile or unknown provider.
+ */
+function _createSTT() {
+    const provider = window._serverProfile?.stt?.provider || 'webspeech';
+    if (provider === 'deepgram-streaming' || provider === 'deepgram') {
+        console.log('[VoiceSession] STT provider: Deepgram Streaming');
+        return new DeepgramStreamingSTT();
+    }
+    // webspeech / groq / other — use WebSpeechSTT as before
+    console.log('[VoiceSession] STT provider: Chrome Web Speech');
+    return new WebSpeechSTT();
+}
 
 export class VoiceSession {
     /**
@@ -56,7 +72,7 @@ export class VoiceSession {
         this.musicPlayer = musicPlayer;
 
         // Sub-modules
-        this.stt = new WebSpeechSTT();
+        this.stt = _createSTT();
         this.tts = new TTSPlayer();
         this.wakeDetector = wakeDetector;
 
@@ -199,7 +215,7 @@ export class VoiceSession {
         eventBus.emit('session:thinking', {});
         faceManager.setMood('thinking');
 
-        const provider = localStorage.getItem('voice_provider') || 'supertonic';
+        const provider = localStorage.getItem('voice_provider') || 'groq';
         const voice = localStorage.getItem('voice_voice') || 'M1';
 
         try {
@@ -323,7 +339,7 @@ export class VoiceSession {
                             // Mute STT before queuing audio — onSpeakingChange(true) will
                             // also mute, but muting here ensures no echo from audio buffering lag
                             if (this.stt.mute) this.stt.mute();
-                            this.tts.queue(data.audio);
+                            this.tts.queue(data.audio, data.audio_format === 'mp3' ? 'audio/mpeg' : 'audio/wav', data.gap_ms || 0);
                         } else {
                             console.warn('[VoiceSession] Audio event had no audio data');
                         }
@@ -372,7 +388,7 @@ export class VoiceSession {
 
         return new Promise(async (resolve) => {
             try {
-                const provider = localStorage.getItem('voice_provider') || 'supertonic';
+                const provider = localStorage.getItem('voice_provider') || 'groq';
                 const voice = localStorage.getItem('voice_voice') || 'M1';
 
                 const response = await fetch(`${this.serverUrl}/api/tts/generate`, {
@@ -515,8 +531,10 @@ export class VoiceSession {
      */
     _resumeListening() {
         if (!this._active) return;
-        // 600ms settling delay: lets audio tail-off clear the mic before re-enabling
+        // 250ms settling delay: lets audio tail-off clear the mic before re-enabling
         // STT so the last fragment of TTS audio isn't captured as user speech.
+        // (Reduced from 600ms — DeepgramStreamingSTT mutes its audio pipeline during
+        // TTS so echo is already suppressed; 250ms is enough for speaker decay.)
         setTimeout(() => {
             if (!this._active) return;
             // resume() clears the mute flag AND restarts the engine — the engine
@@ -528,7 +546,7 @@ export class VoiceSession {
                 this.stt.resetProcessing();
             }
             eventBus.emit('session:listening', {});
-        }, 600);
+        }, 250);
     }
 
     /**

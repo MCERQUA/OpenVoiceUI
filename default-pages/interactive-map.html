@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Map</title>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <style>
+        /* === Leaflet CSS (inlined — canvas CSP blocks external stylesheets) === */
+        .leaflet-pane,.leaflet-tile,.leaflet-marker-icon,.leaflet-marker-shadow,.leaflet-tile-container,.leaflet-pane>svg,.leaflet-pane>canvas,.leaflet-zoom-box,.leaflet-image-layer,.leaflet-layer{position:absolute;left:0;top:0}.leaflet-container{overflow:hidden}.leaflet-tile,.leaflet-marker-icon,.leaflet-marker-shadow{-webkit-user-select:none;-moz-user-select:none;user-select:none;-webkit-user-drag:none}.leaflet-tile::selection{background:transparent}.leaflet-safari .leaflet-tile{image-rendering:-webkit-optimize-contrast}.leaflet-safari .leaflet-tile-container{width:1600px;height:1600px;-webkit-transform-origin:0 0}.leaflet-marker-icon,.leaflet-marker-shadow{display:block}.leaflet-container .leaflet-overlay-pane svg{max-width:none!important;max-height:none!important}.leaflet-container .leaflet-marker-pane img,.leaflet-container .leaflet-shadow-pane img,.leaflet-container .leaflet-tile-pane img,.leaflet-container img.leaflet-image-layer,.leaflet-container .leaflet-tile{max-width:none!important;max-height:none!important;width:auto;padding:0}.leaflet-container img.leaflet-tile{mix-blend-mode:plus-lighter}.leaflet-container.leaflet-touch-zoom{-ms-touch-action:pan-x pan-y;touch-action:pan-x pan-y}.leaflet-container.leaflet-touch-drag{-ms-touch-action:pinch-zoom;touch-action:none;touch-action:pinch-zoom}.leaflet-container.leaflet-touch-drag.leaflet-touch-zoom{-ms-touch-action:none;touch-action:none}.leaflet-container{-webkit-tap-highlight-color:transparent}.leaflet-container a{-webkit-tap-highlight-color:rgba(51,181,229,.4)}.leaflet-tile{filter:inherit;visibility:hidden}.leaflet-tile-loaded{visibility:inherit}.leaflet-zoom-box{width:0;height:0;-moz-box-sizing:border-box;box-sizing:border-box;z-index:800}.leaflet-overlay-pane svg{-moz-user-select:none}.leaflet-pane{z-index:400}.leaflet-tile-pane{z-index:200}.leaflet-overlay-pane{z-index:400}.leaflet-shadow-pane{z-index:500}.leaflet-marker-pane{z-index:600}.leaflet-tooltip-pane{z-index:650}.leaflet-popup-pane{z-index:700}.leaflet-map-pane canvas{z-index:100}.leaflet-map-pane svg{z-index:200}.leaflet-vml-shape{width:1px;height:1px}.lvml{behavior:url(#default#VML);display:inline-block;position:absolute}.leaflet-control{position:relative;z-index:800;pointer-events:visiblePainted;pointer-events:auto}.leaflet-top,.leaflet-bottom{position:absolute;z-index:1000;pointer-events:none}.leaflet-top{top:0}.leaflet-right{right:0}.leaflet-bottom{bottom:0}.leaflet-left{left:0}.leaflet-control{float:left;clear:both}.leaflet-right .leaflet-control{float:right}.leaflet-top .leaflet-control{margin-top:10px}.leaflet-bottom .leaflet-control{margin-bottom:10px}.leaflet-left .leaflet-control{margin-left:10px}.leaflet-right .leaflet-control{margin-right:10px}.leaflet-fade-anim .leaflet-popup{opacity:0;-webkit-transition:opacity .2s linear;-moz-transition:opacity .2s linear;transition:opacity .2s linear}.leaflet-fade-anim .leaflet-map-pane .leaflet-popup{opacity:1}.leaflet-zoom-animated{-webkit-transform-origin:0 0;-ms-transform-origin:0 0;transform-origin:0 0}svg.leaflet-zoom-animated{will-change:transform}.leaflet-zoom-anim .leaflet-zoom-animated{-webkit-transition:-webkit-transform .25s cubic-bezier(0,0,.25,1);-moz-transition:-moz-transform .25s cubic-bezier(0,0,.25,1);transition:transform .25s cubic-bezier(0,0,.25,1)}.leaflet-zoom-anim .leaflet-tile,.leaflet-pan-anim .leaflet-tile{-webkit-transition:none;-moz-transition:none;transition:none}.leaflet-zoom-anim .leaflet-zoom-hide{visibility:hidden}.leaflet-interactive{cursor:pointer}.leaflet-grab{cursor:-webkit-grab;cursor:-moz-grab;cursor:grab}.leaflet-crosshair,.leaflet-crosshair .leaflet-interactive{cursor:crosshair}.leaflet-popup-pane,.leaflet-control{cursor:auto}.leaflet-dragging .leaflet-grab,.leaflet-dragging .leaflet-grab .leaflet-interactive,.leaflet-dragging .leaflet-marker-draggable{cursor:move;cursor:-webkit-grabbing;cursor:-moz-grabbing;cursor:grabbing}.leaflet-marker-icon,.leaflet-marker-shadow,.leaflet-image-layer,.leaflet-pane>svg path,.leaflet-tile-container{pointer-events:none}.leaflet-marker-icon.leaflet-interactive,.leaflet-image-layer.leaflet-interactive,.leaflet-pane>svg path.leaflet-interactive,svg.leaflet-image-layer.leaflet-interactive path{pointer-events:visiblePainted;pointer-events:auto}.leaflet-container{background:#ddd;outline-offset:1px}.leaflet-container a{color:#0078A8}.leaflet-zoom-box{border:2px dotted #38f;background:rgba(255,255,255,.5)}.leaflet-container{font-family:"Helvetica Neue",Arial,Helvetica,sans-serif;font-size:12px;font-size:.75rem;line-height:1.5}.leaflet-bar{box-shadow:0 1px 5px rgba(0,0,0,.65);border-radius:4px}.leaflet-bar a{background-color:#fff;border-bottom:1px solid #ccc;width:26px;height:26px;line-height:26px;display:block;text-align:center;text-decoration:none;color:#000}.leaflet-bar a,.leaflet-control-layers-toggle{background-position:50% 50%;background-repeat:no-repeat;display:block}.leaflet-bar a:hover,.leaflet-bar a:focus{background-color:#f4f4f4}.leaflet-bar a:first-child{border-top-left-radius:4px;border-top-right-radius:4px}.leaflet-bar a:last-child{border-bottom-left-radius:4px;border-bottom-right-radius:4px;border-bottom:none}.leaflet-bar a.leaflet-disabled{cursor:default;background-color:#f4f4f4;color:#bbb}.leaflet-touch .leaflet-bar a{width:30px;height:30px;line-height:30px}.leaflet-touch .leaflet-bar a:first-child{border-top-left-radius:2px;border-top-right-radius:2px}.leaflet-touch .leaflet-bar a:last-child{border-bottom-left-radius:2px;border-bottom-right-radius:2px}.leaflet-control-zoom-in,.leaflet-control-zoom-out{font:bold 18px 'Lucida Console',Monaco,monospace;text-indent:1px}.leaflet-touch .leaflet-control-zoom-in,.leaflet-touch .leaflet-control-zoom-out{font-size:22px}.leaflet-control-layers{box-shadow:0 1px 5px rgba(0,0,0,.4);background:#fff;border-radius:5px}.leaflet-control-layers-toggle{width:36px;height:36px}.leaflet-touch .leaflet-control-layers-toggle{width:44px;height:44px}.leaflet-control-layers .leaflet-control-layers-list,.leaflet-control-layers-expanded .leaflet-control-layers-toggle{display:none}.leaflet-control-layers-expanded .leaflet-control-layers-list{display:block;position:relative}.leaflet-control-layers-expanded{padding:6px 10px 6px 6px;color:#333;background:#fff}.leaflet-control-layers-scrollbar{overflow-y:scroll;overflow-x:hidden;padding-right:5px}.leaflet-control-layers-selector{margin-top:2px;position:relative;top:1px}.leaflet-control-layers label{display:block;font-size:13px;font-size:1.08333em}.leaflet-control-layers-separator{height:0;border-top:1px solid #ddd;margin:5px -10px 5px -6px}.leaflet-container .leaflet-control-attribution{background:#fff;background:rgba(255,255,255,.8);margin:0}.leaflet-control-attribution,.leaflet-control-scale-line{padding:0 5px;color:#333;line-height:1.4}.leaflet-control-attribution a{text-decoration:none}.leaflet-control-attribution a:hover,.leaflet-control-attribution a:focus{text-decoration:underline}.leaflet-attribution-flag{display:inline!important;vertical-align:baseline!important;width:1em;height:.6669em}.leaflet-left .leaflet-control-scale{margin-left:5px}.leaflet-bottom .leaflet-control-scale{margin-bottom:5px}.leaflet-control-scale-line{border:2px solid #777;border-top:none;line-height:1.1;padding:2px 5px 1px;white-space:nowrap;-moz-box-sizing:border-box;box-sizing:border-box;background:rgba(255,255,255,.8);text-shadow:1px 1px #fff}.leaflet-control-scale-line:not(:first-child){border-top:2px solid #777;border-bottom:none;margin-top:-2px}.leaflet-control-scale-line:not(:first-child):not(:last-child){border-bottom:2px solid #777}.leaflet-touch .leaflet-control-attribution,.leaflet-touch .leaflet-control-layers,.leaflet-touch .leaflet-bar{box-shadow:none}.leaflet-touch .leaflet-control-layers,.leaflet-touch .leaflet-bar{border:2px solid rgba(0,0,0,.2);background-clip:padding-box}.leaflet-popup{position:absolute;text-align:center;margin-bottom:20px}.leaflet-popup-content-wrapper{padding:1px;text-align:left;border-radius:12px}.leaflet-popup-content{margin:13px 24px 13px 20px;line-height:1.3;font-size:13px;font-size:1.08333em;min-height:1px}.leaflet-popup-content p{margin:17px 0;margin:1.3em 0}.leaflet-popup-tip-container{width:40px;height:20px;position:absolute;left:50%;margin-top:-1px;margin-left:-20px;overflow:hidden;pointer-events:none}.leaflet-popup-tip{width:17px;height:17px;padding:1px;margin:-10px auto 0;pointer-events:auto;-webkit-transform:rotate(45deg);-moz-transform:rotate(45deg);-ms-transform:rotate(45deg);transform:rotate(45deg)}.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#fff;color:#333;box-shadow:0 3px 14px rgba(0,0,0,.4)}.leaflet-container a.leaflet-popup-close-button{position:absolute;top:0;right:0;border:none;text-align:center;width:24px;height:24px;font:16px/24px Tahoma,Verdana,sans-serif;color:#757575;text-decoration:none;background:transparent}.leaflet-container a.leaflet-popup-close-button:hover,.leaflet-container a.leaflet-popup-close-button:focus{color:#585858}.leaflet-popup-scrolled{overflow:auto}.leaflet-div-icon{background:#fff;border:1px solid #666}.leaflet-tooltip{position:absolute;padding:6px;background-color:#fff;border:1px solid #fff;border-radius:3px;color:#222;white-space:nowrap;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.4)}.leaflet-tooltip.leaflet-interactive{cursor:pointer;pointer-events:auto}.leaflet-tooltip-top:before,.leaflet-tooltip-bottom:before,.leaflet-tooltip-left:before,.leaflet-tooltip-right:before{position:absolute;pointer-events:none;border:6px solid transparent;background:transparent;content:""}.leaflet-tooltip-bottom{margin-top:6px}.leaflet-tooltip-top{margin-top:-6px}.leaflet-tooltip-bottom:before,.leaflet-tooltip-top:before{left:50%;margin-left:-6px}.leaflet-tooltip-top:before{bottom:0;margin-bottom:-12px;border-top-color:#fff}.leaflet-tooltip-bottom:before{top:0;margin-top:-12px;margin-left:-6px;border-bottom-color:#fff}.leaflet-tooltip-left{margin-left:-6px}.leaflet-tooltip-right{margin-left:6px}.leaflet-tooltip-left:before,.leaflet-tooltip-right:before{top:50%;margin-top:-6px}.leaflet-tooltip-left:before{right:0;margin-right:-12px;border-left-color:#fff}.leaflet-tooltip-right:before{left:0;margin-left:-12px;border-right-color:#fff}
+        /* === MarkerCluster CSS (inlined) === */
+        .leaflet-cluster-anim .leaflet-marker-icon,.leaflet-cluster-anim .leaflet-marker-shadow{-webkit-transition:-webkit-transform .3s ease-out,opacity .3s ease-in;-moz-transition:-moz-transform .3s ease-out,opacity .3s ease-in;transition:transform .3s ease-out,opacity .3s ease-in}.leaflet-cluster-spider-leg{-webkit-transition:-webkit-stroke-dashoffset .3s ease-out,-webkit-stroke-opacity .3s ease-in;-moz-transition:-moz-stroke-dashoffset .3s ease-out,-moz-stroke-opacity .3s ease-in;transition:stroke-dashoffset .3s ease-out,stroke-opacity .3s ease-in}
+        .marker-cluster-small{background-color:rgba(181,226,140,.6)}.marker-cluster-small div{background-color:rgba(110,204,57,.6)}.marker-cluster-medium{background-color:rgba(241,211,87,.6)}.marker-cluster-medium div{background-color:rgba(240,194,12,.6)}.marker-cluster-large{background-color:rgba(253,156,115,.6)}.marker-cluster-large div{background-color:rgba(241,128,23,.6)}.marker-cluster{background-clip:padding-box;border-radius:20px}.marker-cluster div{width:30px;height:30px;margin-left:5px;margin-top:5px;text-align:center;border-radius:15px;font:12px "Helvetica Neue",Arial,Helvetica,sans-serif}.marker-cluster span{line-height:30px}
+    </style>
+    <style>
+        /* ================================================================
+           INTERACTIVE MAP — Customizable Canvas Page
+           ================================================================
+           AGENT: Edit the MAP_CONFIG object below to customize this map
+           for your client. Change title, colors, categories, data source,
+           and sample data. Everything is driven by that one config block.
+           ================================================================ */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            height: 100vh;
+            overflow: hidden;
+            color: #e2e8f0;
+        }
+
+        .header {
+            background: rgba(15, 23, 42, 0.97);
+            backdrop-filter: blur(12px);
+            padding: 14px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--accent, #3b82f6);
+            z-index: 1001;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 0.5px;
+        }
+
+        .header-right { display: flex; align-items: center; gap: 20px; }
+        .stats { display: flex; gap: 24px; }
+        .stat-item { text-align: center; }
+
+        .stat-number {
+            font-size: 28px; font-weight: 700; color: #60a5fa; line-height: 1;
+        }
+
+        .stat-label {
+            font-size: 10px; color: #64748b; text-transform: uppercase;
+            letter-spacing: 1.5px; font-weight: 600;
+        }
+
+        .stat-number.green { color: #4ade80; }
+
+        .controls { display: flex; gap: 8px; }
+
+        .controls select {
+            background: #1e293b; color: #e2e8f0; border: 1px solid #334155;
+            padding: 6px 10px; border-radius: 6px; font-size: 12px; outline: none; cursor: pointer;
+        }
+
+        .controls select:focus { border-color: #3b82f6; }
+
+        #map { height: calc(100vh - 64px); width: 100%; background: #0f172a; }
+
+        .legend {
+            position: absolute; bottom: 24px; right: 24px;
+            background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px);
+            padding: 16px 20px; border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5); z-index: 1000;
+            min-width: 180px; border: 1px solid #334155;
+            max-height: 50vh; overflow-y: auto;
+        }
+
+        .legend h3 {
+            margin-bottom: 10px; font-size: 12px; color: #64748b;
+            text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700;
+        }
+
+        .legend-item {
+            display: flex; align-items: center; margin-bottom: 6px; font-size: 12px;
+            color: #cbd5e1; cursor: pointer; padding: 2px 4px; border-radius: 4px;
+            transition: background 0.15s;
+        }
+
+        .legend-item:hover { background: rgba(59, 130, 246, 0.1); }
+        .legend-item.dimmed { opacity: 0.3; }
+
+        .legend-color {
+            width: 14px; height: 14px; border-radius: 50%; margin-right: 10px;
+            flex-shrink: 0; border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .legend-count {
+            margin-left: auto; color: #64748b; font-size: 11px;
+            font-weight: 600; padding-left: 8px;
+        }
+
+        .info-panel {
+            position: absolute; bottom: 24px; left: 24px;
+            background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px);
+            padding: 12px 16px; border-radius: 10px; border: 1px solid #334155;
+            z-index: 1000; font-size: 12px; color: #94a3b8;
+        }
+
+        .info-panel .mapped { color: #4ade80; font-weight: 600; }
+        .info-panel .unmapped { color: #fbbf24; font-weight: 600; }
+
+        /* Popup styling — dark theme */
+        .leaflet-popup-content-wrapper {
+            background: #1e293b; color: #e2e8f0; border-radius: 10px;
+            border: 1px solid #334155; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .leaflet-popup-tip { background: #1e293b; }
+        .popup-content { min-width: 220px; }
+
+        .popup-title {
+            font-size: 16px; font-weight: 700; color: #f1f5f9;
+            margin-bottom: 8px; line-height: 1.2;
+        }
+
+        .popup-detail { margin: 4px 0; font-size: 13px; color: #94a3b8; }
+        .popup-detail strong { color: #cbd5e1; }
+        .popup-detail a { color: #60a5fa; text-decoration: none; }
+        .popup-detail a:hover { text-decoration: underline; }
+
+        .popup-tags { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+        .popup-tag {
+            display: inline-block; padding: 3px 10px; border-radius: 4px;
+            font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
+        }
+
+        .popup-tag.cat { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+        .popup-tag.status-new { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+        .popup-tag.status-active { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .popup-tag.status-pending { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+        .popup-tag.status-completed { background: rgba(34, 211, 238, 0.2); color: #22d3ee; }
+        .popup-tag.status-closed { background: rgba(100, 100, 100, 0.2); color: #94a3b8; }
+        .popup-tag.approx { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+
+        /* Cluster overrides */
+        .marker-cluster-small { background-color: rgba(59, 130, 246, 0.3) !important; }
+        .marker-cluster-small div { background-color: rgba(59, 130, 246, 0.7) !important; color: white !important; font-weight: 700; }
+        .marker-cluster-medium { background-color: rgba(139, 92, 246, 0.3) !important; }
+        .marker-cluster-medium div { background-color: rgba(139, 92, 246, 0.7) !important; color: white !important; font-weight: 700; }
+        .marker-cluster-large { background-color: rgba(236, 72, 153, 0.3) !important; }
+        .marker-cluster-large div { background-color: rgba(236, 72, 153, 0.7) !important; color: white !important; font-weight: 700; }
+
+        .loading-overlay {
+            position: absolute; top: 64px; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.9); display: flex; align-items: center;
+            justify-content: center; z-index: 2000; flex-direction: column; gap: 12px;
+        }
+
+        .loading-overlay .spinner {
+            width: 40px; height: 40px; border: 3px solid #334155;
+            border-top: 3px solid #3b82f6; border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-overlay .msg { color: #94a3b8; font-size: 14px; }
+
+        /* Dark map tiles */
+        .leaflet-tile-pane { filter: saturate(0.3) brightness(0.7); }
+        .leaflet-control-zoom a { background: #1e293b !important; color: #e2e8f0 !important; border-color: #334155 !important; }
+        .leaflet-control-zoom a:hover { background: #334155 !important; }
+        .leaflet-control-attribution { background: rgba(15, 23, 42, 0.8) !important; color: #64748b !important; }
+        .leaflet-control-attribution a { color: #64748b !important; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 id="map-title">Interactive Map</h1>
+        <div class="header-right">
+            <div class="controls">
+                <select id="filter-status"><option value="all">All Statuses</option></select>
+                <select id="filter-category"><option value="all">All Categories</option></select>
+            </div>
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-number" id="total-items">--</div>
+                    <div class="stat-label">Total</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number green" id="mapped-items">--</div>
+                    <div class="stat-label">On Map</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="total-regions">--</div>
+                    <div class="stat-label">Regions</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="legend" id="legend">
+        <h3 id="legend-title">Categories</h3>
+        <div id="legend-items"></div>
+    </div>
+
+    <div class="info-panel" id="info-panel">
+        <span class="mapped" id="info-mapped">--</span> mapped &bull;
+        <span class="unmapped" id="info-unmapped">--</span> no location &bull;
+        Click clusters to zoom
+    </div>
+
+    <div class="loading-overlay" id="loading">
+        <div class="spinner"></div>
+        <div class="msg" id="loading-msg">Loading data...</div>
+    </div>
+
+    <script>
+    // ╔═══════════════════════════════════════════════════════════════════╗
+    // ║  MAP CONFIGURATION — EDIT THIS BLOCK TO CUSTOMIZE THE MAP       ║
+    // ║                                                                   ║
+    // ║  Agent: Change these values to adapt the map for any use case.    ║
+    // ║  Supports: leads, jobs, tasks, locations, assets, properties,     ║
+    // ║  service areas, deliveries, fleet tracking, or any geo data.      ║
+    // ╚═══════════════════════════════════════════════════════════════════╝
+    const MAP_CONFIG = {
+        // --- Display ---
+        title: 'Interactive Map',
+        legendTitle: 'Categories',
+        centerLat: 39.8283,
+        centerLon: -98.5795,
+        defaultZoom: 4,
+
+        // --- Data Source ---
+        // Option A: API endpoint (set apiUrl, leave items empty)
+        // Option B: Inline data (set items array, leave apiUrl null)
+        apiUrl: null,           // e.g. '/social-api/api/leads' or '/api/map-data'
+        apiParams: {},          // e.g. { tenant: 'josh' }
+        apiItemsKey: 'items',   // key in response that holds the array (e.g. 'leads', 'jobs', 'items')
+        refreshInterval: 300000, // auto-refresh ms (0 = disabled, 300000 = 5min)
+
+        // --- Field Mapping ---
+        // Map your data fields to what the map expects
+        fields: {
+            title:    'name',           // primary display name
+            subtitle: 'company',        // secondary name (shown in popup)
+            category: 'category',       // used for color grouping + legend
+            status:   'status',         // used for status filter + badge
+            address:  'address',        // street address for geocoding
+            phone:    'phone',          // phone number (used for area code geolocation)
+            email:    'email',          // email (shown in popup)
+            lat:      'lat',            // latitude (if pre-geocoded)
+            lon:      'lon',            // longitude (if pre-geocoded)
+            id:       'id',             // unique identifier
+        },
+
+        // --- Status Options ---
+        statuses: ['new', 'active', 'pending', 'completed', 'closed'],
+
+        // --- Category Colors ---
+        // Keys should match values in your data's category field
+        categoryColors: {
+            'default':      '#3b82f6',
+            'construction': '#f59e0b',
+            'services':     '#8b5cf6',
+            'retail':       '#10b981',
+            'food':         '#ec4899',
+            'fitness':      '#ef4444',
+            'transport':    '#06b6d4',
+            'other':        '#64748b',
+        },
+
+        // --- Sample Data ---
+        // Replace with your real data or set apiUrl above to fetch from server
+        items: [
+            { id: 1, name: 'Acme Construction', company: 'Acme LLC', category: 'construction', status: 'active', address: '123 Main St, Phoenix, AZ 85001', phone: '6025551234', email: 'info@acme.com' },
+            { id: 2, name: 'Fresh Bites Catering', company: 'Fresh Bites', category: 'food', status: 'new', address: '456 Oak Ave, Austin, TX 78701', phone: '5125559876', email: 'hello@freshbites.com' },
+            { id: 3, name: 'Peak Fitness Gym', company: 'Peak Fitness', category: 'fitness', status: 'active', phone: '3035554567', email: 'contact@peakfit.com' },
+            { id: 4, name: 'Skyline Roofing', company: 'Skyline LLC', category: 'construction', status: 'pending', address: '789 Elm Dr, Denver, CO 80202', phone: '7205553210' },
+            { id: 5, name: 'QuickShip Logistics', company: 'QuickShip', category: 'transport', status: 'completed', address: '321 Harbor Blvd, Miami, FL 33101', phone: '3055558888' },
+            { id: 6, name: 'Urban Cuts Barbershop', company: 'Urban Cuts', category: 'services', status: 'new', phone: '2125557777' },
+            { id: 7, name: 'Mountain View Plumbing', company: 'MV Plumbing', category: 'services', status: 'active', address: '900 Pine St, Salt Lake City, UT 84101', phone: '8015552222' },
+            { id: 8, name: 'Taco Truck Express', company: 'TTE LLC', category: 'food', status: 'new', address: '555 Sunset Blvd, Los Angeles, CA 90028', phone: '3235556666' },
+        ],
+    };
+
+    // ╔═══════════════════════════════════════════════════════════════════╗
+    // ║  GEOCODING ENGINE — US state centers + area code lookup          ║
+    // ║  No external API needed. Works offline for US addresses.         ║
+    // ╚═══════════════════════════════════════════════════════════════════╝
+    const STATE_COORDS = {
+        AL:[32.81,-86.79],AK:[61.37,-152.40],AZ:[33.73,-111.43],AR:[34.97,-92.37],
+        CA:[36.12,-119.68],CO:[39.06,-105.31],CT:[41.60,-72.76],DE:[39.32,-75.51],
+        FL:[27.77,-81.69],GA:[33.04,-83.64],HI:[21.09,-157.50],ID:[44.24,-114.48],
+        IL:[40.35,-88.99],IN:[39.85,-86.26],IA:[42.01,-93.21],KS:[38.53,-96.73],
+        KY:[37.67,-84.67],LA:[31.17,-91.87],ME:[44.69,-69.38],MD:[39.06,-76.80],
+        MA:[42.23,-71.53],MI:[43.33,-84.54],MN:[45.69,-93.90],MS:[32.74,-89.68],
+        MO:[38.46,-92.29],MT:[46.92,-110.45],NE:[41.13,-98.27],NV:[38.31,-117.06],
+        NH:[43.45,-71.56],NJ:[40.30,-74.52],NM:[34.84,-106.25],NY:[42.17,-74.95],
+        NC:[35.63,-79.81],ND:[47.53,-99.78],OH:[40.39,-82.76],OK:[35.57,-96.93],
+        OR:[44.57,-122.07],PA:[40.59,-77.21],RI:[41.68,-71.51],SC:[33.86,-80.95],
+        SD:[44.30,-99.44],TN:[35.75,-86.69],TX:[31.05,-97.56],UT:[40.15,-111.86],
+        VT:[44.05,-72.71],VA:[37.77,-78.17],WA:[47.40,-121.49],WV:[38.49,-80.95],
+        WI:[44.27,-89.62],WY:[42.76,-107.30],DC:[38.90,-77.03],
+    };
+
+    const AREA_CODE_COORDS = {
+        201:[40.88,-74.16],202:[38.90,-77.04],203:[41.18,-73.19],205:[33.52,-86.80],
+        206:[47.61,-122.33],207:[44.31,-69.78],208:[43.62,-116.20],209:[37.95,-121.29],
+        210:[29.42,-98.49],212:[40.78,-73.97],213:[34.05,-118.24],214:[32.78,-96.80],
+        215:[40.00,-75.13],216:[41.50,-81.69],217:[39.78,-89.65],218:[46.78,-92.10],
+        219:[41.60,-87.33],224:[42.05,-87.93],225:[30.45,-91.19],228:[30.40,-88.88],
+        231:[44.25,-86.25],234:[41.10,-81.52],239:[26.64,-81.87],240:[39.14,-77.21],
+        248:[42.59,-83.36],251:[30.69,-88.04],252:[35.60,-77.37],253:[47.25,-122.44],
+        254:[31.55,-97.15],256:[34.73,-86.59],260:[41.08,-85.14],262:[42.73,-88.00],
+        267:[40.00,-75.13],269:[42.29,-85.59],270:[37.04,-86.45],281:[29.76,-95.37],
+        301:[39.00,-76.95],302:[39.16,-75.52],303:[39.74,-104.99],304:[38.35,-81.63],
+        305:[25.76,-80.19],307:[42.85,-106.33],308:[41.13,-100.77],309:[40.69,-89.59],
+        310:[33.94,-118.39],312:[41.88,-87.63],313:[42.33,-83.05],314:[38.63,-90.20],
+        315:[43.05,-75.69],316:[37.69,-97.34],317:[39.77,-86.16],318:[32.51,-93.75],
+        319:[41.98,-91.67],320:[45.56,-94.16],321:[28.54,-80.65],323:[34.05,-118.24],
+        325:[32.45,-99.73],330:[41.08,-81.52],334:[32.37,-86.30],336:[36.07,-79.79],
+        337:[30.22,-92.02],346:[29.76,-95.37],347:[40.65,-73.95],352:[29.22,-82.16],
+        360:[48.75,-122.48],361:[27.80,-97.40],385:[40.76,-111.89],386:[29.21,-81.02],
+        401:[41.82,-71.41],402:[41.26,-95.94],404:[33.75,-84.39],405:[35.47,-97.52],
+        406:[46.59,-112.04],407:[28.54,-81.38],408:[37.34,-121.89],409:[30.08,-94.13],
+        410:[39.29,-76.61],412:[40.44,-79.99],413:[42.10,-72.59],414:[43.04,-87.91],
+        415:[37.78,-122.42],417:[37.22,-93.29],419:[41.65,-83.54],423:[35.05,-85.31],
+        424:[34.05,-118.24],425:[47.61,-122.19],432:[31.95,-102.18],434:[37.54,-78.95],
+        435:[40.76,-111.89],440:[41.48,-81.52],443:[39.29,-76.61],458:[44.05,-123.09],
+        469:[32.78,-96.80],470:[33.75,-84.39],478:[32.84,-83.63],479:[36.07,-94.17],
+        480:[33.41,-111.83],484:[40.00,-75.47],501:[34.75,-92.29],502:[38.25,-85.76],
+        503:[45.51,-122.68],504:[29.95,-90.07],505:[35.08,-106.65],507:[44.02,-93.47],
+        508:[42.06,-71.24],509:[47.66,-117.43],510:[37.80,-122.27],512:[30.27,-97.74],
+        513:[39.10,-84.51],515:[41.59,-93.62],516:[40.72,-73.60],517:[42.73,-84.56],
+        518:[42.65,-73.76],520:[32.22,-110.97],530:[40.58,-122.39],539:[36.15,-95.99],
+        540:[37.27,-79.94],541:[44.05,-121.31],559:[36.74,-119.77],561:[26.72,-80.05],
+        562:[33.77,-118.19],567:[41.65,-83.54],570:[41.24,-75.88],571:[38.88,-77.17],
+        573:[38.58,-92.17],574:[41.68,-86.25],580:[34.62,-98.43],585:[43.16,-77.61],
+        586:[42.56,-82.93],601:[32.30,-90.18],602:[33.45,-112.07],603:[43.21,-71.54],
+        605:[43.55,-96.73],606:[37.83,-83.38],607:[42.10,-75.91],608:[43.07,-89.40],
+        609:[40.22,-74.76],610:[40.06,-75.47],612:[44.98,-93.27],614:[39.96,-82.99],
+        615:[36.16,-86.78],616:[42.96,-85.66],617:[42.36,-71.06],618:[38.63,-89.99],
+        619:[32.72,-117.16],623:[33.49,-112.31],626:[34.14,-118.13],630:[41.75,-88.15],
+        631:[40.82,-73.20],636:[38.63,-90.57],646:[40.78,-73.97],650:[37.49,-122.23],
+        651:[44.95,-93.09],657:[33.79,-117.85],661:[35.37,-119.02],678:[33.75,-84.39],
+        682:[32.75,-97.33],701:[46.88,-96.79],702:[36.17,-115.14],703:[38.88,-77.17],
+        704:[35.23,-80.84],706:[33.47,-82.01],707:[38.51,-122.81],708:[41.84,-87.84],
+        713:[29.76,-95.37],714:[33.74,-117.94],715:[44.52,-89.57],716:[42.89,-78.88],
+        717:[40.27,-76.88],718:[40.65,-73.95],719:[38.83,-104.82],720:[39.74,-104.99],
+        724:[40.36,-79.94],727:[27.96,-82.79],732:[40.49,-74.26],734:[42.28,-83.74],
+        737:[30.27,-97.74],740:[39.96,-82.01],747:[34.18,-118.31],754:[26.12,-80.14],
+        757:[36.85,-76.29],760:[33.13,-117.16],763:[45.07,-93.35],770:[33.95,-84.15],
+        773:[41.88,-87.63],774:[42.06,-71.24],775:[39.53,-119.81],781:[42.45,-71.07],
+        785:[39.05,-95.68],786:[25.76,-80.19],801:[40.76,-111.89],802:[44.26,-72.58],
+        803:[34.00,-81.03],804:[37.54,-77.44],805:[34.95,-120.43],806:[34.47,-101.95],
+        808:[21.31,-157.86],810:[42.97,-83.69],812:[38.44,-87.09],813:[27.95,-82.46],
+        814:[41.45,-79.98],815:[41.52,-88.43],816:[39.10,-94.58],817:[32.75,-97.33],
+        818:[34.18,-118.31],828:[35.60,-82.55],830:[29.30,-98.17],831:[36.60,-121.89],
+        832:[29.76,-95.37],843:[32.78,-79.93],845:[41.50,-74.01],847:[42.16,-87.83],
+        850:[30.44,-87.22],856:[39.95,-75.12],857:[42.36,-71.06],858:[32.90,-117.20],
+        859:[38.05,-84.50],860:[41.77,-72.68],862:[40.74,-74.17],863:[27.95,-81.64],
+        864:[34.85,-82.40],865:[35.96,-83.92],901:[35.15,-90.05],903:[32.35,-95.30],
+        904:[30.33,-81.66],906:[46.49,-87.40],907:[61.22,-149.90],908:[40.67,-74.41],
+        909:[34.06,-117.59],910:[35.05,-78.88],912:[32.08,-81.09],913:[39.11,-94.63],
+        914:[41.03,-73.76],915:[31.76,-106.45],916:[38.58,-121.49],917:[40.78,-73.97],
+        918:[36.15,-95.99],919:[35.79,-78.64],920:[44.02,-88.54],925:[37.95,-122.06],
+        928:[35.20,-111.65],929:[40.65,-73.95],937:[39.76,-84.19],940:[33.91,-97.14],
+        941:[27.34,-82.53],949:[33.62,-117.71],951:[33.95,-117.40],954:[26.12,-80.14],
+        970:[40.49,-105.08],971:[45.51,-122.68],972:[32.95,-96.73],973:[40.74,-74.17],
+        978:[42.65,-71.14],980:[35.23,-80.84],984:[47.61,-122.33],985:[29.70,-90.56],
+    };
+
+    function stateFromZip(zip) {
+        const z = parseInt(zip.substring(0, 3));
+        if(z>=10&&z<=69)return'MA';if(z>=70&&z<=89)return'RI';if(z>=90&&z<=99)return'CT';
+        if(z>=100&&z<=149)return'NY';if(z>=150&&z<=196)return'PA';if(z>=197&&z<=199)return'DE';
+        if(z>=200&&z<=205)return'DC';if(z>=206&&z<=219)return'MD';if(z>=220&&z<=246)return'VA';
+        if(z>=247&&z<=268)return'WV';if(z>=270&&z<=289)return'NC';if(z>=290&&z<=299)return'SC';
+        if(z>=300&&z<=319)return'GA';if(z>=320&&z<=349)return'FL';if(z>=350&&z<=369)return'AL';
+        if(z>=370&&z<=385)return'TN';if(z>=386&&z<=397)return'MS';if(z>=400&&z<=427)return'KY';
+        if(z>=430&&z<=458)return'OH';if(z>=460&&z<=479)return'IN';if(z>=480&&z<=499)return'MI';
+        if(z>=500&&z<=528)return'IA';if(z>=530&&z<=549)return'WI';if(z>=550&&z<=567)return'MN';
+        if(z>=570&&z<=577)return'SD';if(z>=580&&z<=588)return'ND';if(z>=590&&z<=599)return'MT';
+        if(z>=600&&z<=629)return'IL';if(z>=630&&z<=658)return'MO';if(z>=660&&z<=679)return'KS';
+        if(z>=680&&z<=693)return'NE';if(z>=700&&z<=714)return'LA';if(z>=716&&z<=729)return'AR';
+        if(z>=730&&z<=749)return'OK';if(z>=750&&z<=799)return'TX';if(z>=800&&z<=816)return'CO';
+        if(z>=820&&z<=831)return'WY';if(z>=832&&z<=838)return'ID';if(z>=840&&z<=847)return'UT';
+        if(z>=850&&z<=865)return'AZ';if(z>=870&&z<=884)return'NM';if(z>=889&&z<=898)return'NV';
+        if(z>=900&&z<=966)return'CA';if(z>=967&&z<=968)return'HI';if(z>=970&&z<=979)return'OR';
+        if(z>=980&&z<=994)return'WA';if(z>=995&&z<=999)return'AK';return null;
+    }
+
+    // ================================================================
+    // Location extraction — tries lat/lon, address, then area code
+    // ================================================================
+    function extractLocation(item) {
+        const f = MAP_CONFIG.fields;
+
+        // 1. Pre-geocoded coordinates
+        const lat = parseFloat(item[f.lat]);
+        const lon = parseFloat(item[f.lon]);
+        if (!isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0) {
+            return { lat, lon, precision: 'exact', state: null };
+        }
+
+        // 2. Parse address for state/zip
+        const addr = String(item[f.address] || '');
+        if (addr) {
+            const stMatch = addr.match(/\b([A-Z]{2})\s*\d{5}/) ||
+                            addr.match(/,\s*([A-Z]{2})\s*$/) ||
+                            addr.match(/\b([A-Z]{2})\b(?:\s*\d{5})?/);
+            if (stMatch && STATE_COORDS[stMatch[1]]) {
+                const c = STATE_COORDS[stMatch[1]], j = () => (Math.random() - 0.5) * 1.5;
+                return { lat: c[0] + j(), lon: c[1] + j(), precision: 'state', state: stMatch[1] };
+            }
+            const zipMatch = addr.match(/\b(\d{5})(?:-\d{4})?\b/);
+            if (zipMatch) {
+                const st = stateFromZip(zipMatch[1]);
+                if (st && STATE_COORDS[st]) {
+                    const c = STATE_COORDS[st], j = () => (Math.random() - 0.5) * 1.5;
+                    return { lat: c[0] + j(), lon: c[1] + j(), precision: 'zip', state: st };
+                }
+            }
+        }
+
+        // 3. Phone area code
+        const phone = String(item[f.phone] || '').replace(/\D/g, '');
+        let ac = null;
+        if (phone.length === 10) ac = phone.substring(0, 3);
+        else if (phone.length === 11 && phone[0] === '1') ac = phone.substring(1, 4);
+        if (ac && AREA_CODE_COORDS[parseInt(ac)]) {
+            const c = AREA_CODE_COORDS[parseInt(ac)], j = () => (Math.random() - 0.5) * 0.8;
+            return { lat: c[0] + j(), lon: c[1] + j(), precision: 'area-code', state: null };
+        }
+
+        return null;
+    }
+
+    // ================================================================
+    // Map setup
+    // ================================================================
+    const map = L.map('map', { zoomControl: true, attributionControl: true })
+        .setView([MAP_CONFIG.centerLat, MAP_CONFIG.centerLon], MAP_CONFIG.defaultZoom);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 18
+    }).addTo(map);
+
+    const markers = L.markerClusterGroup({
+        maxClusterRadius: 50, spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false, zoomToBoundsOnClick: true, disableClusteringAtZoom: 10,
+    });
+    map.addLayer(markers);
+
+    // ================================================================
+    // Data + render
+    // ================================================================
+    let allItems = [];
+    let categoryFilter = 'all';
+    let statusFilter = 'all';
+    let legendFilter = null;
+
+    function getField(item, fieldName) {
+        return item[MAP_CONFIG.fields[fieldName]] || '';
+    }
+
+    function getCategoryColor(cat) {
+        return MAP_CONFIG.categoryColors[cat] || MAP_CONFIG.categoryColors['default'] || '#64748b';
+    }
+
+    function formatCategoryName(cat) {
+        return String(cat || 'other').replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+    async function fetchItems() {
+        if (MAP_CONFIG.apiUrl) {
+            let allData = [];
+            let offset = 0;
+            const limit = 200;
+            let hasMore = true;
+            while (hasMore) {
+                const params = new URLSearchParams({ ...MAP_CONFIG.apiParams, limit, offset });
+                const url = `${MAP_CONFIG.apiUrl}?${params}`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`API ${res.status}`);
+                const data = await res.json();
+                const items = data[MAP_CONFIG.apiItemsKey] || data.items || data.data || [];
+                allData = allData.concat(items);
+                if (items.length < limit) hasMore = false;
+                else offset += limit;
+            }
+            return allData;
+        }
+        return MAP_CONFIG.items || [];
+    }
+
+    function renderMap(items) {
+        markers.clearLayers();
+        let mapped = 0, unmapped = 0;
+        const regions = new Set();
+        const catCounts = {};
+        const f = MAP_CONFIG.fields;
+
+        const filtered = items.filter(item => {
+            const status = getField(item, 'status');
+            const cat = getField(item, 'category');
+            if (statusFilter !== 'all' && status !== statusFilter) return false;
+            if (categoryFilter !== 'all' && cat !== categoryFilter) return false;
+            if (legendFilter && cat !== legendFilter) return false;
+            return true;
+        });
+
+        filtered.forEach(item => {
+            const cat = getField(item, 'category') || 'other';
+            catCounts[cat] = (catCounts[cat] || 0) + 1;
+
+            const loc = extractLocation(item);
+            if (!loc) { unmapped++; return; }
+            mapped++;
+            if (loc.state) regions.add(loc.state);
+
+            const color = getCategoryColor(cat);
+            const title = getField(item, 'title') || 'Unknown';
+            const subtitle = getField(item, 'subtitle');
+            const phone = getField(item, 'phone');
+            const email = getField(item, 'email');
+            const addr = getField(item, 'address');
+            const status = getField(item, 'status') || 'new';
+            const catName = formatCategoryName(cat);
+
+            const popup = `
+                <div class="popup-content">
+                    <div class="popup-title">${esc(title)}</div>
+                    ${subtitle && subtitle !== title ? `<div class="popup-detail"><strong>${esc(subtitle)}</strong></div>` : ''}
+                    ${addr ? `<div class="popup-detail">${esc(addr)}</div>` : ''}
+                    ${phone ? `<div class="popup-detail"><a href="tel:${esc(phone)}">${esc(phone)}</a></div>` : ''}
+                    ${email ? `<div class="popup-detail"><a href="mailto:${esc(email)}">${esc(email)}</a></div>` : ''}
+                    <div class="popup-tags">
+                        <span class="popup-tag cat" style="background:${color}22;color:${color}">${esc(catName)}</span>
+                        <span class="popup-tag status-${status}">${status}</span>
+                        ${loc.precision === 'exact' ? '' : '<span class="popup-tag approx">approx</span>'}
+                    </div>
+                </div>`;
+
+            const marker = L.circleMarker([loc.lat, loc.lon], {
+                radius: 8, fillColor: color, color: '#fff', weight: 2, opacity: 0.9, fillOpacity: 0.75,
+            });
+            marker.bindPopup(popup, { maxWidth: 300 });
+            marker.on('mouseover', function() { this.setRadius(12); this.setStyle({ fillOpacity: 1, weight: 3 }); });
+            marker.on('mouseout', function() { this.setRadius(8); this.setStyle({ fillOpacity: 0.75, weight: 2 }); });
+            markers.addLayer(marker);
+        });
+
+        document.getElementById('total-items').textContent = items.length;
+        document.getElementById('mapped-items').textContent = mapped;
+        document.getElementById('total-regions').textContent = regions.size;
+        document.getElementById('info-mapped').textContent = mapped;
+        document.getElementById('info-unmapped').textContent = unmapped;
+        renderLegend(catCounts);
+    }
+
+    function renderLegend(catCounts) {
+        const sorted = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
+        document.getElementById('legend-items').innerHTML = sorted.map(([cat, count]) => {
+            const color = getCategoryColor(cat);
+            const name = formatCategoryName(cat);
+            const dim = legendFilter && legendFilter !== cat ? 'dimmed' : '';
+            return `<div class="legend-item ${dim}" onclick="toggleLegend('${cat}')">
+                <div class="legend-color" style="background:${color}"></div>
+                <span>${name}</span><span class="legend-count">${count}</span></div>`;
+        }).join('');
+    }
+
+    function populateFilters(items) {
+        const f = MAP_CONFIG.fields;
+        // Status filter
+        const statusSel = document.getElementById('filter-status');
+        statusSel.innerHTML = '<option value="all">All Statuses</option>';
+        MAP_CONFIG.statuses.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s; opt.textContent = formatCategoryName(s);
+            statusSel.appendChild(opt);
+        });
+        // Category filter
+        const cats = {};
+        items.forEach(i => { const c = i[f.category] || 'other'; cats[c] = (cats[c] || 0) + 1; });
+        const catSel = document.getElementById('filter-category');
+        catSel.innerHTML = '<option value="all">All Categories</option>';
+        Object.entries(cats).sort((a, b) => b[1] - a[1]).forEach(([cat, count]) => {
+            const opt = document.createElement('option');
+            opt.value = cat; opt.textContent = `${formatCategoryName(cat)} (${count})`;
+            catSel.appendChild(opt);
+        });
+    }
+
+    function toggleLegend(cat) {
+        legendFilter = legendFilter === cat ? null : cat;
+        renderMap(allItems);
+    }
+
+    // Event listeners
+    document.getElementById('filter-status').addEventListener('change', e => {
+        statusFilter = e.target.value; legendFilter = null; renderMap(allItems);
+    });
+    document.getElementById('filter-category').addEventListener('change', e => {
+        categoryFilter = e.target.value; legendFilter = null; renderMap(allItems);
+    });
+
+    // Apply config to UI
+    document.getElementById('map-title').textContent = MAP_CONFIG.title;
+    document.getElementById('legend-title').textContent = MAP_CONFIG.legendTitle;
+    document.getElementById('loading-msg').textContent = MAP_CONFIG.apiUrl ? 'Loading data from server...' : 'Loading map...';
+
+    // Initialize
+    (async function init() {
+        try {
+            allItems = await fetchItems();
+            populateFilters(allItems);
+            renderMap(allItems);
+            document.getElementById('loading').style.display = 'none';
+        } catch (err) {
+            document.getElementById('loading').innerHTML = `
+                <div style="color:#f87171;font-size:16px;text-align:center">
+                    Failed to load data: ${err.message}<br>
+                    <span style="color:#64748b;font-size:13px">Check your MAP_CONFIG.apiUrl or items array</span>
+                </div>`;
+        }
+    })();
+
+    // Auto-refresh
+    if (MAP_CONFIG.refreshInterval > 0 && MAP_CONFIG.apiUrl) {
+        setInterval(async () => {
+            try { allItems = await fetchItems(); renderMap(allItems); } catch (e) {}
+        }, MAP_CONFIG.refreshInterval);
+    }
+    </script>
+</body>
+</html>

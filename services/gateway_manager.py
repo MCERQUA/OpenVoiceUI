@@ -164,6 +164,41 @@ class GatewayManager:
                 return ''
 
     # ------------------------------------------------------------------ #
+    # Steer (inject message into active run)                               #
+    # ------------------------------------------------------------------ #
+
+    def send_steer(
+        self,
+        message: str,
+        session_key: str,
+        gateway_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Send a steer message to the named gateway (fire-and-forget).
+
+        Used when the user speaks while the agent is silently working
+        (tools / sub-agents).  Instead of aborting the active run,
+        this injects the user's message at the next tool boundary via
+        OpenClaw's messages.queue.mode=steer.
+
+        The active /api/conversation streaming response continues
+        receiving the steered output — no new streaming connection
+        is created.
+
+        Returns True if the message was delivered, False otherwise.
+        """
+        gid = gateway_id or 'openclaw'
+        gw = self._gateways.get(gid)
+        if gw is None:
+            gw = self._gateways.get('openclaw')
+        if gw is None or not gw.is_configured():
+            return False
+        if not hasattr(gw, 'send_steer'):
+            logger.warning(f"Gateway '{gw.gateway_id}' does not support steer")
+            return False
+        return gw.send_steer(message, session_key)
+
+    # ------------------------------------------------------------------ #
     # Health / status                                                      #
     # ------------------------------------------------------------------ #
 

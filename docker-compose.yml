@@ -3,7 +3,7 @@ services:
     build:
       context: deploy/openclaw
       args:
-        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.2}
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.13}
         CODING_CLI: ${CODING_CLI:-none}
     volumes:
       - openclaw-data:/root/.openclaw
@@ -26,8 +26,8 @@ services:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 120s
 
   openvoiceui:
     build: .
@@ -42,7 +42,7 @@ services:
       - canvas-pages:/app/runtime/canvas-pages
     depends_on:
       openclaw:
-        condition: service_started
+        condition: service_healthy
       supertonic:
         condition: service_healthy
     restart: unless-stopped

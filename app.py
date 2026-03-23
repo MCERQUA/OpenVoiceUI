@@ -34,8 +34,8 @@ from services.security import (
 
 logger = logging.getLogger(__name__)
 
-# Reduced from 100 MB — audio uploads don't need more than 25 MB (P7-T3 security audit)
-_MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+# Match static_files.py and nginx (100 MB) — bulk uploads need full limit
+_MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
 def create_app(config_override: dict = None):
@@ -55,24 +55,18 @@ def create_app(config_override: dict = None):
         static_folder=None,
     )
 
-    # Validate production configuration
-    try:
-        validate_production_config()
-    except SystemExit as e:
-        # Re-raise if in production, log warning in development
-        if os.getenv('ENVIRONMENT', '').lower() == 'production':
-            raise
-        else:
-            logger.warning(f"Configuration validation would fail in production: {e}")
-    
     # Core Flask config
+    # Validate production configuration first (2026-03-23 security hardening)
+    validate_production_config()
+    
     secret_key = os.getenv('SECRET_KEY')
-    env = os.getenv('ENVIRONMENT', 'development').lower()
+    environment = os.getenv('ENVIRONMENT', 'development').lower()
     
     if not secret_key:
-        if env == 'production':
-            logger.critical('SECRET_KEY must be set in production!')
+        if environment == 'production':
+            logger.critical('SECRET_KEY must be set in production! Exiting.')
             sys.exit(1)
+        # Development only: generate random key with warning
         import secrets as _secrets
         secret_key = _secrets.token_hex(32)
         logger.warning(
@@ -101,6 +95,7 @@ def create_app(config_override: dict = None):
     _extra_origins = [o.strip() for o in os.getenv('CORS_ORIGINS', '').split(',') if o.strip()]
     CORS(app, origins=[
         r'^http://localhost:\d+$',
+        r'^chrome-extension://',   # JamBot Browser Companion extension
         *_extra_origins,
     ], supports_credentials=True)
 
@@ -137,10 +132,16 @@ def create_app(config_override: dict = None):
             '/api/canvas/',  # canvas API — creation, manifest, context (no per-user auth needed)
             '/api/uploads',   # uploads list — files are already public at /uploads/, listing is fine
             '/api/profiles',  # read-only profile config — loaded before Clerk init
+            '/api/chat',      # LLM proxy (Groq) — used by canvas pages for inline AI
             '/api/tts/',      # TTS provider list — loaded before Clerk init
             '/api/theme',     # theme config — loaded before Clerk init
             '/api/music',     # music track list — loaded before Clerk init
             '/api/faces',     # face list — loaded before Clerk init
+            '/api/icons/',    # icon library + generated icons — static images, no secrets
+            '/api/suno',      # Suno song generation — status polling + song list (no secrets)
+            '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
+            '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
+            '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
         )
         _PUBLIC_EXACT = {
             '/',           # main page — hosts the Clerk login gate itself
@@ -154,8 +155,7 @@ def create_app(config_override: dict = None):
             '/favicon.ico',     # Browser favicon request — before auth
             '/ws/clawdbot',     # WebSocket — browsers can't send Clerk token in WS headers;
                                 # handler secures itself via CLAWDBOT_AUTH_TOKEN to the gateway
-            '/openclaw-ui',     # WebSocket upgrade for OpenClaw Control UI proxy;
-                                # handler does its own Clerk auth via __session cookie
+            '/openclaw-ui',     # WebSocket upgrade for OpenClaw Control UI proxy (no trailing slash)
         }
 
         # Detect whether Clerk auth is configured at startup.
@@ -168,7 +168,7 @@ def create_app(config_override: dict = None):
 
         @app.before_request
         def generate_request_nonce():
-            """Generate CSP nonce for this request."""
+            """Generate CSP nonce for this request (2026-03-23 security hardening)."""
             g.csp_nonce = generate_csp_nonce()
 
         @app.before_request
@@ -207,6 +207,11 @@ def create_app(config_override: dict = None):
                     return jsonify({'error': 'Unauthorized', 'code': 'auth_required'}), 401
                 # HTML page request — redirect to root (login gate)
                 return redirect('/')
+
+    # ── JSON error handler for 413 (file too large) ────────────────────────
+    @app.errorhandler(413)
+    def handle_413(e):
+        return jsonify({'error': 'File too large (100 MB max)'}), 413
 
     # ── Security headers (P7-T3 security audit + 2026-03-23 hardening) ────────
     @app.after_request

@@ -1,0 +1,11 @@
+# Pinokio local install override
+# - Swaps openclaw-data volume for local dir (pre-configured openclaw.json + auth-profiles)
+# - Injects .env into both containers so API keys are available
+# - dangerouslyDisableDeviceAuth is set in openclaw.json so no device pairing needed
+services:
+  openclaw:
+    env_file:
+      - .env
+    volumes:
+      - ./openclaw-data:/root/.openclaw
+      - canvas-pages:/root/.openclaw/workspace/canvas-pages

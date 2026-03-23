@@ -14,6 +14,7 @@ inject();
         import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
         import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js';
+        import { DeepgramStreamingSTT, DeepgramStreamingWakeWordDetector } from '/src/providers/DeepgramStreamingSTT.js';
 
         // ===== CONFIGURATION =====
         const CONFIG = {
@@ -145,7 +146,7 @@ inject();
                 const statusEl = document.getElementById('provider-status');
                 if (statusEl && provider) {
                     statusEl.textContent = provider.status === 'active' ? '✓ Active' : '✗ Inactive';
-                    statusEl.style.color = provider.status === 'active' ? '#4ade80' : '#ef4444';
+                    statusEl.style.color = provider.status === 'active' ? 'var(--green)' : 'var(--red)';
                 }
             },
 
@@ -550,7 +551,7 @@ inject();
                     const halfH = h * 0.45; // vertical range
 
                     // Main waveform — draw actual time-domain audio
-                    this.ctx.strokeStyle = '#00ffff';
+                    this.ctx.strokeStyle = '#00ffff'; // matches --cyan token
                     this.ctx.lineWidth = 2.5;
                     this.ctx.lineCap = 'round';
                     this.ctx.lineJoin = 'round';
@@ -572,14 +573,14 @@ inject();
                     this.ctx.stroke();
 
                     // Glow layer
-                    this.ctx.strokeStyle = `rgba(0, 255, 255, ${0.15 + this.amplitude * 0.2})`;
+                    this.ctx.strokeStyle = `rgba(0, 255, 255, ${0.15 + this.amplitude * 0.2})`; // --cyan with dynamic alpha
                     this.ctx.lineWidth = 7;
                     this.ctx.stroke();
 
                 } else if (this.amplitude > 0.1) {
                     // Fallback chaotic waveform (no analyser)
                     this.wavePhase += 0.12 + this.amplitude * 0.1;
-                    this.ctx.strokeStyle = '#00ffff';
+                    this.ctx.strokeStyle = '#00ffff'; // matches --cyan token
                     this.ctx.lineWidth = 3;
                     this.ctx.lineCap = 'round';
                     this.ctx.lineJoin = 'round';
@@ -600,13 +601,13 @@ inject();
                         else this.ctx.lineTo(x, y);
                     }
                     this.ctx.stroke();
-                    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
+                    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)'; // --cyan with alpha
                     this.ctx.lineWidth = 8;
                     this.ctx.stroke();
 
                 } else {
                     // Quiet/idle state - gentle flat line with subtle pulse
-                    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)';
+                    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)'; // --cyan with alpha
                     this.ctx.lineWidth = 2;
                     this.ctx.lineCap = 'round';
                     this.ctx.beginPath();
@@ -1328,10 +1329,10 @@ inject();
                 el.id = 'suno-status';
                 el.style.cssText = [
                     'display:none', 'position:fixed', 'bottom:80px', 'left:50%',
-                    'transform:translateX(-50%)', 'background:#1a1a2e', 'color:#a78bfa',
-                    'border:1px solid #7c3aed', 'border-radius:8px', 'padding:8px 16px',
+                    'transform:translateX(-50%)', 'background:var(--bg-elevated)', 'color:var(--blue-bright)',
+                    'border:1px solid var(--blue)', 'border-radius:8px', 'padding:8px 16px',
                     'font-size:13px', 'z-index:9999', 'white-space:nowrap',
-                    'box-shadow:0 4px 12px rgba(124,58,237,0.3)',
+                    'box-shadow:0 4px 12px rgba(0,136,255,0.3)',
                 ].join(';');
                 document.body.appendChild(el);
                 this.statusEl = el;
@@ -1431,8 +1432,9 @@ inject();
                 setTimeout(() => this._hideStatus(), 8000);
                 // Refresh music player so the agent and UI see the new track immediately
                 window.musicPlayer?.loadMetadata();
-                // Speak the completion via TTS
-                this._speakCompletion(title);
+                // Notify the agent so it can proactively respond
+                ActionConsole?.addEntry('system', `🎵 Song ready: "${title}"`);
+                this._notifyAgent(title);
             },
 
             async _speakCompletion(title) {
@@ -1450,6 +1452,46 @@ inject();
                     audio.play().catch(() => {});
                 } catch (e) {
                     console.warn('[Suno] TTS completion error:', e);
+                }
+            },
+
+            async _notifyAgent(title) {
+                try {
+                    const provider = window.voiceAgent?.selectedProvider || 'groq';
+                    const voice = window.voiceAgent?.currentVoice || 'autumn';
+                    const sessionId = window._activeSessionId || `suno-${Date.now()}`;
+
+                    const resp = await fetch(`${CONFIG.serverUrl}/api/conversation`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: `__suno_complete__:${title}`,
+                            tts_provider: provider,
+                            voice: voice,
+                            session_id: sessionId,
+                            ui_context: {},
+                        }),
+                    });
+                    if (!resp.ok) throw new Error('notify failed');
+                    const data = await resp.json();
+
+                    if (data.response) {
+                        TranscriptPanel?.addMessage('assistant', data.response);
+                        ActionConsole?.addEntry('system', `🎵 Agent: ${data.response.substring(0, 80)}`);
+                    }
+                    if (data.audio) {
+                        const binary = atob(data.audio);
+                        const bytes = new Uint8Array(binary.length);
+                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                        const blob = new Blob([bytes], { type: 'audio/mpeg' });
+                        const url = URL.createObjectURL(blob);
+                        const audio = new Audio(url);
+                        audio.onended = () => URL.revokeObjectURL(url);
+                        audio.play().catch(() => {});
+                    }
+                } catch (e) {
+                    console.warn('[Suno] Agent notify failed, falling back to TTS:', e);
+                    this._speakCompletion(title);
                 }
             },
         };
@@ -1875,7 +1917,7 @@ inject();
 
                 // Draw glow layer first (thicker, more transparent)
                 ctx.beginPath();
-                ctx.strokeStyle = 'rgba(0, 255, 255, 0.25)';
+                ctx.strokeStyle = 'rgba(0, 255, 255, 0.25)'; // --cyan with alpha
                 ctx.lineWidth = 20;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
@@ -1894,7 +1936,7 @@ inject();
 
                 // Draw main bright line on top
                 ctx.beginPath();
-                ctx.strokeStyle = '#00ffff';
+                ctx.strokeStyle = '#00ffff'; // matches --cyan token
                 ctx.lineWidth = 6;
                 x = 0;
 
@@ -2221,25 +2263,116 @@ inject();
         };
         AgentActivityChip.init();
 
+        // ===== ISSUE REPORTER =====
+        window.IssueReporter = {
+            _modal: null,
+            _typeEl: null,
+            _descEl: null,
+            _statusEl: null,
+            _submitBtn: null,
+            _contextPreview: null,
+
+            open() {
+                if (!this._modal) {
+                    this._modal      = document.getElementById('issue-report-modal');
+                    this._typeEl     = document.getElementById('irm-type');
+                    this._descEl     = document.getElementById('irm-description');
+                    this._statusEl   = document.getElementById('irm-status');
+                    this._submitBtn  = document.getElementById('irm-submit-btn');
+                    this._contextPreview = document.getElementById('irm-context-preview');
+                }
+                if (!this._modal) return;
+
+                // Reset state
+                if (this._descEl) this._descEl.value = '';
+                if (this._statusEl) { this._statusEl.textContent = ''; this._statusEl.className = 'irm-status'; }
+                if (this._submitBtn) this._submitBtn.disabled = false;
+
+                // Auto-populate context preview
+                const ctx = this._gatherContext();
+                if (this._contextPreview) {
+                    const parts = [];
+                    if (ctx.canvas_page) parts.push(`canvas:${ctx.canvas_page}`);
+                    if (ctx.session_id)  parts.push(`session:${ctx.session_id.slice(-8)}`);
+                    parts.push(ctx.platform || navigator.platform);
+                    this._contextPreview.textContent = parts.join(' · ');
+                }
+
+                this._modal.style.display = 'flex';
+                setTimeout(() => this._descEl?.focus(), 50);
+            },
+
+            close() {
+                if (this._modal) this._modal.style.display = 'none';
+            },
+
+            _gatherContext() {
+                return {
+                    canvas_page: window._currentCanvasPage || null,
+                    session_id: window._activeSessionId || null,
+                    platform: navigator.platform,
+                    ua: navigator.userAgent.slice(0, 120),
+                    voice_mode: localStorage.getItem('voice_mode') || 'supertonic',
+                    tts_provider: localStorage.getItem('voice_provider') || null,
+                    url: location.pathname,
+                };
+            },
+
+            async submit() {
+                const description = this._descEl?.value.trim();
+                if (!description) {
+                    if (this._statusEl) { this._statusEl.textContent = 'Please describe the issue.'; this._statusEl.className = 'irm-status error'; }
+                    return;
+                }
+
+                if (this._submitBtn) this._submitBtn.disabled = true;
+                if (this._statusEl) { this._statusEl.textContent = 'Submitting…'; this._statusEl.className = 'irm-status'; }
+
+                try {
+                    const res = await fetch('/api/report-issue', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            type: this._typeEl?.value || 'bug',
+                            description,
+                            context: this._gatherContext(),
+                        }),
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                        if (this._statusEl) { this._statusEl.textContent = '✓ Report submitted. Thank you!'; this._statusEl.className = 'irm-status success'; }
+                        setTimeout(() => this.close(), 1800);
+                    } else {
+                        throw new Error(data.error || 'Server error');
+                    }
+                } catch (err) {
+                    if (this._statusEl) { this._statusEl.textContent = `Error: ${err.message}`; this._statusEl.className = 'irm-status error'; }
+                    if (this._submitBtn) this._submitBtn.disabled = false;
+                }
+            },
+        };
+
         // ===== AUTH MODULE =====
         window.AuthModule = {
             user: null,
             dropdownOpen: false,
 
             async init() {
-                // If no Clerk key configured, skip auth entirely (local / self-hosted mode)
+                // If no Clerk key configured, show local-mode menu instead of Clerk auth
                 if (!window.AGENT_CONFIG?.clerkPublishableKey) {
                     console.log('Auth disabled — no Clerk key configured (local mode)');
+                    this._renderLocalMenu();
                     return;
                 }
 
-                // Wait for Clerk SDK to load (retry up to 5s)
-                for (let i = 0; i < 10; i++) {
+                // Wait for Clerk SDK to load (retry up to 10s)
+                for (let i = 0; i < 20; i++) {
                     if (typeof Clerk !== 'undefined') break;
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
                 if (typeof Clerk === 'undefined') {
-                    console.error('Clerk SDK failed to load');
+                    console.warn('Clerk SDK failed to load — falling back to local mode');
+                    this._renderLocalMenu();
                     return;
                 }
 
@@ -2301,6 +2434,10 @@ inject();
                     });
                 } catch (error) {
                     console.error('Auth init error:', error);
+                    // If Clerk fails (wrong domain, bad key, network), fall back to local mode
+                    // instead of blocking the app forever
+                    console.warn('Falling back to local mode due to auth error');
+                    this._renderLocalMenu();
                 }
             },
 
@@ -2312,12 +2449,12 @@ inject();
                     gate.style.cssText = [
                         'position:fixed;inset:0;z-index:99999',
                         'display:flex;align-items:center;justify-content:center',
-                        'background:#0d1117;flex-direction:column;gap:24px',
+                        'background:var(--bg-deep);flex-direction:column;gap:24px',
                     ].join(';');
                     gate.innerHTML = [
                         '<div style="text-align:center;margin-bottom:8px">',
-                        '  <div style="font-size:28px;font-weight:700;color:#58a6ff;letter-spacing:-0.5px">OpenVoiceUI</div>',
-                        '  <div style="color:#8b949e;font-size:14px;margin-top:6px">Sign in to continue</div>',
+                        '  <div style="font-size:28px;font-weight:700;color:var(--blue-bright);letter-spacing:-0.5px">OpenVoiceUI</div>',
+                        '  <div style="color:var(--text-muted);font-size:14px;margin-top:6px">Sign in to continue</div>',
                         '</div>',
                         '<div id="auth-gate-signin"></div>',
                     ].join('');
@@ -2346,6 +2483,32 @@ inject();
                 }
             },
 
+            _showAuthErrorGate(message) {
+                let gate = document.getElementById('auth-error-gate');
+                if (!gate) {
+                    gate = document.createElement('div');
+                    gate.id = 'auth-error-gate';
+                    gate.style.cssText = [
+                        'position:fixed;inset:0;z-index:99999',
+                        'display:flex;align-items:center;justify-content:center',
+                        'background:var(--bg-deep);flex-direction:column;gap:24px;padding:32px',
+                    ].join(';');
+                    document.body.appendChild(gate);
+                }
+                gate.style.display = 'flex';
+                gate.innerHTML = `
+                    <div style="text-align:center;max-width:440px">
+                        <div style="font-size:28px;font-weight:700;color:var(--blue-bright);letter-spacing:-0.5px;margin-bottom:20px">OpenVoiceUI</div>
+                        <div style="font-size:15px;font-weight:600;color:var(--red);margin-bottom:12px">Authentication Error</div>
+                        <div style="color:var(--text-muted);font-size:14px;line-height:1.7;margin-bottom:24px;white-space:pre-line">${message}</div>
+                        <button onclick="location.reload()" style="
+                            background:var(--green);color:var(--neutral-900);border:1px solid var(--green);
+                            padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;
+                        ">Refresh Page</button>
+                    </div>
+                `;
+            },
+
             _showWaitlistGate(user) {
                 const email = user?.primaryEmailAddress?.emailAddress || '';
 
@@ -2356,21 +2519,21 @@ inject();
                     gate.style.cssText = [
                         'position:fixed;inset:0;z-index:99999',
                         'display:flex;align-items:center;justify-content:center',
-                        'background:#0d1117;flex-direction:column;gap:20px;padding:32px',
+                        'background:var(--bg-deep);flex-direction:column;gap:20px;padding:32px',
                     ].join(';');
                     document.body.appendChild(gate);
                 }
                 gate.style.display = 'flex';
                 gate.innerHTML = `
                     <div style="text-align:center;max-width:440px">
-                        <div style="font-size:26px;font-weight:700;color:#58a6ff;letter-spacing:-0.5px;margin-bottom:20px">OpenVoiceUI</div>
-                        <div style="font-size:15px;font-weight:600;color:#e6edf3;margin-bottom:12px">We're still in development</div>
-                        <div style="color:#8b949e;font-size:14px;line-height:1.7;margin-bottom:24px">
-                            ${email ? `<strong style="color:#c9d1d9">${email}</strong> has been added to the waitlist.<br>` : ''}
+                        <div style="font-size:26px;font-weight:700;color:var(--blue-bright);letter-spacing:-0.5px;margin-bottom:20px">OpenVoiceUI</div>
+                        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:12px">We're still in development</div>
+                        <div style="color:var(--text-muted);font-size:14px;line-height:1.7;margin-bottom:24px">
+                            ${email ? `<strong style="color:var(--text-secondary)">${email}</strong> has been added to the waitlist.<br>` : ''}
                             We'll reach out with updates as we get closer to launch.
                         </div>
                         <button onclick="Clerk.signOut().then(()=>location.reload())" style="
-                            background:#21262d;color:#8b949e;border:1px solid #30363d;
+                            background:var(--bg-elevated);color:var(--text-muted);border:1px solid var(--neutral-700);
                             padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;
                         ">Sign out</button>
                     </div>
@@ -2381,6 +2544,18 @@ inject();
                 return Clerk.session?.getToken() ?? null;
             },
 
+            async _pushAuthTokenToCanvas() {
+                // Push current Clerk JWT to the active canvas iframe via postMessage.
+                // The injected canvas-auth-bridge script stores it as _canvasAuthToken.
+                try {
+                    const token = await Clerk.session?.getToken();
+                    const iframe = document.getElementById('canvas-iframe');
+                    if (token && iframe?.contentWindow) {
+                        iframe.contentWindow.postMessage({type: 'auth-token', token}, '*');
+                    }
+                } catch (e) { /* session may be gone */ }
+            },
+
             async _syncSessionCookie() {
                 // Clerk tokens expire every ~60s. Sync to __session cookie so
                 // iframe navigations and direct /pages/ URLs carry auth.
@@ -2389,6 +2564,12 @@ inject();
                         const token = await Clerk.session?.getToken();
                         if (token) {
                             document.cookie = `__session=${token}; path=/; SameSite=Lax; Secure`;
+                            // Also push fresh token to canvas iframe so long-running
+                            // uploads/API calls never hit an expired cookie
+                            const iframe = document.getElementById('canvas-iframe');
+                            if (iframe?.contentWindow) {
+                                iframe.contentWindow.postMessage({type: 'auth-token', token}, '*');
+                            }
                         }
                     } catch (e) { /* session may be gone */ }
                 };
@@ -2468,6 +2649,70 @@ inject();
                         </div>
                     </div>
                 `;
+            },
+
+            _renderLocalMenu() {
+                const container = document.getElementById('user-button');
+                container.innerHTML = `
+                    <div class="user-menu-container">
+                        <button class="user-avatar-btn" onclick="AuthModule.toggleDropdown()" title="Menu">
+                            <span class="avatar-fallback" style="display:flex">⚙️</span>
+                        </button>
+                        <div class="user-dropdown" id="user-dropdown">
+                            <div class="user-dropdown-header">
+                                <div class="user-dropdown-info" style="padding:4px 0">
+                                    <div class="user-dropdown-name">Local Mode</div>
+                                    <div class="user-dropdown-email">No authentication configured</div>
+                                </div>
+                            </div>
+
+                            <div class="udm-section-label">Platform</div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin()">
+                                <span class="udi-icon">⚡</span> Admin Dashboard
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('agents')">
+                                <span class="udi-icon">🤖</span> Agent Profiles
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('frameworks')">
+                                <span class="udi-icon">🔌</span> Frameworks
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('install')">
+                                <span class="udi-icon">📦</span> Install Framework
+                            </div>
+
+                            <div class="user-dropdown-divider"></div>
+                            <div class="udm-section-label">Appearance</div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openSettings('themes')">
+                                <span class="udi-icon">🎨</span> Themes & Colors
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openSettings('face')">
+                                <span class="udi-icon">👁️</span> Face Display
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openSettings('voice')">
+                                <span class="udi-icon">🎙️</span> Voice Preview
+                            </div>
+
+                            <div class="user-dropdown-divider"></div>
+                            <div class="udm-section-label">System</div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('djtools')">
+                                <span class="udi-icon">✏️</span> DJ Prompt Editor
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('tests')">
+                                <span class="udi-icon">🧪</span> Connector Tests
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openAdmin('system')">
+                                <span class="udi-icon">⚙️</span> System & Health
+                            </div>
+                        </div>
+                    </div>
+                `;
+                // Close dropdown when clicking outside
+                document.addEventListener('click', (e) => {
+                    const c = document.querySelector('.user-menu-container');
+                    if (c && !c.contains(e.target) && this.dropdownOpen) {
+                        this.closeDropdown();
+                    }
+                });
             },
 
             toggleDropdown() {
@@ -2903,9 +3148,8 @@ inject();
 
                 // Determine WebSocket URL based on hostname
                 // Connect to voice agent (main agent, voice-optimized)
-                const wsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-                    ? 'ws://localhost:5002/ws/clawdbot?agent=main'
-                    : `wss://${window.location.host}/ws/clawdbot?agent=main`;
+                const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProto}//${window.location.host}/ws/clawdbot?agent=main`;
 
                 console.log('Clawdbot connecting to:', wsUrl);
 
@@ -2968,10 +3212,20 @@ inject();
             }
 
             async startVoiceInput() {
+                // Debounce: prevent rapid start/stop/start cycles that poison the session
+                if (this._startingSession) return;
+                if (Date.now() - (this._lastCallToggle || 0) < 2000) {
+                    console.warn('[Session] Debounce: ignoring rapid call toggle');
+                    return;
+                }
+                this._startingSession = true;
+                this._lastCallToggle = Date.now();
+
                 this._voiceActive = true;  // Mark call as active
                 this._sessionGreeted = false;  // Reset so every new call gets a greeting
                 // Generate new session ID for this call
                 this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                window._activeSessionId = this.sessionId;
                 console.log('New conversation session:', this.sessionId);
 
                 // Show thinking state immediately so user sees feedback before any async work
@@ -3033,6 +3287,7 @@ inject();
                 // — show user text right away so they know the system heard them.
                 this.stt.onListenFinal = (text) => {
                     if (this._ttsPlaying || !text || !text.trim()) return;
+                    if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     // Show in transcript immediately + set thinking state
                     this.displayMessage('user', text.trim());
                     this.callbacks.onMessage('user', text.trim());
@@ -3050,6 +3305,13 @@ inject();
                         console.log('Ignoring transcript during TTS:', transcript);
                         return;
                     }
+                    // Echo cooldown: ignore STT for 2.5s after TTS ends to prevent
+                    // TTS audio from being picked up by the mic and re-submitted.
+                    if (this._ttsEchoCooldownUntil && Date.now() < this._ttsEchoCooldownUntil) {
+                        console.log('Ignoring transcript in echo cooldown:', transcript);
+                        return;
+                    }
+                    if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     if (transcript && transcript.trim()) {
                         console.log('Voice input:', transcript);
                         this.sendMessage(transcript.trim(), { skipDisplay: true });
@@ -3094,9 +3356,11 @@ inject();
                     console.error('Failed to start voice input');
                     this.callbacks.onError('Failed to start voice input');
                 }
+                this._startingSession = false;
             }
 
             stopVoiceInput() {
+                this._startingSession = false;
                 this._voiceActive = false;  // Mark call as ended — prevents safety-net restart
                 this._ttsPlaying = false;
                 if (this._ttsGuardTimer) { clearTimeout(this._ttsGuardTimer); this._ttsGuardTimer = null; }
@@ -3157,20 +3421,47 @@ inject();
             async sendMessage(text, opts = {}) {
                 if (!text || !text.trim()) return;
 
-                // Interrupt: abort any in-flight request and stop current audio FIRST
-                // (must happen before the _sending guard so interrupts aren't blocked)
+                // ── Interrupt vs Steer ─────────────────────────────────────
+                // When a new message arrives while a request is in-flight:
+                //   • TTS playing → ABORT  (stop spoken output, kill run, fresh start)
+                //   • Agent working silently (tools/subagents) → STEER
+                //     Send the message fire-and-forget; openclaw injects it at the
+                //     next tool boundary (messages.queue.mode=steer).  The existing
+                //     streaming fetch continues receiving the steered output.
                 if (this._fetchAbortController) {
-                    this._fetchAbortController.abort();
-                    this._fetchAbortController = null;
-                    // Tell server to abort the openclaw run (fire-and-forget)
-                    console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (new msg: "${text.substring(0,30)}")`);
-                    fetch(`${this.config.serverUrl}/api/conversation/abort`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ source: 'clawdbot-sendMessage', text: text.substring(0, 50) }),
-                    }).catch(() => {});
+                    if (this._ttsPlaying) {
+                        // Agent already responded, TTS playing → ABORT
+                        this._fetchAbortController.abort();
+                        this._fetchAbortController = null;
+                        console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (TTS playing, new msg: "${text.substring(0,30)}")`);
+                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: 'clawdbot-sendMessage', text: text.substring(0, 50) }),
+                        }).catch(() => {});
+                        this.stopAudio();
+                    } else {
+                        // Agent working silently → STEER (inject at next tool boundary)
+                        console.log(`🔀 STEER: injecting "${text.substring(0,50)}" into active run`);
+                        ActionConsole.addEntry('system', `Steering: "${text.substring(0, 60)}"`);
+                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: text, source: 'clawdbot-sendMessage' }),
+                        }).catch(() => {});
+                        // Show the user's steer message in transcript
+                        if (!opts.skipDisplay) {
+                            this.displayMessage('user', text);
+                            this.callbacks.onMessage('user', text);
+                            TranscriptPanel.addMessage('user', text, { imageUrl: opts.imageUrl || null });
+                        }
+                        // Return early — the existing streaming response will receive
+                        // the steered output.  Do NOT abort fetch or start a new one.
+                        return;
+                    }
+                } else {
+                    this.stopAudio();
                 }
-                this.stopAudio();
 
                 // Wait for previous send to finish unwinding after abort
                 if (this._sending) {
@@ -3334,15 +3625,12 @@ inject();
                             AgentActivityChip.handleTag('music_next');
                             window.musicPlayer?.next();
                         }
-                        // Check for [SUNO_GENERATE:prompt]
-                        const sunoMatch = text.match(/\[SUNO_GENERATE:([^\]]+)\]/i);
-                        if (sunoMatch && !canvasCommandsProcessed.has('SUNO_GENERATE')) {
-                            canvasCommandsProcessed.add('SUNO_GENERATE');
-                            const sunoPrompt = sunoMatch[1].trim();
-                            ActionConsole.addEntry('system', `Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
-                            AgentActivityChip.handleTag('suno', sunoPrompt);
+                        [...text.matchAll(/\[SUNO_GENERATE:([^\]]+)\]/gi)].forEach(m => {
+                            const sunoPrompt = m[1].trim();
+                            ActionConsole?.addEntry('system', `🎵 Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
+                            AgentActivityChip?.handleTag('suno', sunoPrompt);
                             window.sunoModule?.generate(sunoPrompt);
-                        }
+                        });
                         // Check for [SPOTIFY:track name|artist] — switches player to Spotify mode
                         const spotifyMatch = text.match(/\[SPOTIFY:([^|\]]+)(?:\|([^\]]+))?\]/i);
                         if (spotifyMatch && !canvasCommandsProcessed.has('SPOTIFY')) {
@@ -3486,6 +3774,7 @@ inject();
                                 // Heartbeat: server is alive, agent is working
                                 if (data.type === 'heartbeat') {
                                     const secs = data.elapsed || 0;
+                                    this._wasAgentic = true;
                                     StatusModule.update('thinking', `WORKING... ${secs}s`);
                                     AgentActivityChip.show('⏳', `Working... ${secs}s`);
                                 }
@@ -3578,6 +3867,7 @@ inject();
                                     this.callbacks.onMessage('assistant', displayText);
                                     TranscriptPanel.finalizeStreaming(displayText);
 
+                                    this._wasAgentic = false;
                                     if (data.actions) ActionConsole.processActions(data.actions);
                                     ActionConsole.addEntry('system', `Response complete (${fullResponse?.length || 0} chars, LLM: ${data.timing?.llm_ms}ms)`);
                                     AgentActivityChip.show('✅', 'Done');
@@ -3605,10 +3895,23 @@ inject();
                                     this.addSystemMessage('Session reset — next response may be slow.');
                                 }
 
-                                // Generic server error
+                                // AI provider rate limited — surface clearly
+                                if (data.type === 'rate_limit') {
+                                    const provider = data.provider || 'AI provider';
+                                    console.warn('[Conversation] Rate limited by', provider, data.message);
+                                    ActionConsole.addEntry('error', `⚠️ ${provider} throttled — using fallback model`);
+                                    this.addSystemMessage(`⚠️ ${provider} is temporarily throttled. Response came from fallback model.`);
+                                }
+
+                                // Generic server error — surface prominently
                                 if (data.type === 'error') {
                                     console.error('Stream error:', data.error);
                                     ActionConsole.addEntry('error', data.error);
+                                    // Gateway connection errors should be visible to the user
+                                    if (data.error?.includes('connect') || data.error?.includes('Gateway') || data.error?.includes('Failed')) {
+                                        this.addSystemMessage('Agent connection error — retrying...');
+                                        StatusModule.update('thinking', 'RECONNECTING...');
+                                    }
                                 }
 
                                 // TTS-specific failure — response came through but audio failed
@@ -3670,17 +3973,60 @@ inject();
                         FaceModule.setMood('neutral');
                         StatusModule.update('idle', 'READY');
                         TranscriptPanel.removeThinking();
-                        TranscriptPanel.finalizeStreaming(null);
+                        // If agent was mid-task (had heartbeats), note the redirect
+                        if (this._wasAgentic) {
+                            this._wasAgentic = false;
+                            TranscriptPanel.finalizeStreaming('🔀 Redirected.');
+                            ActionConsole.addEntry('system', 'Task redirected by user');
+                        } else {
+                            TranscriptPanel.finalizeStreaming(null);
+                        }
                         document.getElementById('thought-bubbles')?.classList.remove('active');
                         window.HaloSmokeFace?.setThinking(false);
                     } else {
                         console.error('Conversation error:', error);
-                        this.addSystemMessage(`Error: ${error.message}`);
+                        // Connection failure auto-retry: if the agent crashed/restarted,
+                        // retry the message up to 2 times with backoff instead of dying silently
+                        const isNetworkError = (
+                            error.message?.includes('fetch') ||
+                            error.message?.includes('network') ||
+                            error.message?.includes('Failed') ||
+                            error.message?.includes('API error: 5') ||  // 5xx server errors
+                            error instanceof TypeError  // fetch network failures
+                        );
+                        const retryCount = opts._retryCount || 0;
+                        if (isNetworkError && retryCount < 2 && this._voiceActive) {
+                            const delay = retryCount === 0 ? 5000 : 15000;
+                            console.warn(`[Conversation] Connection error, retrying in ${delay/1000}s (attempt ${retryCount + 1}/2)...`);
+                            this.addSystemMessage('Connection interrupted — reconnecting...');
+                            ActionConsole.addEntry('system', `Connection lost — retrying in ${delay/1000}s...`);
+                            StatusModule.update('thinking', 'RECONNECTING...');
+                            FaceModule.setMood('sad');
+                            TranscriptPanel.removeThinking();
+                            TranscriptPanel.finalizeStreaming(null);
+                            document.getElementById('thought-bubbles')?.classList.remove('active');
+                            window.HaloSmokeFace?.setThinking(false);
+                            // Clear _sending so the retry can proceed
+                            this._sending = false;
+                            if (_inactivityTimer) clearTimeout(_inactivityTimer);
+                            setTimeout(() => {
+                                if (!this._voiceActive) return; // call ended during wait
+                                FaceModule.setMood('thinking');
+                                StatusModule.update('thinking', 'RECONNECTING...');
+                                this.sendMessage(text, { ...opts, _retryCount: retryCount + 1, skipDisplay: true });
+                            }, delay);
+                            return; // skip finally block's safety net — retry will handle it
+                        }
+                        const lostMsg = this._wasAgentic
+                            ? 'Agent restarted mid-task — your task was interrupted. Try again.'
+                            : 'Connection lost. The agent may have restarted. Try talking again in a moment.';
+                        this._wasAgentic = false;
+                        this.addSystemMessage(lostMsg);
                         ActionConsole.addEntry('error', `Error: ${error.message}`);
                         // Clear thinking state on error
                         FaceModule.setMood('sad');
                         TranscriptPanel.removeThinking();
-                        TranscriptPanel.finalizeStreaming(null);
+                        TranscriptPanel.finalizeStreaming('⚠️ Task interrupted — agent restarted.');
                         document.getElementById('thought-bubbles')?.classList.remove('active');
                         window.HaloSmokeFace?.setThinking(false);
                         setTimeout(() => FaceModule.setMood('neutral'), 2000);
@@ -3688,6 +4034,7 @@ inject();
                 } finally {
                     if (_inactivityTimer) clearTimeout(_inactivityTimer);
                     this._sending = false;
+                    this._fetchAbortController = null;
                     // Safety net: if no audio was queued/played, STT never gets restarted
                     // via onListening callback. Ensure mic comes back after a short delay.
                     // Only fires if call is still active (_voiceActive) — prevents restart after hang-up.
@@ -3709,6 +4056,16 @@ inject();
             }
 
             async _sendGreetingTrigger() {
+                // Global cooldown: prevent any __session_start__ from firing within 60s of
+                // the last one — across ALL modes (ClawdbotMode + VoiceConversation).
+                // Without this, a reconnect can cause two simultaneous starts which triggers
+                // Z.AI empty_response → double_empty → session crash cascade.
+                const now = Date.now();
+                if (now - (window._lastSessionStartSentMs || 0) < 60000) {
+                    console.warn('[Session] Skipping greeting — global 60s cooldown active');
+                    return;
+                }
+                window._lastSessionStartSentMs = now;
                 // Send a session start signal to the agent — generates its own greeting
                 // based on face recognition, memory (MEMORY.md / clawd/memory/), and GREETINGS.md
                 // Face recognition context is automatically included via sendMessage() → identified_person
@@ -3735,7 +4092,7 @@ inject();
                 // HTML-escape first, then apply code block and newline formatting
                 text = escapeHtml(text);
                 if (text.includes('```')) {
-                    text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre style="background:#111;padding:8px;border-radius:4px;overflow-x:auto;"><code>$2</code></pre>');
+                    text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre style="background:var(--bg-deep);padding:8px;border-radius:4px;overflow-x:auto;"><code>$2</code></pre>');
                 }
 
                 // Handle line breaks
@@ -4187,12 +4544,18 @@ inject();
                         AgentActivityChip.setSpeaking(false);
                         // Cancel guard timer — TTS finished normally
                         if (this.clawdbotMode._ttsGuardTimer) { clearTimeout(this.clawdbotMode._ttsGuardTimer); this.clawdbotMode._ttsGuardTimer = null; }
-                        // _ttsPlaying stays true through the delay window to block echo
+                        // Set echo cooldown: Chrome SpeechRecognition can deliver buffered
+                        // results up to 2-3s after TTS ends. Block STT results for 2.5s
+                        // to prevent TTS audio from being re-submitted as user speech.
+                        this.clawdbotMode._ttsEchoCooldownUntil = Date.now() + 2500;
+                        // _ttsPlaying stays true through brief delay to block echo.
+                        // 300ms for UI state updates — _ttsEchoCooldownUntil handles
+                        // the longer STT delivery lag independently.
                         setTimeout(() => {
                             this.clawdbotMode._ttsPlaying = false;
                             if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt) {
-                                // Skip resume if PTT is held — user is actively speaking
-                                if (this.clawdbotMode.stt._pttHolding) return;
+                                // Skip resume if PTT mode is on (mic only opens on hold)
+                                if (this.clawdbotMode.stt._micMuted || this.clawdbotMode.stt._pttHolding) return;
                                 console.log('🎤 Unmuting mic after TTS');
                                 if (this.clawdbotMode.stt.resume) {
                                     this.clawdbotMode.stt.resume();
@@ -4201,7 +4564,7 @@ inject();
                                     if (!this.clawdbotMode.stt.isListening) this.clawdbotMode.stt.start();
                                 }
                             }
-                        }, 1500);
+                        }, 300);
                     },
                     onMessage: (role, text) => {
                         console.log(`Clawdbot ${role}:`, text);
@@ -4343,45 +4706,25 @@ inject();
             },
 
             stopAll() {
-                console.log('STOP ALL - killing audio and resetting');
-                // Tell server to abort any active openclaw run (fire-and-forget)
-                console.warn('⛔ ABORT source: stopAll');
-                fetch('/api/conversation/abort', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source: 'stopAll' }),
-                }).catch(() => {});
-                // Stop voiceConversation TTS and abort its fetch
+                // MUTE: Stop TTS audio playback only — do NOT abort the agent's
+                // work, kill the call, or disconnect. The agent keeps working
+                // silently. The user can still speak new requests.
+                console.log('STOP AUDIO - muting TTS (agent keeps working)');
+                // Stop TTS audio on both voice modes
                 if (window._voiceConversation) {
                     window._voiceConversation.stopAudio?.();
-                    if (window._voiceConversation._fetchAbortController) {
-                        window._voiceConversation._fetchAbortController.abort();
-                        window._voiceConversation._fetchAbortController = null;
-                    }
                 }
-                // Stop Clawdbot mode
                 if (this.clawdbotMode) {
                     this.clawdbotMode.stopAudio();
-                    this.clawdbotMode.stopVoiceInput();
-                    if (this.clawdbotMode.stt && this.clawdbotMode.stt.resetProcessing) {
-                        this.clawdbotMode.stt.resetProcessing();
-                    }
                     this.clawdbotMode._ttsPlaying = false;
                 }
-                // Stop Hume mode
-                if (this.humeAdapter) {
-                    this.humeAdapter.disconnect();
-                }
-                if (window.voiceAgent && window.voiceAgent.disconnect) {
-                    window.voiceAgent.disconnect();
-                }
-                // Reset UI
-                StatusModule.update('idle', 'STOPPED');
+                // Un-duck music if it was ducked for TTS
+                MusicModule.duck(false);
+                // Hide the stop button since audio is stopped
+                document.getElementById('stop-button').style.display = 'none';
+                // Face back to neutral (not speaking anymore)
                 FaceModule.setMood('neutral');
                 WaveformModule.setAmplitude(0);
-                MusicModule.duck(false);
-                UIModule.setCallButtonState('disconnected');
-                document.getElementById('stop-button').style.display = 'none';
             }
         };
 
@@ -4406,9 +4749,12 @@ inject();
                 this.isProcessing = false;
                 // Select STT provider from server profile (default: webspeech)
                 const sttProvider = window._serverProfile?.stt?.provider || 'webspeech';
-                if (sttProvider === 'deepgram') {
+                if (sttProvider === 'deepgram-streaming' || sttProvider === 'deepgram') {
+                    this.stt = new DeepgramStreamingSTT();
+                    console.log('STT provider: Deepgram Streaming (WebSocket)');
+                } else if (sttProvider === 'deepgram-batch') {
                     this.stt = new DeepgramSTT();
-                    console.log('STT provider: Deepgram Nova-2');
+                    console.log('STT provider: Deepgram Nova-2 (batch)');
                 } else if (sttProvider === 'groq') {
                     this.stt = new GroqSTT();
                     console.log('STT provider: Groq Whisper');
@@ -4416,7 +4762,7 @@ inject();
                     this.stt = new WebSpeechSTT();
                     console.log('STT provider: Chrome Web Speech');
                 }
-                this.ttsProvider = 'supertonic';
+                this.ttsProvider = 'groq';
                 this.ttsVoice = 'F3';
                 this.audioContext = null;
                 this.analyser = null;
@@ -4453,6 +4799,7 @@ inject();
 
                 // Generate new session ID for this call
                 this.sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                window._activeSessionId = this.sessionId;
                 console.log('New conversation session:', this.sessionId);
 
                 // Pause wake word detector during conversation
@@ -4514,6 +4861,14 @@ inject();
             }
 
             async _sendSessionGreeting() {
+                // Global cooldown: same 60s guard as ClawdbotMode._sendGreetingTrigger()
+                // prevents double __session_start__ when both modes fire on reconnect.
+                const now = Date.now();
+                if (now - (window._lastSessionStartSentMs || 0) < 60000) {
+                    console.warn('[VoiceConversation] Skipping greeting — global 60s cooldown active');
+                    return;
+                }
+                window._lastSessionStartSentMs = now;
                 // Pause STT so it doesn't pick up the agent's own greeting audio
                 this.stt.pause?.();
 
@@ -4601,19 +4956,40 @@ inject();
                     return;
                 }
 
-                // Interrupt: abort any in-flight request and stop current audio
+                // ── Interrupt vs Steer (same logic as ClawdbotMode.sendMessage) ──
+                // Check ClawdbotMode's _ttsPlaying to decide abort vs steer.
                 if (this._fetchAbortController) {
-                    this._fetchAbortController.abort();
-                    this._fetchAbortController = null;
-                    // Tell server to abort the openclaw run (fire-and-forget)
-                    console.warn(`⛔ ABORT source: VoiceConversation.handleUserTranscript (transcript: "${transcript.substring(0,30)}")`);
-                    fetch(`${this.config.serverUrl}/api/conversation/abort`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ source: 'voice-handleUserTranscript', text: transcript.substring(0, 50) }),
-                    }).catch(() => {});
+                    const cm = ModeManager?.clawdbotMode;
+                    if (cm?._ttsPlaying) {
+                        // TTS playing → ABORT (stop spoken output)
+                        this._fetchAbortController.abort();
+                        this._fetchAbortController = null;
+                        console.warn(`⛔ ABORT source: VoiceConversation.handleUserTranscript (TTS playing)`);
+                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: 'voice-handleUserTranscript', text: transcript.substring(0, 50) }),
+                        }).catch(() => {});
+                        this.stopAudio();
+                    } else {
+                        // Agent working silently → STEER
+                        console.log(`🔀 STEER: injecting "${transcript.substring(0,50)}" into active run`);
+                        ActionConsole.addEntry('system', `Steering: "${transcript.substring(0, 60)}"`);
+                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: transcript, source: 'voice-handleUserTranscript' }),
+                        }).catch(() => {});
+                        // Show user text, reset STT for next input, and return.
+                        // The existing streaming response will receive the steered output.
+                        this.callbacks.onTranscript(transcript, true);
+                        TranscriptPanel.addMessage('user', transcript);
+                        this.stt.resetProcessing();
+                        return;
+                    }
+                } else {
+                    this.stopAudio();
                 }
-                this.stopAudio();
 
                 console.log('User said:', transcript);
                 this.callbacks.onTranscript(transcript, true);
@@ -4770,11 +5146,10 @@ inject();
                 if (/\[MUSIC_NEXT\]/i.test(text)) {
                     window.musicPlayer?.next();
                 }
-                // [SUNO_GENERATE:prompt]
-                const sunoMatch = text.match(/\[SUNO_GENERATE:([^\]]+)\]/i);
-                if (sunoMatch) {
-                    window.sunoModule?.generate(sunoMatch[1].trim());
-                }
+                // [SUNO_GENERATE:prompt] — may appear multiple times
+                [...text.matchAll(/\[SUNO_GENERATE:([^\]]+)\]/gi)].forEach(m => {
+                    window.sunoModule?.generate(m[1].trim());
+                });
                 // [SPOTIFY:track|artist]
                 const spotifyMatch = text.match(/\[SPOTIFY:([^|\]]+)(?:\|([^\]]+))?\]/i);
                 if (spotifyMatch) {
@@ -5785,7 +6160,9 @@ inject();
                     document.getElementById('stop-button').style.display = 'none';
                     // Cancel guard timer — TTS finished normally
                     if (ModeManager.clawdbotMode?._ttsGuardTimer) { clearTimeout(ModeManager.clawdbotMode._ttsGuardTimer); ModeManager.clawdbotMode._ttsGuardTimer = null; }
-                    // _ttsPlaying stays true through the delay window to block echo
+                    // _ttsPlaying stays true through brief delay to block echo.
+                    // 300ms is enough — DeepgramStreamingSTT mutes its audio pipeline
+                    // during TTS so speaker audio can't be captured. Reduced from 1500ms.
                     setTimeout(() => {
                         if (ModeManager.clawdbotMode) ModeManager.clawdbotMode._ttsPlaying = false;
                         if (voiceConversation.stt) {
@@ -5800,7 +6177,7 @@ inject();
                                 if (!voiceConversation.stt.isListening) voiceConversation.stt.start();
                             }
                         }
-                    }, 1500);
+                    }, 300);
                 },
                 onTranscript: (text, isUser) => {
                     console.log(`${isUser ? 'User' : 'AI'}: ${text}`);
@@ -5898,12 +6275,12 @@ inject();
                             if (doc) {
                                 const style = doc.createElement('style');
                                 style.textContent = `
-                                    * { scrollbar-width: thin; scrollbar-color: #1a2a3a #0d1117; }
+                                    * { scrollbar-width: thin; scrollbar-color: var(--neutral-800) var(--bg-deep); }
                                     ::-webkit-scrollbar { width: 6px; height: 6px; }
-                                    ::-webkit-scrollbar-track { background: #0d1117; }
-                                    ::-webkit-scrollbar-thumb { background: #1a2a3a; border-radius: 3px; }
-                                    ::-webkit-scrollbar-thumb:hover { background: #254060; }
-                                    ::-webkit-scrollbar-corner { background: #0d1117; }
+                                    ::-webkit-scrollbar-track { background: var(--bg-deep); }
+                                    ::-webkit-scrollbar-thumb { background: var(--neutral-800); border-radius: 3px; }
+                                    ::-webkit-scrollbar-thumb:hover { background: var(--neutral-700); }
+                                    ::-webkit-scrollbar-corner { background: var(--bg-deep); }
                                 `;
                                 doc.head.appendChild(style);
                             }
@@ -5934,15 +6311,20 @@ inject();
                         case 'open-url':
                             // Load external URL in the iframe
                             if (url) {
+                                const resolvedUrl = resolveCanvasUrl(url) || url;
                                 const iframe = document.getElementById('canvas-iframe');
                                 const container = document.getElementById('canvas-container');
-                                if (iframe) iframe.src = url;
+                                if (iframe) iframe.src = resolvedUrl;
                                 if (container && event.data.padded) {
                                     container.classList.add('canvas-padded');
                                 } else if (container) {
                                     container.classList.remove('canvas-padded');
                                 }
                             }
+                            break;
+                        case 'request-auth-token':
+                            // Canvas page requesting a fresh Clerk JWT for API calls
+                            Auth._pushAuthTokenToCanvas();
                             break;
                         case 'menu':
                             CanvasControl.showMenu();
@@ -5974,13 +6356,21 @@ inject();
             },
 
             _startPoll() {
-                // Poll every 3 seconds for file changes on the displayed canvas page
+                // Poll every 10 seconds for file changes on the displayed canvas page
                 if (this._pollInterval) return;
-                this._pollInterval = setInterval(() => this._checkForUpdates(), 3000);
+                this._pollInterval = setInterval(() => this._checkForUpdates(), 10000);
+                // Pause polling when tab is hidden to reduce server load
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+                    } else if (this.isVisible) {
+                        this._startPoll();
+                    }
+                });
             },
 
             async _checkForUpdates() {
-                if (!this.isVisible || !this.iframe) return;
+                if (!this.isVisible || !this.iframe || document.hidden) return;
                 const src = this.iframe.src || '';
                 // Extract filename from iframe src like "/pages/voice-app-refactor-plan.html"
                 const match = src.match(/\/pages\/([^?#]+)/);
@@ -6571,7 +6961,7 @@ inject();
                     // Allow dropping on other category headers
                     header.addEventListener('dragover', (e) => {
                         e.preventDefault();
-                        header.style.background = 'rgba(74, 158, 255, 0.1)';
+                        header.style.background = 'rgba(0, 136, 255, 0.1)'; // matches --blue with alpha
                     });
 
                     header.addEventListener('dragleave', () => {
@@ -6621,7 +7011,7 @@ inject();
                     this.manifest.categories[newCategory] = {
                         name: newCategory.charAt(0).toUpperCase() + newCategory.slice(1),
                         icon: '📄',
-                        color: '#4a9eff',
+                        color: '#00aaff', // matches --blue-bright
                         pages: []
                     };
                 }
@@ -6971,9 +7361,11 @@ inject();
                     this.panel.addEventListener('drop', (e) => {
                         e.preventDefault();
                         this.panel.classList.remove('tp-dragover');
-                        const file = e.dataTransfer?.files?.[0];
-                        if (file && file.type.startsWith('image/')) {
-                            this._stageFile(file);
+                        const files = e.dataTransfer?.files;
+                        if (files && files.length > 1) {
+                            this._stageBulkFiles(Array.from(files));
+                        } else if (files && files.length === 1) {
+                            this._stageFile(files[0]);
                         }
                     });
                 }
@@ -6983,6 +7375,7 @@ inject();
 
             _stageFile(file) {
                 this._pendingFile = { file, name: file.name, type: file.type, size: file.size };
+                this._pendingBulkFiles = null;
                 // Create blob URL for thumbnail preview in chat
                 if (file.type.startsWith('image/')) {
                     this._pendingImageThumbUrl = URL.createObjectURL(file);
@@ -6991,6 +7384,19 @@ inject();
                 const nameEl = document.getElementById('tp-file-name');
                 if (preview && nameEl) {
                     nameEl.textContent = file.name.length > 20 ? file.name.substring(0, 17) + '...' : file.name;
+                    preview.style.display = 'flex';
+                }
+                document.getElementById('tp-text-input')?.focus();
+                if (!this.isVisible) this.show();
+            },
+
+            _stageBulkFiles(files) {
+                this._pendingFile = null;
+                this._pendingBulkFiles = files;
+                const preview = document.getElementById('tp-file-preview');
+                const nameEl = document.getElementById('tp-file-name');
+                if (preview && nameEl) {
+                    nameEl.textContent = `${files.length} files selected`;
                     preview.style.display = 'flex';
                 }
                 document.getElementById('tp-text-input')?.focus();
@@ -7129,23 +7535,59 @@ inject();
 
             // --- Text input + file upload ---
             _pendingFile: null,
+            _pendingBulkFiles: null,
 
             async sendText() {
                 const input = document.getElementById('tp-text-input');
                 const text = input?.value?.trim() || '';
 
                 // Need either text or a file
-                if (!text && !this._pendingFile) return;
+                if (!text && !this._pendingFile && !this._pendingBulkFiles) return;
 
                 // Grab and clear input + file immediately so repeat sends have nothing to send
                 if (input) input.value = '';
                 const stagedFile = this._pendingFile;
+                const stagedBulkFiles = this._pendingBulkFiles;
                 this._pendingFile = null;
+                this._pendingBulkFiles = null;
 
                 let messageToSend = text;
 
-                // Upload file first if one is staged
-                if (stagedFile) {
+                // Bulk upload — upload all files, send summary to AI
+                if (stagedBulkFiles && stagedBulkFiles.length > 0) {
+                    try {
+                        this.addMessage('assistant', `Uploading ${stagedBulkFiles.length} files...`);
+                        const results = await this.uploadBulkFiles(stagedBulkFiles);
+                        const succeeded = results.filter(r => !r.error);
+                        const failed = results.filter(r => r.error);
+
+                        let parts = [];
+                        if (succeeded.length > 0) {
+                            parts.push(`[BULK UPLOAD: ${succeeded.length} files uploaded successfully]`);
+                            for (const r of succeeded) {
+                                if (r.content_preview) {
+                                    parts.push(`\n--- ${r.original_name} (${r.url}) ---\n${r.content_preview}\n--- End ${r.original_name} ---`);
+                                } else {
+                                    parts.push(`\n- ${r.original_name} → ${r.url} (${r.type})`);
+                                }
+                            }
+                        }
+                        if (failed.length > 0) {
+                            parts.push(`\n[FAILED: ${failed.length} files]`);
+                            for (const r of failed) {
+                                parts.push(`\n- ${r.name}: ${r.error}`);
+                            }
+                        }
+                        messageToSend = parts.join('') + (text ? `\n\n${text}` : '');
+                    } catch (err) {
+                        console.error('Bulk upload failed:', err);
+                        this.addMessage('assistant', `Bulk upload failed: ${err.message}`);
+                        return;
+                    }
+                    this.clearFile();
+                }
+                // Single file upload
+                else if (stagedFile) {
                     try {
                         const result = await this.uploadFile(stagedFile.file);
                         if (result.type === 'image') {
@@ -7181,12 +7623,18 @@ inject();
             },
 
             handleUpload(inputEl) {
-                const file = inputEl?.files?.[0];
-                if (file) this._stageFile(file);
+                const files = inputEl?.files;
+                if (!files || files.length === 0) return;
+                if (files.length === 1) {
+                    this._stageFile(files[0]);
+                } else {
+                    this._stageBulkFiles(Array.from(files));
+                }
             },
 
             clearFile() {
                 this._pendingFile = null;
+                this._pendingBulkFiles = null;
                 const preview = document.getElementById('tp-file-preview');
                 if (preview) preview.style.display = 'none';
                 const fileInput = document.getElementById('tp-file-input');
@@ -7198,17 +7646,41 @@ inject();
                 formData.append('file', file);
 
                 const serverUrl = window.CONFIG?.serverUrl || '';
-                const resp = await fetch(`${serverUrl}/api/upload`, {
-                    method: 'POST',
-                    body: formData
-                });
+                let resp;
+                try {
+                    resp = await fetch(`${serverUrl}/api/upload`, {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'same-origin'
+                    });
+                } catch (networkErr) {
+                    console.error('Upload network error:', networkErr, 'file:', file.name, 'size:', file.size);
+                    throw new Error(`Network error uploading ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`);
+                }
 
                 if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    throw new Error(err.error || 'Upload failed');
+                    const errBody = await resp.text().catch(() => '');
+                    console.error('Upload server error:', resp.status, errBody, 'file:', file.name);
+                    let msg;
+                    try { msg = JSON.parse(errBody).error; } catch(e) {}
+                    throw new Error(msg || `Server error ${resp.status} uploading ${file.name}`);
                 }
 
                 return await resp.json();
+            },
+
+            async uploadBulkFiles(files) {
+                const results = [];
+                // Upload sequentially to avoid overwhelming the server
+                for (const file of files) {
+                    try {
+                        const result = await this.uploadFile(file);
+                        results.push(result);
+                    } catch (err) {
+                        results.push({ error: err.message, name: file.name });
+                    }
+                }
+                return results;
             }
         };
 
@@ -7452,16 +7924,16 @@ inject();
                     const faces = data.faces || [];
                     const list = document.getElementById('fp-face-list');
                     if (faces.length === 0) {
-                        list.innerHTML = '<li style="color:#6e7681">No faces registered</li>';
+                        list.innerHTML = '<li style="color:var(--text-dim)">No faces registered</li>';
                         return;
                     }
                     list.innerHTML = faces.map(f => {
                         const count = f.photo_count || 0;
-                        return `<li><span>${f.name}</span><span class="confidence" style="color:#6e7681">${count} photo${count !== 1 ? 's' : ''}</span>` +
-                               `<button onclick="FacePanel.deleteFace('${f.name}')" style="margin-left:8px;font-size:10px;padding:2px 6px;background:transparent;border:1px solid #f85149;color:#f85149;border-radius:3px;cursor:pointer">&#x2715;</button></li>`;
+                        return `<li><span>${f.name}</span><span class="confidence" style="color:var(--text-dim)">${count} photo${count !== 1 ? 's' : ''}</span>` +
+                               `<button onclick="FacePanel.deleteFace('${f.name}')" style="margin-left:8px;font-size:10px;padding:2px 6px;background:transparent;border:1px solid var(--red);color:var(--red);border-radius:3px;cursor:pointer">&#x2715;</button></li>`;
                     }).join('');
                 } catch (e) {
-                    document.getElementById('fp-face-list').innerHTML = '<li style="color:#6e7681">Could not load faces</li>';
+                    document.getElementById('fp-face-list').innerHTML = '<li style="color:var(--text-dim)">Could not load faces</li>';
                 }
             },
 
@@ -7503,7 +7975,7 @@ inject();
                     }
                 } catch (error) {
                     statusEl.textContent = 'Error: ' + error.message;
-                    statusEl.style.color = '#f85149';
+                    statusEl.style.color = 'var(--red)';
                 }
             },
 
@@ -7555,7 +8027,7 @@ inject();
                     window.FaceID.loadKnownFaces();
                 } catch (error) {
                     statusEl.textContent = 'Error: ' + error.message;
-                    statusEl.style.color = '#f85149';
+                    statusEl.style.color = 'var(--red)';
                 }
             }
         };
@@ -7745,7 +8217,7 @@ inject();
                 const full = this._buffer + (this._interim ? (this._buffer ? ' ' : '') + this._interim : '');
 
                 if (!full) {
-                    container.innerHTML = '<span id="listen-empty" style="color:#3d3d3d;font-style:italic">Start speaking — transcript will appear here</span>';
+                    container.innerHTML = '<span id="listen-empty" style="color:var(--text-dim);font-style:italic">Start speaking - transcript will appear here</span>';
                     this._shownLen = 0;
                     return;
                 }
@@ -8320,7 +8792,7 @@ inject();
                 clearInterval(_sttExposePoll);
                 stt._exposed = true;
 
-                const _sttName = stt instanceof DeepgramSTT ? 'Deepgram Nova-2' : stt instanceof GroqSTT ? 'Groq Whisper' : 'Chrome Web Speech';
+                const _sttName = stt instanceof DeepgramStreamingSTT ? 'Deepgram Streaming' : stt instanceof DeepgramSTT ? 'Deepgram Nova-2' : stt instanceof GroqSTT ? 'Groq Whisper' : 'Chrome Web Speech';
                 console.log(`STT exposed (${_sttName})`);
                 // Apply any profile settings that were deferred (profile loaded before STT existed)
                 if (window._activeProfileData) {

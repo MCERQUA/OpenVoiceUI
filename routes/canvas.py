@@ -31,7 +31,7 @@ from services.canvas_versioning import (
 # Constants
 # ---------------------------------------------------------------------------
 
-from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR
+from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR
 CANVAS_SSE_PORT = int(os.getenv('CANVAS_SSE_PORT', '3030'))
 CANVAS_SESSION_PORT = int(os.getenv('CANVAS_SESSION_PORT', '3002'))
 BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
@@ -320,28 +320,35 @@ def sync_canvas_manifest() -> dict:
         return manifest
 
     existing_files = {p.name for p in CANVAS_PAGES_DIR.glob('*.html')}
-    manifest_files = {p.get('filename') for p in manifest['pages'].values()}
+    # Only consider pages that have a proper 'filename' field — entries using
+    # non-standard keys (e.g. 'file') are treated as un-tracked and will be
+    # re-synced below, which also standardises their format.
+    manifest_files = {p.get('filename') for p in manifest['pages'].values() if p.get('filename')}
 
     for filename in existing_files - manifest_files:
         page_id = Path(filename).stem
+        # Preserve any existing metadata (starred, display_name, etc.) but fix
+        # non-standard entries that used 'file'/'title' instead of 'filename'/'display_name'.
+        existing = manifest['pages'].get(page_id, {})
         filepath = CANVAS_PAGES_DIR / filename
-        title = page_id.replace('-', ' ').title()
+        title = existing.get('display_name') or existing.get('title') or page_id.replace('-', ' ').title()
         try:
             content = filepath.read_text()[:1000]
         except Exception:
             content = ''
-        category = suggest_category(title, content)
+        category = existing.get('category') or suggest_category(title, content)
         manifest['pages'][page_id] = {
+            **{k: v for k, v in existing.items() if k not in ('file', 'title', 'created_at')},
             'filename': filename,
             'display_name': title,
-            'description': '',
+            'description': existing.get('description', ''),
             'category': category,
-            'tags': [],
-            'created': datetime.fromtimestamp(filepath.stat().st_ctime).isoformat(),
+            'tags': existing.get('tags', []),
+            'created': existing.get('created') or existing.get('created_at') or datetime.fromtimestamp(filepath.stat().st_ctime).isoformat(),
             'modified': datetime.fromtimestamp(filepath.stat().st_mtime).isoformat(),
-            'starred': False,
-            'voice_aliases': generate_voice_aliases(title),
-            'access_count': 0,
+            'starred': existing.get('starred', False),
+            'voice_aliases': existing.get('voice_aliases') or generate_voice_aliases(title),
+            'access_count': existing.get('access_count', 0),
         }
         if category not in manifest['categories']:
             manifest['categories'][category] = {
@@ -352,7 +359,9 @@ def sync_canvas_manifest() -> dict:
             }
         if page_id not in manifest['categories'][category]['pages']:
             manifest['categories'][category]['pages'].append(page_id)
-        # Note: uncategorized pages are managed via manifest['categories']['uncategorized']['pages']
+        # Inject every newly-discovered page into the desktop icon list so it
+        # appears immediately without requiring the desktop to be open first.
+        _inject_page_into_desktop_state(manifest, page_id)
 
     # Reconcile: pages registered in pages{} but missing from their category list
     for page_id, page_data in manifest['pages'].items():
@@ -386,24 +395,43 @@ def sync_canvas_manifest() -> dict:
 
 
 def add_page_to_manifest(filename: str, title: str, description: str = '', content: str = '') -> dict:
-    """Add a new page to the manifest (called after page creation)."""
+    """Add or update a page in the manifest (called after page creation/update).
+    When updating an existing page, all user-customised fields are preserved —
+    only 'modified' and, if explicitly supplied, 'display_name' are touched.
+    """
     manifest = load_canvas_manifest()
     page_id = Path(filename).stem
     category = suggest_category(title, content)
-    manifest['pages'][page_id] = {
-        'filename': filename,
-        'display_name': title,
-        'description': description[:200] if description else '',
-        'category': category,
-        'tags': [],
-        'created': datetime.now().isoformat(),
-        'modified': datetime.now().isoformat(),
-        'starred': False,
-        'is_public': False,
-        'is_locked': False,
-        'voice_aliases': generate_voice_aliases(title),
-        'access_count': 0,
-    }
+
+    is_new_page = False
+    if page_id in manifest['pages']:
+        # Page already exists — preserve user-customised state (description, starred, etc.)
+        existing = manifest['pages'][page_id]
+        manifest['pages'][page_id] = {
+            **existing,
+            'filename': filename,
+            'modified': datetime.now().isoformat(),
+            # Only update display_name if one is explicitly provided
+            'display_name': title if title else existing.get('display_name', page_id),
+            # Never clear description — it may hold serialised desktop state or notes
+            'description': description[:200] if description else existing.get('description', ''),
+        }
+    else:
+        is_new_page = True
+        manifest['pages'][page_id] = {
+            'filename': filename,
+            'display_name': title,
+            'description': description[:200] if description else '',
+            'category': category,
+            'tags': [],
+            'created': datetime.now().isoformat(),
+            'modified': datetime.now().isoformat(),
+            'starred': False,
+            'is_public': False,
+            'is_locked': False,
+            'voice_aliases': generate_voice_aliases(title),
+            'access_count': 0,
+        }
     if category not in manifest['categories']:
         manifest['categories'][category] = {
             'name': category.title(),
@@ -415,8 +443,53 @@ def add_page_to_manifest(filename: str, title: str, description: str = '', conte
         manifest['categories'][category]['pages'].append(page_id)
     if page_id in manifest.get('uncategorized', []):
         manifest['uncategorized'].remove(page_id)
+
+    # Auto-inject new pages into the desktop state so they appear as icons
+    # even when the desktop page isn't actively open in the browser
+    if is_new_page and page_id != 'desktop':
+        _inject_page_into_desktop_state(manifest, page_id)
+
     save_canvas_manifest(manifest)
     return manifest['pages'][page_id]
+
+
+def _inject_page_into_desktop_state(manifest: dict, page_id: str) -> None:
+    """Inject a newly created page into the desktop's serialised state.
+
+    The desktop stores its icon layout in the 'description' field of the
+    'desktop' page entry as a JSON blob with desktopPages, knownPages, etc.
+    When a page is created while the desktop isn't open, it would never get
+    added.  This ensures every new page appears as a desktop icon immediately.
+    """
+    desktop_entry = manifest.get('pages', {}).get('desktop')
+    if not desktop_entry:
+        return
+    desc = desktop_entry.get('description', '')
+    if not desc:
+        return
+    try:
+        state = json.loads(desc)
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    changed = False
+    known = state.get('knownPages', [])
+    desktop_pages = state.get('desktopPages', [])
+    hidden = state.get('hiddenPages', [])
+    recycle = state.get('recycleBin', [])
+
+    if page_id not in known:
+        known.append(page_id)
+        changed = True
+    # Add to desktop unless user previously recycled/hid it
+    if page_id not in desktop_pages and page_id not in hidden and page_id not in recycle:
+        desktop_pages.append(page_id)
+        changed = True
+
+    if changed:
+        state['knownPages'] = known
+        state['desktopPages'] = desktop_pages
+        desktop_entry['description'] = json.dumps(state)
 
 
 def track_page_access(page_id: str) -> None:
@@ -566,7 +639,9 @@ def canvas_pages_proxy(path):
     """
     try:
         # Auth check — only when explicitly enabled (opt-in for self-hosted deployments)
-        if CANVAS_REQUIRE_AUTH:
+        # Skip auth for non-HTML assets (images, icons, CSS) — they're embedded resources
+        _is_html = path.endswith('.html')
+        if CANVAS_REQUIRE_AUTH and _is_html:
             page_id = Path(path).stem
             manifest = load_canvas_manifest()
             page_meta = manifest.get('pages', {}).get(page_id, {})
@@ -648,16 +723,33 @@ def canvas_pages_proxy(path):
                     b'window.parent.postMessage({type:"canvas-action",action:"speak",text:t},"*");};}'
                     b'</script>'
                 )
+                # Inject auth token bridge — parent pushes fresh Clerk JWT,
+                # canvas pages use it via authFetch() or _canvasAuthToken
+                _auth_bridge = (
+                    b'<script id="canvas-auth-bridge">'
+                    b'window._canvasAuthToken=null;'
+                    b'window.addEventListener("message",function(e){'
+                    b'if(e.data&&e.data.type==="auth-token"){'
+                    b'window._canvasAuthToken=e.data.token;}});'
+                    b'window.authFetch=function(url,opts){'
+                    b'opts=opts||{};'
+                    b'if(window._canvasAuthToken){'
+                    b'opts.headers=Object.assign(opts.headers||{},{"Authorization":"Bearer "+window._canvasAuthToken});}'
+                    b'return fetch(url,opts);};'
+                    b'window.parent.postMessage({type:"canvas-action",action:"request-auth-token"},"*");'
+                    b'</script>'
+                )
                 _inject = _base_css + _error_bridge
                 if b'</head>' in content:
                     content = content.replace(b'</head>', _inject + b'</head>', 1)
                 else:
                     content = _inject + content
-                # Inject nav/speak helpers before </body>
+                # Inject nav/speak helpers + auth bridge before </body>
+                _body_inject = _nav_helpers + _auth_bridge
                 if b'</body>' in content:
-                    content = content.replace(b'</body>', _nav_helpers + b'</body>', 1)
+                    content = content.replace(b'</body>', _body_inject + b'</body>', 1)
                 else:
-                    content += _nav_helpers
+                    content += _body_inject
                 resp = Response(content, mimetype='text/html')
                 resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
                 resp.headers['Pragma'] = 'no-cache'
@@ -670,12 +762,12 @@ def canvas_pages_proxy(path):
                     "default-src 'none'; "
                     "script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://games.jam-bot.com blob:; "
                     "style-src 'unsafe-inline' https://games.jam-bot.com; "
-                    "img-src 'self' data: blob: https://games.jam-bot.com; "
+                    "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob:; "
                     "font-src 'self'; "
                     "connect-src 'self' https://games.jam-bot.com; "
                     "worker-src blob:; "
-                    "frame-src 'none'"
+                    "frame-src 'self' https://*.jam-bot.com"
                 )
                 return resp
             else:
@@ -790,7 +882,7 @@ def openclaw_ui_proxy(path=''):
         # Strip headers that interfere with iframe/proxy rendering
         excluded_headers = [
             'content-encoding', 'content-length', 'transfer-encoding',
-            'connection', 'x-frame-options',
+            'connection', 'x-frame-options', 'content-security-policy',
         ]
         headers = [(k, v) for k, v in resp.headers.items()
                    if k.lower() not in excluded_headers]
@@ -852,10 +944,12 @@ def get_canvas_manifest():
 
     Auto-syncs with the filesystem (throttled to once per 60s) so that
     pages written directly by agents appear without a manual sync call.
+    Pass ?sync=1 to force an immediate sync (bypasses throttle).
     """
     global _last_sync_time
+    force_sync = request.args.get('sync') == '1'
     now = time.time()
-    if now - _last_sync_time >= _SYNC_THROTTLE_SECONDS:
+    if force_sync or now - _last_sync_time >= _SYNC_THROTTLE_SECONDS:
         _last_sync_time = now
         manifest = sync_canvas_manifest()
     else:
@@ -994,7 +1088,7 @@ def handle_page_metadata(page_id):
             except (ValueError, TypeError):
                 pass  # malformed date — allow through
 
-    for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked']:
+    for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon']:
         if field in data:
             old_category = page.get('category')
             page[field] = data[field]
@@ -1083,6 +1177,16 @@ def create_canvas_page():
         if not raw_filename:
             slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
             raw_filename = f'{slug}.html'
+
+        # Guard: protected system pages cannot be overwritten via this API.
+        # desktop.html and file-explorer.html are OS infrastructure — their HTML
+        # is maintained by admins, not agents. State is in the manifest description.
+        _PROTECTED_PAGES = {'desktop.html', 'file-explorer.html'}
+        if Path(raw_filename).name in _PROTECTED_PAGES:
+            return jsonify({
+                'error': f'{Path(raw_filename).name} is a protected system page and cannot be overwritten. '
+                         'To update desktop icons or layout, use the desktop UI or ask the admin.',
+            }), 403
 
         # Sanitize: strip directory traversal, ensure .html
         filename = Path(raw_filename).name
@@ -1218,3 +1322,184 @@ def restore_page_version(page_id, timestamp):
         'restored_from': timestamp,
         'message': f'Page restored to version from {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))}',
     })
+
+
+# ---------------------------------------------------------------------------
+# Build Log API — serves z-code session JSONL files parsed into human-readable lines
+# The openclaw workspace is mounted into openvoiceui at /app/runtime/workspace/Agent
+# JSONL session files are synced here: Agent/scripts/logs/zcode-sessions/*.jsonl
+# ---------------------------------------------------------------------------
+
+_BUILD_LOG_DIR = WORKSPACE_DIR / 'Agent' / 'scripts' / 'logs'
+_ZCODE_SESSIONS_DIR = _BUILD_LOG_DIR / 'zcode-sessions'
+
+
+def _parse_jsonl_to_lines(jsonl_path):
+    """Parse a z-code JSONL session file into human-readable activity lines."""
+    import json as _json
+    results = []
+    try:
+        with open(jsonl_path, encoding='utf-8', errors='replace') as _f:
+            for raw in _f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    obj = _json.loads(raw)
+                except Exception:
+                    continue
+                if obj.get('type') != 'assistant':
+                    continue
+                ts_raw = obj.get('timestamp', '')
+                ts = ts_raw[11:16] if len(ts_raw) >= 16 else '?'
+                content = obj.get('message', {}).get('content', [])
+                for c in content:
+                    if not isinstance(c, dict):
+                        continue
+                    ct = c.get('type')
+                    if ct == 'text':
+                        text = c.get('text', '').strip()
+                        if text:
+                            short = text.replace('\n', ' ')[:160]
+                            results.append((ts_raw, f'[{ts}] {short}'))
+                    elif ct == 'tool_use':
+                        name = c.get('name', '?')
+                        inp = c.get('input', {})
+                        _pfx = '/home/node/.openclaw/workspace/'
+                        if name == 'Read':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Reading: {fp}'))
+                        elif name == 'WebSearch':
+                            results.append((ts_raw, f'[{ts}] Searching: {inp.get("query", "")}'))
+                        elif name == 'Bash':
+                            cmd = inp.get('command', '').strip().replace('\n', ' ')[:100]
+                            results.append((ts_raw, f'[{ts}] Running: {cmd}'))
+                        elif name == 'Write':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Writing: {fp}'))
+                        elif name == 'Edit':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Editing: {fp}'))
+                        elif name == 'Glob':
+                            results.append((ts_raw, f'[{ts}] Scanning: {inp.get("pattern", "")}'))
+                        elif name == 'Grep':
+                            results.append((ts_raw, f'[{ts}] Searching: {inp.get("pattern", "")}'))
+                        elif name == 'TodoWrite':
+                            todos = inp.get('todos', [])
+                            in_prog = [
+                                t['content'] for t in todos
+                                if isinstance(t, dict) and t.get('status') == 'in_progress'
+                            ]
+                            if in_prog:
+                                results.append((ts_raw, f'[{ts}] Starting: {in_prog[0][:80]}'))
+                        elif name == 'Agent':
+                            desc = inp.get('description', '')
+                            if desc:
+                                results.append((ts_raw, f'[{ts}] Spawning agent: {desc[:80]}'))
+                        else:
+                            results.append((ts_raw, f'[{ts}] {name}: {str(inp)[:80]}'))
+    except Exception:
+        pass
+    return results
+
+
+@canvas_bp.route('/api/canvas/build-log/<project>', methods=['GET'])
+def canvas_build_log(project):
+    """Return parsed z-code JSONL session activity as human-readable console lines.
+
+    GET /api/canvas/build-log/<project>?lines=300&since=<iso-timestamp>
+    Returns: {"lines": [...], "status": "ok", "sources": N, "updated_at": "..."}
+    Returns: {"lines": [], "status": "no_log"} if no JSONL files found yet.
+    """
+    import re as _re
+    import json as _json
+    if not _re.match(r'^[a-z0-9][a-z0-9\-_]{0,80}$', project):
+        return jsonify({'error': 'Invalid project name'}), 400
+
+    try:
+        n_lines = min(int(request.args.get('lines', 300)), 1000)
+    except (ValueError, TypeError):
+        n_lines = 300
+
+    # Optional: only return lines after this ISO timestamp (for incremental polling)
+    since_ts = request.args.get('since', '')
+
+    try:
+        sessions_dir = _ZCODE_SESSIONS_DIR
+        if not sessions_dir.exists():
+            return jsonify({'lines': [], 'status': 'no_log'})
+
+        # Find JSONL files — use ALL of them sorted by mtime (single-tenant: newest = current build)
+        all_jsonl = sorted(sessions_dir.glob('*.jsonl'), key=lambda p: p.stat().st_mtime)
+        if not all_jsonl:
+            return jsonify({'lines': [], 'status': 'no_log'})
+
+        # Determine build start time from the project status file (if available)
+        build_start_ts = ''
+        status_path = CANVAS_PAGES_DIR / '_data' / 'builds' / f'{project}-status.json'
+        if status_path.exists():
+            try:
+                with open(status_path) as _sf:
+                    _sd = _json.load(_sf)
+                build_start_ts = _sd.get('startedAt', '')
+            except Exception:
+                pass
+
+        # Collect entries from all JSONL files, filtered to files updated after build start
+        all_entries = []
+        sources_used = 0
+        for jf in all_jsonl:
+            # Skip JSONL files older than build start (if we know it)
+            if build_start_ts:
+                import time as _time
+                try:
+                    # Compare file mtime to build start
+                    file_mtime_iso = _time.strftime(
+                        '%Y-%m-%dT%H:%M:%S', _time.gmtime(jf.stat().st_mtime)
+                    )
+                    if file_mtime_iso < build_start_ts[:19]:
+                        continue
+                except Exception:
+                    pass
+            entries = _parse_jsonl_to_lines(jf)
+            if entries:
+                all_entries.extend(entries)
+                sources_used += 1
+
+        if not all_entries:
+            # Fall back: use ALL files if nothing matched the build-start filter
+            for jf in all_jsonl:
+                entries = _parse_jsonl_to_lines(jf)
+                all_entries.extend(entries)
+                sources_used += 1
+
+        # Sort by timestamp string (ISO, sorts lexically), dedupe adjacent identical lines
+        all_entries.sort(key=lambda x: x[0])
+
+        # Filter by since_ts if provided
+        if since_ts:
+            all_entries = [(ts, line) for ts, line in all_entries if ts > since_ts]
+
+        # Deduplicate: remove consecutive identical display lines
+        deduped = []
+        last_line = None
+        for ts, line in all_entries:
+            if line != last_line:
+                deduped.append((ts, line))
+                last_line = line
+
+        # Return tail
+        tail_entries = deduped[-n_lines:] if len(deduped) > n_lines else deduped
+        lines_out = [line for _, line in tail_entries]
+        last_ts = tail_entries[-1][0] if tail_entries else ''
+
+        return jsonify({
+            'lines': lines_out,
+            'status': 'ok',
+            'sources': sources_used,
+            'total_lines': len(deduped),
+            'updated_at': last_ts,
+        })
+    except Exception as exc:
+        logger.error(f'Build log read error for {project}: {exc}')
+        return jsonify({'lines': [], 'status': 'error', 'error': str(exc)}), 500
