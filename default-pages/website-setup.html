@@ -321,6 +321,14 @@ details[open] summary .arrow{transform:rotate(90deg)}
 .btn.primary:hover{background:#2563eb;box-shadow:0 6px 20px rgba(59,130,246,.35)}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
 
+/* ── Field Validation Errors ── */
+.form-group.field-error input,
+.form-group.field-error textarea{border-color:var(--red) !important;box-shadow:0 0 8px var(--red-dim)}
+.form-group.field-error label{color:var(--red) !important}
+.card-select.field-error{outline:2px solid var(--red);outline-offset:2px;border-radius:var(--r-sm)}
+@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-4px)}40%,80%{transform:translateX(4px)}}
+.field-shake{animation:shake .4s ease}
+
 /* ── Toast ── */
 .toast{
   position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(60px);
@@ -770,7 +778,7 @@ details[open] summary .arrow{transform:rotate(90deg)}
   </div>
   <div class="action-buttons">
     <button class="btn" onclick="saveNow()">Save Draft</button>
-    <button class="btn primary" id="startResearchBtn" disabled onclick="startResearch()">Start Research</button>
+    <button class="btn primary" id="startResearchBtn" onclick="startResearch()">Start Research</button>
   </div>
 </div>
 
@@ -998,6 +1006,7 @@ function updatePreview(){
 function selectCard(el,field){
   el.parentElement.querySelectorAll('.sel-card').forEach(c=>c.classList.remove('active'));
   el.classList.add('active');
+  el.parentElement.classList.remove('field-error','field-shake');
   if(field==='siteType') formData.siteConfig.siteType=el.dataset.val;
   scheduleSave();
   updateStatus();
@@ -1212,6 +1221,8 @@ function bindInputs(){
   document.querySelectorAll('[data-field]').forEach(el=>{
     el.addEventListener('input',()=>{
       setNestedVal(formData,el.dataset.field,el.value);
+      const g=el.closest('.form-group');
+      if(g)g.classList.remove('field-error','field-shake');
       scheduleSave();
       updateStatus();
     });
@@ -1239,14 +1250,39 @@ function updateStatus(){
   const b=formData.basics;
   const ready=b.businessName.trim()&&b.industry.trim()&&b.description.trim()&&formData.siteConfig.siteType;
   const badge=$('statusBadge');
-  const btn=$('startResearchBtn');
   if(ready){
     badge.className='status-badge ready';badge.textContent='Ready';
-    btn.disabled=false;
   }else{
     badge.className='status-badge draft';badge.textContent='Draft';
-    btn.disabled=true;
   }
+}
+
+function validateRequired(){
+  // Clear previous errors
+  document.querySelectorAll('.field-error').forEach(el=>el.classList.remove('field-error','field-shake'));
+  const errors=[];
+  const b=formData.basics;
+  if(!b.businessName.trim()){
+    const g=$('f-businessName').closest('.form-group');
+    g.classList.add('field-error','field-shake');errors.push(g);
+  }
+  if(!b.industry.trim()){
+    const g=$('f-industry').closest('.form-group');
+    g.classList.add('field-error','field-shake');errors.push(g);
+  }
+  if(!b.description.trim()){
+    const g=$('f-description').closest('.form-group');
+    g.classList.add('field-error','field-shake');errors.push(g);
+  }
+  if(!formData.siteConfig.siteType){
+    const cards=$('siteTypeCards');
+    cards.classList.add('field-error','field-shake');errors.push(cards);
+  }
+  if(errors.length){
+    errors[0].scrollIntoView({behavior:'smooth',block:'center'});
+    toast('Please fill in the highlighted required fields');
+  }
+  return errors.length===0;
 }
 
 // ── Auto-save ──
@@ -1551,6 +1587,7 @@ function applyAIResult(field,result){
 
 // ── Start Research ──
 async function startResearch(){
+  if(!validateRequired()) return;
   await doSave();
   // Build config.json for init-website.sh
   const config={

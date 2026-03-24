@@ -767,7 +767,7 @@ def canvas_pages_proxy(path):
                     "font-src 'self'; "
                     "connect-src 'self' https://games.jam-bot.com; "
                     "worker-src blob:; "
-                    "frame-src 'self' https://*.jam-bot.com"
+                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app"
                 )
                 return resp
             else:

@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice Cloning Studio</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #08090e;
+  --surface: #0f1119;
+  --card: #151821;
+  --card-hover: #1a1e2d;
+  --border: #1e2436;
+  --border-light: #2a3148;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-glow: rgba(59, 130, 246, 0.12);
+  --cyan: #06b6d4;
+  --green: #22c55e;
+  --green-dim: rgba(34, 197, 94, 0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239, 68, 68, 0.08);
+  --orange: #f97316;
+  --text: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-dim: #64748b;
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* Header */
+.page-header {
+  background: linear-gradient(180deg, #0d0f18 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 28px 24px 20px;
+  text-align: center;
+}
+.page-header h1 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.page-header p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+/* Layout */
+.container {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+/* Cards */
+.section-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.section-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.section-number.done { background: var(--green); }
+.section-header h2 { font-size: 16px; font-weight: 600; }
+.section-header .badge {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 3px 10px;
+  background: var(--surface);
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 18px;
+}
+.tab-btn {
+  flex: 1;
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+.tab-btn.active { background: var(--card-hover); color: var(--text); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Record */
+.record-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 0;
+}
+.mic-btn {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 2px solid var(--border-light);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 28px;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mic-btn:hover { border-color: var(--accent); background: var(--accent-glow); }
+.mic-btn.recording {
+  border-color: var(--red);
+  background: var(--red-dim);
+  animation: pulse-ring 1.5s infinite;
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.25); }
+  70% { box-shadow: 0 0 0 14px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+.mic-btn svg { pointer-events: none; }
+.record-timer {
+  margin-top: 10px;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.record-timer.active { color: var(--red); }
+.record-hint { margin-top: 6px; font-size: 12px; color: var(--text-dim); }
+
+/* Upload */
+.drop-zone {
+  border: 2px dashed var(--border-light);
+  border-radius: var(--radius);
+  padding: 36px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+.drop-zone-icon { color: var(--text-dim); margin-bottom: 8px; }
+.drop-zone-text { font-size: 14px; color: var(--text-secondary); }
+.drop-zone-text span { color: var(--accent); font-weight: 500; }
+.drop-zone-formats { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+.file-input { display: none; }
+
+/* Audio preview */
+.audio-preview {
+  display: none;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.audio-preview.visible { display: block; }
+.audio-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.audio-file-name { font-size: 13px; font-weight: 500; }
+.audio-file-info { font-size: 11px; color: var(--text-dim); }
+.audio-preview audio { width: 100%; height: 36px; border-radius: 6px; }
+.clear-audio-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.clear-audio-btn:hover { color: var(--red); background: var(--red-dim); }
+
+/* Form fields */
+.form-group { margin-bottom: 14px; }
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+}
+.form-label .optional { font-weight: 400; color: var(--text-dim); font-size: 11px; }
+.form-input, .form-textarea {
+  width: 100%;
+  padding: 9px 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.form-input:focus, .form-textarea:focus { border-color: var(--accent); }
+.form-input::placeholder, .form-textarea::placeholder { color: var(--text-dim); }
+.form-textarea { resize: vertical; min-height: 60px; }
+.form-hint { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+
+/* Platform cards */
+.platforms-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.platform-card {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  user-select: none;
+}
+.platform-card:hover { border-color: var(--border-light); }
+.platform-card.selected { border-color: var(--accent); background: var(--accent-glow); }
+.platform-card.unavailable {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.platform-card.unavailable:hover { border-color: var(--border); }
+.platform-check {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-light);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.platform-card.selected .platform-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.platform-check svg { opacity: 0; transition: opacity 0.15s; }
+.platform-card.selected .platform-check svg { opacity: 1; }
+.platform-name { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+.platform-sub { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
+.platform-time { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.platform-status {
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.ok { background: var(--green); }
+.status-dot.err { background: var(--red); }
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-secondary {
+  background: var(--card-hover);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover:not(:disabled) { background: var(--border); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-full { width: 100%; }
+
+/* Clone progress rows */
+.clone-progress-list { display: flex; flex-direction: column; gap: 14px; }
+.clone-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 60px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.clone-row-label { font-size: 13px; font-weight: 600; }
+.clone-row-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--card);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.clone-row-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  width: 0%;
+}
+.clone-row-fill.qwen3 { background: var(--cyan); }
+.clone-row-fill.elevenlabs { background: var(--green); }
+.clone-row-fill.resemble { background: var(--orange); }
+.clone-row-status { font-size: 11px; color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+.clone-row-detail {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: -4px;
+}
+
+/* Results table */
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.results-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.results-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.results-table tr:last-child td { border-bottom: none; }
+.voice-id-cell {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.status-badge.ready { background: var(--green-dim); color: var(--green); }
+.status-badge.failed { background: var(--red-dim); color: var(--red); }
+
+/* Voice library */
+.voices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.voice-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  transition: border-color 0.2s;
+}
+.voice-card:hover { border-color: var(--border-light); }
+.voice-card-name { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.voice-card-provider {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+.voice-card-id {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-card audio {
+  width: 100%;
+  height: 34px;
+  border-radius: 6px;
+  margin-top: 6px;
+  display: none;
+}
+
+/* Test output in results */
+.test-inline-audio {
+  width: 160px;
+  height: 30px;
+  border-radius: 6px;
+  display: none;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* Spinner */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Tips box */
+.tips-box {
+  background: rgba(59, 130, 246, 0.05);
+  border: 1px solid rgba(59, 130, 246, 0.12);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 14px;
+}
+.tips-box h4 {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.tips-box ul { list-style: none; }
+.tips-box li {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0 2px 12px;
+  position: relative;
+}
+.tips-box li::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 9px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.4;
+}
+
+/* Select */
+.form-select {
+  width: 100%;
+  padding: 9px 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+.form-select:focus { border-color: var(--accent); }
+
+/* Test section */
+.test-section { margin-top: 12px; }
+.test-output {
+  display: none;
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--surface);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.test-output.visible { display: block; }
+.test-output audio { width: 100%; height: 36px; border-radius: 6px; }
+.test-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; text-align: right; }
+
+/* Responsive */
+@media (max-width: 640px) {
+  .container { padding: 16px 12px 40px; }
+  .section-card { padding: 18px 14px; }
+  .page-header h1 { font-size: 22px; }
+  .platforms-grid { grid-template-columns: 1fr; }
+  .clone-row { grid-template-columns: 90px 1fr 50px; gap: 10px; }
+  .voices-grid { grid-template-columns: 1fr; }
+  .mic-btn { width: 66px; height: 66px; }
+}
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Voice Cloning Studio</h1>
+  <p>Record once, clone across multiple AI voice platforms</p>
+</div>
+
+<div class="container">
+
+  <!-- STEP 1: Audio Input -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-number" id="step1-num">1</div>
+      <h2>Provide a Voice Sample</h2>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('record')">Record</button>
+      <button class="tab-btn" onclick="switchTab('upload')">Upload File</button>
+    </div>
+
+    <div class="tab-content active" id="tab-record">
+      <div class="record-area">
+        <button class="mic-btn" id="micBtn" onclick="toggleRecording()">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+        <div class="record-timer" id="recordTimer">0:00</div>
+        <div class="record-hint" id="recordHint">Click to start recording</div>
+      </div>
+    </div>
+
+    <div class="tab-content" id="tab-upload">
+      <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <div class="drop-zone-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <div class="drop-zone-text">Drag and drop or <span>browse files</span></div>
+        <div class="drop-zone-formats">WAV, MP3, M4A, OGG, WEBM, FLAC</div>
+      </div>
+      <input type="file" class="file-input" id="fileInput" accept=".wav,.mp3,.m4a,.ogg,.webm,.flac,audio/*" />
+    </div>
+
+    <div class="audio-preview" id="audioPreview">
+      <div class="audio-preview-header">
+        <div>
+          <div class="audio-file-name" id="audioFileName">Recording</div>
+          <div class="audio-file-info" id="audioFileInfo"></div>
+        </div>
+        <button class="clear-audio-btn" onclick="clearAudio()" title="Remove">&times;</button>
+      </div>
+      <audio id="audioPlayer" controls></audio>
+    </div>
+
+    <div class="tips-box">
+      <h4>Recording Tips</h4>
+      <ul>
+        <li>Quiet environment, minimal background noise</li>
+        <li>Speak clearly and naturally, 10-30 seconds</li>
+        <li>Read a passage aloud for the most natural result</li>
+        <li>Consistent distance from microphone</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- STEP 2: Name + Platforms -->
+  <div class="section-card">
+    <div class="section-header">
+      <div class="section-number" id="step2-num">2</div>
+      <h2>Configure Clone</h2>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Voice Name</label>
+      <input type="text" class="form-input" id="voiceName" placeholder="e.g. Alex, Narrator, Studio Voice" maxlength="40" />
+      <div class="form-hint">Identifies this voice across all platforms</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Reference Text <span class="optional">(optional, improves accuracy)</span></label>
+      <textarea class="form-textarea" id="referenceText" placeholder="Type exactly what was said in the recording..."></textarea>
+    </div>
+
+    <label class="form-label" style="margin-bottom:10px;">Select Platforms</label>
+    <div class="platforms-grid" id="platformsGrid">
+      <div class="platform-card" data-provider="qwen3" onclick="togglePlatform(this)">
+        <div class="platform-check">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="platform-name">Qwen3 TTS</div>
+        <div class="platform-sub">fal.ai</div>
+        <div class="platform-time">~37 seconds</div>
+        <div class="platform-status" id="status-qwen3">
+          <span class="status-dot" id="dot-qwen3"></span>
+          <span id="statusText-qwen3">Checking...</span>
+        </div>
+      </div>
+
+      <div class="platform-card" data-provider="elevenlabs" onclick="togglePlatform(this)">
+        <div class="platform-check">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="platform-name">ElevenLabs</div>
+        <div class="platform-sub">Instant Voice Cloning</div>
+        <div class="platform-time">~5-10 seconds</div>
+        <div class="platform-status" id="status-elevenlabs">
+          <span class="status-dot" id="dot-elevenlabs"></span>
+          <span id="statusText-elevenlabs">Checking...</span>
+        </div>
+      </div>
+
+      <div class="platform-card" data-provider="resemble" onclick="togglePlatform(this)">
+        <div class="platform-check">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="platform-name">Resemble AI</div>
+        <div class="platform-sub">Chatterbox</div>
+        <div class="platform-time">~1-5 minutes</div>
+        <div class="platform-status" id="status-resemble">
+          <span class="status-dot" id="dot-resemble"></span>
+          <span id="statusText-resemble">Checking...</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-full" id="cloneBtn" onclick="startClone()" disabled>
+      Clone to Selected Platforms
+    </button>
+  </div>
+
+  <!-- STEP 3: Progress + Results -->
+  <div class="section-card" id="progressSection" style="display:none;">
+    <div class="section-header">
+      <div class="section-number" id="step3-num">3</div>
+      <h2>Clone Progress</h2>
+    </div>
+
+    <div class="clone-progress-list" id="progressList"></div>
+
+    <div id="resultsArea" style="display:none; margin-top:20px;">
+      <h3 style="font-size:14px; font-weight:600; margin-bottom:12px;">Results</h3>
+      <table class="results-table">
+        <thead>
+          <tr>
+            <th>Platform</th>
+            <th>Voice ID</th>
+            <th>Time</th>
+            <th>Status</th>
+            <th>Test</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Test Cloned Voice -->
+  <div class="section-card">
+    <div class="section-header">
+      <h2>Test a Voice</h2>
+    </div>
+    <div class="test-section">
+      <div class="form-group">
+        <label class="form-label">Voice</label>
+        <select class="form-select" id="testVoiceSelect">
+          <option value="">-- Clone a voice first --</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Text</label>
+        <textarea class="form-textarea" id="testText">Hello! This is a test of my cloned voice. The quick brown fox jumps over the lazy dog.</textarea>
+      </div>
+      <button class="btn btn-primary btn-full" id="testBtn" onclick="testVoice()" disabled>
+        Generate Speech
+      </button>
+      <div class="test-output" id="testOutput">
+        <audio id="testAudioPlayer" controls></audio>
+        <div class="test-meta" id="testMeta"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voice Library -->
+  <div class="section-card">
+    <div class="section-header">
+      <h2>Voice Library</h2>
+      <button class="btn btn-secondary btn-sm" onclick="loadVoiceLibrary()" style="margin-left:auto;">Refresh</button>
+    </div>
+    <div id="voiceLibrary">
+      <div class="empty-state">Loading voices...</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ── State ──────────────────────────────────────────────────────────
+  var mediaRecorder = null;
+  var audioChunks = [];
+  var recordingInterval = null;
+  var recordingSeconds = 0;
+  var currentAudioBlob = null;
+  var currentAudioName = 'recording.webm';
+  var providerStatus = {};   // {qwen3: true, elevenlabs: false, resemble: true}
+  var selectedProviders = [];
+  var cloneResults = [];     // [{provider, voice_id, name, status, clone_time_ms}]
+  var allVoices = [];
+
+  // ── Helpers ────────────────────────────────────────────────────────
+  function $(id) { return document.getElementById(id); }
+
+  function formatTime(secs) {
+    var m = Math.floor(secs / 60);
+    var s = secs % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function formatBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+    return (b / 1048576).toFixed(1) + ' MB';
+  }
+
+  function escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function apiFetch(url, opts) {
+    if (window.authFetch) return window.authFetch(url, opts);
+    return fetch(url, opts);
+  }
+
+  // ── Tab switching ──────────────────────────────────────────────────
+  window.switchTab = function(tab) {
+    document.querySelectorAll('.tab-btn')[0].classList.toggle('active', tab === 'record');
+    document.querySelectorAll('.tab-btn')[1].classList.toggle('active', tab === 'upload');
+    $('tab-record').classList.toggle('active', tab === 'record');
+    $('tab-upload').classList.toggle('active', tab === 'upload');
+  };
+
+  // ── Recording ──────────────────────────────────────────────────────
+  window.toggleRecording = function() {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
+  function startRecording() {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+      audioChunks = [];
+      var opts = {};
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))
+        opts.mimeType = 'audio/webm;codecs=opus';
+      else if (MediaRecorder.isTypeSupported('audio/webm'))
+        opts.mimeType = 'audio/webm';
+      mediaRecorder = new MediaRecorder(stream, opts);
+
+      mediaRecorder.ondataavailable = function(e) {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+      mediaRecorder.onstop = function() {
+        stream.getTracks().forEach(function(t) { t.stop(); });
+        var blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        currentAudioBlob = blob;
+        currentAudioName = 'recording.webm';
+        showAudioPreview(blob, 'Recording', formatTime(recordingSeconds) + ' / ' + formatBytes(blob.size));
+        updateCloneButton();
+      };
+
+      mediaRecorder.start(250);
+      recordingSeconds = 0;
+      $('micBtn').classList.add('recording');
+      $('recordTimer').classList.add('active');
+      $('recordHint').textContent = 'Click to stop recording';
+      $('recordTimer').textContent = '0:00';
+
+      recordingInterval = setInterval(function() {
+        recordingSeconds++;
+        $('recordTimer').textContent = formatTime(recordingSeconds);
+      }, 1000);
+    }).catch(function(err) {
+      alert('Microphone access denied. Please allow microphone access.\n\n' + err.message);
+    });
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+    clearInterval(recordingInterval);
+    $('micBtn').classList.remove('recording');
+    $('recordTimer').classList.remove('active');
+    $('recordHint').textContent = 'Click to record again';
+  }
+
+  // ── File upload ────────────────────────────────────────────────────
+  var dropZone = $('dropZone');
+  var fileInput = $('fileInput');
+
+  dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('drag-over'); });
+  dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', function() {
+    if (fileInput.files.length > 0) handleFile(fileInput.files[0]);
+  });
+
+  function handleFile(file) {
+    var allowed = ['.wav', '.mp3', '.m4a', '.ogg', '.webm', '.flac'];
+    var ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    if (allowed.indexOf(ext) === -1) {
+      alert('Unsupported format. Use: ' + allowed.join(', '));
+      return;
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      alert('File too large. Max 50MB.');
+      return;
+    }
+    currentAudioBlob = file;
+    currentAudioName = file.name;
+    showAudioPreview(file, file.name, formatBytes(file.size));
+    updateCloneButton();
+  }
+
+  // ── Audio preview ──────────────────────────────────────────────────
+  function showAudioPreview(blob, name, info) {
+    $('audioPlayer').src = URL.createObjectURL(blob);
+    $('audioFileName').textContent = name;
+    $('audioFileInfo').textContent = info;
+    $('audioPreview').classList.add('visible');
+    $('step1-num').classList.add('done');
+    $('step1-num').textContent = '\u2713';
+  }
+
+  window.clearAudio = function() {
+    currentAudioBlob = null;
+    currentAudioName = '';
+    $('audioPlayer').src = '';
+    $('audioPreview').classList.remove('visible');
+    $('step1-num').classList.remove('done');
+    $('step1-num').textContent = '1';
+    updateCloneButton();
+  };
+
+  // ── Platform selection ─────────────────────────────────────────────
+  window.togglePlatform = function(el) {
+    var provider = el.dataset.provider;
+    if (!providerStatus[provider]) return; // unavailable
+    el.classList.toggle('selected');
+    rebuildSelectedList();
+    updateCloneButton();
+  };
+
+  function rebuildSelectedList() {
+    selectedProviders = [];
+    document.querySelectorAll('.platform-card.selected').forEach(function(card) {
+      selectedProviders.push(card.dataset.provider);
+    });
+  }
+
+  function updateCloneButton() {
+    var hasAudio = !!currentAudioBlob;
+    var hasName = !!$('voiceName').value.trim();
+    var hasPlatforms = selectedProviders.length > 0;
+    $('cloneBtn').disabled = !(hasAudio && hasName && hasPlatforms);
+  }
+
+  $('voiceName').addEventListener('input', updateCloneButton);
+
+  // ── Check provider availability ────────────────────────────────────
+  function checkProviders() {
+    apiFetch('/api/tts/providers').then(function(r) { return r.json(); }).then(function(data) {
+      var providers = data.providers || data;
+      if (Array.isArray(providers)) {
+        providers.forEach(function(p) {
+          var pid = p.provider_id || p.name || '';
+          if (pid === 'qwen3' || pid === 'elevenlabs' || pid === 'resemble') {
+            var available = p.status === 'active';
+            providerStatus[pid] = available;
+            var dot = $('dot-' + pid);
+            var txt = $('statusText-' + pid);
+            var card = document.querySelector('[data-provider="' + pid + '"]');
+            if (available) {
+              dot.classList.add('ok');
+              dot.classList.remove('err');
+              txt.textContent = 'Available';
+              txt.style.color = 'var(--green)';
+              card.classList.remove('unavailable');
+            } else {
+              dot.classList.add('err');
+              dot.classList.remove('ok');
+              txt.textContent = 'Not configured';
+              txt.style.color = 'var(--text-dim)';
+              card.classList.add('unavailable');
+              card.classList.remove('selected');
+            }
+          }
+        });
+      }
+      // Auto-select available providers
+      document.querySelectorAll('.platform-card').forEach(function(card) {
+        if (providerStatus[card.dataset.provider]) {
+          card.classList.add('selected');
+        }
+      });
+      rebuildSelectedList();
+      updateCloneButton();
+    }).catch(function() {
+      // If providers endpoint fails, assume qwen3 is available (it has been working)
+      ['qwen3', 'elevenlabs', 'resemble'].forEach(function(pid) {
+        $('statusText-' + pid).textContent = 'Unknown';
+        $('dot-' + pid).classList.add('err');
+      });
+    });
+  }
+
+  // ── Clone to selected platforms ────────────────────────────────────
+  window.startClone = function() {
+    if (!currentAudioBlob || !$('voiceName').value.trim() || selectedProviders.length === 0) return;
+
+    var name = $('voiceName').value.trim();
+    var refText = $('referenceText').value.trim();
+    cloneResults = [];
+
+    // Show progress section
+    $('progressSection').style.display = '';
+    $('resultsArea').style.display = 'none';
+    $('cloneBtn').disabled = true;
+    $('cloneBtn').innerHTML = '<span class="spinner"></span> Cloning...';
+
+    // Build progress rows
+    var progressHtml = '';
+    selectedProviders.forEach(function(pid) {
+      progressHtml += '<div class="clone-row" id="row-' + pid + '">';
+      progressHtml += '  <div class="clone-row-label">' + escHtml(platformLabel(pid)) + '</div>';
+      progressHtml += '  <div class="clone-row-bar"><div class="clone-row-fill ' + pid + '" id="fill-' + pid + '"></div></div>';
+      progressHtml += '  <div class="clone-row-status" id="time-' + pid + '">0s</div>';
+      progressHtml += '  <div class="clone-row-detail" id="detail-' + pid + '">Starting...</div>';
+      progressHtml += '</div>';
+    });
+    $('progressList').innerHTML = progressHtml;
+
+    // Fire clone requests in parallel
+    var promises = selectedProviders.map(function(pid) {
+      return cloneToProvider(pid, name, refText);
+    });
+
+    Promise.allSettled(promises).then(function() {
+      $('cloneBtn').innerHTML = 'Clone to Selected Platforms';
+      $('cloneBtn').disabled = false;
+      $('step2-num').classList.add('done');
+      $('step2-num').textContent = '\u2713';
+      showResults();
+      loadVoiceLibrary();
+      updateTestSelect();
+    });
+  };
+
+  function platformLabel(pid) {
+    var labels = { qwen3: 'Qwen3', elevenlabs: 'ElevenLabs', resemble: 'Resemble' };
+    return labels[pid] || pid;
+  }
+
+  function estimatedTime(pid) {
+    var times = { qwen3: 40000, elevenlabs: 12000, resemble: 180000 };
+    return times[pid] || 60000;
+  }
+
+  function statusMessages(pid) {
+    if (pid === 'resemble') {
+      return [
+        [0, 'Creating voice...'],
+        [10, 'Uploading recording...'],
+        [25, 'Building voice model...'],
+        [60, 'Training (this takes a few minutes)...'],
+        [80, 'Finalizing...'],
+      ];
+    }
+    return [
+      [0, 'Uploading audio...'],
+      [15, 'Analyzing voice patterns...'],
+      [40, 'Generating voice model...'],
+      [75, 'Finalizing...'],
+    ];
+  }
+
+  function cloneToProvider(pid, name, refText) {
+    return new Promise(function(resolve) {
+      var startTime = Date.now();
+      var est = estimatedTime(pid);
+      var msgs = statusMessages(pid);
+
+      // Progress timer
+      var timer = setInterval(function() {
+        var elapsed = Date.now() - startTime;
+        var elapsedSec = Math.floor(elapsed / 1000);
+        $('time-' + pid).textContent = elapsedSec + 's';
+
+        var pct = Math.min(90, (elapsed / est) * 90);
+        $('fill-' + pid).style.width = pct + '%';
+
+        // Status message
+        var pctDone = (elapsed / est) * 100;
+        for (var i = msgs.length - 1; i >= 0; i--) {
+          if (pctDone >= msgs[i][0]) {
+            $('detail-' + pid).textContent = msgs[i][1];
+            break;
+          }
+        }
+      }, 400);
+
+      var formData = new FormData();
+      formData.append('audio', currentAudioBlob, currentAudioName);
+      formData.append('name', name);
+      formData.append('provider', pid);
+      if (refText) formData.append('reference_text', refText);
+
+      apiFetch('/api/tts/clone', { method: 'POST', body: formData })
+        .then(function(resp) {
+          if (!resp.ok) return resp.text().then(function(t) { throw new Error(t); });
+          return resp.json();
+        })
+        .then(function(data) {
+          clearInterval(timer);
+          var elapsed = Math.floor((Date.now() - startTime) / 1000);
+          $('fill-' + pid).style.width = '100%';
+          $('time-' + pid).textContent = elapsed + 's';
+          $('detail-' + pid).textContent = 'Complete';
+          $('detail-' + pid).style.color = 'var(--green)';
+
+          cloneResults.push({
+            provider: pid,
+            voice_id: data.voice_id,
+            name: data.name || name,
+            status: 'ready',
+            clone_time_ms: data.clone_time_ms || (elapsed * 1000),
+          });
+          resolve();
+        })
+        .catch(function(err) {
+          clearInterval(timer);
+          var elapsed = Math.floor((Date.now() - startTime) / 1000);
+          $('fill-' + pid).style.width = '0%';
+          $('time-' + pid).textContent = elapsed + 's';
+
+          var msg = 'Failed';
+          try { msg = JSON.parse(err.message).error || msg; } catch(e) { msg = err.message || msg; }
+          $('detail-' + pid).textContent = msg;
+          $('detail-' + pid).style.color = 'var(--red)';
+
+          cloneResults.push({
+            provider: pid,
+            voice_id: '',
+            name: name,
+            status: 'failed',
+            error: msg,
+          });
+          resolve();
+        });
+    });
+  }
+
+  // ── Show results table ─────────────────────────────────────────────
+  function showResults() {
+    if (cloneResults.length === 0) return;
+
+    $('resultsArea').style.display = '';
+    $('step3-num').classList.add('done');
+    $('step3-num').textContent = '\u2713';
+
+    var html = '';
+    cloneResults.forEach(function(r) {
+      html += '<tr>';
+      html += '<td>' + escHtml(platformLabel(r.provider)) + '</td>';
+      html += '<td class="voice-id-cell" title="' + escHtml(r.voice_id) + '">' + escHtml(r.voice_id || '--') + '</td>';
+      html += '<td>' + (r.clone_time_ms ? (r.clone_time_ms / 1000).toFixed(1) + 's' : '--') + '</td>';
+      html += '<td><span class="status-badge ' + r.status + '">' + r.status + '</span></td>';
+
+      if (r.status === 'ready' && r.voice_id) {
+        html += '<td>';
+        html += '<button class="btn btn-secondary btn-sm" onclick="quickTest(\'' + escHtml(r.provider) + '\',\'' + escHtml(r.voice_id) + '\', this)">Test</button>';
+        html += '<audio class="test-inline-audio" id="audio-result-' + escHtml(r.provider) + '" controls></audio>';
+        html += '</td>';
+      } else {
+        html += '<td style="color:var(--text-dim);font-size:12px;">--</td>';
+      }
+      html += '</tr>';
+    });
+    $('resultsBody').innerHTML = html;
+  }
+
+  // ── Quick test from results ────────────────────────────────────────
+  window.quickTest = function(provider, voiceId, btn) {
+    var audioEl = $('audio-result-' + provider);
+    if (!audioEl) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>';
+
+    var testText = 'Hello, this is a test of my cloned voice. How does it sound?';
+
+    apiFetch('/api/tts/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: testText, provider: provider, voice: voiceId }),
+    })
+    .then(function(resp) {
+      if (!resp.ok) throw new Error('Generation failed');
+      return resp.blob();
+    })
+    .then(function(blob) {
+      audioEl.src = URL.createObjectURL(blob);
+      audioEl.style.display = 'inline-block';
+      audioEl.play();
+      btn.innerHTML = 'Test';
+      btn.disabled = false;
+    })
+    .catch(function() {
+      btn.innerHTML = 'Test';
+      btn.disabled = false;
+      alert('Test generation failed. The provider may not support this voice yet.');
+    });
+  };
+
+  // ── Test voice (full section) ──────────────────────────────────────
+  window.testVoice = function() {
+    var sel = $('testVoiceSelect');
+    var val = sel.value;
+    if (!val) return;
+
+    var parts = val.split('|');
+    var provider = parts[0];
+    var voiceId = parts[1];
+    var text = $('testText').value.trim();
+    if (!text) return;
+
+    $('testBtn').disabled = true;
+    $('testBtn').innerHTML = '<span class="spinner"></span> Generating...';
+    $('testOutput').classList.remove('visible');
+
+    var startTime = Date.now();
+
+    apiFetch('/api/tts/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, provider: provider, voice: voiceId }),
+    })
+    .then(function(resp) {
+      if (!resp.ok) return resp.text().then(function(t) { throw new Error(t); });
+      return resp.blob();
+    })
+    .then(function(blob) {
+      var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      $('testAudioPlayer').src = URL.createObjectURL(blob);
+      $('testMeta').textContent = 'Generated in ' + elapsed + 's via ' + provider;
+      $('testOutput').classList.add('visible');
+      $('testAudioPlayer').play();
+      $('testBtn').innerHTML = 'Generate Speech';
+      $('testBtn').disabled = false;
+    })
+    .catch(function(err) {
+      var msg = err.message || 'Failed';
+      try { msg = JSON.parse(msg).error || msg; } catch(e) {}
+      alert('Generation failed: ' + msg);
+      $('testBtn').innerHTML = 'Generate Speech';
+      $('testBtn').disabled = false;
+    });
+  };
+
+  // ── Update test voice select ───────────────────────────────────────
+  function updateTestSelect() {
+    var sel = $('testVoiceSelect');
+    sel.innerHTML = '';
+
+    var hasVoices = false;
+
+    // Add cloneResults first
+    if (cloneResults.length > 0) {
+      var group = document.createElement('optgroup');
+      group.label = 'Recently Cloned';
+      cloneResults.forEach(function(r) {
+        if (r.status === 'ready' && r.voice_id) {
+          var opt = document.createElement('option');
+          opt.value = r.provider + '|' + r.voice_id;
+          opt.textContent = r.name + ' (' + platformLabel(r.provider) + ')';
+          group.appendChild(opt);
+          hasVoices = true;
+        }
+      });
+      if (group.children.length > 0) sel.appendChild(group);
+    }
+
+    // Add library voices
+    if (allVoices.length > 0) {
+      var libGroup = document.createElement('optgroup');
+      libGroup.label = 'Voice Library';
+      allVoices.forEach(function(v) {
+        var opt = document.createElement('option');
+        opt.value = v.provider + '|' + v.voice_id;
+        opt.textContent = v.name + ' (' + platformLabel(v.provider) + ')';
+        libGroup.appendChild(opt);
+        hasVoices = true;
+      });
+      if (libGroup.children.length > 0) sel.appendChild(libGroup);
+    }
+
+    if (!hasVoices) {
+      sel.innerHTML = '<option value="">-- Clone a voice first --</option>';
+    }
+    $('testBtn').disabled = !hasVoices;
+  }
+
+  // ── Voice library ──────────────────────────────────────────────────
+  function loadVoiceLibrary() {
+    apiFetch('/api/tts/voices').then(function(r) { return r.json(); }).then(function(data) {
+      var voices = data.voices || {};
+      allVoices = [];
+
+      Object.keys(voices).forEach(function(provider) {
+        var pv = voices[provider];
+        if (pv && pv.cloned) {
+          pv.cloned.forEach(function(v) {
+            allVoices.push({
+              voice_id: v.voice_id,
+              name: v.name,
+              provider: provider,
+              created_at: v.created_at || '',
+            });
+          });
+        }
+      });
+
+      renderVoiceLibrary();
+      updateTestSelect();
+    }).catch(function() {
+      $('voiceLibrary').innerHTML = '<div class="empty-state">Could not load voices</div>';
+    });
+  }
+  window.loadVoiceLibrary = loadVoiceLibrary;
+
+  function renderVoiceLibrary() {
+    if (allVoices.length === 0) {
+      $('voiceLibrary').innerHTML = '<div class="empty-state">No cloned voices yet. Create your first one above.</div>';
+      return;
+    }
+
+    var html = '<div class="voices-grid">';
+    allVoices.forEach(function(v) {
+      html += '<div class="voice-card">';
+      html += '<div class="voice-card-name">' + escHtml(v.name) + '</div>';
+      html += '<div class="voice-card-provider">' + escHtml(platformLabel(v.provider)) + '</div>';
+      html += '<div class="voice-card-id" title="' + escHtml(v.voice_id) + '">' + escHtml(v.voice_id) + '</div>';
+      html += '<button class="btn btn-secondary btn-sm" onclick="libTest(\'' + escHtml(v.provider) + '\',\'' + escHtml(v.voice_id) + '\',this)">Test</button>';
+      html += '<audio class="voice-card-audio" id="lib-audio-' + escHtml(v.voice_id).replace(/[^a-zA-Z0-9_-]/g, '') + '" controls></audio>';
+      html += '</div>';
+    });
+    html += '</div>';
+    $('voiceLibrary').innerHTML = html;
+  }
+
+  window.libTest = function(provider, voiceId, btn) {
+    var safeId = voiceId.replace(/[^a-zA-Z0-9_-]/g, '');
+    var audioEl = document.getElementById('lib-audio-' + safeId);
+    if (!audioEl) return;
+
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    apiFetch('/api/tts/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'Hello, this is a test of my cloned voice.',
+        provider: provider,
+        voice: voiceId,
+      }),
+    })
+    .then(function(resp) {
+      if (!resp.ok) throw new Error('failed');
+      return resp.blob();
+    })
+    .then(function(blob) {
+      audioEl.src = URL.createObjectURL(blob);
+      audioEl.style.display = 'block';
+      audioEl.play();
+      btn.textContent = 'Test';
+      btn.disabled = false;
+    })
+    .catch(function() {
+      btn.textContent = 'Test';
+      btn.disabled = false;
+    });
+  };
+
+  // ── Init ───────────────────────────────────────────────────────────
+  checkProviders();
+  loadVoiceLibrary();
+})();
+</script>
+
+</body>
+</html>
