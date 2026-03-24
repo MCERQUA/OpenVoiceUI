@@ -388,16 +388,20 @@ def _enter_session_recovery():
     """Switch to a temporary recovery session key after double-empty.
     Openclaw will create a fresh session for this key, escaping the
     poisoned state. The recovery key is cleared on the first successful
-    (non-empty, non-fallback) response."""
+    (non-empty, non-fallback) response.
+
+    IMPORTANT: Uses a STABLE key ('recovery') not a timestamped one.
+    Timestamped keys (recovery-<epoch>) created a new openclaw session
+    every time, piling up zombie sessions that never got cleaned.
+    A stable key reuses the same recovery session each time."""
     global _session_recovery_key, _recovery_entered_at
-    import datetime
     # Cooldown: don't thrash recovery keys from rapid start/stop cycles
     now = time.time()
     if now - _recovery_entered_at < 30:
         logger.info('### SESSION RECOVERY: skipping — cooldown active (entered <30s ago)')
         return
     _recovery_entered_at = now
-    _session_recovery_key = f'recovery-{int(datetime.datetime.utcnow().timestamp())}'
+    _session_recovery_key = 'recovery'
     logger.warning(f'### SESSION RECOVERY: switching to key "{_session_recovery_key}" to escape poisoned session')
 
 
@@ -1449,10 +1453,10 @@ def _conversation_inner():
                                             },
                                             json={
                                                 'model': 'glm-4.7',
-                                                'max_tokens': 400,
+                                                'max_tokens': 1500,
                                                 'messages': [{'role': 'user', 'content': message_with_context}],
                                             },
-                                            timeout=20,
+                                            timeout=30,
                                         )
                                         if _zai_resp.status_code == 200:
                                             _zai_data = _zai_resp.json()
@@ -2019,19 +2023,24 @@ def tts_clone_voice():
     Clone a voice from an audio sample.
 
     Accepts either:
-      - JSON: {"audio_url": "...", "name": "...", "reference_text": "..."}
-      - Multipart form: audio file + name field
+      - JSON: {"audio_url": "...", "name": "...", "provider": "qwen3", "reference_text": "..."}
+      - Multipart form: audio file + name + provider fields
 
-    Returns: JSON with voice_id, name, embedding metadata.
+    Provider support:
+      - qwen3: Instant clone via fal.ai (~37s). Needs audio URL.
+      - elevenlabs: Instant clone (~5-10s). Needs audio file.
+      - resemble: Multi-step clone (~1-5min). Needs audio file.
+
+    Returns: JSON with voice_id, name, provider, clone metadata.
     """
     try:
-        provider = get_provider('qwen3')
-        if not provider.is_available():
-            return jsonify({'error': 'Qwen3 provider not available (FAL_KEY not set)'}), 503
+        # --- Parse request (JSON or multipart) ---
+        save_path = None
+        audio_url = None
 
-        # JSON mode (audio already hosted at a URL)
         if request.is_json:
             data = request.get_json()
+            provider_id = data.get('provider', 'qwen3').strip()
             audio_url = data.get('audio_url', '').strip()
             name = data.get('name', '').strip()
             reference_text = data.get('reference_text', '').strip() or None
@@ -2041,11 +2050,11 @@ def tts_clone_voice():
             if not name:
                 return jsonify({'error': 'name is required'}), 400
 
-        # Multipart form mode (upload audio file directly)
         elif 'audio' in request.files:
             from services.paths import UPLOADS_DIR
             import uuid
 
+            provider_id = request.form.get('provider', 'qwen3').strip()
             audio_file = request.files['audio']
             name = request.form.get('name', '').strip()
             reference_text = request.form.get('reference_text', '').strip() or None
@@ -2055,7 +2064,6 @@ def tts_clone_voice():
             if not audio_file.filename:
                 return jsonify({'error': 'Empty audio file'}), 400
 
-            # Save upload
             ext = Path(audio_file.filename).suffix.lower()
             if ext not in ('.wav', '.mp3', '.m4a', '.ogg', '.webm', '.flac'):
                 return jsonify({'error': f'Unsupported audio format: {ext}'}), 400
@@ -2064,31 +2072,73 @@ def tts_clone_voice():
             UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
             save_path = UPLOADS_DIR / safe_name
             audio_file.save(str(save_path))
-
-            # Build public URL for fal.ai to fetch
             audio_url = f"{request.host_url.rstrip('/')}/uploads/{safe_name}"
         else:
             return jsonify({
                 'error': 'Send JSON with audio_url or multipart form with audio file'
             }), 400
 
-        logger.info(f"Voice clone request: name='{name}', url={audio_url[:80]}")
-        result = provider.clone_voice(
-            audio_url=audio_url,
-            name=name,
-            reference_text=reference_text,
+        # --- Validate provider ---
+        clone_providers = ('qwen3', 'elevenlabs', 'resemble')
+        if provider_id not in clone_providers:
+            return jsonify({
+                'error': f'Voice cloning not supported for provider "{provider_id}". '
+                         f'Supported: {", ".join(clone_providers)}'
+            }), 400
+
+        provider = get_provider(provider_id)
+        if not provider.is_available():
+            return jsonify({
+                'error': f'{provider_id} provider not available (API key not set)'
+            }), 503
+
+        # --- Route to provider ---
+        logger.info(
+            f"Voice clone request: provider={provider_id}, name='{name}', "
+            f"url={audio_url[:80] if audio_url else 'N/A'}"
         )
+
+        if provider_id == 'qwen3':
+            if not audio_url:
+                return jsonify({'error': 'Qwen3 requires audio_url'}), 400
+            result = provider.clone_voice(
+                audio_url=audio_url,
+                name=name,
+                reference_text=reference_text,
+            )
+
+        elif provider_id == 'elevenlabs':
+            if not save_path:
+                return jsonify({
+                    'error': 'ElevenLabs requires audio file upload (multipart form)'
+                }), 400
+            result = provider.clone_voice(
+                audio_path=str(save_path),
+                name=name,
+            )
+
+        elif provider_id == 'resemble':
+            if not save_path:
+                return jsonify({
+                    'error': 'Resemble requires audio file upload (multipart form)'
+                }), 400
+            result = provider.clone_voice(
+                audio_path=str(save_path),
+                name=name,
+                reference_text=reference_text,
+            )
 
         return jsonify({
             'status': 'ok',
-            'voice_id': result['voice_id'],
-            'name': result['name'],
-            'created_at': result['created_at'],
-            'clone_time_ms': result['clone_time_ms'],
-            'embedding_size': result['embedding_size'],
+            'provider': provider_id,
+            'voice_id': result.get('voice_id', ''),
+            'name': result.get('name', name),
+            'created_at': result.get('created_at', ''),
+            'clone_time_ms': result.get('clone_time_ms', 0),
+            'embedding_size': result.get('embedding_size', 0),
             'usage': (
-                f'Use voice_id "{result["voice_id"]}" in /api/tts/generate '
-                f'with provider=qwen3'
+                f'Use voice_id "{result.get("voice_id", "")}" in '
+                f'/api/tts/generate with provider={provider_id}'
             ),
         })
 

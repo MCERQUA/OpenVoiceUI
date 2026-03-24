@@ -32,6 +32,7 @@ from .supertonic_provider import SupertonicProvider
 from .groq_provider import GroqProvider
 from .qwen3_provider import Qwen3Provider
 from .resemble_provider import ResembleProvider
+from .elevenlabs_provider import ElevenLabsProvider
 
 # Provider registry
 _PROVIDERS = {
@@ -40,6 +41,7 @@ _PROVIDERS = {
     'groq': GroqProvider,
     'qwen3': Qwen3Provider,
     'resemble': ResembleProvider,
+    'elevenlabs': ElevenLabsProvider,
 }
 
 def _load_config() -> Dict[str, Any]:
@@ -131,6 +133,7 @@ __all__ = [
     'GroqProvider',
     'Qwen3Provider',
     'ResembleProvider',
+    'ElevenLabsProvider',
     'get_provider',
     'list_providers',
 ]

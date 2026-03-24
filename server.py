@@ -162,6 +162,9 @@ app.register_blueprint(report_issue_bp)
 from routes.registry import registry_bp
 app.register_blueprint(registry_bp)
 
+from routes.chatgpt_import import chatgpt_import_bp
+app.register_blueprint(chatgpt_import_bp)
+
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.
 try:
@@ -1327,7 +1330,7 @@ def openclaw_ui_websocket(ws):
 
     async def _run():
         try:
-            async with websockets.connect(gateway_url) as gw:
+            async with websockets.connect(gateway_url, origin="http://localhost:18789") as gw:
                 logger.info(f"OpenClaw UI: connected to Gateway at {gateway_url}")
 
                 async def _from_client():

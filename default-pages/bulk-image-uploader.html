@@ -96,6 +96,7 @@ input[type="file"]{display:none}
 .qi-ic.t-aud{background:var(--amber-dim)}.qi-ic.t-aud svg{stroke:var(--amber)}
 .qi-ic.t-vid{background:var(--red-dim)}.qi-ic.t-vid svg{stroke:var(--red)}
 .qi-ic.t-code{background:var(--green-dim)}.qi-ic.t-code svg{stroke:var(--green)}
+.qi-ic.t-3d{background:rgba(168,85,247,.12)}.qi-ic.t-3d svg{stroke:#a855f7}
 .qi-ic.t-oth{background:rgba(255,255,255,.04)}.qi-ic.t-oth svg{stroke:var(--tx-3)}
 .qi-body{min-width:0}
 .qi-name{font-size:.8rem;color:var(--tx);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -297,11 +298,12 @@ const DOC=new Set('pdf docx xlsx pptx txt md csv log'.split(' '));
 const AUD=new Set('mp3 wav ogg flac m4a aac'.split(' '));
 const VID=new Set('mp4 webm mov avi mkv'.split(' '));
 const COD=new Set('py js ts json yaml yml html css'.split(' '));
+const D3D=new Set('glb gltf obj fbx stl 3ds dae ply usdz blend mtl hdr exr'.split(' '));
 
 let files=[],filter='all',qid=0,ups=[];
 
 function ext(n){return(n.split('.').pop()||'').toLowerCase()}
-function cat(e){return IMG.has(e)?'img':DOC.has(e)?'doc':AUD.has(e)?'aud':VID.has(e)?'vid':COD.has(e)?'code':'oth'}
+function cat(e){return IMG.has(e)?'img':D3D.has(e)?'3d':DOC.has(e)?'doc':AUD.has(e)?'aud':VID.has(e)?'vid':COD.has(e)?'code':'oth'}
 function sz(b){if(!b)return'0 B';const k=1024,s=['B','KB','MB','GB'],i=Math.floor(Math.log(b)/Math.log(k));return(b/Math.pow(k,i)).toFixed(i?1:0)+' '+s[i]}
 function ago(t){const d=Date.now()/1000-t;return d<60?'now':d<3600?Math.floor(d/60)+'m':d<86400?Math.floor(d/3600)+'h':d<604800?Math.floor(d/86400)+'d':new Date(t*1000).toLocaleDateString()}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
@@ -315,9 +317,10 @@ const IC={
   aud:'<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
   vid:'<svg viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>',
   code:'<svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  '3d':'<svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
   oth:'<svg viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>'
 };
-const COLORS={img:'var(--blue)',doc:'var(--cyan)',aud:'var(--amber)',vid:'var(--red)',code:'var(--green)',oth:'var(--tx-3)'};
+const COLORS={img:'var(--blue)',doc:'var(--cyan)',aud:'var(--amber)',vid:'var(--red)',code:'var(--green)','3d':'#a855f7',oth:'var(--tx-3)'};
 
 // ── Drag & Drop ──
 let dc=0;const dz=$('drop');
@@ -400,7 +403,7 @@ function cancelQ(id){const u=ups.find(x=>x.id===id);if(u){u.xhr.abort();ups=ups.
 function updQCt(){const active=document.querySelectorAll('.qi-st.up').length;$('qCt').textContent=active;if(!document.querySelectorAll('.qi').length)$('queue').classList.remove('on')}
 
 // ── Tabs ──
-const TABS=[{k:'all',l:'All'},{k:'img',l:'Images'},{k:'doc',l:'Docs'},{k:'aud',l:'Audio'},{k:'vid',l:'Video'},{k:'code',l:'Code'}];
+const TABS=[{k:'all',l:'All'},{k:'img',l:'Images'},{k:'3d',l:'3D Models'},{k:'doc',l:'Docs'},{k:'aud',l:'Audio'},{k:'vid',l:'Video'},{k:'code',l:'Code'}];
 function renderTabs(){
   const cts={all:files.length};TABS.forEach(t=>{if(t.k!=='all')cts[t.k]=files.filter(f=>f.cat===t.k).length});
   $('tabs').innerHTML=TABS.map(t=>`<button class="tab${filter===t.k?' on':''}" data-f="${t.k}" role="tab" aria-selected="${filter===t.k}">${t.l}<span class="n">${cts[t.k]||0}</span></button>`).join('');

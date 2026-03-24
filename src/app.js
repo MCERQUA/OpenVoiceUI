@@ -155,11 +155,12 @@ inject();
                 const voiceGroup = document.getElementById('voice-select-group');
                 if (!voiceSelect) return;
 
-                // Find voices for current provider
+                // Find voices for current provider (builtin + cloned)
                 const provider = this.providers.find(p => p.provider_id === this.selectedProvider);
                 const voices = provider?.voices || [];
+                const clonedVoices = provider?.cloned_voices || [];
 
-                if (voices.length === 0) {
+                if (voices.length === 0 && clonedVoices.length === 0) {
                     // Hide voice selector if provider has no voice choices
                     if (voiceGroup) voiceGroup.style.display = 'none';
                     return;
@@ -173,6 +174,18 @@ inject();
                     option.textContent = v;
                     voiceSelect.appendChild(option);
                 });
+                // Add cloned voices with visual grouping
+                if (clonedVoices.length > 0) {
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = 'Cloned Voices';
+                    clonedVoices.forEach(cv => {
+                        const option = document.createElement('option');
+                        option.value = cv.voice_id;
+                        option.textContent = cv.name;
+                        optgroup.appendChild(option);
+                    });
+                    voiceSelect.appendChild(optgroup);
+                }
                 voiceSelect.value = this.currentVoice;
             },
 
@@ -4063,13 +4076,17 @@ inject();
                 const now = Date.now();
                 if (now - (window._lastSessionStartSentMs || 0) < 60000) {
                     console.warn('[Session] Skipping greeting — global 60s cooldown active');
+                    this._greetingSkipped = true;
                     return;
                 }
                 window._lastSessionStartSentMs = now;
+                this._greetingSkipped = false;
                 // Send a session start signal to the agent — generates its own greeting
                 // based on face recognition, memory (MEMORY.md / clawd/memory/), and GREETINGS.md
                 // Face recognition context is automatically included via sendMessage() → identified_person
-                this.sendMessage('__session_start__');
+                // AWAIT so _fetchAbortController is guaranteed set before stt.start() —
+                // prevents the safety-net at stt.start() from prematurely unmuting STT.
+                await this.sendMessage('__session_start__');
             }
 
             displayMessage(role, text, streaming = false) {
@@ -4844,16 +4861,18 @@ inject();
                     }
                 };
 
-                // Start listening
+                // Start listening — but MUTED until greeting finishes.
+                // STT must not capture speech before the agent greets, otherwise
+                // pre-greeting speech gets sent to the LLM and confuses the session.
                 if (await this.stt.start()) {
+                    this.stt.pause?.();  // Mute immediately — greeting will resume
                     this.isConnected = true;
                     this.isProcessing = false;
                     this.callbacks.onConnect();
-                    this.callbacks.onListening();
 
-                    // Auto-greet — sends session start so agent speaks first.
-                    // Do NOT await; greeting runs in background while STT listens.
-                    this._sendSessionGreeting();
+                    // Auto-greet — await so STT stays muted until greeting TTS finishes.
+                    // _sendSessionGreeting resumes STT + fires onListening in its finally block.
+                    await this._sendSessionGreeting();
                 } else {
                     this.isProcessing = false;
                     this.callbacks.onError('Failed to start speech recognition');
@@ -8780,7 +8799,28 @@ inject();
                 console.log(`[Profile] wakeWords = ${JSON.stringify(window.wakeDetector.wakeWords)}`);
             }
 
-            console.log(`[Profile] applied: ${profile?.id} | silence=${profile?.stt?.silence_timeout_ms ?? 'default'}ms | accumulation=${profile?.stt?.accumulation_delay_ms ?? 'default'}ms | interruption=${window._interruptionEnabled} | wakeWords=${JSON.stringify(profile?.stt?.wake_words)} | modes=${JSON.stringify(profile?.modes)}`);
+            // 8. TTS provider/voice — switch ProviderManager to match profile voice settings
+            if (profile?.voice && window.providerManager) {
+                const newProvider = profile.voice.tts_provider;
+                const newVoice = profile.voice.voice_id;
+                if (newProvider) {
+                    window.providerManager.selectedProvider = newProvider;
+                    if (newVoice) window.providerManager.currentVoice = newVoice;
+                    // Update provider dropdown
+                    const provSelect = document.getElementById('voice-provider-select');
+                    if (provSelect) provSelect.value = newProvider;
+                    // Rebuild voice dropdown (includes cloned voices)
+                    window.providerManager.updateProviderStatus();
+                    window.providerManager.updateVoiceUI();
+                    // Update active voice conversation
+                    if (window.voiceAgent?.setTTSProvider) {
+                        window.voiceAgent.setTTSProvider(newProvider, newVoice || 'autumn');
+                    }
+                    console.log(`[Profile] TTS: ${newProvider} / ${newVoice}`);
+                }
+            }
+
+            console.log(`[Profile] applied: ${profile?.id} | silence=${profile?.stt?.silence_timeout_ms ?? 'default'}ms | accumulation=${profile?.stt?.accumulation_delay_ms ?? 'default'}ms | interruption=${window._interruptionEnabled} | wakeWords=${JSON.stringify(profile?.stt?.wake_words)} | modes=${JSON.stringify(profile?.modes)} | tts=${profile?.voice?.tts_provider}/${profile?.voice?.voice_id}`);
         };
 
         // Expose STT instance — lives at ModeManager.clawdbotMode.stt

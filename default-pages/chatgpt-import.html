@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Import Conversations</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #0b0e13;
+      --bg-secondary: #111620;
+      --bg-tertiary: #181d28;
+      --bg-card: #151a24;
+      --bg-hover: #1c2230;
+      --border: #252d3a;
+      --border-light: #2e3848;
+      --text-primary: #e2e8f0;
+      --text-secondary: #8b95a5;
+      --text-muted: #5c6777;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --accent-muted: rgba(59, 130, 246, 0.12);
+      --success: #22c55e;
+      --success-muted: rgba(34, 197, 94, 0.12);
+      --warning: #f59e0b;
+      --warning-muted: rgba(245, 158, 11, 0.12);
+      --error: #ef4444;
+      --error-muted: rgba(239, 68, 68, 0.12);
+      --radius: 8px;
+      --radius-lg: 12px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,0.4);
+      --transition: 150ms ease;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.5;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Layout */
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+
+    /* Header */
+    .page-header {
+      margin-bottom: 32px;
+    }
+    .page-header h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+    .page-header p {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-top: 6px;
+    }
+
+    /* Upload Zone */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-lg);
+      padding: 48px 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color var(--transition), background var(--transition);
+      background: var(--bg-secondary);
+      position: relative;
+    }
+    .upload-zone:hover,
+    .upload-zone.dragover {
+      border-color: var(--accent);
+      background: var(--accent-muted);
+    }
+    .upload-zone.processing {
+      pointer-events: none;
+      opacity: 0.7;
+    }
+    .upload-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .upload-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 16px;
+      border-radius: 50%;
+      background: var(--bg-tertiary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .upload-icon svg {
+      width: 24px;
+      height: 24px;
+      color: var(--text-secondary);
+    }
+    .upload-zone h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .upload-zone .hint {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* How-to Steps */
+    .steps-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      margin-top: 24px;
+    }
+    .steps-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 16px;
+    }
+    .steps-list {
+      list-style: none;
+      display: grid;
+      gap: 12px;
+    }
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .step-num {
+      width: 28px;
+      height: 28px;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background: var(--accent-muted);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .step-text {
+      font-size: 14px;
+      color: var(--text-secondary);
+      padding-top: 3px;
+    }
+    .step-text strong {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    /* Progress */
+    .progress-section {
+      display: none;
+      margin-top: 24px;
+    }
+    .progress-section.visible { display: block; }
+    .progress-bar-track {
+      height: 4px;
+      background: var(--bg-tertiary);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.4s ease;
+      width: 0%;
+    }
+    .progress-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    /* Stats Row */
+    .stats-row {
+      display: none;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+    .stats-row.visible {
+      display: grid;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .stat-value.accent { color: var(--accent); }
+    .stat-value.success { color: var(--success); }
+
+    /* Toolbar */
+    .toolbar {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      margin-top: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .toolbar.visible { display: flex; }
+    .search-box {
+      flex: 1;
+      position: relative;
+    }
+    .search-box svg {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      color: var(--text-muted);
+    }
+    .search-box input {
+      width: 100%;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px 10px 38px;
+      font-size: 14px;
+      color: var(--text-primary);
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    .search-box input::placeholder { color: var(--text-muted); }
+    .search-box input:focus { border-color: var(--accent); }
+
+    .filter-btn {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+    }
+    .filter-btn:hover { border-color: var(--border-light); color: var(--text-primary); }
+    .filter-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-muted); }
+
+    /* Conversation List */
+    .conversation-list {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .conversation-list.visible { display: flex; }
+
+    .conv-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .conv-item:hover {
+      border-color: var(--border-light);
+      background: var(--bg-hover);
+    }
+    .conv-item-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .conv-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .conv-date {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .conv-meta {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 8px;
+    }
+    .conv-stat {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .conv-topics {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .topic-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 100px;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--text-muted);
+      font-size: 14px;
+      display: none;
+    }
+    .empty-state.visible { display: block; }
+
+    .load-more-btn {
+      display: none;
+      width: 100%;
+      padding: 12px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all var(--transition);
+      margin-top: 8px;
+    }
+    .load-more-btn:hover { border-color: var(--border-light); color: var(--text-primary); }
+    .load-more-btn.visible { display: block; }
+
+    /* Conversation Detail Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 1000;
+      backdrop-filter: blur(4px);
+    }
+    .modal-overlay.visible { display: flex; align-items: center; justify-content: center; }
+
+    .modal {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      width: 90%;
+      max-width: 720px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow-lg);
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .modal-header h3 {
+      font-size: 16px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+      display: flex;
+      transition: color var(--transition);
+    }
+    .modal-close:hover { color: var(--text-primary); }
+    .modal-close svg { width: 20px; height: 20px; }
+
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-body .msg-block {
+      margin-bottom: 20px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-body .msg-block:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+    .msg-role {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    .msg-role.user { color: var(--accent); }
+    .msg-role.assistant { color: var(--success); }
+    .msg-text {
+      font-size: 14px;
+      line-height: 1.65;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Result banner */
+    .result-banner {
+      display: none;
+      padding: 14px 18px;
+      border-radius: var(--radius);
+      margin-top: 16px;
+      font-size: 14px;
+    }
+    .result-banner.visible { display: block; }
+    .result-banner.success {
+      background: var(--success-muted);
+      border: 1px solid rgba(34, 197, 94, 0.25);
+      color: var(--success);
+    }
+    .result-banner.error {
+      background: var(--error-muted);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      color: var(--error);
+    }
+
+    /* Topic Filter Bar */
+    .topic-filters {
+      display: none;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 12px;
+    }
+    .topic-filters.visible { display: flex; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .container { padding: 20px 16px; }
+      .upload-zone { padding: 32px 20px; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .toolbar { flex-wrap: wrap; }
+      .search-box { min-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="page-header">
+      <h1>Import Conversations</h1>
+      <p>Bring in your ChatGPT history so your agent has full context on your business</p>
+    </div>
+
+    <!-- Upload Zone -->
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept=".zip">
+      <div class="upload-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </div>
+      <h3>Upload ChatGPT Export</h3>
+      <p class="hint">Drop your ZIP file here or click to browse</p>
+    </div>
+
+    <!-- Result Banner -->
+    <div class="result-banner" id="resultBanner"></div>
+
+    <!-- Progress -->
+    <div class="progress-section" id="progressSection">
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressBar"></div>
+      </div>
+      <div class="progress-label" id="progressLabel">Preparing...</div>
+    </div>
+
+    <!-- How-to Steps -->
+    <div class="steps-card" id="stepsCard">
+      <h3>How to export from ChatGPT</h3>
+      <ol class="steps-list">
+        <li class="step-item">
+          <span class="step-num">1</span>
+          <span class="step-text">Open <strong>chatgpt.com</strong> and sign in to your account</span>
+        </li>
+        <li class="step-item">
+          <span class="step-num">2</span>
+          <span class="step-text">Click your profile icon, then go to <strong>Settings</strong></span>
+        </li>
+        <li class="step-item">
+          <span class="step-num">3</span>
+          <span class="step-text">Navigate to <strong>Data Controls</strong> and click <strong>Export Data</strong></span>
+        </li>
+        <li class="step-item">
+          <span class="step-num">4</span>
+          <span class="step-text">Check your email for the download link — it arrives within a few minutes</span>
+        </li>
+        <li class="step-item">
+          <span class="step-num">5</span>
+          <span class="step-text">Download the ZIP and upload it here</span>
+        </li>
+      </ol>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row" id="statsRow">
+      <div class="stat-card">
+        <div class="stat-label">Conversations</div>
+        <div class="stat-value accent" id="statConversations">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Messages</div>
+        <div class="stat-value" id="statMessages">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Words</div>
+        <div class="stat-value" id="statWords">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Topics Found</div>
+        <div class="stat-value success" id="statTopics">0</div>
+      </div>
+    </div>
+
+    <!-- Topic Filters -->
+    <div class="topic-filters" id="topicFilters"></div>
+
+    <!-- Search/Filter Toolbar -->
+    <div class="toolbar" id="toolbar">
+      <div class="search-box">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="searchInput" placeholder="Search conversations...">
+      </div>
+      <button class="filter-btn" id="sortBtn" title="Toggle sort order">Newest first</button>
+    </div>
+
+    <!-- Conversation List -->
+    <div class="conversation-list" id="convList"></div>
+    <div class="empty-state" id="emptyState">No conversations match your search</div>
+    <button class="load-more-btn" id="loadMoreBtn">Show more</button>
+
+  </div>
+
+  <!-- Conversation Detail Modal -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Conversation</h3>
+        <button class="modal-close" id="modalClose">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <script>
+    // ---- State ----
+    let allConversations = [];
+    let filteredConversations = [];
+    let activeTopic = '';
+    let sortNewest = true;
+    let visibleCount = 30;
+
+    // ---- DOM ----
+    const $ = id => document.getElementById(id);
+    const uploadZone = $('uploadZone');
+    const fileInput = $('fileInput');
+    const progressSection = $('progressSection');
+    const progressBar = $('progressBar');
+    const progressLabel = $('progressLabel');
+    const resultBanner = $('resultBanner');
+    const stepsCard = $('stepsCard');
+    const statsRow = $('statsRow');
+    const toolbar = $('toolbar');
+    const convList = $('convList');
+    const searchInput = $('searchInput');
+    const sortBtn = $('sortBtn');
+    const emptyState = $('emptyState');
+    const loadMoreBtn = $('loadMoreBtn');
+    const topicFilters = $('topicFilters');
+    const modalOverlay = $('modalOverlay');
+    const modalTitle = $('modalTitle');
+    const modalBody = $('modalBody');
+    const modalClose = $('modalClose');
+
+    // ---- Auth ----
+    let authToken = null;
+    window.addEventListener('message', e => {
+      if (e.data && e.data.type === 'auth-token') authToken = e.data.token;
+    });
+    function authFetch(url, opts = {}) {
+      const headers = { ...(opts.headers || {}) };
+      if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+      return fetch(url, { ...opts, headers });
+    }
+
+    // ---- Init: check for existing import ----
+    async function init() {
+      try {
+        const res = await authFetch('/api/import/chatgpt/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.has_import && data.total_conversations > 0) {
+          loadExistingImport();
+        }
+      } catch (e) { /* no existing import */ }
+    }
+
+    async function loadExistingImport() {
+      try {
+        const res = await authFetch('/api/import/chatgpt/conversations');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.conversations && data.conversations.length > 0) {
+          allConversations = data.conversations;
+          showResults(data.conversations.length, 0, 0);
+        }
+      } catch (e) { /* silently fail */ }
+    }
+
+    // ---- Upload ----
+    uploadZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragleave', () => {
+      uploadZone.classList.remove('dragover');
+    });
+    uploadZone.addEventListener('drop', e => {
+      e.preventDefault();
+      uploadZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) handleFile(fileInput.files[0]);
+    });
+
+    async function handleFile(file) {
+      if (!file.name.toLowerCase().endsWith('.zip')) {
+        showBanner('Please upload a ZIP file from ChatGPT\'s data export', 'error');
+        return;
+      }
+
+      uploadZone.classList.add('processing');
+      stepsCard.style.display = 'none';
+      resultBanner.classList.remove('visible');
+      progressSection.classList.add('visible');
+
+      setProgress(10, 'Uploading file...');
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        setProgress(30, 'Parsing conversations...');
+
+        const res = await authFetch('/api/import/chatgpt', {
+          method: 'POST',
+          body: formData,
+        });
+
+        setProgress(70, 'Processing results...');
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+          showBanner(err.error || 'Import failed', 'error');
+          uploadZone.classList.remove('processing');
+          progressSection.classList.remove('visible');
+          stepsCard.style.display = '';
+          return;
+        }
+
+        const data = await res.json();
+        setProgress(100, 'Complete');
+
+        allConversations = data.conversations || [];
+        showResults(data.imported, data.skipped, data.errors ? data.errors.length : 0);
+
+        if (data.errors && data.errors.length > 0) {
+          console.warn('Import warnings:', data.errors);
+        }
+
+      } catch (e) {
+        showBanner('Network error: ' + e.message, 'error');
+        uploadZone.classList.remove('processing');
+        progressSection.classList.remove('visible');
+        stepsCard.style.display = '';
+      }
+    }
+
+    function setProgress(pct, label) {
+      progressBar.style.width = pct + '%';
+      progressLabel.textContent = label;
+    }
+
+    function showBanner(msg, type) {
+      resultBanner.textContent = msg;
+      resultBanner.className = 'result-banner visible ' + type;
+    }
+
+    // ---- Show Results ----
+    function showResults(imported, skipped, errorCount) {
+      uploadZone.classList.remove('processing');
+      progressSection.classList.remove('visible');
+      stepsCard.style.display = 'none';
+
+      if (imported > 0) {
+        showBanner(imported + ' conversation' + (imported !== 1 ? 's' : '') + ' imported successfully' + (skipped ? ' (' + skipped + ' skipped)' : ''), 'success');
+      }
+
+      // Stats
+      let totalMessages = 0, totalWords = 0;
+      const topicSet = new Set();
+      allConversations.forEach(c => {
+        totalMessages += c.message_count || 0;
+        totalWords += c.word_count || 0;
+        (c.topics || []).forEach(t => topicSet.add(t));
+      });
+
+      $('statConversations').textContent = allConversations.length.toLocaleString();
+      $('statMessages').textContent = totalMessages.toLocaleString();
+      $('statWords').textContent = totalWords.toLocaleString();
+      $('statTopics').textContent = topicSet.size;
+
+      statsRow.classList.add('visible');
+      toolbar.classList.add('visible');
+      convList.classList.add('visible');
+
+      // Build topic filter buttons
+      buildTopicFilters(topicSet);
+
+      // Render list
+      applyFilters();
+    }
+
+    function buildTopicFilters(topicSet) {
+      topicFilters.innerHTML = '';
+      if (topicSet.size === 0) return;
+
+      const allBtn = document.createElement('button');
+      allBtn.className = 'filter-btn active';
+      allBtn.textContent = 'All';
+      allBtn.onclick = () => {
+        activeTopic = '';
+        topicFilters.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        allBtn.classList.add('active');
+        applyFilters();
+      };
+      topicFilters.appendChild(allBtn);
+
+      // Count topics
+      const counts = {};
+      allConversations.forEach(c => (c.topics || []).forEach(t => counts[t] = (counts[t] || 0) + 1));
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+      sorted.forEach(([topic, count]) => {
+        const btn = document.createElement('button');
+        btn.className = 'filter-btn';
+        btn.textContent = topic + ' (' + count + ')';
+        btn.onclick = () => {
+          activeTopic = topic;
+          topicFilters.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          applyFilters();
+        };
+        topicFilters.appendChild(btn);
+      });
+
+      topicFilters.classList.add('visible');
+    }
+
+    // ---- Filter / Search / Sort ----
+    searchInput.addEventListener('input', debounce(applyFilters, 200));
+    sortBtn.addEventListener('click', () => {
+      sortNewest = !sortNewest;
+      sortBtn.textContent = sortNewest ? 'Newest first' : 'Oldest first';
+      applyFilters();
+    });
+
+    function applyFilters() {
+      const q = searchInput.value.trim().toLowerCase();
+      visibleCount = 30;
+
+      filteredConversations = allConversations.filter(c => {
+        if (activeTopic && !(c.topics || []).includes(activeTopic)) return false;
+        if (q) {
+          const text = (c.title || '').toLowerCase() + ' ' + (c.topics || []).join(' ');
+          if (!text.includes(q)) return false;
+        }
+        return true;
+      });
+
+      // Sort
+      filteredConversations.sort((a, b) => {
+        const da = a.created || '';
+        const db = b.created || '';
+        return sortNewest ? db.localeCompare(da) : da.localeCompare(db);
+      });
+
+      renderList();
+    }
+
+    function renderList() {
+      convList.innerHTML = '';
+      const toShow = filteredConversations.slice(0, visibleCount);
+
+      if (toShow.length === 0 && allConversations.length > 0) {
+        emptyState.classList.add('visible');
+      } else {
+        emptyState.classList.remove('visible');
+      }
+
+      toShow.forEach(c => {
+        const el = document.createElement('div');
+        el.className = 'conv-item';
+        el.onclick = () => openConversation(c);
+
+        const dateStr = c.created ? c.created.split(' ')[0] : '';
+        const topicHtml = (c.topics || []).map(t => '<span class="topic-tag">' + esc(t) + '</span>').join('');
+
+        el.innerHTML =
+          '<div class="conv-item-header">' +
+            '<span class="conv-title">' + esc(c.title) + '</span>' +
+            (dateStr ? '<span class="conv-date">' + esc(dateStr) + '</span>' : '') +
+          '</div>' +
+          '<div class="conv-meta">' +
+            '<span class="conv-stat">' + (c.message_count || 0) + ' messages</span>' +
+            '<span class="conv-stat">' + ((c.word_count || 0)).toLocaleString() + ' words</span>' +
+          '</div>' +
+          (topicHtml ? '<div class="conv-topics">' + topicHtml + '</div>' : '');
+
+        convList.appendChild(el);
+      });
+
+      if (filteredConversations.length > visibleCount) {
+        loadMoreBtn.classList.add('visible');
+        loadMoreBtn.textContent = 'Show more (' + (filteredConversations.length - visibleCount) + ' remaining)';
+      } else {
+        loadMoreBtn.classList.remove('visible');
+      }
+    }
+
+    loadMoreBtn.addEventListener('click', () => {
+      visibleCount += 30;
+      renderList();
+    });
+
+    // ---- Conversation Detail ----
+    async function openConversation(conv) {
+      modalTitle.textContent = conv.title || 'Conversation';
+      modalBody.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted)">Loading...</div>';
+      modalOverlay.classList.add('visible');
+      document.body.style.overflow = 'hidden';
+
+      try {
+        const res = await authFetch('/api/import/chatgpt/conversation/' + encodeURIComponent(conv.filename));
+        if (!res.ok) {
+          modalBody.innerHTML = '<div style="padding:24px;color:var(--error)">Could not load conversation</div>';
+          return;
+        }
+        const data = await res.json();
+        renderConversationContent(data.content);
+      } catch (e) {
+        modalBody.innerHTML = '<div style="padding:24px;color:var(--error)">Error: ' + esc(e.message) + '</div>';
+      }
+    }
+
+    function renderConversationContent(markdown) {
+      // Parse the markdown into user/assistant blocks
+      const blocks = [];
+      const lines = markdown.split('\n');
+      let currentRole = null;
+      let currentText = [];
+
+      for (const line of lines) {
+        if (line.startsWith('## User')) {
+          if (currentRole) blocks.push({ role: currentRole, text: currentText.join('\n').trim() });
+          currentRole = 'user';
+          currentText = [];
+        } else if (line.startsWith('## Assistant')) {
+          if (currentRole) blocks.push({ role: currentRole, text: currentText.join('\n').trim() });
+          currentRole = 'assistant';
+          currentText = [];
+        } else if (line.startsWith('# ') || line.startsWith('**Date:**')) {
+          // Skip title and date header
+        } else {
+          currentText.push(line);
+        }
+      }
+      if (currentRole) blocks.push({ role: currentRole, text: currentText.join('\n').trim() });
+
+      modalBody.innerHTML = blocks
+        .filter(b => b.text)
+        .map(b =>
+          '<div class="msg-block">' +
+            '<div class="msg-role ' + b.role + '">' + (b.role === 'user' ? 'You' : 'ChatGPT') + '</div>' +
+            '<div class="msg-text">' + esc(b.text) + '</div>' +
+          '</div>'
+        ).join('');
+    }
+
+    modalClose.addEventListener('click', closeModal);
+    modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+    function closeModal() {
+      modalOverlay.classList.remove('visible');
+      document.body.style.overflow = '';
+    }
+
+    // ---- Utilities ----
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s || '';
+      return d.innerHTML;
+    }
+
+    function debounce(fn, ms) {
+      let t;
+      return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+    }
+
+    // ---- Boot ----
+    init();
+  </script>
+</body>
+</html>

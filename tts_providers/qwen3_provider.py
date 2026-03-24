@@ -12,6 +12,8 @@ API key: FAL_KEY env var
 
 import json
 import os
+import re
+import subprocess
 import time
 import logging
 from pathlib import Path
@@ -259,9 +261,22 @@ class Qwen3Provider(TTSProvider):
                     except Exception:
                         pass
 
+        # ── Comic timing: add pauses at sentence boundaries ──
+        # Ellipsis after sentence-ending punctuation creates natural pauses
+        # in qwen3 TTS output without needing SSML.
+        comic_timing = kwargs.get('comic_timing', True) if is_cloned else False
+        if comic_timing:
+            text = re.sub(r'([.!?])\s+', r'\1 ... ', text)
+
+        # Scale max_new_tokens based on text length — default 200 truncates long responses.
+        # ~4 tokens per character is a safe ratio for speech codec tokens.
+        estimated_tokens = max(2000, len(text) * 4)
+        max_tokens = min(estimated_tokens, 8192)
+
         payload = {
             "text": text,
             "language": language,
+            "max_new_tokens": max_tokens,
         }
 
         if embedding_url:
@@ -299,8 +314,54 @@ class Qwen3Provider(TTSProvider):
 
         audio_bytes = _fal_download(audio_url)
 
+        # ── Post-processing: speed adjustment via ffmpeg ──
+        # Read speed from active profile if not passed directly
+        speed = kwargs.get('speed', None)
+        if speed is None:
+            speed = self._get_profile_speed()
+        if speed and speed != 1.0 and 0.5 <= speed <= 2.0:
+            audio_bytes = self._ffmpeg_speed(audio_bytes, speed)
+
         elapsed = int((time.time() - t) * 1000)
-        logger.info(f"[Qwen3] Generated {len(audio_bytes)} bytes in {elapsed}ms")
+        logger.info(f"[Qwen3] Generated {len(audio_bytes)} bytes in {elapsed}ms speed={speed}")
+        return audio_bytes
+
+    @staticmethod
+    def _get_profile_speed():
+        """Read speed from the active profile's voice settings."""
+        try:
+            from profiles.manager import get_profile_manager
+            from routes.profiles import _active_profile_id
+            mgr = get_profile_manager()
+            prof = mgr.get_profile(_active_profile_id)
+            if prof and hasattr(prof, 'voice') and prof.voice:
+                return prof.voice.speed
+        except Exception:
+            pass
+        return 1.0
+
+    @staticmethod
+    def _ffmpeg_speed(audio_bytes: bytes, speed: float) -> bytes:
+        """Adjust audio speed using ffmpeg atempo filter."""
+        try:
+            cmd = [
+                'ffmpeg', '-y', '-i', 'pipe:0',
+                '-filter:a', f'atempo={speed}',
+                '-f', 'mp3', 'pipe:1'
+            ]
+            proc = subprocess.run(
+                cmd, input=audio_bytes, capture_output=True, timeout=30
+            )
+            if proc.returncode == 0 and proc.stdout:
+                logger.info(
+                    f"[Qwen3] ffmpeg speed={speed}: "
+                    f"{len(audio_bytes)}→{len(proc.stdout)} bytes"
+                )
+                return proc.stdout
+            else:
+                logger.warning(f"[Qwen3] ffmpeg failed: {proc.stderr[:200]}")
+        except Exception as e:
+            logger.warning(f"[Qwen3] ffmpeg speed adjust error: {e}")
         return audio_bytes
 
     # ------------------------------------------------------------------

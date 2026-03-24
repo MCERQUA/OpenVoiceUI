@@ -20,6 +20,8 @@ import io
 import time
 import logging
 import threading
+from pathlib import Path
+from typing import Optional
 
 import httpx
 
@@ -52,6 +54,33 @@ _voices_cache_global = None
 _voices_cache_time_global = 0
 _voices_loading_global = False
 
+# Per-voice style configuration file path (JSON, optional).
+# Maps voice UUID → {exaggeration, model, prompt} overrides.
+# Falls back to env var RESEMBLE_VOICE_STYLES_PATH.
+_VOICE_STYLES_PATH = os.getenv(
+    'RESEMBLE_VOICE_STYLES_PATH',
+    os.path.join(os.path.dirname(__file__), 'resemble_voice_styles.json')
+)
+_voice_styles_cache = None
+_voice_styles_mtime = 0
+
+
+def _get_voice_styles() -> dict:
+    """Load per-voice style overrides from JSON file. Hot-reloads on change."""
+    global _voice_styles_cache, _voice_styles_mtime
+    try:
+        mt = os.path.getmtime(_VOICE_STYLES_PATH)
+        if _voice_styles_cache is not None and mt == _voice_styles_mtime:
+            return _voice_styles_cache
+        import json
+        with open(_VOICE_STYLES_PATH) as f:
+            _voice_styles_cache = json.load(f)
+        _voice_styles_mtime = mt
+        logger.info(f"[Resemble] Loaded voice styles: {list(_voice_styles_cache.keys())}")
+        return _voice_styles_cache
+    except (FileNotFoundError, ValueError):
+        return {}
+
 
 class ResembleProvider(TTSProvider):
     """
@@ -83,6 +112,188 @@ class ResembleProvider(TTSProvider):
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
         }
+
+    # ------------------------------------------------------------------
+    # Voice cloning
+    # ------------------------------------------------------------------
+
+    def clone_voice(self, audio_path: str, name: str, **kwargs) -> dict:
+        """
+        Clone a voice using Resemble AI's voice creation API.
+
+        Steps: Create voice -> Upload recording -> Build -> Poll until ready.
+        Build time varies: typically 1-5 minutes for a single recording.
+
+        Args:
+            audio_path: Local path to audio file.
+            name: Human-readable name for the voice.
+            **kwargs:
+                reference_text: Optional transcript of the recording.
+                max_wait: Max seconds to wait for build (default 300).
+
+        Returns:
+            dict with: voice_id, name, provider, created_at, clone_time_ms
+        """
+        if not self.api_key:
+            raise RuntimeError("RESEMBLE_API_KEY not set")
+
+        reference_text = kwargs.get('reference_text', '')
+        max_wait = kwargs.get('max_wait', 300)
+
+        t = time.time()
+        logger.info(f"[Resemble] Cloning voice '{name}' from {audio_path}")
+
+        audio_file = Path(audio_path)
+        if not audio_file.exists():
+            raise RuntimeError(f"Audio file not found: {audio_path}")
+
+        # Step 1: Create voice entry
+        try:
+            with httpx.Client(timeout=httpx.Timeout(API_TIMEOUT)) as client:
+                resp = client.post(
+                    f"{API_BASE_URL}/voices",
+                    json={"name": name, "language": "en"},
+                    headers=self._auth_headers(),
+                )
+                resp.raise_for_status()
+                voice_data = resp.json().get('item', {})
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"Resemble voice creation error {e.response.status_code}: "
+                f"{e.response.text[:200]}"
+            )
+
+        voice_uuid = voice_data.get('uuid', '')
+        if not voice_uuid:
+            raise RuntimeError(
+                f"No UUID in Resemble voice creation response"
+            )
+        logger.info(f"[Resemble] Voice created: {voice_uuid}")
+
+        # Step 2: Upload recording
+        with open(audio_file, 'rb') as f:
+            audio_bytes = f.read()
+
+        ct_map = {
+            '.wav': 'audio/wav', '.mp3': 'audio/mpeg',
+            '.m4a': 'audio/mp4', '.ogg': 'audio/ogg',
+            '.webm': 'audio/webm', '.flac': 'audio/flac',
+        }
+        ct = ct_map.get(audio_file.suffix.lower(), 'audio/wav')
+
+        try:
+            with httpx.Client(
+                timeout=httpx.Timeout(30.0, connect=10.0)
+            ) as client:
+                upload_data = {'name': f'{name}_sample', 'is_active': 'true'}
+                if reference_text:
+                    upload_data['emotion'] = 'neutral'
+
+                resp = client.post(
+                    f"{API_BASE_URL}/voices/{voice_uuid}/recordings",
+                    headers={'Authorization': f'Bearer {self.api_key}'},
+                    files={'file': (audio_file.name, audio_bytes, ct)},
+                    data=upload_data,
+                )
+                resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"Resemble recording upload error {e.response.status_code}: "
+                f"{e.response.text[:200]}"
+            )
+        logger.info(f"[Resemble] Recording uploaded for {voice_uuid}")
+
+        # Step 3: Start voice build
+        try:
+            with httpx.Client(timeout=httpx.Timeout(API_TIMEOUT)) as client:
+                resp = client.post(
+                    f"{API_BASE_URL}/voices/{voice_uuid}/build",
+                    headers=self._auth_headers(),
+                    json={},
+                )
+                resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"Resemble build error {e.response.status_code}: "
+                f"{e.response.text[:200]}"
+            )
+        logger.info(f"[Resemble] Build started for {voice_uuid}")
+
+        # Step 4: Poll for build completion
+        poll_interval = 5
+        polls = int(max_wait / poll_interval)
+        build_ready = False
+
+        for i in range(polls):
+            time.sleep(poll_interval)
+            try:
+                with httpx.Client(
+                    timeout=httpx.Timeout(API_TIMEOUT)
+                ) as client:
+                    resp = client.get(
+                        f"{API_BASE_URL}/voices/{voice_uuid}",
+                        headers=self._auth_headers(),
+                    )
+                    resp.raise_for_status()
+                    status = resp.json().get('item', {}).get(
+                        'voice_status', ''
+                    )
+            except Exception as e:
+                logger.warning(f"[Resemble] Poll error: {e}")
+                continue
+
+            if status == 'Ready':
+                build_ready = True
+                break
+            elif status in ('Failed', 'Disabled'):
+                raise RuntimeError(
+                    f"Resemble voice build failed (status: {status})"
+                )
+            # Still building — continue polling
+
+        if not build_ready:
+            raise RuntimeError(
+                f"Resemble voice build timed out after {max_wait}s. "
+                f"Voice UUID: {voice_uuid} — it may still finish building."
+            )
+
+        elapsed_ms = int((time.time() - t) * 1000)
+        logger.info(
+            f"[Resemble] Voice cloned: {voice_uuid} in {elapsed_ms}ms"
+        )
+
+        # Invalidate voice cache
+        global _voices_cache_global, _voices_cache_time_global
+        _voices_cache_global = None
+        _voices_cache_time_global = 0
+
+        return {
+            'voice_id': voice_uuid,
+            'name': name,
+            'provider': 'resemble',
+            'created_at': time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            ),
+            'clone_time_ms': elapsed_ms,
+        }
+
+    def get_voice_status(self, voice_uuid: str) -> str:
+        """Check the build status of a Resemble voice."""
+        if not self.api_key:
+            return 'error'
+        try:
+            with httpx.Client(timeout=httpx.Timeout(API_TIMEOUT)) as client:
+                resp = client.get(
+                    f"{API_BASE_URL}/voices/{voice_uuid}",
+                    headers=self._auth_headers(),
+                )
+                resp.raise_for_status()
+                return resp.json().get('item', {}).get(
+                    'voice_status', 'unknown'
+                )
+        except Exception as e:
+            logger.warning(f"[Resemble] Status check failed: {e}")
+            return 'error'
 
     # ------------------------------------------------------------------
     # Voice listing (cached from Resemble API)
@@ -181,9 +392,25 @@ class ResembleProvider(TTSProvider):
         precision = kwargs.get('precision', 'PCM_16')
         exaggeration = kwargs.get('exaggeration')
 
-        # Wrap in SSML if exaggeration is set
-        if exaggeration is not None and not text.strip().startswith('<speak'):
-            text = f'<speak exaggeration="{exaggeration}">{text}</speak>'
+        # Per-voice style presets — apply character-specific direction
+        # when no explicit exaggeration/model is provided via kwargs.
+        voice_styles = _get_voice_styles()
+        style = voice_styles.get(voice_uuid, {})
+        if exaggeration is None and 'exaggeration' in style:
+            exaggeration = style['exaggeration']
+        if not model and 'model' in style:
+            model = style['model']
+        prompt = style.get('prompt', '')
+
+        # Wrap in SSML with prompt/exaggeration if applicable
+        if not text.strip().startswith('<speak'):
+            attrs = []
+            if exaggeration is not None:
+                attrs.append(f'exaggeration="{exaggeration}"')
+            if prompt:
+                attrs.append(f'prompt="{prompt}"')
+            if attrs:
+                text = f'<speak {" ".join(attrs)}>{text}</speak>'
 
         payload = {
             'voice_uuid': voice_uuid,
