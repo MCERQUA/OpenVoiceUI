@@ -6017,6 +6017,11 @@ inject();
             CanvasControl.init();
             TranscriptPanel.init();
             ActionConsole.init();
+
+            // Initialize ModeManager EARLY so transcript text input works immediately.
+            // STT will be attached later when VoiceConversation is ready.
+            ModeManager.init(null);
+
             await CanvasMenu.init();
 
             // Initialize Provider Manager — sets window._serverProfile
@@ -6035,8 +6040,8 @@ inject();
             const voiceConversation = new VoiceConversation(CONFIG);
             window._voiceConversation = voiceConversation; // expose for stopAll()
 
-            // Initialize Mode Manager with shared STT (handles Hume/Clawdbot switching)
-            ModeManager.init(voiceConversation.stt);
+            // Attach shared STT to ModeManager (was initialized early without it)
+            ModeManager.clawdbotMode.stt = voiceConversation.stt;
 
             // Restore saved mode (default to supertonic).
             // savedMode may be a profile ID (e.g. 'default') or a transport
@@ -7638,6 +7643,27 @@ inject();
                 this._pendingImageThumbUrl = null;
                 if (window.ModeManager?.clawdbotMode) {
                     window.ModeManager.clawdbotMode.sendMessage(messageToSend, { image_path: imagePath, imageUrl: imageThumbUrl });
+                } else {
+                    // Fallback: ModeManager not ready — send directly via API
+                    console.warn('[TranscriptPanel] ModeManager not ready — sending directly');
+                    this.addMessage('user', messageToSend, { imageUrl: imageThumbUrl });
+                    try {
+                        const resp = await fetch(`${CONFIG.serverUrl}/api/conversation`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ message: messageToSend, tts_provider: 'groq', voice: 'autumn' })
+                        });
+                        if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+                        const data = await resp.json();
+                        if (data.response) {
+                            this.addMessage('assistant', data.response);
+                        } else {
+                            this.addMessage('assistant', 'No response received. Try starting a call first.');
+                        }
+                    } catch (err) {
+                        console.error('[TranscriptPanel] Direct send failed:', err);
+                        this.addMessage('assistant', 'Failed to send — try starting a call first.');
+                    }
                 }
             },
 

@@ -246,8 +246,18 @@ def get_current_canvas_page_for_worker() -> str | None:
 # Manifest helpers
 # ---------------------------------------------------------------------------
 
+import copy
+
+_manifest_lock = threading.Lock()
+
+
 def load_canvas_manifest() -> dict:
-    """Load manifest with mtime-based caching."""
+    """Load manifest with mtime-based caching.
+
+    Returns a deep copy so callers can mutate freely without corrupting the
+    cache or racing with other threads.  The _manifest_lock MUST be held by
+    the caller when load+modify+save must be atomic (use ``with _manifest_lock:``).
+    """
     global _manifest_cache
     if CANVAS_MANIFEST_PATH.exists():
         try:
@@ -257,7 +267,7 @@ def load_canvas_manifest() -> dict:
                     _manifest_cache['data'] = json.load(f)
                     _manifest_cache['mtime'] = mtime
             if _manifest_cache['data']:
-                return _manifest_cache['data']
+                return copy.deepcopy(_manifest_cache['data'])
         except (json.JSONDecodeError, IOError) as exc:
             logging.getLogger(__name__).warning(f'Failed to load canvas manifest: {exc}')
 
@@ -279,7 +289,8 @@ def save_canvas_manifest(manifest: dict) -> None:
         data = json.dumps(manifest, indent=2)
         with open(CANVAS_MANIFEST_PATH, 'w') as f:
             f.write(data)
-        _manifest_cache['mtime'] = 0  # invalidate cache
+        _manifest_cache['data'] = copy.deepcopy(manifest)
+        _manifest_cache['mtime'] = CANVAS_MANIFEST_PATH.stat().st_mtime
     except Exception as exc:
         logging.getLogger(__name__).error(f'Failed to save canvas manifest: {exc}')
 
@@ -310,6 +321,12 @@ def generate_voice_aliases(title: str) -> list[str]:
 
 def sync_canvas_manifest() -> dict:
     """Full sync with pages directory."""
+    with _manifest_lock:
+        return _sync_canvas_manifest_locked()
+
+
+def _sync_canvas_manifest_locked() -> dict:
+    """Inner implementation — caller must hold _manifest_lock."""
     global _last_sync_time
     _last_sync_time = time.time()
     manifest = load_canvas_manifest()
@@ -399,6 +416,12 @@ def add_page_to_manifest(filename: str, title: str, description: str = '', conte
     When updating an existing page, all user-customised fields are preserved —
     only 'modified' and, if explicitly supplied, 'display_name' are touched.
     """
+    with _manifest_lock:
+        return _add_page_to_manifest_locked(filename, title, description, content)
+
+
+def _add_page_to_manifest_locked(filename: str, title: str, description: str = '', content: str = '') -> dict:
+    """Inner implementation — caller must hold _manifest_lock."""
     manifest = load_canvas_manifest()
     page_id = Path(filename).stem
     category = suggest_category(title, content)
@@ -494,15 +517,16 @@ def _inject_page_into_desktop_state(manifest: dict, page_id: str) -> None:
 
 def track_page_access(page_id: str) -> None:
     """Track when a page is accessed (for recently viewed)."""
-    manifest = load_canvas_manifest()
-    if page_id in manifest['pages']:
-        manifest['pages'][page_id]['access_count'] = manifest['pages'][page_id].get('access_count', 0) + 1
-        recently = manifest.get('recently_viewed', [])
-        if page_id in recently:
-            recently.remove(page_id)
-        recently.insert(0, page_id)
-        manifest['recently_viewed'] = recently[:20]
-        save_canvas_manifest(manifest)
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
+        if page_id in manifest['pages']:
+            manifest['pages'][page_id]['access_count'] = manifest['pages'][page_id].get('access_count', 0) + 1
+            recently = manifest.get('recently_viewed', [])
+            if page_id in recently:
+                recently.remove(page_id)
+            recently.insert(0, page_id)
+            manifest['recently_viewed'] = recently[:20]
+            save_canvas_manifest(manifest)
 
 
 # ---------------------------------------------------------------------------
@@ -974,70 +998,78 @@ def sync_manifest():
 
 @canvas_bp.route('/api/canvas/manifest/page/<page_id>', methods=['GET', 'PATCH', 'DELETE'])
 def handle_page_metadata(page_id):
-    """Get, update, or delete page metadata."""
-    manifest = load_canvas_manifest()
+    """Get, update, or delete page metadata.
 
-    if page_id not in manifest['pages']:
-        return jsonify({'error': 'Page not found'}), 404
+    All reads and writes are serialised via _manifest_lock to prevent
+    concurrent threads from overwriting each other's changes (the Flask
+    server runs with ``threaded=True``).
+    """
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
 
-    if request.method == 'GET':
-        return jsonify(manifest['pages'][page_id])
+        if page_id not in manifest['pages']:
+            return jsonify({'error': 'Page not found'}), 404
 
-    if request.method == 'DELETE':
-        page = manifest['pages'][page_id]
-        filename = page.get('filename')
-        page_title = page.get('display_name', page_id)
-        logger.info(f'Deleting canvas page: {page_title} ({filename})')
+        if request.method == 'GET':
+            return jsonify(manifest['pages'][page_id])
 
-        old_category = page.get('category')
-        if old_category and old_category in manifest['categories']:
-            if page_id in manifest['categories'][old_category].get('pages', []):
-                manifest['categories'][old_category]['pages'].remove(page_id)
-        if page_id in manifest.get('uncategorized', []):
-            manifest['uncategorized'].remove(page_id)
-        if page_id in manifest.get('recently_viewed', []):
-            manifest['recently_viewed'].remove(page_id)
+        if request.method == 'DELETE':
+            page = manifest['pages'][page_id]
+            filename = page.get('filename')
+            page_title = page.get('display_name', page_id)
+            logger.info(f'Deleting canvas page: {page_title} ({filename})')
 
-        del manifest['pages'][page_id]
+            old_category = page.get('category')
+            if old_category and old_category in manifest['categories']:
+                if page_id in manifest['categories'][old_category].get('pages', []):
+                    manifest['categories'][old_category]['pages'].remove(page_id)
+            if page_id in manifest.get('uncategorized', []):
+                manifest['uncategorized'].remove(page_id)
+            if page_id in manifest.get('recently_viewed', []):
+                manifest['recently_viewed'].remove(page_id)
 
-        # Clear canvas_context if this was the current page
-        global canvas_context
-        current_page = canvas_context.get('current_page') or ''
-        if filename and current_page.endswith(filename):
-            canvas_context['current_page'] = None
-            canvas_context['current_title'] = None
-            canvas_context['page_content'] = None
-            logger.info('Cleared canvas context (deleted page was current)')
+            del manifest['pages'][page_id]
 
-        # Refresh all_pages list
-        try:
-            if CANVAS_PAGES_DIR.exists():
-                pages = sorted(CANVAS_PAGES_DIR.glob('*.html'), key=lambda p: p.stat().st_mtime, reverse=True)[:30]
-                canvas_context['all_pages'] = [
-                    {'name': p.name, 'title': p.stem.replace('-', ' '), 'mtime': p.stat().st_mtime}
-                    for p in pages
-                ]
-        except Exception as exc:
-            logger.warning(f'Failed to refresh all_pages: {exc}')
+            # Clear canvas_context if this was the current page
+            global canvas_context
+            current_page = canvas_context.get('current_page') or ''
+            if filename and current_page.endswith(filename):
+                canvas_context['current_page'] = None
+                canvas_context['current_title'] = None
+                canvas_context['page_content'] = None
+                logger.info('Cleared canvas context (deleted page was current)')
 
-        # Archive the file (rename to .bak)
-        if filename:
-            filepath = CANVAS_PAGES_DIR / filename
+            # Refresh all_pages list
             try:
-                if filepath.exists():
-                    bak_path = filepath.with_suffix('.bak')
-                    counter = 1
-                    while bak_path.exists():
-                        bak_path = filepath.with_name(f'{filepath.stem}.bak.{counter}')
-                        counter += 1
-                    filepath.rename(bak_path)
-                    logger.info(f'Archived canvas page: {filename} -> {bak_path.name}')
+                if CANVAS_PAGES_DIR.exists():
+                    pages = sorted(CANVAS_PAGES_DIR.glob('*.html'), key=lambda p: p.stat().st_mtime, reverse=True)[:30]
+                    canvas_context['all_pages'] = [
+                        {'name': p.name, 'title': p.stem.replace('-', ' '), 'mtime': p.stat().st_mtime}
+                        for p in pages
+                    ]
             except Exception as exc:
-                logger.warning(f'Failed to archive file {filename}: {exc}')
+                logger.warning(f'Failed to refresh all_pages: {exc}')
 
-        save_canvas_manifest(manifest)
+            # Archive the file (rename to .bak)
+            if filename:
+                filepath = CANVAS_PAGES_DIR / filename
+                try:
+                    if filepath.exists():
+                        bak_path = filepath.with_suffix('.bak')
+                        counter = 1
+                        while bak_path.exists():
+                            bak_path = filepath.with_name(f'{filepath.stem}.bak.{counter}')
+                            counter += 1
+                        filepath.rename(bak_path)
+                        logger.info(f'Archived canvas page: {filename} -> {bak_path.name}')
+                except Exception as exc:
+                    logger.warning(f'Failed to archive file {filename}: {exc}')
+
+            save_canvas_manifest(manifest)
+
+    # Notifications outside the lock (they do network I/O and shouldn't hold the lock)
+    if request.method == 'DELETE':
         _notify_brain('canvas_page_deleted', page_id=page_id, title=page_title, filename=filename)
-
         try:
             http_requests.post(
                 f'http://localhost:{CANVAS_SSE_PORT}/clear-display',
@@ -1046,78 +1078,85 @@ def handle_page_metadata(page_id):
             )
         except Exception as exc:
             logger.debug(f'Could not clear canvas display: {exc}')
-
         return jsonify({'status': 'ok', 'message': 'Page archived', 'page_id': page_id, 'title': page_title})
 
-    # PATCH — update metadata
+    # PATCH — update metadata (lock is re-acquired to read fresh state)
     data = request.get_json() or {}
-    page = manifest['pages'][page_id]
 
     # Detect agent requests (X-Agent-Key header) vs admin requests (Clerk JWT)
     _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
     is_agent_request = bool(_agent_api_key and request.headers.get('X-Agent-Key') == _agent_api_key)
 
-    # Guard: locked pages — agent cannot change is_public on locked pages.
-    # Admin (Clerk-authenticated) can still change anything, including unlocking.
-    if 'is_public' in data and page.get('is_locked', False) and is_agent_request:
-        return jsonify({
-            'error': 'This page is locked. Visibility can only be changed from the admin dashboard.',
-            'is_locked': True,
-        }), 403
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
+        if page_id not in manifest['pages']:
+            return jsonify({'error': 'Page not found'}), 404
+        page = manifest['pages'][page_id]
 
-    # Guard: agent cannot lock/unlock pages — only admin can.
-    if 'is_locked' in data and is_agent_request:
-        return jsonify({
-            'error': 'Page lock status can only be changed from the admin dashboard.',
-        }), 403
+        # Guard: locked pages — agent cannot change is_public on locked pages.
+        if 'is_public' in data and page.get('is_locked', False) and is_agent_request:
+            return jsonify({
+                'error': 'This page is locked. Visibility can only be changed from the admin dashboard.',
+                'is_locked': True,
+            }), 403
 
-    # Guard: reject is_public=True if page was created less than 30 seconds ago.
-    # Prevents agents from making pages public immediately on creation.
-    if data.get('is_public') is True:
-        created_str = page.get('created', '')
-        if created_str:
-            try:
-                created_dt = datetime.fromisoformat(created_str)
-                age_seconds = (datetime.now() - created_dt).total_seconds()
-                if age_seconds < 30:
-                    return jsonify({
-                        'error': 'Cannot make a page public within 30 seconds of creation. '
-                                 'Wait a moment and try again.',
-                        'age_seconds': round(age_seconds, 1),
-                    }), 429
-            except (ValueError, TypeError):
-                pass  # malformed date — allow through
+        # Guard: agent cannot lock/unlock pages — only admin can.
+        if 'is_locked' in data and is_agent_request:
+            return jsonify({
+                'error': 'Page lock status can only be changed from the admin dashboard.',
+            }), 403
 
-    for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon']:
-        if field in data:
-            old_category = page.get('category')
-            page[field] = data[field]
+        # Guard: reject is_public=True if page was created less than 30 seconds ago.
+        if data.get('is_public') is True:
+            created_str = page.get('created', '')
+            if created_str:
+                try:
+                    created_dt = datetime.fromisoformat(created_str)
+                    age_seconds = (datetime.now() - created_dt).total_seconds()
+                    if age_seconds < 30:
+                        return jsonify({
+                            'error': 'Cannot make a page public within 30 seconds of creation. '
+                                     'Wait a moment and try again.',
+                            'age_seconds': round(age_seconds, 1),
+                        }), 429
+                except (ValueError, TypeError):
+                    pass  # malformed date — allow through
 
-            if field == 'category' and old_category != data[field]:
-                if old_category and old_category in manifest['categories']:
-                    if page_id in manifest['categories'][old_category].get('pages', []):
-                        manifest['categories'][old_category]['pages'].remove(page_id)
-                if old_category == 'uncategorized' and page_id in manifest.get('uncategorized', []):
-                    manifest['uncategorized'].remove(page_id)
+        for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon']:
+            if field in data:
+                old_category = page.get('category')
+                page[field] = data[field]
 
-                new_cat = data[field]
-                if new_cat not in manifest['categories']:
-                    manifest['categories'][new_cat] = {
-                        'name': new_cat.title(),
-                        'icon': CATEGORY_ICONS.get(new_cat, '📄'),
-                        'color': CATEGORY_COLORS.get(new_cat, '#4a9eff'),
-                        'pages': [],
-                    }
-                if page_id not in manifest['categories'][new_cat]['pages']:
-                    manifest['categories'][new_cat]['pages'].append(page_id)
+                if field == 'category' and old_category != data[field]:
+                    if old_category and old_category in manifest['categories']:
+                        if page_id in manifest['categories'][old_category].get('pages', []):
+                            manifest['categories'][old_category]['pages'].remove(page_id)
+                    if old_category == 'uncategorized' and page_id in manifest.get('uncategorized', []):
+                        manifest['uncategorized'].remove(page_id)
 
-    save_canvas_manifest(manifest)
-    return jsonify({'status': 'ok', 'page': page})
+                    new_cat = data[field]
+                    if new_cat not in manifest['categories']:
+                        manifest['categories'][new_cat] = {
+                            'name': new_cat.title(),
+                            'icon': CATEGORY_ICONS.get(new_cat, '📄'),
+                            'color': CATEGORY_COLORS.get(new_cat, '#4a9eff'),
+                            'pages': [],
+                        }
+                    if page_id not in manifest['categories'][new_cat]['pages']:
+                        manifest['categories'][new_cat]['pages'].append(page_id)
+
+        save_canvas_manifest(manifest)
+        return jsonify({'status': 'ok', 'page': page})
 
 
 @canvas_bp.route('/api/canvas/manifest/category', methods=['GET', 'POST', 'PATCH'])
 def handle_category():
     """List, create, or update categories."""
+    with _manifest_lock:
+        return _handle_category_locked()
+
+
+def _handle_category_locked():
     manifest = load_canvas_manifest()
 
     if request.method == 'GET':
@@ -1311,10 +1350,11 @@ def restore_page_version(page_id, timestamp):
         return jsonify({'error': 'Version not found or restore failed'}), 404
 
     # Update manifest modified time
-    manifest = load_canvas_manifest()
-    if page_id in manifest.get('pages', {}):
-        manifest['pages'][page_id]['modified'] = datetime.now().isoformat()
-        save_canvas_manifest(manifest)
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
+        if page_id in manifest.get('pages', {}):
+            manifest['pages'][page_id]['modified'] = datetime.now().isoformat()
+            save_canvas_manifest(manifest)
 
     return jsonify({
         'status': 'ok',
