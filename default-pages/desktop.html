@@ -1108,20 +1108,30 @@ const SYSTEM_ITEMS = [
 ];
 let DESKTOP_ITEMS = [];
 
+function _isRecycled(item) {
+  if (recycleBin.includes(item.id)) return true;
+  if (item.pageId && recycleBin.includes(item.pageId)) return true;
+  return false;
+}
+
 function rebuildDesktopItems() {
-  DESKTOP_ITEMS = SYSTEM_ITEMS.slice();
-  // Category folders
+  // System items — filter out recycled ones (but never hide the recycle bin itself)
+  DESKTOP_ITEMS = SYSTEM_ITEMS.filter(item => item.action === 'recycle' || !_isRecycled(item));
+  // Category folders — skip recycled
   Object.keys(CATEGORIES).forEach(catId => {
+    const itemId = 'cat-' + catId;
+    if (recycleBin.includes(itemId)) return;
     DESKTOP_ITEMS.push({
-      id: 'cat-' + catId,
+      id: itemId,
       name: CATEGORIES[catId].name,
       icon: CATEGORIES[catId].icon === 'folder' ? 'folder' : CATEGORIES[catId].icon,
       action: 'folder',
       category: catId,
     });
   });
-  // Custom folders
+  // Custom folders — skip recycled
   Object.keys(customFolders).forEach(fid => {
+    if (recycleBin.includes(fid)) return;
     if (DESKTOP_ITEMS.find(i => i.id === fid)) return;
     DESKTOP_ITEMS.push({
       id: fid,
@@ -1134,6 +1144,7 @@ function rebuildDesktopItems() {
   // Loose desktop page icons (new/unassigned pages)
   desktopPages.forEach(pageId => {
     if (!PAGES[pageId]) return;
+    if (recycleBin.includes(pageId)) return;  // skip recycled
     if (DESKTOP_ITEMS.find(i => i.id === 'page-' + pageId)) return;
     DESKTOP_ITEMS.push({
       id: 'page-' + pageId,
@@ -1168,7 +1179,7 @@ function buildDesktopIcons() {
   const maxPerCol = Math.max(1, Math.floor(colH / cellH));
 
   DESKTOP_ITEMS.forEach((item, i) => {
-    if (recycleBin.includes(item.id) && item.action !== 'recycle') return;
+    if (item.action !== 'recycle' && _isRecycled(item)) return;
     const col = Math.floor(i / maxPerCol);
     const row = i % maxPerCol;
     const saved = getActivePositions()[item.id];
@@ -2555,11 +2566,20 @@ function openRecycleBin() {
 }
 
 function buildRecycleContent() {
-  if (recycleBin.length === 0) return '<div class="recycle-empty">Recycle Bin is empty</div>';
+  // Deduplicate: system items store both item.id and item.pageId — only show the pageId entry
+  const sysShortcutIds = new Set();
+  SYSTEM_ITEMS.forEach(s => {
+    if (s.pageId && recycleBin.includes(s.id) && recycleBin.includes(s.pageId)) {
+      sysShortcutIds.add(s.id);
+    }
+  });
+  const displayItems = recycleBin.filter(id => !sysShortcutIds.has(id));
+  if (displayItems.length === 0) return '<div class="recycle-empty">Recycle Bin is empty</div>';
   let html = '<div class="explorer-grid">';
-  recycleBin.forEach(id => {
+  displayItems.forEach(id => {
     const page = PAGES[id];
-    const name = page ? page.name : CATEGORIES[id.replace('cat-','')]?.name || id;
+    const sysItem = SYSTEM_ITEMS.find(s => s.pageId === id || s.id === id);
+    const name = page ? page.name : sysItem ? sysItem.name : CATEGORIES[id.replace('cat-','')]?.name || id;
     html += `<div class="explorer-item" ondblclick="restoreItem('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showRecycleItemMenu(event,'${id}')">
       <div class="ei-icon">${getIcon('document')}</div>
       <div class="ei-name">${name}</div>
@@ -2573,9 +2593,10 @@ function buildRecycleContent() {
 function sendToRecycle(item) {
   if (!item || item.action === 'recycle') return;
   if (item.action === 'openPage' && item.pageId) {
-    // Loose page icon
+    // Page icon (loose or system shortcut) — store both IDs so filter catches either
     desktopPages = desktopPages.filter(id => id !== item.pageId);
     deleteItem(item.pageId);
+    if (item.id !== item.pageId) deleteItem(item.id);
   } else {
     deleteItem(item.id);
   }
@@ -2616,7 +2637,12 @@ function deleteItem(id) {
 
 function restoreItem(id) {
   recycleBin = recycleBin.filter(i => i !== id);
-  // If it was a page, add back to desktop
+  // Also remove companion IDs (system items store both 'page-id' and 'page-id-shortcut')
+  const sysItem = SYSTEM_ITEMS.find(s => s.id === id || s.pageId === id);
+  if (sysItem) {
+    recycleBin = recycleBin.filter(i => i !== sysItem.id && i !== sysItem.pageId);
+  }
+  // If it was a loose page, add back to desktop
   if (PAGES[id] && !desktopPages.includes(id)) desktopPages.push(id);
   saveState();
   rebuildDesktopItems();
