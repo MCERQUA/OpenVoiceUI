@@ -187,6 +187,14 @@ inject();
                     voiceSelect.appendChild(optgroup);
                 }
                 voiceSelect.value = this.currentVoice;
+                // If the voice wasn't found in options (e.g. custom name), add it
+                if (voiceSelect.value !== this.currentVoice && this.currentVoice) {
+                    const opt = document.createElement('option');
+                    opt.value = this.currentVoice;
+                    opt.textContent = this.currentVoice + ' ★';
+                    voiceSelect.insertBefore(opt, voiceSelect.firstChild);
+                    voiceSelect.value = this.currentVoice;
+                }
             },
 
             switchProvider(providerId) {
@@ -295,12 +303,51 @@ inject();
                         .then(p => { if (p.id) window.applyProfile(p); })
                         .catch(() => {});
 
+                    this._updateDeleteBtn();
+
                 } catch (e) {
                     const select = document.getElementById('voice-mode-select');
                     if (select) {
                         select.innerHTML = '<option value="default">Assistant</option>';
                     }
                 }
+            },
+
+            _updateDeleteBtn() {
+                const select = document.getElementById('voice-mode-select');
+                const btn = document.getElementById('agent-delete-btn');
+                if (!select || !btn) return;
+                btn.style.display = select.value && select.value !== 'default' ? '' : 'none';
+            },
+
+            async refresh() {
+                // Re-fetch profiles from server and update dropdown
+                // (picks up agents created in admin panel or via API)
+                try {
+                    const res = await fetch('/api/profiles');
+                    const data = await res.json();
+                    const newProfiles = data.profiles || [];
+                    const newIds = new Set(newProfiles.map(p => p.id));
+                    const oldIds = new Set(this._profiles.map(p => p.id));
+                    // Only rebuild dropdown if profile list actually changed
+                    if (newIds.size !== oldIds.size || [...newIds].some(id => !oldIds.has(id))) {
+                        console.log('[QuickSettings] profile list changed, refreshing dropdown');
+                        this._profiles = newProfiles;
+                        const select = document.getElementById('voice-mode-select');
+                        if (!select) return;
+                        const currentVal = select.value;
+                        const activeId = this._profiles.find(p => p.id === currentVal)
+                            ? currentVal : (data.active || this._DEFAULT_PROFILE);
+                        select.innerHTML = '';
+                        this._profiles.forEach(p => {
+                            const opt = document.createElement('option');
+                            opt.value = p.id;
+                            opt.textContent = p.name;
+                            if (p.id === activeId) opt.selected = true;
+                            select.appendChild(opt);
+                        });
+                    }
+                } catch (e) { /* silent — non-critical refresh */ }
             },
 
             async switchAgent(profileId) {
@@ -326,11 +373,67 @@ inject();
                     console.log(`[QuickSettings] switched to ${profileId}, agentId=${agentId || 'main'}`);
                     // Apply full profile settings from activate response
                     if (data.profile) window.applyProfile(data.profile);
+                    this._updateDeleteBtn();
                 } catch (e) {
                     if (statusEl) statusEl.textContent = '✗ Error';
                 }
+            },
+
+            async deleteAgent() {
+                const select = document.getElementById('voice-mode-select');
+                if (!select) return;
+                const profileId = select.value;
+                if (!profileId || profileId === 'default') return;
+                const profile = this._profiles.find(p => p.id === profileId);
+                const name = profile?.name || profileId;
+                if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+
+                try {
+                    const res = await fetch(`/api/profiles/${profileId}`, { method: 'DELETE' });
+                    if (res.ok || res.status === 204) {
+                        await this.switchAgent('default');
+                        this._profiles = this._profiles.filter(p => p.id !== profileId);
+                        const sel = document.getElementById('voice-mode-select');
+                        if (sel) {
+                            sel.innerHTML = '';
+                            this._profiles.forEach(p => {
+                                const opt = document.createElement('option');
+                                opt.value = p.id;
+                                opt.textContent = p.name;
+                                if (p.id === 'default') opt.selected = true;
+                                sel.appendChild(opt);
+                            });
+                        }
+                        this._updateDeleteBtn();
+                        const statusEl = document.getElementById('agent-status');
+                        if (statusEl) statusEl.textContent = `✓ Deleted ${name}`;
+                    }
+                } catch (e) {
+                    const statusEl = document.getElementById('agent-status');
+                    if (statusEl) statusEl.textContent = '✗ Delete failed';
+                }
             }
         };
+
+        // Re-fetch agent dropdown when tab regains focus (picks up admin/builder changes)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && window.QuickSettings?._profiles?.length) {
+                window.QuickSettings.refresh().then(() => window.QuickSettings._updateDeleteBtn());
+            }
+        });
+
+        // Listen for postMessage from canvas iframes (e.g. BigHead builder creating a character)
+        window.addEventListener('message', (e) => {
+            if (e.data?.type === 'profile-created' || e.data?.type === 'profile-updated') {
+                console.log('[QuickSettings] canvas iframe created/updated profile:', e.data.profileId);
+                window.QuickSettings?.refresh().then(() => {
+                    if (e.data.profileId) {
+                        window.QuickSettings?.switchAgent(e.data.profileId);
+                    }
+                    window.QuickSettings?._updateDeleteBtn();
+                });
+            }
+        });
 
         // ===== DJ SOUNDBOARD MODULE =====
         const DJSoundboard = {
@@ -3832,6 +3935,42 @@ inject();
                                 // Server retrying empty response — keep stream alive, no fallback
                                 if (data.type === 'retrying') {
                                     console.log('[Conversation] Server retrying empty response — waiting for result...');
+                                    continue;
+                                }
+
+                                // Text interim: agent responded but sub-agents still running.
+                                // Finalize current text, play TTS, but keep stream alive.
+                                if (data.type === 'text_interim') {
+                                    const interimText = data.response || streamingText;
+                                    const cleanedInterim = this.stripReasoningTokens(interimText);
+                                    const displayInterim = stripCanvasTags(cleanedInterim);
+
+                                    // Finalize current streaming text display
+                                    if (streamingMsgEl) {
+                                        streamingMsgEl.classList.remove('streaming');
+                                        const textEl = streamingMsgEl.querySelector?.('.message-text') || streamingMsgEl;
+                                        textEl.innerHTML = escapeHtml(displayInterim).replace(/\n/g, '<br>');
+                                    } else if (displayInterim) {
+                                        this.displayMessage('assistant', displayInterim);
+                                    }
+
+                                    // Process canvas commands from interim response
+                                    this.handleCanvasCommands(cleanedInterim, canvasCommandsProcessed);
+
+                                    if (data.actions) ActionConsole.processActions(data.actions);
+                                    ActionConsole.addEntry('system', 'Background tasks running — waiting for results...');
+
+                                    // Reset streaming state for sub-agent result phase
+                                    streamingText = '';
+                                    streamingMsgEl = null;
+                                    firstDeltaReceived = false;
+                                    continue;
+                                }
+
+                                // Sub-agents actively working — show status
+                                if (data.type === 'subagents_working') {
+                                    StatusModule.update('thinking', 'BACKGROUND TASKS RUNNING...');
+                                    AgentActivityChip.show('\u23F3', 'Tasks running...');
                                     continue;
                                 }
 
@@ -8880,6 +9019,16 @@ inject();
                         window.voiceAgent.setTTSProvider(newProvider, newVoice || 'autumn');
                     }
                     console.log(`[Profile] TTS: ${newProvider} / ${newVoice}`);
+                }
+            }
+
+            // 9. Face plugin — switch mode + config from profile (generic, not face-type-specific)
+            const faceMode = profile?.ui?.face_mode;
+            const faceConfig = profile?.ui?.face_config || null;
+            if (faceMode && window.FaceRenderer) {
+                if (window.FaceRenderer.currentMode !== faceMode || faceConfig) {
+                    // skipPersist: applyProfile is READING the profile, not user-initiated
+                    window.FaceRenderer.setMode(faceMode, faceConfig, { skipPersist: true });
                 }
             }
 

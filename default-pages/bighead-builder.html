@@ -321,6 +321,12 @@
         <div class="form-group">
             <label class="form-label">Select Voice</label>
             <div class="form-hint" style="margin-bottom:8px;">Click play to preview, then select your character's voice</div>
+            <div id="voiceSelection" style="display:none; padding:10px 14px; background:#ffe135; border:3px solid #0d0d0d; border-radius:10px; margin-bottom:12px; box-shadow:3px 3px 0 #0d0d0d; position:sticky; top:0; z-index:10;">
+                <span style="font-family:'Courier New',monospace; font-size:0.7em; text-transform:uppercase; font-weight:700; letter-spacing:0.06em; color:rgba(0,0,0,0.5);">Selected:</span>
+                <span id="voiceSelName" style="font-family:'Impact','Arial Black',sans-serif; font-size:1em; margin-left:6px; text-transform:uppercase;"></span>
+                <span id="voiceSelProvider" style="font-family:'Courier New',monospace; font-size:0.65em; color:rgba(0,0,0,0.5); margin-left:4px;"></span>
+            </div>
+            <input type="text" id="voiceFilter" placeholder="Search voices..." oninput="filterVoices(this.value)" style="width:100%; padding:8px 12px; border:3px solid #0d0d0d; border-radius:8px; font-family:'Courier New',monospace; font-size:0.85em; background:rgba(255,255,255,0.7); margin-bottom:10px; box-shadow:3px 3px 0 #0d0d0d;">
             <div id="voiceProviders"></div>
         </div>
     </div>
@@ -714,9 +720,9 @@ Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think spec
                 for (const cv of (p.cloned_voices || [])) {
                     provVoices.push({ id: cv.voice_id, name: cv.name, provider: pid, type: 'Cloned', active: isActive });
                 }
-                // Stock voices (limit Resemble to top picks)
+                // Stock voices — show all
                 const stockVoices = p.voices || [];
-                const displayVoices = pid === 'resemble' ? stockVoices.slice(0, 20) : stockVoices;
+                const displayVoices = stockVoices;
                 for (const v of displayVoices) {
                     provVoices.push({ id: v, name: v, provider: pid, type: 'Stock', active: isActive });
                 }
@@ -763,6 +769,11 @@ Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think spec
                         container.querySelectorAll('.voice-card').forEach(c => c.classList.remove('active'));
                         card.classList.add('active');
                         selectedVoice = v;
+                        // Update sticky selection banner
+                        const banner = document.getElementById('voiceSelection');
+                        banner.style.display = '';
+                        document.getElementById('voiceSelName').textContent = v.name;
+                        document.getElementById('voiceSelProvider').textContent = `(${v.provider})`;
                     });
 
                     grid.appendChild(card);
@@ -773,6 +784,15 @@ Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think spec
             }
         } catch(e) { console.error('Failed to load voices:', e); }
     }
+
+    // ── Voice filter ──
+    window.filterVoices = function(q) {
+        q = q.toLowerCase();
+        document.querySelectorAll('#voiceProviders .voice-card').forEach(card => {
+            const name = card.querySelector('.vc-name')?.textContent?.toLowerCase() || '';
+            card.style.display = !q || name.includes(q) ? '' : 'none';
+        });
+    };
 
     // ── Step navigation ──
     const STEP_LABELS = ['Next: Identity', 'Next: Voice', 'Next: Review', 'Create Character'];
@@ -856,7 +876,7 @@ Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think spec
             stt: { provider: 'deepgram', language: 'en-US', silence_timeout_ms: 3500, continuous: true, wake_words: ['wake up'], wake_word_required: null, ptt_default: null },
             context: { enable_fts: true, enable_briefing: false, enable_history: true, max_history_messages: 8 },
             features: { canvas: true, vision: true, music: false, tools: true },
-            ui: { theme: 'dark', theme_preset: 'blue', face_enabled: true, face_mode: 'bighead', face_mood: 'neutral', transcript_panel: true, thought_bubbles: false, show_mode_badge: true, mode_badge_text: name, visualizer_enabled: true, music_autoplay: false },
+            ui: { theme: 'dark', theme_preset: 'blue', face_enabled: true, face_mode: 'bighead', face_config: traitsCfg, face_mood: 'neutral', transcript_panel: true, thought_bubbles: false, show_mode_badge: true, mode_badge_text: name, visualizer_enabled: true, music_autoplay: false },
             conversation: { greeting: null, auto_hangup_silence_ms: null, interruption_enabled: true, max_response_chars: 1500 },
             modes: { normal: true, listen: true, ptt: true, a2a: false },
             session: { key_strategy: 'persistent', key_prefix: `voice-${id}` },
@@ -918,13 +938,10 @@ Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think spec
             });
         } catch(e) {}
 
-        // Set agent_id in parent so next conversation uses this character
+        // Notify parent to update agent dropdown (no page reload needed)
         try {
-            if (window.parent) {
-                window.parent.localStorage?.setItem('gateway_agent_id', id);
-                window.parent.BigHeadFace?.setCharacter(charData);
-                // Trigger profile reload in parent
-                window.parent.location?.reload();
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'profile-created', profileId: id }, '*');
             }
         } catch(e) {}
 
@@ -959,6 +976,7 @@ Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think spec
                     <div class="char-card-actions">
                         <button class="char-card-btn use" data-id="${ch.id}">Use</button>
                         <button class="char-card-btn" data-edit="${ch.id}">Edit</button>
+                        <button class="char-card-btn" data-delete="${ch.id}" style="background:#ff3b3b;color:#fef9ee;">Del</button>
                     </div>`;
                 card.appendChild(info);
                 grid.appendChild(card);
@@ -983,8 +1001,8 @@ Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think spec
                     } catch(e) { showToast('Error: ' + e.message); }
                 });
 
-                // Edit = load into builder
-                info.querySelector('[data-edit]').addEventListener('click', (e) => {
+                // Edit = load ALL character + profile data into builder
+                info.querySelector('[data-edit]').addEventListener('click', async (e) => {
                     e.stopPropagation();
                     DISPLAY_ORDER.forEach(c => {
                         const idx = TRAITS[c].indexOf(ch[c]);
@@ -997,7 +1015,47 @@ Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think spec
                     });
                     render();
                     if (ch.name) document.getElementById('charName').value = ch.name;
+                    if (ch.archetype) {
+                        selectedArch = ch.archetype;
+                        document.querySelectorAll('.arch-card').forEach(ac => {
+                            ac.classList.toggle('active', ac.dataset.arch === ch.archetype);
+                        });
+                    }
+                    try {
+                        const profRes = await fetch(`/api/profiles/${ch.id}`);
+                        if (profRes.ok) {
+                            const prof = await profRes.json();
+                            const sp = prof.system_prompt || '';
+                            const persMatch = sp.match(/PERSONALITY:\s*([\s\S]*?)(?:\n\n[A-Z]|\nFACIAL|\nCORE|\nHOW|\nYOUR|$)/);
+                            if (persMatch) document.getElementById('charPersonality').value = persMatch[1].trim();
+                            const backMatch = sp.match(/BACKSTORY:\s*([\s\S]*?)(?:\n\n[A-Z]|\nFACIAL|$)/);
+                            if (backMatch) document.getElementById('charBackstory').value = backMatch[1].trim();
+                            if (!persMatch && !backMatch && sp.length > 50) {
+                                const lines = sp.split('\n').filter(l => l.trim());
+                                if (lines.length > 1) document.getElementById('charPersonality').value = lines.slice(1).join('\n').trim();
+                            }
+                            if (prof.voice?.voice_id) {
+                                selectedVoice = { id: prof.voice.voice_id, name: prof.voice.voice_id, provider: prof.voice.tts_provider || 'supertonic' };
+                            }
+                        }
+                    } catch(err) {}
+                    if (!selectedVoice && ch.voiceId) {
+                        selectedVoice = { id: ch.voiceId, name: ch.voiceId, provider: ch.voiceProvider || 'supertonic' };
+                    }
                     goStep(0);
+                });
+
+                // Delete button
+                info.querySelector('[data-delete]').addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`Delete "${ch.name}"? This cannot be undone.`)) return;
+                    try {
+                        await fetch(`/api/bighead/characters/${ch.id}`, { method: 'DELETE' });
+                        await fetch(`/api/profiles/${ch.id}`, { method: 'DELETE' });
+                        showToast(`Deleted ${ch.name}`);
+                        try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'profile-created', profileId: 'default' }, '*'); } catch(e) {}
+                        loadSavedCharacters();
+                    } catch(err) { showToast('Delete failed: ' + err.message); }
                 });
             }
         } catch(e) {}

@@ -92,6 +92,7 @@ const envKeyList = [
   "BYTEPLUS_API_KEY", "SYNTHETIC_API_KEY", "VENICE_API_KEY",
   "OPENCODE_ZEN_API_KEY", "KILOCODE_API_KEY", "AI_GATEWAY_API_KEY",
   "CLOUDFLARE_AI_GATEWAY_API_KEY", "LITELLM_API_KEY", "SUNO_API_KEY",
+  "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID",
   "RESEMBLE_API_KEY", "RESEMBLE_VOICE_UUID",
 ];
 for (const k of envKeyList) envLines.push(`${k}=${getKey(k)}`);
@@ -146,6 +147,7 @@ const providerMap = {
   CLOUDFLARE_AI_GATEWAY_API_KEY: "cloudflare-ai-gateway",
   LITELLM_API_KEY: "litellm",
   SUNO_API_KEY: "suno",
+  ELEVENLABS_API_KEY: "elevenlabs",
 };
 
 const authProfiles = {};

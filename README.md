@@ -21,7 +21,7 @@ OpenVoiceUI is a modular voice UI shell. You bring the intelligence (LLM + TTS),
 - **Music Player** — background music with crossfade, AI ducking, and AI trigger commands
 - **Music Generation** — AI-generated track support via Suno or fal.ai integrations
 - **AI Image Generation** — HuggingFace-powered image generation with FLUX.1 and SD3.5 models, quality presets, and aspect ratio control
-- **Voice Cloning** — clone and generate speech with custom voice embeddings via fal.ai Qwen3-TTS
+- **Voice Cloning** — clone and generate speech with custom voice embeddings via ElevenLabs, fal.ai Qwen3-TTS, or Resemble AI
 - **Soundboard** — configurable sound effects with text-trigger detection
 - **Agent Profiles** — switch personas/providers without restart via JSON config
 - **Agent Activity Chip** — live action ticker showing what the agent is doing in real-time
@@ -56,7 +56,9 @@ Connect to any LLM via a gateway plugin — OpenClaw is built-in, others are dro
 |----------|------|------|
 | **Supertonic** | Local ONNX | Free |
 | **Groq Orpheus** | Cloud, fast | ~$0.05/min |
+| **ElevenLabs** | Cloud, premium | ~$0.30/min |
 | **Qwen3-TTS** | Cloud, expressive | ~$0.003/min |
+| **Resemble AI** | Cloud, streaming | ~$0.10/min |
 | **Hume EVI** | Cloud, emotion-aware | ~$0.032/min |
 | **Any TTS engine you implement** | Local or cloud | Your choice |
 
@@ -176,7 +178,9 @@ Define agents in JSON — each profile configures:
 ├── tts_providers/              TTS provider implementations
 │   ├── groq_provider.py        Groq Orpheus
 │   ├── supertonic_provider.py  Supertonic (local ONNX)
+│   ├── elevenlabs_provider.py  ElevenLabs (premium, voice cloning)
 │   ├── qwen3_provider.py       Qwen3-TTS via fal.ai
+│   ├── resemble_provider.py    Resemble AI (Chatterbox, streaming)
 │   └── hume_provider.py        Hume EVI
 ├── providers/                  LLM/STT provider implementations
 ├── plugins/                    Gateway plugins (gitignored, drop-in)
@@ -425,6 +429,8 @@ OpenVoiceUI connects to an [OpenClaw](https://openclaw.ai) gateway via persisten
 | `GROQ_API_KEY` | No | Groq Orpheus TTS and Groq Whisper STT ([console.groq.com](https://console.groq.com)) |
 | `FAL_KEY` | No | Qwen3-TTS and voice cloning via fal.ai ([fal.ai](https://fal.ai/dashboard)) |
 | `SUPERTONIC_API_URL` | No | Override Supertonic TTS URL (Docker sets this automatically) |
+| `ELEVENLABS_API_KEY` | No | ElevenLabs premium TTS + voice cloning ([elevenlabs.io](https://elevenlabs.io/app/settings/api-keys)) |
+| `ELEVENLABS_VOICE_ID` | No | Default ElevenLabs voice ID ([voice library](https://elevenlabs.io/app/voice-library)) |
 | `HUME_API_KEY` | No | Hume EVI — emotion-aware voice ([platform.hume.ai](https://platform.hume.ai)) |
 | `HUME_SECRET_KEY` | No | Hume EVI secret key |
 | `CLERK_PUBLISHABLE_KEY` | No | Clerk auth — enables login ([clerk.com](https://clerk.com)) |
@@ -652,7 +658,7 @@ OpenVoiceUI is designed so you can host a single VPS and serve multiple clients,
 | Backend | Python / Flask (blueprint architecture) |
 | Frontend | Vanilla JS ES modules (no framework) |
 | STT | Web Speech API / Deepgram Nova-2 / Groq Whisper / Whisper / Hume |
-| TTS | Supertonic / Groq Orpheus / Qwen3 / Hume EVI |
+| TTS | Supertonic / Groq Orpheus / ElevenLabs / Qwen3 / Resemble / Hume EVI |
 | LLM | Any via gateway adapter |
 | Image Gen | HuggingFace (FLUX.1, SD3.5) |
 | Canvas | Fullscreen iframe + SSE manifest system |

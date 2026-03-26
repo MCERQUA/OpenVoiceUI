@@ -1,38 +1,26 @@
 {
-  "version": 1,
-  "default": "eyes",
+  "version": 2,
+  "default": "halo-smoke",
   "faces": [
     {
       "id": "eyes",
       "name": "AI Eyes",
       "description": "Classic animated eyes with mood-based eyelid expressions and mouse tracking",
       "module": "/src/face/EyeFace.js",
-      "class": "EyeFace",
       "preview": "/src/face/previews/eyes.svg",
       "moods": ["neutral", "happy", "sad", "angry", "thinking", "surprised", "listening"],
-      "features": ["blink", "eye-tracking", "mood-eyelids"]
+      "features": ["blink", "eye-tracking", "mood-eyelids"],
+      "configurable": false
     },
     {
       "id": "halo-smoke",
       "name": "Halo Smoke Orb",
       "description": "Halo frequency ring with wispy smoke core — calm at rest, reacts to TTS speech",
       "module": "/src/face/HaloSmokeFace.js",
-      "class": null,
-      "note": "Global script — use FaceRenderer.setMode('halo-smoke').",
       "preview": "/src/face/previews/orb.svg",
       "moods": [],
-      "features": ["audio-reactive", "smoke", "halo", "speech-reactive"]
-    },
-    {
-      "id": "bighead",
-      "name": "BigHead Avatar",
-      "description": "Animated BigHead character with lip-sync mouth shapes and mood-driven eye expressions",
-      "module": "/src/face/BigHeadFace.js",
-      "class": null,
-      "note": "Global script — use FaceRenderer.setMode('bighead').",
-      "preview": "/src/face/previews/bighead.svg",
-      "moods": ["neutral", "happy", "sad", "angry", "thinking", "surprised", "listening"],
-      "features": ["lip-sync", "mood-eyes", "blink", "customizable", "audio-reactive"]
+      "features": ["audio-reactive", "smoke", "halo", "speech-reactive"],
+      "configurable": false
     }
   ]
 }

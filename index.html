@@ -42,7 +42,27 @@
     <script src="src/ui/themes/ThemeManager.js?v=2"></script>
     <script src="src/ui/face/FaceRenderer.js?v=2"></script>
     <script src="src/face/HaloSmokeFace.js?v=2"></script>
-    <script src="src/face/BigHeadFace.js?v=2"></script>
+    <!-- Plugin face scripts loaded dynamically from /api/plugins/assets -->
+    <script>
+    (async function loadPluginAssets() {
+        try {
+            const r = await fetch('/api/plugins/assets');
+            const d = await r.json();
+            for (const url of (d.styles || [])) {
+                const link = document.createElement('link');
+                link.rel = 'stylesheet'; link.href = url;
+                document.head.appendChild(link);
+            }
+            for (const url of (d.scripts || [])) {
+                await new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = url; s.onload = resolve; s.onerror = reject;
+                    document.head.appendChild(s);
+                });
+            }
+        } catch(e) { console.warn('[Plugins] No plugin assets:', e.message); }
+    })();
+    </script>
     <script src="src/ui/face/FacePicker.js?v=2"></script>
     <script src="src/ui/settings/SettingsPanel.js?v=2"></script>
 

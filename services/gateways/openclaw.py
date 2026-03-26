@@ -890,6 +890,27 @@ class GatewayConnection:
                             logger.info(f"### Suppressing system response (chat final): {final_text!r}")
                             event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
                             return
+                        # Check if subagents are still running — deliver text
+                        # as interim so TTS plays it, but keep stream alive
+                        # for sub-agent announce-back results
+                        _has_subagent_tools_final = any(
+                            a.get('type') == 'tool' and is_subagent_tool(a.get('name', ''))
+                            for a in captured_actions
+                        )
+                        if subagent_active or main_lifecycle_ended or _has_subagent_tools_final:
+                            logger.info(f"### ✓✓✓ AI RESPONSE (interim, subagents pending): {final_text[:200]}...")
+                            event_queue.put({
+                                'type': 'text_interim',
+                                'response': final_text,
+                                'actions': list(captured_actions),
+                            })
+                            # Reset for sub-agent announce-back phase
+                            prev_text_len = 0
+                            collected_text = ''
+                            chat_final_seen = False
+                            lifecycle_ended = False
+                            main_lifecycle_ended = False
+                            continue
                         logger.info(f"### ✓✓✓ AI RESPONSE (chat final): {final_text[:200]}...")
                         event_queue.put({'type': 'text_done', 'response': final_text, 'actions': captured_actions})
                         return

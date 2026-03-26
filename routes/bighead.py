@@ -98,6 +98,17 @@ def update_character(char_id):
     return jsonify({"error": "Character not found"}), 404
 
 
+@bighead_bp.route("/api/bighead/characters/<char_id>", methods=["DELETE"])
+def delete_character(char_id):
+    chars = _load_characters()
+    new_chars = [c for c in chars if c.get("id") != char_id]
+    if len(new_chars) == len(chars):
+        return jsonify({"error": "Character not found"}), 404
+    _save_characters(new_chars)
+    logger.info(f"Deleted BigHead character: {char_id}")
+    return "", 204
+
+
 @bighead_bp.route("/api/bighead/create-agent", methods=["POST"])
 def create_agent():
     """Create openclaw agent files for a BigHead character.

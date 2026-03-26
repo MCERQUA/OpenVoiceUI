@@ -406,7 +406,7 @@ window.BigHeadFace = (function () {
 
     // ── Public API ───────────────────────────────────────────────────────────
 
-    async function start(container) {
+    async function start(container, config) {
         stop();
 
         _container = container;
@@ -456,15 +456,21 @@ window.BigHeadFace = (function () {
         // Draw loading indicator
         _drawLoading('Loading character...');
 
-        // Load character config from server
-        try {
-            const saved = await _loadCharacterFromServer();
-            if (saved) {
-                _character = { ...DEFAULT_CHARACTER, ...saved };
+        // Load character config: prefer passed-in config (from profile.face_config),
+        // then server /api/bighead/active, then DEFAULT_CHARACTER.
+        if (config && config.BODY) {
+            _character = { ...DEFAULT_CHARACTER, ...config };
+            console.log('[BigHeadFace] Character from profile face_config:', _character.BODY);
+        } else {
+            try {
+                const saved = await _loadCharacterFromServer();
+                if (saved) {
+                    _character = { ...DEFAULT_CHARACTER, ...saved };
+                }
+                console.log('[BigHeadFace] Character from server:', _character.BODY);
+            } catch (err) {
+                console.error('[BigHeadFace] Failed to load character config:', err);
             }
-            console.log('[BigHeadFace] Character config:', _character);
-        } catch (err) {
-            console.error('[BigHeadFace] Failed to load character config:', err);
         }
 
         // Preload all needed images
@@ -597,3 +603,18 @@ window.BigHeadFace = (function () {
         TRAITS, DEFAULT_CHARACTER, CDN
     };
 })();
+
+// Self-register with FaceRenderer plugin system.
+// start(container, config) passes face_config from the profile directly to BigHeadFace.
+if (window.FaceRenderer?.registerFace) {
+    window.FaceRenderer.registerFace('bighead', {
+        start(container, config) { return window.BigHeadFace.start(container, config); },
+        stop()                   { window.BigHeadFace.stop(); },
+        setMood(mood)            { window.BigHeadFace.setMood(mood); },
+        setThinking(v)           { window.BigHeadFace.setThinking(v); },
+        detectMood(text)         { window.BigHeadFace.detectMood(text); }
+    }, {
+        name: 'BigHead Avatar',
+        description: 'Animated BigHead character with lip sync and expressions'
+    });
+}

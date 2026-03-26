@@ -165,8 +165,12 @@ app.register_blueprint(registry_bp)
 from routes.chatgpt_import import chatgpt_import_bp
 app.register_blueprint(chatgpt_import_bp)
 
-from routes.bighead import bighead_bp
-app.register_blueprint(bighead_bp)
+# Plugin system — auto-discover and load installed plugins
+from routes.plugins import plugins_bp
+app.register_blueprint(plugins_bp)
+
+from services.plugins import load_plugins
+load_plugins(app)
 
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.
