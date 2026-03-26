@@ -13,6 +13,10 @@ window.FaceRenderer = {
         'halo-smoke': {
             name: 'Halo Smoke Orb',
             description: 'Halo ring + wispy smoke core, reacts to TTS audio'
+        },
+        'bighead': {
+            name: 'BigHead Avatar',
+            description: 'Animated BigHead character with lip sync and expressions'
         }
     },
 
@@ -101,6 +105,11 @@ window.FaceRenderer = {
         if (window.HaloSmokeFace) {
             window.HaloSmokeFace.stop();
         }
+
+        // Stop bighead face if running
+        if (window.BigHeadFace) {
+            window.BigHeadFace.stop();
+        }
     },
 
     render() {
@@ -113,6 +122,9 @@ window.FaceRenderer = {
                 break;
             case 'halo-smoke':
                 this.renderHaloSmoke();
+                break;
+            case 'bighead':
+                this.renderBigHead();
                 break;
         }
     },
@@ -284,6 +296,14 @@ window.FaceRenderer = {
         }
         // HaloSmokeFace.start() handles hiding eyes, removing old canvases, etc.
         window.HaloSmokeFace.start(this.container);
+    },
+
+    renderBigHead() {
+        if (!window.BigHeadFace) {
+            console.warn('[FaceRenderer] BigHeadFace not loaded — add src/face/BigHeadFace.js to index.html');
+            return;
+        }
+        window.BigHeadFace.start(this.container);
     },
 
     hexToRgba(hex, alpha) {

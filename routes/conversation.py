@@ -177,6 +177,12 @@ _VOICE_INSTRUCTIONS = (
     "SPOTIFY: [SPOTIFY:song name] or [SPOTIFY:song name|artist name] — plays from Spotify. "
     "Example: [SPOTIFY:Bohemian Rhapsody|Queen]. Only use when user specifically asks. "
 
+    # --- Facial expressions / mood ---
+    "EXPRESSIONS: [MOOD:happy] [MOOD:sad] [MOOD:angry] [MOOD:surprised] [MOOD:thinking] [MOOD:neutral] — "
+    "changes your facial expression on the avatar. Use naturally in conversation to match your emotional tone. "
+    "Include the tag INLINE with your speech — e.g. 'That's hilarious! [MOOD:happy] I love that idea.' "
+    "Switch to [MOOD:neutral] after a moment or let it happen naturally. Don't announce that you're changing expressions. "
+
     # --- Sleep / goodbye ---
     "SLEEP: [SLEEP] — puts interface into passive wake-word mode. "
     "Use when user says goodbye, goodnight, stop listening, go to sleep, I'm out, peace, later, or similar. "
@@ -549,6 +555,7 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'\[MUSIC_NEXT\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SUNO_GENERATE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SLEEP\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[MOOD:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[REGISTER_FACE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SPOTIFY:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SOUND:[^\]]*\]', '', text, flags=re.IGNORECASE)

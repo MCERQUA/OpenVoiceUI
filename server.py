@@ -165,6 +165,9 @@ app.register_blueprint(registry_bp)
 from routes.chatgpt_import import chatgpt_import_bp
 app.register_blueprint(chatgpt_import_bp)
 
+from routes.bighead import bighead_bp
+app.register_blueprint(bighead_bp)
+
 # Auto-sync canvas manifest on startup so any pages written outside the API
 # are picked up immediately without a restart.
 try:

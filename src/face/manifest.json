@@ -22,6 +22,17 @@
       "preview": "/src/face/previews/orb.svg",
       "moods": [],
       "features": ["audio-reactive", "smoke", "halo", "speech-reactive"]
+    },
+    {
+      "id": "bighead",
+      "name": "BigHead Avatar",
+      "description": "Animated BigHead character with lip-sync mouth shapes and mood-driven eye expressions",
+      "module": "/src/face/BigHeadFace.js",
+      "class": null,
+      "note": "Global script — use FaceRenderer.setMode('bighead').",
+      "preview": "/src/face/previews/bighead.svg",
+      "moods": ["neutral", "happy", "sad", "angry", "thinking", "surprised", "listening"],
+      "features": ["lip-sync", "mood-eyes", "blink", "customizable", "audio-reactive"]
     }
   ]
 }

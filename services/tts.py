@@ -225,10 +225,16 @@ def generate_tts_b64(
 
     # ── Try primary provider (single attempt for cloud, retries for local) ──
     last_err = None
-    # Cloud providers (groq, qwen3) have their own timeout — don't retry
-    # on timeout, fall back immediately. Only retry local providers.
-    is_cloud = tts_provider in ('groq', 'qwen3', 'resemble')
-    max_attempts = 1 if is_cloud else _MAX_RETRIES + 1
+    # Cloud providers: groq/qwen3 get 1 attempt (their own timeout handling).
+    # Resemble gets 2 attempts — their cluster throws transient 500s that
+    # succeed on immediate retry. Falling back to supertonic kills the
+    # custom voice which is worse than a brief retry delay.
+    if tts_provider == 'resemble':
+        max_attempts = 2
+    elif tts_provider in ('groq', 'qwen3'):
+        max_attempts = 1
+    else:
+        max_attempts = _MAX_RETRIES + 1
     for attempt in range(max_attempts):
         try:
             audio_bytes = _generate_with_provider(tts_provider, text, voice)
@@ -249,7 +255,13 @@ def generate_tts_b64(
         logger.info(f"TTS falling back: {tts_provider} → {fallback_id}")
         try:
             fallback_provider = get_provider(fallback_id)
+            # Preserve voice gender on fallback — if the original voice was male,
+            # pick a male fallback voice instead of the provider default (which may be female).
             fallback_voice = fallback_provider.get_default_voice()
+            if voice and fallback_id == 'supertonic':
+                # Supertonic voices: M1-M5 (male), F1-F5 (female)
+                # Use M1 as male fallback to avoid jarring gender switch
+                fallback_voice = 'M1'
             audio_bytes = _generate_with_provider(fallback_id, text, fallback_voice)
             logger.info(f"TTS fallback OK: provider={fallback_id}, voice={fallback_voice}")
             return base64.b64encode(audio_bytes).decode('utf-8')

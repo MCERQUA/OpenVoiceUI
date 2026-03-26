@@ -438,6 +438,9 @@ inject();
                     this.rightEye.classList.add(mood);
                 }
                 this.currentMood = mood;
+
+                // Propagate mood to BigHeadFace if active
+                window.BigHeadFace?.setMood(mood);
             },
 
             blink() {
@@ -3246,6 +3249,7 @@ inject();
                 StatusModule.update('thinking', 'CONNECTING...');
                 document.getElementById('thought-bubbles')?.classList.add('active');
                 window.HaloSmokeFace?.setThinking(true);
+                window.BigHeadFace?.setThinking(true);
 
                 // Guard mic from the start — greeting fetch + TTS play will set this properly
                 // via onSpeaking, but setting it here prevents any STT results that arrive
@@ -3310,6 +3314,7 @@ inject();
                     TranscriptPanel.showThinking();
                     document.getElementById('thought-bubbles')?.classList.add('active');
                     window.HaloSmokeFace?.setThinking(true);
+                window.BigHeadFace?.setThinking(true);
                 };
 
                 this.stt.onResult = (transcript) => {
@@ -3500,6 +3505,7 @@ inject();
                 TranscriptPanel.showThinking();
                 document.getElementById('thought-bubbles')?.classList.add('active');
                 window.HaloSmokeFace?.setThinking(true);
+                window.BigHeadFace?.setThinking(true);
 
                 ActionConsole.addEntry('chat', `Sent: "${text.substring(0, 80)}${text.length > 80 ? '...' : ''}"`);
                 window._canvasErrorBuffer = []; // clear after send
@@ -3579,6 +3585,7 @@ inject();
                             .replace(/\[SUNO_GENERATE:[^\]]*\]/gi, '')
                             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
+                            .replace(/\[MOOD:[^\]]*\]/gi, '')
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SOUND:[^\]]*\]/gi, '')
                             .trim();
@@ -3707,6 +3714,14 @@ inject();
                                 ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
                             }
                         }
+                        // Check for [MOOD:xxx] — agent-driven facial expression change
+                        const moodTagMatch = text.match(/\[MOOD:(neutral|happy|sad|angry|thinking|surprised|listening)\]/i);
+                        if (moodTagMatch) {
+                            const newMood = moodTagMatch[1].toLowerCase();
+                            console.log('[Mood] Agent set mood:', newMood);
+                            FaceModule.setMood(newMood);
+                            ActionConsole.addEntry('system', `Mood: ${newMood}`);
+                        }
                         // Check for [SLEEP] — agent-initiated return to wake-word mode
                         if (/\[SLEEP\]/i.test(text) && !canvasCommandsProcessed.has('SLEEP')) {
                             canvasCommandsProcessed.add('SLEEP');
@@ -3758,6 +3773,9 @@ inject();
                                 if (data.type === 'delta') {
                                     streamingText += data.text;
 
+                                    // Auto-detect mood from streaming text
+                                    window.BigHeadFace?.detectMood(streamingText);
+
                                     if (!firstDeltaReceived) {
                                         firstDeltaReceived = true;
                                         FaceModule.setMood('neutral');
@@ -3766,6 +3784,7 @@ inject();
                                         TranscriptPanel.startStreaming();
                                         document.getElementById('thought-bubbles')?.classList.remove('active');
                                         window.HaloSmokeFace?.setThinking(false);
+                window.BigHeadFace?.setThinking(false);
                                         // Create streaming message element
                                         streamingMsgEl = this.displayMessage('assistant', stripCanvasTags(streamingText), true);
                                     } else if (streamingMsgEl) {
@@ -3996,6 +4015,7 @@ inject();
                         }
                         document.getElementById('thought-bubbles')?.classList.remove('active');
                         window.HaloSmokeFace?.setThinking(false);
+                window.BigHeadFace?.setThinking(false);
                     } else {
                         console.error('Conversation error:', error);
                         // Connection failure auto-retry: if the agent crashed/restarted,
@@ -4019,6 +4039,7 @@ inject();
                             TranscriptPanel.finalizeStreaming(null);
                             document.getElementById('thought-bubbles')?.classList.remove('active');
                             window.HaloSmokeFace?.setThinking(false);
+                window.BigHeadFace?.setThinking(false);
                             // Clear _sending so the retry can proceed
                             this._sending = false;
                             if (_inactivityTimer) clearTimeout(_inactivityTimer);
@@ -4042,6 +4063,7 @@ inject();
                         TranscriptPanel.finalizeStreaming('⚠️ Task interrupted — agent restarted.');
                         document.getElementById('thought-bubbles')?.classList.remove('active');
                         window.HaloSmokeFace?.setThinking(false);
+                window.BigHeadFace?.setThinking(false);
                         setTimeout(() => FaceModule.setMood('neutral'), 2000);
                     }
                 } finally {
@@ -4930,6 +4952,7 @@ inject();
                             .replace(/\[MUSIC_STOP\]/gi, '')
                             .replace(/\[MUSIC_NEXT\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
+                            .replace(/\[MOOD:[^\]]*\]/gi, '')
                             .trim();
                         this.callbacks.onTranscript(displayText, false);
                         TranscriptPanel.addMessage('assistant', displayText);
@@ -5020,6 +5043,7 @@ inject();
                 TranscriptPanel.showThinking();
                 document.getElementById('thought-bubbles')?.classList.add('active');
                 window.HaloSmokeFace?.setThinking(true);
+                window.BigHeadFace?.setThinking(true);
 
                 // NOTE: STT stays running - isProcessing flag blocks new transcripts
 
@@ -5058,8 +5082,10 @@ inject();
                         TranscriptPanel.removeThinking();
                         document.getElementById('thought-bubbles')?.classList.remove('active');
                         window.HaloSmokeFace?.setThinking(false);
+                window.BigHeadFace?.setThinking(false);
 
                         console.log('AI responded:', data.response);
+                        window.BigHeadFace?.detectMood(data.response);
                         const rawResponse = data.response;
 
                         // Process command tags from response
@@ -5080,6 +5106,7 @@ inject();
                             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
+                            .replace(/\[MOOD:[^\]]*\]/gi, '')
                             .trim();
 
                         this.callbacks.onTranscript(displayText, false);
@@ -5107,6 +5134,7 @@ inject();
                     TranscriptPanel.removeThinking();
                     document.getElementById('thought-bubbles')?.classList.remove('active');
                     window.HaloSmokeFace?.setThinking(false);
+                window.BigHeadFace?.setThinking(false);
                     this.stt.resetProcessing();
                     this.callbacks.onListening();
                 }
@@ -5194,6 +5222,12 @@ inject();
                             window.FaceID?.loadKnownFaces();
                         }).catch(e => console.error('[FaceReg] Error:', e));
                     }
+                }
+                // [MOOD:xxx] — agent-driven expression change
+                const _moodMatch = text.match(/\[MOOD:(neutral|happy|sad|angry|thinking|surprised|listening)\]/i);
+                if (_moodMatch) {
+                    console.log('[Mood] Agent set mood:', _moodMatch[1].toLowerCase());
+                    FaceModule.setMood(_moodMatch[1].toLowerCase());
                 }
                 // [SLEEP]
                 if (/\[SLEEP\]/i.test(text)) {
@@ -6100,6 +6134,7 @@ inject();
                     StatusModule.update('thinking', 'CONNECTING...');
                     document.getElementById('thought-bubbles')?.classList.add('active');
                     window.HaloSmokeFace?.setThinking(true);
+                window.BigHeadFace?.setThinking(true);
 
                     // Flash buttons and start conversation
                     callButton.classList.add('auto-triggered');
@@ -6152,6 +6187,7 @@ inject();
                     // Clear thinking state when TTS starts — agent is now speaking, not thinking
                     document.getElementById('thought-bubbles')?.classList.remove('active');
                     window.HaloSmokeFace?.setThinking(false);
+                window.BigHeadFace?.setThinking(false);
                     TranscriptPanel.removeThinking?.();
                     if (voiceConversation.stt) {
                         console.log('🔇 Muting mic during TTS');
@@ -6256,6 +6292,7 @@ inject();
                         StatusModule.update('thinking', 'CONNECTING...');
                         document.getElementById('thought-bubbles')?.classList.add('active');
                         window.HaloSmokeFace?.setThinking(true);
+                window.BigHeadFace?.setThinking(true);
                     }
                     ModeManager.toggleVoice();
                 });
