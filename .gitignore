@@ -141,3 +141,6 @@ setup/openvoiceui-agent/
 openclaw-data/
 .npmrc
 *.tgz
+
+# Brandbook — internal design doc, not part of public product
+brandbook/
