@@ -1,10 +1,38 @@
 module.exports = {
   run: [
-    // Step 1: Verify Docker is available
+    // Step 1: Check Docker is installed and running — clear message if not
     {
       method: "shell.run",
       params: {
-        message: "docker --version && docker compose version",
+        message: [
+          'node -e "',
+          "const { execSync } = require('child_process');",
+          "try { execSync('docker --version', { stdio: 'pipe' }); }",
+          "catch(e) {",
+          "  console.error('\\n\\n=== Docker is not installed ===\\n');",
+          "  console.error('OpenVoiceUI requires Docker to run.\\n');",
+          "  console.error('Download and install Docker Desktop from:\\n  https://www.docker.com/products/docker-desktop/\\n');",
+          "  console.error('After installing, open Docker Desktop and wait for it to fully start,');",
+          "  console.error('then try installing OpenVoiceUI again.\\n');",
+          "  process.exit(1);",
+          "}",
+          "try { execSync('docker info', { stdio: 'pipe' }); }",
+          "catch(e) {",
+          "  console.error('\\n\\n=== Docker is installed but not running ===\\n');",
+          "  console.error('Please open Docker Desktop and wait for it to fully start');",
+          "  console.error('(the whale icon in your system tray should stop animating),');",
+          "  console.error('then try installing OpenVoiceUI again.\\n');",
+          "  process.exit(1);",
+          "}",
+          "try { execSync('docker compose version', { stdio: 'pipe' }); }",
+          "catch(e) {",
+          "  console.error('\\n\\n=== Docker Compose not found ===\\n');",
+          "  console.error('Please update Docker Desktop to the latest version.\\n');",
+          "  process.exit(1);",
+          "}",
+          "console.log('Docker is installed and running.');",
+          '"',
+        ].join(""),
       },
     },
 
