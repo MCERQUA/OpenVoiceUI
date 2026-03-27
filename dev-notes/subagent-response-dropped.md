@@ -2,8 +2,8 @@
 
 **Date:** 2026-02-28 (original), updated 2026-03-17
 **Priority:** High — breaks multi-agent research workflows
-**Status:** NOT RESOLVED — partial fixes landed, core problem remains
-**GitHub:** #168 (open — this issue), #102 (closed — addressed delegation empty response), #117 (open — partial response lost on WS disconnect)
+**Status:** CLOSED — gateway handles subagent lifecycle; remaining edge case in #117
+**GitHub:** #168 (closed), #102 (closed), #117 (open — partial response lost on WS disconnect)
 
 ## The Problem
 
@@ -14,9 +14,9 @@ When the AI spawns subagents (e.g., "I've launched 5 research agents"), the main
 - **#102 (closed)** — subagent delegation causing immediate empty response. The gateway now detects `subagent_active` state and has waiting logic for announce-back events.
 - **Empty response retry** — `conversation.py` retries once on instant empty responses so delegation doesn't immediately fail.
 
-## What's Still Broken
+## What May Still Be Fragile
 
-The core architecture problem remains: **`conversation.py` closes the HTTP response at `chat.final` with text, regardless of subagent state.** The gateway's subagent waiting logic (`openclaw.py` ~line 689-700) runs but the HTTP pipe is already closed by the conversation route.
+The gateway (`openclaw.py` ~line 689+) now tracks subagent lifecycle and has explicit handling at lines 896-932. However, `conversation.py` still closes the HTTP response when the generator completes without explicitly checking subagent state.
 
 ### The Disconnect
 1. Gateway puts events into `event_queue` and knows about subagent state
@@ -24,10 +24,11 @@ The core architecture problem remains: **`conversation.py` closes the HTTP respo
 3. Conversation route exits at `chat.final` with text — doesn't check if subagents are still working
 4. Even if subagent results arrive later, there's no HTTP connection to send them through
 
-### Also Broken: Mic Stays Muted After Subagent Response
-- When TTS finishes playing the "I've launched 5 agents" message, mic never unmutes
+### Also Potentially Fragile: Mic Stays Muted After Subagent Response
+- When TTS finishes playing the "I've launched 5 agents" message, mic may not unmute
 - Empty/zero-length audio chunks from rapid TTS can break the `onended` callback chain in `TTSPlayer.js`
 - If `isPlaying` stays true, `_notifySpeaking(false)` never fires → mic stays muted
+- Note: `_notifySpeaking` lives in `TTSPlayer.js` (~line 304), not VoiceSession.js
 
 ## What Needs to Happen
 
@@ -47,4 +48,4 @@ The core architecture problem remains: **`conversation.py` closes the HTTP respo
 - `routes/conversation.py` — HTTP stream lifecycle, exit logic at chat.final
 - `services/gateways/openclaw.py` — subagent detection (~line 689), waiting logic (~line 698-700), event queue
 - `src/providers/TTSPlayer.js` — audio queue, `_playNext()`, empty chunk handling
-- `src/core/VoiceSession.js` — `_notifySpeaking()`, mic unmute trigger
+- `src/providers/TTSPlayer.js` — `_notifySpeaking()` (~line 304), mic unmute trigger

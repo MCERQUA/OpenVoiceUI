@@ -1,8 +1,8 @@
 # Unwired TTS Config Options
 
 **Date:** 2026-02-28 (original), updated 2026-03-17
-**Related:** tts-stream-cutoff-issue.md, GitHub #115
-**Priority:** Medium — directly contributes to choppy audio
+**Related:** tts-stream-cutoff-issue.md, GitHub #115 (closed)
+**Priority:** Medium — directly contributes to choppy audio. Issue closed with only `min_sentence_chars` wired; other two deferred.
 
 ## Summary
 
@@ -15,7 +15,7 @@ Three TTS settings exist in the profile config schema. One is now wired; two are
 **Status:** `conversation.py` line 885-894 reads the profile value with a default of 40. The profile can override this per-voice-config.
 
 **Files:**
-- `routes/conversation.py` → `_min_sentence_chars` (line 885), `_extract_sentence(_tts_buf, min_len=_min_sentence_chars)` (line 1120)
+- `routes/conversation.py` → `_min_sentence_chars` (line 1018), `_extract_sentence(_tts_buf, min_len=_min_sentence_chars)` (line 1318)
 - `profiles/default.json` → `"min_sentence_chars": 20`
 - `profiles/manager.py` → `min_sentence_chars: Optional[int] = None`
 
@@ -48,4 +48,4 @@ Three TTS settings exist in the profile config schema. One is now wired; two are
 
 ## GitHub Tracking
 
-All three tracked in **#115** — feat: wire TTS sentence streaming config options from profile
+All three were tracked in **#115** (closed) — feat: wire TTS sentence streaming config options from profile. Issue closed with only `min_sentence_chars` implemented; `parallel_sentences` and `inter_sentence_gap_ms` deferred.

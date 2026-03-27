@@ -8,10 +8,11 @@ Internal development notes, research, and issue context.
 
 | File | Status | GitHub Issue |
 |------|--------|-------------|
-| `bot-scanning-rate-limiting.md` | Open — low priority | #167 |
+| `bot-scanning-rate-limiting.md` | CLOSED — low priority, safe | #167 (closed) |
 | `brain-glitch-fallback-chain.md` | RESOLVED — original bugs fixed | #82 (closed) |
-| `subagent-response-dropped.md` | NOT RESOLVED — core arch problem | #168 |
-| `tts-stream-cutoff-issue.md` | Partially fixed — `min_sentence_chars` wired | #115, #81 |
-| `unwired-tts-config-options.md` | 1/3 wired, 2/3 still todo | #115 |
+| `commit-review-100.md` | Historical reference — Mar 6-17 review | — |
+| `subagent-response-dropped.md` | CLOSED — gateway handles subagent lifecycle | #168 (closed), #117 (open) |
+| `tts-stream-cutoff-issue.md` | CLOSED — `min_sentence_chars` wired, other options deferred | #115 (closed), #81 (closed) |
+| `unwired-tts-config-options.md` | 1/3 wired, 2/3 deferred — issues closed as-is | #115 (closed) |
 
-Last reviewed: 2026-03-17
+Last reviewed: 2026-03-27

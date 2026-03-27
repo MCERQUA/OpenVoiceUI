@@ -1,8 +1,8 @@
 # TTS Stream Audio Cutoff Issue
 
 **Date:** 2026-02-27 (original), updated 2026-03-17
-**Priority:** Medium — tracked in GitHub #115, #81
-**Status:** Partially addressed — `min_sentence_chars` now wired, other config options still unwired
+**Priority:** Medium
+**Status:** CLOSED — `min_sentence_chars` wired; `parallel_sentences` and `inter_sentence_gap_ms` deferred. GitHub #115 and #81 both closed.
 
 ## The Problem
 
@@ -42,16 +42,15 @@ When the AI streams a response, it's broken into sentences and each sentence get
 
 ## GitHub Issues
 
-- **#115** — feat: wire TTS sentence streaming config options from profile (covers `parallel_sentences` and `inter_sentence_gap_ms`)
-- **#81** — perf: high TTS latency on greeting responses (related — parallel TTS is fast but causes overlap)
+- **#115** (closed) — feat: wire TTS sentence streaming config options from profile (`min_sentence_chars` wired; `parallel_sentences` and `inter_sentence_gap_ms` deferred)
+- **#81** (closed) — perf: high TTS latency on greeting responses
 
 ## Key Files
 
 **Backend:**
-- `routes/conversation.py` — `_extract_sentence()` (~line 1014), `_fire_tts()` (~line 1026), `_min_sentence_chars` (~line 885)
-- `profiles/manager.py` — VoiceConfig schema (lines 56-62)
+- `routes/conversation.py` — `_extract_sentence()` (~line 1156), `_fire_tts()` (~line 1173), `_min_sentence_chars` (~line 1018)
+- `profiles/manager.py` — VoiceConfig schema (lines 54-62)
 - `profiles/default.json` — default values
 
 **Frontend:**
-- `src/providers/TTSPlayer.js` — queue-based audio player (queue/_playNext/stop)
-- `src/core/VoiceSession.js` line 342 — queuing audio from stream
+- `src/providers/TTSPlayer.js` — queue-based audio player (queue ~line 149, _playNext ~line 181, stop ~line 223)

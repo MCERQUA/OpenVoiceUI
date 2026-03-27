@@ -24,5 +24,5 @@ The AI returned blank responses (0 chars from `chat.final`), then a broken Z.AI 
 
 ## Key Files
 
-- `routes/conversation.py` — retry logic (~line 1228), `_consecutive_empty_responses` (~line 308), session reset (~line 1344)
+- `routes/conversation.py` — retry logic (~line 1485), `_consecutive_empty_responses` (~line 318), session reset
 - `services/gateways/openclaw.py` — empty response detection, ABORT logic
