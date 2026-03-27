@@ -507,3 +507,11 @@ window.HaloSmokeFace = (function () {
 
     return { start, stop, setThinking };
 })();
+
+// Self-register with FaceRenderer plugin system
+if (window.FaceRenderer?.registerFace) {
+    window.FaceRenderer.registerFace('halo-smoke', window.HaloSmokeFace, {
+        name: 'Halo Smoke Orb',
+        description: 'Halo ring + wispy smoke core, reacts to TTS audio'
+    });
+}

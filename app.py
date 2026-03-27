@@ -114,6 +114,9 @@ def create_app(config_override: dict = None):
             '/api/canvas/',  # canvas API — creation, manifest, context (no per-user auth needed)
             '/api/uploads',   # uploads list — files are already public at /uploads/, listing is fine
             '/api/profiles',  # read-only profile config — loaded before Clerk init
+            '/api/bighead',   # BigHead avatar config — loaded by face plugin
+            '/api/plugins',   # Plugin system — asset loading, install/uninstall
+            '/plugins/',      # Plugin static assets — face scripts, CSS, previews
             '/api/chat',      # LLM proxy (Groq) — used by canvas pages for inline AI
             '/api/tts/',      # TTS provider list — loaded before Clerk init
             '/api/theme',     # theme config — loaded before Clerk init
@@ -207,7 +210,7 @@ def create_app(config_override: dict = None):
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://*.clerk.accounts.dev https://*.jam-bot.com; "
             "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com; "
+            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io; "
             "media-src 'self' blob:; "
             "connect-src 'self' wss: https:; "
             "frame-src 'self' https://*.clerk.accounts.dev https://*.jam-bot.com https:; "

@@ -92,6 +92,33 @@
       "audio_format": "wav",
       "sample_rate": 24000
     },
+    "elevenlabs": {
+      "name": "ElevenLabs",
+      "provider_id": "elevenlabs",
+      "cost_per_minute": 0.30,
+      "quality": "premium",
+      "latency": "fast",
+      "voices": [],
+      "features": [
+        "voice-cloning",
+        "multilingual",
+        "streaming",
+        "emotion-control",
+        "cloud",
+        "mp3-output"
+      ],
+      "requires_api_key": true,
+      "status": "active",
+      "description": "ElevenLabs — premium TTS with instant voice cloning, multilingual, emotion control",
+      "languages": ["en", "es", "fr", "de", "it", "pt", "ja", "ko", "zh", "ar", "ru", "hi", "pl", "tr", "nl", "sv"],
+      "max_characters": 5000,
+      "notes": "Premium quality. Models: eleven_multilingual_v2 (default), eleven_turbo_v2_5 (faster). ELEVENLABS_API_KEY required. Voices populated dynamically from API.",
+      "requires_microphone": false,
+      "requires_websocket": false,
+      "mode": "tts-only",
+      "audio_format": "mp3",
+      "sample_rate": 44100
+    },
     "groq": {
       "name": "Groq Orpheus",
       "provider_id": "groq",

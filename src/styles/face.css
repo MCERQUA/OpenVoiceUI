@@ -61,6 +61,8 @@
             display: none;
         }
 
+        /* Face plugin CSS is loaded dynamically from /api/plugins/assets */
+
         /* Hide square-frame equalizer bars when halo orb is active —
            the box outline clashes with the circular halo face. */
         .face-box.halo-smoke-mode .visualizer-container,

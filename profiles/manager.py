@@ -96,6 +96,7 @@ class UIConfig:
     face_enabled: bool = True
     face_mode: str = "halo-smoke"
     face_mood: str = "neutral"
+    face_config: Dict = field(default_factory=dict)
     transcript_panel: bool = True
     thought_bubbles: bool = True
     show_mode_badge: bool = False
@@ -221,9 +222,16 @@ class ProfileManager:
     @classmethod
     def get_instance(cls) -> "ProfileManager":
         if cls._instance is None:
-            # Resolve relative to the project root (parent of this file)
-            project_root = Path(__file__).parent.parent
-            cls._instance = ProfileManager(str(project_root / "profiles"))
+            import os
+            # Use runtime profiles dir if mounted (persists across container recreates)
+            runtime_profiles = Path("/app/runtime/profiles")
+            if runtime_profiles.is_dir():
+                profiles_path = str(runtime_profiles)
+            else:
+                # Fallback to bundled profiles (read-only in image)
+                project_root = Path(__file__).parent.parent
+                profiles_path = str(project_root / "profiles")
+            cls._instance = ProfileManager(profiles_path)
         return cls._instance
 
     @classmethod

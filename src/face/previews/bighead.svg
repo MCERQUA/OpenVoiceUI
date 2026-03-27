@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="56" fill="#1a1d23" stroke="#2a2d35" stroke-width="2"/>
+  <!-- Head shape -->
+  <ellipse cx="60" cy="52" rx="30" ry="34" fill="#d4a574"/>
+  <!-- Body/shoulders -->
+  <path d="M30 86 Q30 76 42 72 L60 68 L78 72 Q90 76 90 86 L90 120 L30 120 Z" fill="#2563eb"/>
+  <!-- Eyes -->
+  <ellipse cx="48" cy="46" rx="7" ry="8" fill="white"/>
+  <ellipse cx="72" cy="46" rx="7" ry="8" fill="white"/>
+  <circle cx="49" cy="46" r="4" fill="#1a1d23"/>
+  <circle cx="73" cy="46" r="4" fill="#1a1d23"/>
+  <circle cx="50" cy="45" r="1.5" fill="white"/>
+  <circle cx="74" cy="45" r="1.5" fill="white"/>
+  <!-- Mouth -->
+  <path d="M50 62 Q60 68 70 62" stroke="#1a1d23" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <!-- Audio waves (lip sync indicator) -->
+  <g opacity="0.6">
+    <path d="M40 100 Q45 96 50 100 Q55 104 60 100 Q65 96 70 100 Q75 104 80 100" stroke="#00ccff" stroke-width="1.5" fill="none"/>
+    <path d="M44 106 Q49 103 54 106 Q59 109 64 106 Q69 103 74 106" stroke="#00ccff" stroke-width="1" fill="none" opacity="0.4"/>
+  </g>
+</svg>

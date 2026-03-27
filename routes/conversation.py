@@ -177,6 +177,12 @@ _VOICE_INSTRUCTIONS = (
     "SPOTIFY: [SPOTIFY:song name] or [SPOTIFY:song name|artist name] — plays from Spotify. "
     "Example: [SPOTIFY:Bohemian Rhapsody|Queen]. Only use when user specifically asks. "
 
+    # --- Facial expressions / mood ---
+    "EXPRESSIONS: [MOOD:happy] [MOOD:sad] [MOOD:angry] [MOOD:surprised] [MOOD:thinking] [MOOD:neutral] — "
+    "changes your facial expression on the avatar. Use naturally in conversation to match your emotional tone. "
+    "Include the tag INLINE with your speech — e.g. 'That's hilarious! [MOOD:happy] I love that idea.' "
+    "Switch to [MOOD:neutral] after a moment or let it happen naturally. Don't announce that you're changing expressions. "
+
     # --- Sleep / goodbye ---
     "SLEEP: [SLEEP] — puts interface into passive wake-word mode. "
     "Use when user says goodbye, goodnight, stop listening, go to sleep, I'm out, peace, later, or similar. "
@@ -549,6 +555,7 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'\[MUSIC_NEXT\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SUNO_GENERATE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SLEEP\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[MOOD:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[REGISTER_FACE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SPOTIFY:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SOUND:[^\]]*\]', '', text, flags=re.IGNORECASE)
@@ -1158,6 +1165,11 @@ def _conversation_inner():
                                 return text[:end].strip(), text[end:].lstrip()
                         return None, text
 
+                    # Sticky fallback state — shared across all TTS calls in this response.
+                    # If one sentence falls back to a different provider, all subsequent
+                    # sentences use the same fallback to keep the voice consistent.
+                    _tts_fallback_state = {}
+
                     def _fire_tts(raw_text):
                         """Start TTS for raw_text. Parallel or sequential per profile config.
                         Returns (done_event, result)."""
@@ -1174,7 +1186,8 @@ def _conversation_inner():
                                 if cleaned and cleaned.strip():
                                     result['audio'] = _tts_generate_b64(
                                         cleaned, voice=voice or 'M1',
-                                        tts_provider=tts_provider
+                                        tts_provider=tts_provider,
+                                        fallback_state=_tts_fallback_state
                                     )
                                 t_done = time.time()
                                 logger.info(
@@ -1215,6 +1228,19 @@ def _conversation_inner():
                     _tts_pending = []   # [(done_event, result_dict), ...]
                     _chunks_sent = 0    # audio chunks already yielded early
 
+                    # ── Spoken status updates during long tool execution ──
+                    # Prevents dead silence when agent runs tools for 30-90+ seconds.
+                    _last_audio_time = time.time()   # last time we sent audio to browser
+                    _status_tts_count = 0            # how many "still working" messages sent
+                    _tools_seen = 0                  # count of tool starts seen
+                    _STATUS_SILENCE_THRESHOLD = 15   # seconds of no audio before first status
+                    _STATUS_REPEAT_INTERVAL = 30     # seconds between subsequent status msgs
+                    _STATUS_MESSAGES = [
+                        "Working on that.",
+                        "Still working, one moment.",
+                        "Almost there, still on it.",
+                    ]
+
                     full_response = None
                     _stream_start = time.time()
                     _STREAM_HARD_TIMEOUT = 310  # seconds — total allowed time
@@ -1243,6 +1269,7 @@ def _conversation_inner():
                             # Flush any TTS that finished during tool execution —
                             # without this, audio sits in _tts_pending for the
                             # entire duration of tool calls (30-60s+ silence).
+                            _flushed_audio = False
                             while _tts_pending and _tts_pending[0][0].is_set():
                                 _done_evt, _res = _tts_pending.pop(0)
                                 if _res.get('error'):
@@ -1250,6 +1277,28 @@ def _conversation_inner():
                                 elif _res.get('audio'):
                                     yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
+                                    _last_audio_time = time.time()
+                                    _flushed_audio = True
+                            # ── Spoken status: break silence during long tool execution ──
+                            # If tools are running and user has heard nothing for too long,
+                            # speak a brief status so they know the agent is alive.
+                            if not _flushed_audio and _tools_seen > 0 and not skip_tts:
+                                _silence_secs = time.time() - _last_audio_time
+                                _threshold = (
+                                    _STATUS_SILENCE_THRESHOLD if _status_tts_count == 0
+                                    else _STATUS_REPEAT_INTERVAL
+                                )
+                                if _silence_secs >= _threshold:
+                                    _msg_idx = min(_status_tts_count, len(_STATUS_MESSAGES) - 1)
+                                    _status_text = _STATUS_MESSAGES[_msg_idx]
+                                    logger.info(f"### STATUS TTS ({_status_tts_count}): '{_status_text}' (silence={_silence_secs:.0f}s)")
+                                    _status_done, _status_res = _fire_tts(_status_text)
+                                    _status_done.wait(timeout=10)
+                                    if _status_res.get('audio'):
+                                        yield _audio_event(_status_res['audio'], _chunks_sent)
+                                        _chunks_sent += 1
+                                        _last_audio_time = time.time()
+                                    _status_tts_count += 1
                             continue
 
                         if evt['type'] == 'delta':
@@ -1280,9 +1329,13 @@ def _conversation_inner():
                                 elif _res.get('audio'):
                                     yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
+                                    _last_audio_time = time.time()
                             continue
 
                         if evt['type'] == 'action':
+                            # Track tool starts for spoken status logic
+                            if evt.get('action', {}).get('phase') == 'start':
+                                _tools_seen += 1
                             # Flush any TTS chunks that already finished —
                             # avoids silence during long tool calls (the first
                             # sentence TTS completes ~1s in but would otherwise
@@ -1294,12 +1347,63 @@ def _conversation_inner():
                                 elif _res.get('audio'):
                                     yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
+                                    _last_audio_time = time.time()
                             yield json.dumps({'type': 'action', 'action': evt['action']}) + '\n'
                             continue
 
                         if evt['type'] == 'queued':
                             StatusModule_hack = True  # just yield to browser
                             yield json.dumps({'type': 'queued'}) + '\n'
+                            continue
+
+                        if evt['type'] == 'text_interim':
+                            # Agent spoke but sub-agents still running.
+                            # Process TTS for this text but keep stream open.
+                            interim_response = evt.get('response', '')
+                            logger.info(
+                                f"### TEXT_INTERIM: {len(interim_response)} chars "
+                                f"— sub-agents still working, stream stays open"
+                            )
+
+                            # Yield interim event to frontend
+                            yield json.dumps({
+                                'type': 'text_interim',
+                                'response': interim_response,
+                                'actions': evt.get('actions', []),
+                            }) + '\n'
+
+                            # Flush any buffered TTS text from streaming deltas
+                            _remaining_interim = _tts_buf.strip()
+                            if _remaining_interim:
+                                _tts_pending.append(_fire_tts(_remaining_interim))
+                                _tts_buf = ''
+
+                            # If no sentences were extracted mid-stream, fire TTS
+                            # for the full interim text
+                            if not _tts_pending and interim_response:
+                                tts_text_interim = clean_for_tts(interim_response)
+                                if tts_text_interim and tts_text_interim.strip():
+                                    _tts_pending.append(_fire_tts(tts_text_interim))
+
+                            # Flush all pending TTS audio immediately
+                            for _done_i, _res_i in _tts_pending:
+                                _done_i.wait(timeout=30)
+                                if _res_i.get('error'):
+                                    yield _tts_error_event(_res_i['error'])
+                                elif _res_i.get('audio'):
+                                    yield _audio_event(_res_i['audio'], _chunks_sent)
+                                    _chunks_sent += 1
+                            _tts_pending = []
+                            _tts_buf = ''
+
+                            # Tell frontend sub-agents are actively working
+                            yield json.dumps({
+                                'type': 'subagents_working',
+                            }) + '\n'
+
+                            # Extend hard timeout for sub-agent wait phase
+                            _stream_start = time.time()
+                            _STREAM_HARD_TIMEOUT = 600
                             continue
 
                         if evt['type'] == 'text_done':
@@ -1439,11 +1543,40 @@ def _conversation_inner():
                                 except Exception as _rfe:
                                     logger.error(f'### Failed to write restart flag: {_rfe}')
 
-                                # 4. Try Z.AI direct fallback for THIS message
+                                # 4. Try Groq fallback for THIS message (available on all clients)
+                                #    Falls back to Z.AI direct if Groq unavailable.
                                 try:
                                     import requests as _req
+                                    _groq_key = os.environ.get('GROQ_API_KEY', '')
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
-                                    if _zai_key:
+                                    # Strip context to just the user message for fallback
+                                    _fallback_msg = user_message if user_message else message_with_context
+                                    if _groq_key:
+                                        _groq_resp = _req.post(
+                                            'https://api.groq.com/openai/v1/chat/completions',
+                                            headers={
+                                                'Authorization': f'Bearer {_groq_key}',
+                                                'Content-Type': 'application/json',
+                                            },
+                                            json={
+                                                'model': 'llama-3.3-70b-versatile',
+                                                'max_tokens': 1500,
+                                                'messages': [
+                                                    {'role': 'system', 'content': 'You are a helpful AI assistant. Respond conversationally and concisely.'},
+                                                    {'role': 'user', 'content': _fallback_msg},
+                                                ],
+                                            },
+                                            timeout=15,
+                                        )
+                                        if _groq_resp.status_code == 200:
+                                            _groq_data = _groq_resp.json()
+                                            _groq_text = _groq_data.get('choices', [{}])[0].get('message', {}).get('content', '')
+                                            if _groq_text:
+                                                full_response = _groq_text
+                                                metrics['fallback_used'] = 1
+                                                metrics['profile'] = 'groq-fallback'
+                                                logger.info(f'### Groq fallback succeeded: {len(_groq_text)} chars')
+                                    elif _zai_key:
                                         _zai_resp = _req.post(
                                             'https://api.z.ai/api/anthropic/v1/messages',
                                             headers={
@@ -1454,7 +1587,7 @@ def _conversation_inner():
                                             json={
                                                 'model': 'glm-4.7',
                                                 'max_tokens': 1500,
-                                                'messages': [{'role': 'user', 'content': message_with_context}],
+                                                'messages': [{'role': 'user', 'content': _fallback_msg}],
                                             },
                                             timeout=30,
                                         )
@@ -1466,11 +1599,11 @@ def _conversation_inner():
                                                 metrics['fallback_used'] = 1
                                                 metrics['profile'] = 'zai-direct'
                                                 logger.info(f'### Z.AI direct fallback succeeded: {len(_zai_text)} chars')
-                                except Exception as _zfe:
-                                    logger.error(f'### Z.AI direct fallback failed: {_zfe}')
+                                except Exception as _fbe:
+                                    logger.error(f'### Fallback LLM failed: {_fbe}')
 
                                 if not full_response or not full_response.strip():
-                                    full_response = "I had a brief connection issue. I'm reconnecting now — please try again."
+                                    full_response = "I missed that — my brain glitched for a second. Could you say that again?"
 
                             # ── Timeout empty: agent ran but produced nothing in 300s ──
                             # This is NOT session poisoning — the session is healthy but the

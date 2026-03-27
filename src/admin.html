@@ -603,9 +603,52 @@ const Builder = {
     }
   },
 
+  _providerVoices:{},  // cached {provider_id: [{name,id},...]}
+  async _loadProviderVoices(){
+    if(Object.keys(this._providerVoices).length) return;
+    try{
+      const r=await fetch('/api/tts/providers');
+      const d=await r.json();
+      for(const p of (d.providers||[])){
+        const pid=p.provider_id;
+        const voices=p.voices||[];
+        // voices can be strings (names) or objects — normalize
+        this._providerVoices[pid]=voices.map(v=>typeof v==='string'?v:v.name||v.id||v);
+      }
+    }catch(e){console.warn('Failed to load TTS voices',e)}
+  },
+  _renderVoiceGrid(provider,selectedVoice){
+    const grid=$('voice-grid');
+    if(!grid) return;
+    const voices=this._providerVoices[provider]||['M1','M2','M3','M4','M5','F1','F2','F3','F4','F5'];
+    if(voices.length<=20){
+      // Small list — button grid
+      grid.innerHTML=voices.map(v=>{
+        const sel=v===selectedVoice;
+        const f=v.startsWith('F');
+        return'<button class="voice-btn'+(sel?(f?' sel-f':' sel-m'):'')+'" onclick="Builder.setVoice(\''+esc(v)+'\','+f+')" id="vb-'+esc(v)+'">'+esc(v)+'</button>';
+      }).join('');
+    }else{
+      // Large list — searchable select
+      grid.innerHTML='<input type="text" id="voice-search" placeholder="Search '+voices.length+' voices..." style="margin-bottom:8px;font-size:12px" oninput="Builder._filterVoices()">'+
+        '<select id="voice-select" size="8" style="width:100%;font-size:12px;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px" onchange="Builder.setVoice(this.value,false)">'+
+        voices.map(v=>'<option value="'+esc(v)+'"'+(v===selectedVoice?' selected':'')+'>'+esc(v)+'</option>').join('')+
+        '</select>';
+    }
+  },
+  _filterVoices(){
+    const q=($('voice-search')?.value||'').toLowerCase();
+    const sel=$('voice-select');
+    if(!sel) return;
+    const prov=$('be-tts')?.value||'supertonic';
+    const voices=this._providerVoices[prov]||[];
+    const filtered=q?voices.filter(v=>v.toLowerCase().includes(q)):voices;
+    sel.innerHTML=filtered.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');
+  },
+
   renderEditor(id,p){
-    const voices=['M1','M2','M3','M4','M5','F1','F2','F3','F4','F5'];
-    const selVoice=this._voice||'M1';
+    const defaultVoices=['M1','M2','M3','M4','M5','F1','F2','F3','F4','F5'];
+    const selVoice=this._voice||p.voice?.voice_id||'M1';
     // features is {canvas:bool, music:bool, ...} object
     const featObj=Array.isArray(p.features)?Object.fromEntries(p.features.map(k=>[k,true])):(p.features||{});
     const allFeats=['canvas','music','tools','vision','memory','caller','sounds','commercial'];
@@ -627,18 +670,17 @@ const Builder = {
           '<option value="elevenlabs"'+(llmProv==='elevenlabs'?' selected':'')+'>ElevenLabs AI</option>'+
           '<option value="openai"'+(llmProv==='openai'?' selected':'')+'>OpenAI</option>'+
         '</select></div>'+
-        '<div class="fg"><label class="fl">TTS Provider</label><select id="be-tts">'+
+        '<div class="fg"><label class="fl">TTS Provider</label><select id="be-tts" onchange="Builder._renderVoiceGrid(this.value,null)">'+
           '<option value="supertonic"'+(ttsProv==='supertonic'?' selected':'')+'>Supertonic (Free &middot; Local)</option>'+
           '<option value="groq"'+(ttsProv==='groq'?' selected':'')+'>Groq Orpheus (Fast &middot; Cloud)</option>'+
+          '<option value="resemble"'+(ttsProv==='resemble'?' selected':'')+'>Resemble AI (Premium &middot; Cloud)</option>'+
+          '<option value="qwen3"'+(ttsProv==='qwen3'?' selected':'')+'>Qwen3 Voice Clone (Cloud)</option>'+
           '<option value="hume"'+(ttsProv==='hume'?' selected':'')+'>Hume EVI</option>'+
           '<option value="elevenlabs"'+(ttsProv==='elevenlabs'?' selected':'')+'>ElevenLabs</option>'+
         '</select></div>'+
       '</div>'+
       '<div class="fg"><label class="fl">Voice</label>'+
-        '<div class="voice-grid" id="voice-grid">'+
-          voices.map(v=>{const f=v.startsWith('F');const sel=v===selVoice;return'<button class="voice-btn'+(sel?(f?' sel-f':' sel-m'):'')+'" onclick="Builder.setVoice(\''+v+'\','+f+')" id="vb-'+v+'">'+v+'</button>'}).join('')+
-        '</div>'+
-        '<div style="font-size:11px;color:var(--dim);margin-top:5px"><span style="color:var(--blue)">&#9632;</span> Male &nbsp;<span style="color:var(--purple)">&#9632;</span> Female</div>'+
+        '<div class="voice-grid" id="voice-grid"><div class="loading" style="padding:8px"><div class="spin"></div>Loading voices...</div></div>'+
       '</div>'+
       '<div class="sect-label">Vision / Camera AI</div>'+
       '<div class="fg">'+
@@ -702,6 +744,8 @@ const Builder = {
         '<button class="btn btn-o" onclick="Builder.selectAgent(\''+esc(id)+'\')">&#8634; Discard</button>'+
         (id!=='default'?'<button class="btn btn-d" onclick="Builder.delete(\''+esc(id)+'\')">&#x1F5D1; Delete</button>':'')+
       '</div>';
+    // Load voice list for the selected TTS provider
+    this._loadProviderVoices().then(()=>this._renderVoiceGrid(ttsProv,selVoice));
   },
 
   switchTab(tab){
@@ -721,7 +765,8 @@ const Builder = {
 
   setVoice(v,isFemale){
     document.querySelectorAll('.voice-btn').forEach(b=>{b.className='voice-btn'});
-    $('vb-'+v).className='voice-btn '+(isFemale?'sel-f':'sel-m');
+    const btn=$('vb-'+v);
+    if(btn) btn.className='voice-btn '+(isFemale?'sel-f':'sel-m');
     this._voice=v;
   },
 

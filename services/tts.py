@@ -81,24 +81,28 @@ from tts_providers import get_provider, list_providers  # noqa: E402 — after s
 
 def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) -> bytes:
     """
-    Generate TTS audio with chunking to avoid Supertonic ONNX overflow.
+    Generate TTS audio with chunking for WAV providers.
 
-    Supertonic ONNX crashes with RUNTIME_EXCEPTION when text exceeds ~1000 tokens.
     Splits long text on sentence boundaries, generates each chunk, then
     concatenates the raw PCM data into a single WAV file.
+    Works with any WAV-output provider (Supertonic, Resemble, etc.).
 
     Args:
-        provider: TTSProvider instance (e.g. SupertonicProvider).
+        provider: TTSProvider instance.
         text: Text to synthesize.
-        voice: Voice identifier (e.g. 'M1').
+        voice: Voice identifier.
         max_chars: Max characters per chunk. Default 800.
 
     Returns:
         WAV audio bytes (concatenated from all chunks).
     """
+    # Supertonic-specific kwargs (ignored by other providers via **kwargs)
+    provider_id = provider.get_info().get('provider_id', '')
+    extra_kwargs = {'speed': 1.05, 'total_step': 40} if provider_id == 'supertonic' else {}
+
     # Short text — no chunking needed
     if len(text) <= max_chars:
-        return provider.generate_speech(text=text, voice=voice, speed=1.05, total_step=40)
+        return provider.generate_speech(text=text, voice=voice, **extra_kwargs)
 
     # Split on sentence boundaries
     sentences = re.split(r'(?<=[.!?])\s+', text)
@@ -125,7 +129,7 @@ def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) 
         if not chunk.strip():
             continue
         try:
-            chunk_audio = provider.generate_speech(text=chunk, voice=voice, speed=1.05, total_step=40)
+            chunk_audio = provider.generate_speech(text=chunk, voice=voice, **extra_kwargs)
             if i == 0:
                 if chunk_audio[:4] == b'RIFF' and chunk_audio[8:12] == b'WAVE':
                     pos = 12
@@ -159,7 +163,7 @@ def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) 
 
     if not all_audio_data or sample_rate is None:
         logger.warning("All TTS chunks failed, trying truncated text")
-        return provider.generate_speech(text=text[:max_chars], voice=voice, speed=1.05, total_step=40)
+        return provider.generate_speech(text=text[:max_chars], voice=voice, **extra_kwargs)
 
     # Rebuild WAV with concatenated PCM data
     byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
@@ -182,10 +186,36 @@ _FALLBACK_CHAIN = {
     'groq': 'supertonic',
     'qwen3': 'supertonic',
     'resemble': 'supertonic',
+    'elevenlabs': 'supertonic',
 }
 
 _MAX_RETRIES = 2
 _RETRY_DELAYS = (0.5, 1.5)  # seconds between retries
+
+# Voice gender/character mapping across providers — keeps voice consistent on fallback.
+# Maps (source_provider, voice) → (fallback_provider) → fallback_voice.
+_VOICE_GENDER = {
+    # Groq Orpheus voices
+    'autumn': 'F', 'diana': 'F', 'hannah': 'F',
+    'austin': 'M', 'daniel': 'M', 'troy': 'M',
+    # ElevenLabs voices (common ones)
+    'rachel': 'F', 'drew': 'M', 'clyde': 'M', 'paul': 'M',
+    'domi': 'F', 'bella': 'F', 'antoni': 'M', 'elli': 'F',
+    'josh': 'M', 'arnold': 'M', 'adam': 'M', 'sam': 'M',
+    # Supertonic voices
+    'M1': 'M', 'M2': 'M', 'M3': 'M', 'M4': 'M', 'M5': 'M',
+    'F1': 'F', 'F2': 'F', 'F3': 'F', 'F4': 'F', 'F5': 'F',
+}
+
+
+def _map_voice_to_fallback(voice: str, src_provider: str, dst_provider: str) -> str:
+    """Map a voice from one provider to the closest equivalent on another."""
+    gender = _VOICE_GENDER.get(voice, 'M')  # default male if unknown
+    if dst_provider == 'supertonic':
+        return 'M1' if gender == 'M' else 'F1'
+    if dst_provider == 'groq':
+        return 'troy' if gender == 'M' else 'autumn'
+    return voice  # pass through if we don't know the destination
 
 
 def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
@@ -194,8 +224,15 @@ def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
     provider_info = provider.get_info()
     audio_format = provider_info.get('audio_format', 'wav')
 
-    # Cloud providers that return WAV handle their own chunking/limits
-    if audio_format == 'mp3' or tts_provider in ('resemble',):
+    # Resemble returns WAV — chunk long texts to reduce latency and 500 errors.
+    # Their cluster is much more reliable with <500 char requests (4-8s) vs
+    # long ones (40-60s + frequent 500s).
+    if tts_provider == 'resemble':
+        if len(text) > 500:
+            return generate_tts_chunked(provider, text, voice, max_chars=500)
+        return provider.generate_speech(text=text, voice=voice)
+    # Cloud providers returning MP3 (groq, elevenlabs) handle their own limits
+    if audio_format == 'mp3':
         return provider.generate_speech(text=text, voice=voice)
     # Local WAV providers (supertonic) need ONNX overflow chunking
     return generate_tts_chunked(provider, text, voice)
@@ -205,6 +242,7 @@ def generate_tts_b64(
     text: str,
     voice: Optional[str] = None,
     tts_provider: str = 'groq',
+    fallback_state: Optional[dict] = None,
     **kwargs,
 ) -> Optional[str]:
     """
@@ -217,18 +255,35 @@ def generate_tts_b64(
         text: Text to synthesize.
         voice: Voice ID (provider-specific). Defaults to provider default.
         tts_provider: Provider ID ('supertonic', 'groq', 'qwen3', etc.).
+        fallback_state: Optional mutable dict for sticky fallback across
+            sentences in a single response. When a fallback fires, this dict
+            is updated with {'provider': ..., 'voice': ...} so subsequent
+            calls use the fallback directly (avoids voice switching mid-response).
 
     Returns:
         Base64-encoded audio string, or None on failure.
     """
     voice = voice or 'M1'
 
+    # Sticky fallback: if a previous sentence in this response already fell back,
+    # use the fallback provider/voice directly to keep the voice consistent.
+    if fallback_state and fallback_state.get('provider'):
+        tts_provider = fallback_state['provider']
+        voice = fallback_state['voice']
+        logger.info(f"TTS using sticky fallback: provider={tts_provider}, voice={voice}")
+
     # ── Try primary provider (single attempt for cloud, retries for local) ──
     last_err = None
-    # Cloud providers (groq, qwen3) have their own timeout — don't retry
-    # on timeout, fall back immediately. Only retry local providers.
-    is_cloud = tts_provider in ('groq', 'qwen3', 'resemble')
-    max_attempts = 1 if is_cloud else _MAX_RETRIES + 1
+    # Cloud providers: groq/qwen3 get 1 attempt (their own timeout handling).
+    # Resemble gets 3 attempts — their cluster throws transient 500s.
+    # Falling back to supertonic kills the custom voice which is much worse
+    # than a brief retry delay. 3 attempts covers most transient failures.
+    if tts_provider == 'resemble':
+        max_attempts = 3
+    elif tts_provider in ('groq', 'qwen3', 'elevenlabs'):
+        max_attempts = 1
+    else:
+        max_attempts = _MAX_RETRIES + 1
     for attempt in range(max_attempts):
         try:
             audio_bytes = _generate_with_provider(tts_provider, text, voice)
@@ -249,9 +304,16 @@ def generate_tts_b64(
         logger.info(f"TTS falling back: {tts_provider} → {fallback_id}")
         try:
             fallback_provider = get_provider(fallback_id)
-            fallback_voice = fallback_provider.get_default_voice()
+            # Map the original voice to the closest match on the fallback provider
+            # to minimize jarring voice switches mid-response.
+            fallback_voice = _map_voice_to_fallback(voice, tts_provider, fallback_id)
             audio_bytes = _generate_with_provider(fallback_id, text, fallback_voice)
-            logger.info(f"TTS fallback OK: provider={fallback_id}, voice={fallback_voice}")
+            logger.info(f"TTS fallback OK: provider={fallback_id}, voice={fallback_voice} (original: {tts_provider}/{voice})")
+            # Record fallback so subsequent sentences in this response stay consistent
+            if fallback_state is not None:
+                fallback_state['provider'] = fallback_id
+                fallback_state['voice'] = fallback_voice
+                logger.info(f"TTS sticky fallback locked: {fallback_id}/{fallback_voice} for rest of response")
             return base64.b64encode(audio_bytes).decode('utf-8')
         except Exception as fb_err:
             logger.error(f"TTS fallback also failed (provider={fallback_id}): {fb_err}")

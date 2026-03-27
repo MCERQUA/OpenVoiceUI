@@ -1,10 +1,10 @@
 {
   "704cb696": {
-    "exaggeration": 0.4,
-    "prompt": "Speak with a deep low-pitched voice, slow deliberate stoner energy, laid-back and chill like everything is fine"
+    "exaggeration": 0.6,
+    "prompt": "Speak with a deep low-pitched voice, slow stoner drawl, casual chill energy, amused tone like everything is funny, chuckle and laugh naturally when the text has heheh or hah or laughter"
   },
   "cabc1397": {
     "exaggeration": 0.7,
-    "prompt": "Speak with nervous anxious energy, slightly stuttering, worried tone, like someone who is constantly stressed and exasperated"
+    "prompt": "Speak with a scared nervous trembling voice, stuttering and stumbling over words, anxious energy like something bad is about to happen, high-pitched worried tone, constantly on edge"
   }
 }

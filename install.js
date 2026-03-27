@@ -220,6 +220,20 @@ module.exports = {
           // ADDITIONAL TTS PROVIDERS
           // ═══════════════════════════════════════════════════════════
           {
+            key: "ELEVENLABS_API_KEY",
+            title: "ElevenLabs API Key — Premium TTS + Instant Voice Cloning",
+            description: "Plans from $5/mo at elevenlabs.io — premium quality, 29 languages, instant voice cloning",
+            placeholder: "",
+            required: false,
+          },
+          {
+            key: "ELEVENLABS_VOICE_ID",
+            title: "ElevenLabs Voice ID (find in ElevenLabs Voice Library)",
+            description: "Select or clone a voice at elevenlabs.io/app/voice-library, then paste the voice ID here",
+            placeholder: "",
+            required: false,
+          },
+          {
             key: "RESEMBLE_API_KEY",
             title: "Resemble AI API Key — Chatterbox TTS (streaming, voice cloning)",
             description: "Pay-as-you-go from $5 at resemble.ai — high-quality streaming TTS with emotion control",
@@ -295,6 +309,8 @@ module.exports = {
           PINOKIO_AI_GATEWAY_API_KEY: "{{input.AI_GATEWAY_API_KEY}}",
           PINOKIO_CLOUDFLARE_AI_GATEWAY_API_KEY: "{{input.CLOUDFLARE_AI_GATEWAY_API_KEY}}",
           PINOKIO_LITELLM_API_KEY: "{{input.LITELLM_API_KEY}}",
+          PINOKIO_ELEVENLABS_API_KEY: "{{input.ELEVENLABS_API_KEY}}",
+          PINOKIO_ELEVENLABS_VOICE_ID: "{{input.ELEVENLABS_VOICE_ID}}",
           PINOKIO_RESEMBLE_API_KEY: "{{input.RESEMBLE_API_KEY}}",
           PINOKIO_RESEMBLE_VOICE_UUID: "{{input.RESEMBLE_VOICE_UUID}}",
           PINOKIO_SUNO_API_KEY: "{{input.SUNO_API_KEY}}",
