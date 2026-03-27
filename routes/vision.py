@@ -52,8 +52,14 @@ _deepface_lock = threading.Lock()
 def _get_deepface():
     global _deepface
     if _deepface is None:
-        from deepface import DeepFace
-        _deepface = DeepFace
+        try:
+            from deepface import DeepFace
+            _deepface = DeepFace
+        except ImportError:
+            raise ImportError(
+                "Face recognition requires deepface. Install it with: "
+                "pip install deepface tf-keras"
+            )
     return _deepface
 
 
