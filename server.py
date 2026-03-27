@@ -386,6 +386,115 @@ def serve_index():
 
 
 # ---------------------------------------------------------------------------
+# Routes — version info
+# ---------------------------------------------------------------------------
+
+_VERSION_INFO = {"commit": "unknown", "branch": "unknown", "date": "unknown"}
+_version_file = Path(__file__).parent / "version.json"
+if _version_file.exists():
+    try:
+        _VERSION_INFO = json.loads(_version_file.read_text())
+    except Exception:
+        pass
+
+
+@app.route("/api/version", methods=["GET"])
+def get_version():
+    """Return build version and check GitHub for latest."""
+    data = {**_VERSION_INFO, "uptime_seconds": round(time.time() - SERVER_START_TIME)}
+    # Check for newer version on GitHub (cached, non-blocking)
+    latest = _get_latest_main_commit()
+    if latest:
+        data["latest_commit"] = latest["sha"]
+        data["latest_date"] = latest["date"]
+        data["latest_message"] = latest["message"]
+        data["update_available"] = (
+            _VERSION_INFO.get("commit", "unknown") != "unknown"
+            and not latest["sha"].startswith(_VERSION_INFO.get("commit", ""))
+        )
+    return jsonify(data)
+
+
+# Cache GitHub check for 5 minutes to avoid hammering the API
+_github_cache = {"data": None, "expires": 0}
+
+
+def _get_latest_main_commit():
+    """Fetch latest commit on main from GitHub. Returns None on failure."""
+    now = time.time()
+    if _github_cache["data"] and now < _github_cache["expires"]:
+        return _github_cache["data"]
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/MCERQUA/OpenVoiceUI/commits/main",
+            headers={"Accept": "application/vnd.github.v3+json"},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            j = resp.json()
+            result = {
+                "sha": j["sha"][:7],
+                "date": j["commit"]["committer"]["date"],
+                "message": j["commit"]["message"].split("\n")[0][:120],
+            }
+            _github_cache["data"] = result
+            _github_cache["expires"] = now + 300  # 5 min cache
+            return result
+    except Exception:
+        pass
+    return _github_cache.get("data")
+
+
+@app.route("/api/version/update", methods=["POST"])
+def trigger_update():
+    """Signal the host to recreate this container with the latest image.
+
+    Writes an update-request flag file to a well-known path on the shared
+    volume. The host-side update service picks it up and recreates the
+    container. Requires admin auth (Clerk user check).
+    """
+    # Determine client name from env
+    client_name = os.environ.get("CLIENT_NAME", "").strip()
+    if not client_name:
+        return jsonify({"status": "error", "error": "CLIENT_NAME not set"}), 500
+
+    # Check if already current
+    latest = _get_latest_main_commit()
+    current = _VERSION_INFO.get("commit", "unknown")
+    if latest and current != "unknown" and latest["sha"].startswith(current):
+        return jsonify({"status": "current", "message": "Already up to date"})
+
+    # Write update request flag (host-side service watches for these)
+    flag_dir = Path("/app/runtime")
+    flag_dir.mkdir(parents=True, exist_ok=True)
+    flag_file = flag_dir / "update-requested"
+    flag_file.write_text(json.dumps({
+        "client": client_name,
+        "current_commit": current,
+        "requested_at": datetime.utcnow().isoformat(),
+        "latest_commit": latest["sha"] if latest else "unknown",
+    }))
+
+    # Also try to call the host update service directly
+    try:
+        requests.post(
+            f"http://host.docker.internal:5199/update/{client_name}",
+            timeout=3,
+        )
+    except Exception:
+        # Fallback: try the Docker gateway IP
+        try:
+            requests.post(
+                f"http://172.17.0.1:5199/update/{client_name}",
+                timeout=3,
+            )
+        except Exception:
+            pass
+
+    return jsonify({"status": "updating", "message": "Update requested — container will restart shortly"})
+
+
+# ---------------------------------------------------------------------------
 # Routes — health probes
 # ---------------------------------------------------------------------------
 

@@ -3,6 +3,78 @@
    Controls, panels, music, party effects, settings, auth, canvas
    ============================================================= */
 
+/* Update Banner */
+#update-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10000;
+    transform: translateY(-100%);
+    transition: transform 0.3s ease;
+}
+#update-banner.visible {
+    transform: translateY(0);
+}
+.update-banner-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #1a3a4a, #0d2833);
+    border-bottom: 1px solid rgba(100, 200, 255, 0.2);
+    font-family: var(--font-mono, monospace);
+    font-size: 13px;
+}
+.update-banner-text {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    overflow: hidden;
+}
+.update-banner-title {
+    color: #64d8ff;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.update-banner-detail {
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.update-banner-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.update-banner-btn {
+    padding: 5px 14px;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--font-mono, monospace);
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.update-banner-btn:hover { opacity: 0.85; }
+.update-banner-btn:disabled { opacity: 0.5; cursor: wait; }
+.update-banner-btn.update-btn {
+    background: #64d8ff;
+    color: #000;
+    font-weight: 600;
+}
+.update-banner-btn.dismiss-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.6);
+}
+@media (max-width: 500px) {
+    .update-banner-inner { flex-direction: column; gap: 8px; padding: 8px 12px; }
+    .update-banner-detail { display: none; }
+}
+
 /* Canvas padded mode — OS-style inset for external URLs */
 #canvas-container.canvas-padded {
     background: #111 !important;

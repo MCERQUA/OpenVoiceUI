@@ -7,14 +7,18 @@
  * Loaded by thin-shell index.html via: <script type="module" src="src/app.js">
  */
 import { inject } from './ui/AppShell.js';
+import { initUpdateChecker } from './ui/UpdateBanner.js';
 
 // Inject the application DOM structure before any module accesses the DOM
 inject();
 
-        import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js';
+// Start update checker (non-blocking, runs after app loads)
+initUpdateChecker();
+
+        import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js?v=3';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
-        import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js';
-        import { DeepgramStreamingSTT, DeepgramStreamingWakeWordDetector } from '/src/providers/DeepgramStreamingSTT.js';
+        import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js?v=3';
+        import { DeepgramStreamingSTT, DeepgramStreamingWakeWordDetector } from '/src/providers/DeepgramStreamingSTT.js?v=3';
 
         // ===== CONFIGURATION =====
         const CONFIG = {
@@ -6365,9 +6369,8 @@ inject();
                     setTimeout(() => {
                         if (ModeManager.clawdbotMode) ModeManager.clawdbotMode._ttsPlaying = false;
                         if (voiceConversation.stt) {
-                            // Skip resume if PTT is held — user is actively speaking,
-                            // don't clear their accumulatedText
-                            if (voiceConversation.stt._pttHolding) return;
+                            // Skip resume if PTT mode is active or user is holding PTT button
+                            if (voiceConversation.stt._pttHolding || voiceConversation.stt._micMuted) return;
                             console.log('🎤 Unmuting mic after TTS');
                             if (voiceConversation.stt.resume) {
                                 voiceConversation.stt.resume();
