@@ -1,7 +1,6 @@
 .env
 .env.*
 *.env
-.git
 .gitignore
 .claude
 __pycache__
@@ -24,3 +23,4 @@ uploads/
 generated_music/
 music/
 canvas-pages/
+plugins/bhb-animated-characters/

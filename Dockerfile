@@ -7,7 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libffi-dev \
     libgl1 libglib2.0-0 \
     ffmpeg \
-    libsndfile1 && \
+    libsndfile1 \
+    git && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -27,6 +28,9 @@ RUN mkdir -p runtime/uploads runtime/canvas-pages runtime/known_faces runtime/mu
 # Run as non-root user
 RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
 USER appuser
+
+# Allow git operations in /app (owner may differ between build and runtime)
+RUN git config --global --add safe.directory /app
 
 # Bind to all interfaces inside the container
 ENV HOST=0.0.0.0
