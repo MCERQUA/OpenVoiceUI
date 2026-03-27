@@ -25,9 +25,11 @@ groq==1.0.0                 # Groq Orpheus TTS (required if using groq provider)
 PyJWT==2.11.0
 cryptography==46.0.5
 
-# Face recognition (local, free — runs on-server, no API calls)
-deepface>=0.0.93            # DeepFace biometric face recognition
-tf-keras>=2.19.0            # Required by deepface (Keras backend)
+# Face recognition (optional — adds ~700MB for TensorFlow)
+# Installs on first use if not present. To pre-install:
+#   pip install deepface tf-keras
+# deepface>=0.0.93
+# tf-keras>=2.19.0
 
 # AI providers (optional)
 google-generativeai==0.8.6  # Only if using Gemini
