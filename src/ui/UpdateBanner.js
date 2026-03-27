@@ -2,27 +2,30 @@
  * UpdateBanner — Checks for app updates and shows a dismissible banner.
  *
  * On init, fetches /api/version to compare the running build against
- * the latest commit on main. If an update is available, shows a fixed
- * banner at the top of the viewport with a one-click update button.
- *
- * The update button calls the host-side update service which recreates
- * the user's container with the latest image.
+ * the latest release on GitHub. If an update is available, shows a
+ * floating notification with a one-click update button.
  */
 
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000; // Re-check every 30 min
 
 let _banner = null;
 let _dismissed = false;
+let _updating = false;
 
 function createBanner(versionData) {
     if (_banner) _banner.remove();
 
+    const version = versionData.latest_version || 'update';
     const el = document.createElement('div');
     el.id = 'update-banner';
     el.innerHTML = `
-        <span class="update-banner-title">OpenVoiceUI ${versionData.latest_version || 'update'} is available</span>
-        <button class="update-banner-btn update-btn" id="update-apply-btn">Update</button>
-        <button class="update-banner-btn dismiss-btn" id="update-dismiss-btn">&times;</button>
+        <div class="update-banner-status">
+            <span class="update-banner-title">OpenVoiceUI ${version} is available</span>
+        </div>
+        <div class="update-banner-actions">
+            <button class="update-banner-btn update-btn" id="update-apply-btn">Update</button>
+            <button class="update-banner-btn dismiss-btn" id="update-dismiss-btn">&times;</button>
+        </div>
     `;
     document.body.appendChild(el);
     _banner = el;
@@ -32,6 +35,7 @@ function createBanner(versionData) {
     el.classList.add('visible');
 
     el.querySelector('#update-dismiss-btn').addEventListener('click', () => {
+        if (_updating) return; // Can't dismiss during update
         el.classList.remove('visible');
         setTimeout(() => el.remove(), 300);
         _banner = null;
@@ -39,55 +43,89 @@ function createBanner(versionData) {
     });
 
     el.querySelector('#update-apply-btn').addEventListener('click', () => {
-        applyUpdate(el);
+        if (!_updating) applyUpdate(el);
     });
 }
 
+function setStatus(bannerEl, message, showSpinner) {
+    const status = bannerEl.querySelector('.update-banner-status');
+    if (!status) return;
+    status.innerHTML = `
+        ${showSpinner ? '<span class="update-spinner"></span>' : ''}
+        <span class="update-banner-title">${message}</span>
+    `;
+}
+
 async function applyUpdate(bannerEl) {
+    _updating = true;
     const btn = bannerEl.querySelector('#update-apply-btn');
-    const origText = btn.textContent;
-    btn.textContent = 'Updating...';
-    btn.disabled = true;
-    // Update the title too
-    const title = bannerEl.querySelector('.update-banner-title');
-    if (title) title.textContent = 'Updating OpenVoiceUI...';
+    const dismiss = bannerEl.querySelector('#update-dismiss-btn');
+    btn.style.display = 'none';
+    dismiss.style.opacity = '0.2';
+    dismiss.style.pointerEvents = 'none';
+
+    setStatus(bannerEl, 'Downloading update...', true);
 
     try {
         const resp = await fetch('/api/version/update', { method: 'POST' });
         const data = await resp.json();
 
         if (data.status === 'updating') {
-            if (title) title.textContent = 'Restarting — one moment...';
-            btn.style.display = 'none';
-            pollForRestart();
+            setStatus(bannerEl, 'Installing update — restarting app...', true);
+            pollForRestart(bannerEl);
         } else if (data.status === 'current') {
-            window.location.reload();
+            setStatus(bannerEl, 'Already up to date — reloading...', true);
+            setTimeout(() => window.location.reload(), 1000);
         } else if (data.status === 'manual') {
-            // No host update service — show update instructions inline
+            _updating = false;
+            btn.style.display = '';
             btn.textContent = 'How to update';
-            btn.disabled = false;
+            dismiss.style.opacity = '';
+            dismiss.style.pointerEvents = '';
             btn.onclick = () => showUpdateInstructions();
+            setStatus(bannerEl, 'Automatic update not available', false);
         } else {
-            btn.textContent = data.error || 'Update failed';
-            setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 3000);
+            setStatus(bannerEl, data.error || 'Update failed — try again', false);
+            btn.style.display = '';
+            btn.textContent = 'Retry';
+            dismiss.style.opacity = '';
+            dismiss.style.pointerEvents = '';
+            _updating = false;
         }
     } catch (e) {
-        // Server might already be restarting
-        btn.textContent = 'Restarting...';
-        pollForRestart();
+        // Server likely restarting already
+        setStatus(bannerEl, 'Installing update — restarting app...', true);
+        pollForRestart(bannerEl);
     }
 }
 
-function pollForRestart() {
+function pollForRestart(bannerEl) {
     let attempts = 0;
-    const maxAttempts = 60; // 60 seconds max
+    const maxAttempts = 90; // 90 seconds max
+    const stages = [
+        { at: 0, msg: 'Restarting app...' },
+        { at: 10, msg: 'Still restarting — almost there...' },
+        { at: 30, msg: 'Taking a bit longer than usual...' },
+        { at: 60, msg: 'Still waiting for server...' },
+    ];
+
     const interval = setInterval(async () => {
         attempts++;
+
+        // Update status message at milestones
+        for (const stage of stages) {
+            if (attempts === stage.at) {
+                setStatus(bannerEl, stage.msg, true);
+            }
+        }
+
         if (attempts > maxAttempts) {
             clearInterval(interval);
-            if (_banner) {
-                const btn = _banner.querySelector('#update-apply-btn');
-                if (btn) { btn.textContent = 'Reload page'; btn.disabled = false; btn.onclick = () => window.location.reload(); }
+            _updating = false;
+            setStatus(bannerEl, 'Update may have completed — reload to check', false);
+            const actions = bannerEl.querySelector('.update-banner-actions');
+            if (actions) {
+                actions.innerHTML = `<button class="update-banner-btn update-btn" onclick="window.location.reload()">Reload</button>`;
             }
             return;
         }
@@ -95,16 +133,17 @@ function pollForRestart() {
             const resp = await fetch('/health/live', { signal: AbortSignal.timeout(2000) });
             if (resp.ok) {
                 clearInterval(interval);
-                window.location.reload();
+                setStatus(bannerEl, 'Updated — reloading...', true);
+                setTimeout(() => window.location.reload(), 500);
             }
         } catch (_) {
-            // Server still restarting — keep polling
+            // Server still restarting
         }
     }, 1000);
 }
 
 async function checkForUpdate() {
-    if (_dismissed) return;
+    if (_dismissed || _updating) return;
     try {
         const resp = await fetch('/api/version');
         if (!resp.ok) return;
@@ -120,7 +159,6 @@ async function checkForUpdate() {
 }
 
 function showUpdateInstructions() {
-    // Remove the banner
     if (_banner) { _banner.remove(); _banner = null; }
 
     const overlay = document.createElement('div');
@@ -150,10 +188,8 @@ docker compose up -d</code></pre>
  * Initialize update checker. Call once on app startup.
  */
 export function initUpdateChecker() {
-    // First check after short delay (let app finish loading)
     setTimeout(checkForUpdate, 3000);
-    // Periodic re-check
     setInterval(() => {
-        if (!_dismissed) checkForUpdate();
+        if (!_dismissed && !_updating) checkForUpdate();
     }, UPDATE_CHECK_INTERVAL);
 }
