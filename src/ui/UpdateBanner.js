@@ -20,7 +20,7 @@ function createBanner(versionData) {
     const el = document.createElement('div');
     el.id = 'update-banner';
     el.innerHTML = `
-        <span class="update-banner-title">A new version of OpenVoiceUI is available</span>
+        <span class="update-banner-title">OpenVoiceUI ${versionData.latest_version || 'update'} is available</span>
         <button class="update-banner-btn update-btn" id="update-apply-btn">Update</button>
         <button class="update-banner-btn dismiss-btn" id="update-dismiss-btn">&times;</button>
     `;

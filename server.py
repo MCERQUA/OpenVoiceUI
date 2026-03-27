@@ -408,6 +408,7 @@ def get_version():
         data["latest_commit"] = latest["sha"]
         data["latest_date"] = latest["date"]
         data["latest_message"] = latest["message"]
+        data["latest_version"] = latest.get("latest_version", "")
         data["update_available"] = (
             _VERSION_INFO.get("commit", "unknown") != "unknown"
             and not latest["sha"].startswith(_VERSION_INFO.get("commit", ""))
@@ -423,7 +424,7 @@ _GITHUB_REPO = os.environ.get("GITHUB_REPO", "MCERQUA/OpenVoiceUI").strip()
 
 
 def _get_latest_main_commit():
-    """Fetch latest commit on main from GitHub. Returns None on failure."""
+    """Fetch latest commit on main and latest release tag from GitHub."""
     now = time.time()
     if _github_cache["data"] and now < _github_cache["expires"]:
         return _github_cache["data"]
@@ -440,6 +441,17 @@ def _get_latest_main_commit():
                 "date": j["commit"]["committer"]["date"],
                 "message": j["commit"]["message"].split("\n")[0][:120],
             }
+            # Fetch latest release tag
+            try:
+                rel = requests.get(
+                    f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
+                    headers={"Accept": "application/vnd.github.v3+json"},
+                    timeout=5,
+                )
+                if rel.status_code == 200:
+                    result["latest_version"] = rel.json().get("tag_name", "")
+            except Exception:
+                pass
             _github_cache["data"] = result
             _github_cache["expires"] = now + 300  # 5 min cache
             return result
