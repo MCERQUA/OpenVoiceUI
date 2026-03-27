@@ -135,6 +135,7 @@ def create_app(config_override: dict = None):
             '/health/ready',
             '/api/auth/check',      # Auth check endpoint — does its own token verification
             '/api/suno/callback',   # Suno's servers POST here from external IPs (no Clerk token)
+            '/api/version',         # Version check — loaded before auth to show update banner
             '/sw.js',           # PWA service worker — browser fetches this before auth
             '/manifest.json',   # PWA manifest — browser fetches this before auth
             '/favicon.ico',     # Browser favicon request — before auth
