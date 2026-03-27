@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>dApp Builder</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0f172a; --bg2: #1e293b; --bg3: #334155;
+            --border: #334155; --border-active: #3b82f6;
+            --text: #f1f5f9; --text2: #94a3b8; --text3: #64748b;
+            --accent: #3b82f6; --accent-hover: #2563eb;
+            --success: #22c55e; --warn: #f59e0b; --error: #ef4444;
+            --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+            --font-code: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+        html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: 13px; }
+
+        /* Toolbar */
+        #toolbar { height: 44px; background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 10px; gap: 6px; }
+        .tb-sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+        .tb-btn {
+            background: none; border: 1px solid transparent; color: var(--text2); padding: 6px 12px;
+            border-radius: 6px; cursor: pointer; font: 500 12px/1 var(--font-ui);
+            display: flex; align-items: center; gap: 5px; white-space: nowrap; transition: all 0.15s;
+        }
+        .tb-btn:hover { background: var(--bg3); color: var(--text); }
+        .tb-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .tb-btn.primary:hover { background: var(--accent-hover); }
+        .tb-btn.on { background: var(--bg3); color: var(--accent); border-color: var(--accent); }
+        .tb-spacer { flex: 1; }
+        #wallet-label { font-size: 11px; color: var(--text3); }
+        #wallet-label.ok { color: var(--success); }
+
+        /* Dropdown */
+        .dd { position: relative; }
+        .dd-menu { display: none; position: absolute; top: calc(100% + 4px); left: 0; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; min-width: 260px; z-index: 50; padding: 4px; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+        .dd-menu.open { display: block; }
+        .dd-item { padding: 10px 14px; border-radius: 6px; cursor: pointer; }
+        .dd-item:hover { background: var(--bg3); }
+        .dd-item b { display: block; font-size: 13px; font-weight: 500; color: var(--text); }
+        .dd-item span { font-size: 11px; color: var(--text3); }
+        .dd-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+        /* Layout */
+        #main { display: flex; height: calc(100% - 44px - 26px); }
+        #editor-side { flex: 1; display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--border); }
+        #preview-side { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+        /* Resize */
+        #resize-bar { width: 5px; cursor: col-resize; background: var(--border); flex-shrink: 0; transition: background .15s; }
+        #resize-bar:hover, #resize-bar.drag { background: var(--accent); }
+
+        /* Tabs */
+        #tabs { height: 36px; background: var(--bg2); display: flex; align-items: stretch; overflow-x: auto; border-bottom: 1px solid var(--border); }
+        #tabs::-webkit-scrollbar { height: 0; }
+        .tab { padding: 0 14px; display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text2); font-size: 12px; border-right: 1px solid var(--border); white-space: nowrap; }
+        .tab:hover { background: var(--bg3); }
+        .tab.active { background: var(--bg); color: var(--text); border-bottom: 2px solid var(--accent); }
+        .tab .dot { color: var(--accent); display: none; }
+        .tab.dirty .dot { display: inline; }
+        .tab .x { opacity: 0; font-size: 14px; margin-left: 2px; border-radius: 3px; padding: 0 3px; cursor: pointer; }
+        .tab:hover .x { opacity: .5; }
+        .tab .x:hover { opacity: 1; background: rgba(255,255,255,.1); }
+        #tab-plus { padding: 0 10px; display: flex; align-items: center; cursor: pointer; color: var(--text3); font-size: 18px; }
+        #tab-plus:hover { color: var(--text); background: var(--bg3); }
+
+        /* Editor */
+        #code { flex: 1; min-height: 0; }
+        #code textarea {
+            width: 100%; height: 100%; background: var(--bg); color: var(--text); border: none; outline: none;
+            font: 400 13px/1.6 var(--font-code); padding: 12px 16px; resize: none; tab-size: 2;
+        }
+        #code textarea::selection { background: rgba(59,130,246,.3); }
+
+        /* Preview */
+        #prev-bar { height: 36px; background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; gap: 8px; }
+        #prev-bar .lbl { font-size: 12px; color: var(--text2); font-weight: 500; }
+        #prev-wrap { flex: 1; min-height: 0; background: #fff; position: relative; }
+        #prev-frame { width: 100%; height: 100%; border: none; }
+        #prev-empty { position: absolute; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--text3); }
+        #prev-empty.hide { display: none; }
+        #prev-empty .big { font-size: 36px; opacity: .2; }
+
+        /* Console */
+        #console { height: 160px; border-top: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg2); }
+        #console.shut { height: 0; overflow: hidden; border: none; }
+        #con-bar { height: 28px; display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--border); gap: 8px; flex-shrink: 0; }
+        #con-bar .lbl { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; }
+        #con-count { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg3); color: var(--text3); }
+        #con-count.err { background: #3b1111; color: var(--error); }
+        #con-log { flex: 1; overflow-y: auto; padding: 6px 10px; font: 400 12px/1.7 var(--font-code); }
+        .clog { display: flex; gap: 8px; }
+        .clog .t { color: var(--text3); flex-shrink: 0; }
+        .clog.log { color: var(--text2); }
+        .clog.warn { color: var(--warn); }
+        .clog.error { color: var(--error); }
+        .clog.info { color: var(--accent); }
+        .clog.sys { color: var(--text3); font-style: italic; }
+
+        /* Status */
+        #status { height: 26px; background: var(--bg2); border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; font-size: 11px; color: var(--text3); gap: 18px; }
+        .sdot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+        .sdot.g { background: var(--success); } .sdot.y { background: var(--warn); } .sdot.r { background: var(--error); } .sdot.x { background: var(--text3); }
+
+        /* Modal */
+        .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 100; align-items: center; justify-content: center; }
+        .modal-bg.open { display: flex; }
+        .modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 20px; min-width: 340px; }
+        .modal h3 { margin-bottom: 14px; font-size: 15px; font-weight: 600; }
+        .modal input, .modal select { width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font: 13px var(--font-ui); margin-bottom: 10px; }
+        .modal input:focus { outline: none; border-color: var(--accent); }
+        .modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    </style>
+</head>
+<body>
+<div id="toolbar">
+    <div class="dd">
+        <button class="tb-btn" id="btn-new">+ New</button>
+        <div class="dd-menu" id="tpl-menu"></div>
+    </div>
+    <button class="tb-btn" id="btn-file">+ File</button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn primary" id="btn-run">&#9654; Run</button>
+    <button class="tb-btn" id="btn-auto">Auto</button>
+    <div class="tb-sep"></div>
+    <div class="tb-spacer"></div>
+    <span id="wallet-label">No wallet</span>
+    <button class="tb-btn" id="btn-wallet">Connect Wallet</button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btn-export">Export</button>
+</div>
+
+<div id="main">
+    <div id="editor-side">
+        <div id="tabs"><div id="tab-plus">+</div></div>
+        <div id="code"><textarea id="editor" spellcheck="false"></textarea></div>
+    </div>
+    <div id="resize-bar"></div>
+    <div id="preview-side">
+        <div id="prev-bar">
+            <span class="lbl">Preview</span>
+            <div style="flex:1"></div>
+            <button class="tb-btn" id="btn-console" style="font-size:11px;padding:4px 8px">Console</button>
+            <button class="tb-btn" id="btn-refresh" style="font-size:11px;padding:4px 8px">Refresh</button>
+        </div>
+        <div id="prev-wrap">
+            <iframe id="prev-frame" sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin"></iframe>
+            <div id="prev-empty"><div class="big">{ }</div><div>Click <b>Run</b> or press Ctrl+S</div></div>
+        </div>
+        <div id="console">
+            <div id="con-bar"><span class="lbl">Console</span><span id="con-count">0</span><div style="flex:1"></div><button class="tb-btn" style="font-size:10px;padding:2px 6px" id="btn-clr">Clear</button></div>
+            <div id="con-log"></div>
+        </div>
+    </div>
+</div>
+
+<div id="status">
+    <span><span class="sdot x" id="py-dot"></span><span id="py-lbl">Pyodide: idle</span></span>
+    <span><span class="sdot x" id="w3-dot"></span><span id="w3-lbl">Web3: off</span></span>
+    <span id="cursor-lbl">Ln 1, Col 1</span>
+    <div style="flex:1"></div>
+    <span id="lang-lbl">HTML</span>
+</div>
+
+<div class="modal-bg" id="file-modal">
+    <div class="modal">
+        <h3>New File</h3>
+        <input type="text" id="nf-name" placeholder="filename.js">
+        <div class="modal-btns">
+            <button class="tb-btn" id="nf-cancel">Cancel</button>
+            <button class="tb-btn primary" id="nf-ok">Create</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+// ── Helpers ──
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// ── File System ──
+const files = new Map();
+let activeFile = null;
+const editorEl = $('editor');
+
+function createFile(name, content) {
+    const ext = name.split('.').pop().toLowerCase();
+    const lang = {html:'HTML',htm:'HTML',css:'CSS',js:'JavaScript',mjs:'JavaScript',ts:'TypeScript',py:'Python',sol:'Solidity',json:'JSON',md:'Markdown'}[ext] || 'Text';
+    files.set(name, { content: content || '', lang, dirty: false });
+    renderTabs();
+    return name;
+}
+
+function removeFile(name) {
+    files.delete(name);
+    if (activeFile === name) {
+        const keys = [...files.keys()];
+        openFile(keys.length ? keys[keys.length-1] : null);
+    }
+    renderTabs();
+}
+
+function openFile(name) {
+    // Save current
+    if (activeFile && files.has(activeFile)) {
+        files.get(activeFile).content = editorEl.value;
+    }
+    activeFile = name;
+    if (name && files.has(name)) {
+        editorEl.value = files.get(name).content;
+        $('lang-lbl').textContent = files.get(name).lang;
+    } else {
+        editorEl.value = '';
+        $('lang-lbl').textContent = '-';
+    }
+    renderTabs();
+    editorEl.focus();
+}
+
+function renderTabs() {
+    const container = $('tabs');
+    container.querySelectorAll('.tab').forEach(t => t.remove());
+    const plus = $('tab-plus');
+    for (const [name, f] of files) {
+        const t = document.createElement('div');
+        t.className = 'tab' + (name === activeFile ? ' active' : '') + (f.dirty ? ' dirty' : '');
+        t.innerHTML = '<span class="dot">&bull;</span>' + esc(name) + '<span class="x" data-f="'+esc(name)+'">&times;</span>';
+        t.addEventListener('click', e => {
+            if (e.target.classList.contains('x')) { removeFile(e.target.dataset.f); return; }
+            openFile(name);
+        });
+        container.insertBefore(t, plus);
+    }
+}
+
+function getFileContent(name) { return files.has(name) ? files.get(name).content : ''; }
+function syncActive() { if (activeFile && files.has(activeFile)) files.get(activeFile).content = editorEl.value; }
+
+// ── Console ──
+let logN = 0, errN = 0;
+function clog(level, ...args) {
+    const el = $('con-log');
+    const d = document.createElement('div');
+    d.className = 'clog ' + level;
+    const t = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const msg = args.map(a => typeof a==='object' ? JSON.stringify(a,null,2) : String(a)).join(' ');
+    d.innerHTML = '<span class="t">'+t+'</span><span>'+esc(msg)+'</span>';
+    el.appendChild(d);
+    el.scrollTop = el.scrollHeight;
+    logN++;
+    if (level === 'error') errN++;
+    const c = $('con-count');
+    c.textContent = logN;
+    c.className = errN ? 'err' : '';
+}
+function clearLog() { $('con-log').innerHTML=''; logN=0; errN=0; $('con-count').textContent='0'; $('con-count').className=''; }
+
+// ── Preview ──
+let autoRun = false, runTimer = null;
+function scheduleRun() { clearTimeout(runTimer); runTimer = setTimeout(run, 800); }
+
+function run() {
+    syncActive();
+    $('prev-empty').classList.add('hide');
+
+    let html = '';
+    let css = '';
+    let js = '';
+    for (const [name, f] of files) {
+        const c = f.content;
+        if (name.endsWith('.html') || name.endsWith('.htm')) html += c + '\n';
+        else if (name.endsWith('.css')) css += c + '\n';
+        else if ((name.endsWith('.js') || name.endsWith('.mjs')) && name !== 'deploy.js') js += c + '\n';
+    }
+
+    // Build document
+    let doc;
+    const htmlTrim = html.trim().toLowerCase();
+    if (htmlTrim.startsWith('<!doctype') || htmlTrim.startsWith('<html')) {
+        doc = html;
+        if (css) {
+            var tag = '<style data-inj>\n'+css+'\n\x3c/style>';
+            doc = doc.includes('\x3c/head>') ? doc.replace('\x3c/head>', tag+'\n\x3c/head>') : tag+'\n'+doc;
+        }
+        if (js) {
+            var tag = '\x3cscript data-inj>\n'+js+'\n\x3c/script>';
+            doc = doc.includes('\x3c/body>') ? doc.replace('\x3c/body>', tag+'\n\x3c/body>') : doc+'\n'+tag;
+        }
+    } else {
+        doc = '\x3c!DOCTYPE html>\x3chtml>\x3chead>\x3cmeta charset="UTF-8">\x3cmeta name="viewport" content="width=device-width,initial-scale=1.0">'
+            + '\x3cstyle>body{margin:0;padding:20px;font-family:system-ui,sans-serif;background:#fff;color:#1a1a2e;}\x3c/style>'
+            + (css ? '\x3cstyle>'+css+'\x3c/style>' : '')
+            + '\x3c/head>\x3cbody>' + html + (js ? '\x3cscript>'+js+'\x3c/script>' : '') + '\x3c/body>\x3c/html>';
+    }
+
+    // Console bridge
+    var bridge = '\x3cscript>(function(){var P=function(l,a){try{window.parent.postMessage({type:"con",level:l,args:Array.from(a).map(function(x){return typeof x==="object"?JSON.stringify(x):String(x)})},"*")}catch(e){}};var O={log:console.log,warn:console.warn,error:console.error,info:console.info};console.log=function(){O.log.apply(console,arguments);P("log",arguments)};console.warn=function(){O.warn.apply(console,arguments);P("warn",arguments)};console.error=function(){O.error.apply(console,arguments);P("error",arguments)};console.info=function(){O.info.apply(console,arguments);P("info",arguments)};window.onerror=function(m,s,l){P("error",["Error: "+m+" (line "+l+")"])};window.onunhandledrejection=function(e){P("error",["Unhandled: "+(e.reason||e)])}}())\x3c/script>';
+    if (doc.includes('\x3chead>')) doc = doc.replace('\x3chead>', '\x3chead>'+bridge);
+    else doc = bridge + doc;
+
+    const blob = new Blob([doc], {type:'text/html'});
+    const url = URL.createObjectURL(blob);
+    const frame = $('prev-frame');
+    frame.onload = () => URL.revokeObjectURL(url);
+    frame.src = url;
+    clog('sys', 'Preview updated');
+}
+
+// Listen for console from iframe
+window.addEventListener('message', e => {
+    if (e.data?.type === 'con') clog(e.data.level, ...(e.data.args||[]));
+    if (e.data?.type === 'clerk-token' && e.data.token) window.__clerkToken = e.data.token;
+    // AI bridge
+    if (e.data?.type === 'set-file') {
+        const d = e.data;
+        if (!files.has(d.name)) createFile(d.name, d.content||'');
+        else files.get(d.name).content = d.content||'';
+        if (d.open !== false) openFile(d.name);
+        if (d.run) run();
+    }
+    if (e.data?.type === 'get-files') {
+        const out = {};
+        for (const [n,f] of files) out[n] = f.content;
+        window.parent.postMessage({type:'builder-files',files:out},'*');
+    }
+    if (e.data?.type === 'run-preview') run();
+    if (e.data?.type === 'load-template') { const t = TEMPLATES.find(x=>x.id===e.data.id); if(t) loadTpl(t); }
+});
+
+// ── Wallet ──
+async function connectWallet() {
+    if (!window.ethereum || window.frameElement || window !== window.top) {
+        alert('Wallet connect requires a top-level page.\n\nMetaMask blocks wallet access inside iframes. Right-click the dApp Builder on your desktop and choose "Open in New Tab" to use wallet features.');
+        clog('warn','Wallet blocked in iframe — open in new tab to connect');
+        return;
+    }
+    try {
+        // Load ethers if needed
+        if (!window.ethers) {
+            clog('sys','Loading ethers.js...');
+            await new Promise((ok,no) => { const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js'; s.onload=ok; s.onerror=no; document.head.appendChild(s); });
+            $('w3-dot').className='sdot g'; $('w3-lbl').textContent='Web3: ready';
+        }
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const accts = await provider.send('eth_requestAccounts',[]);
+        const net = await provider.getNetwork();
+        const short = accts[0].slice(0,6)+'...'+accts[0].slice(-4);
+        $('wallet-label').textContent = short+' ('+net.name+')';
+        $('wallet-label').className = 'ok';
+        clog('info','Connected: '+accts[0]+' on '+net.name);
+    } catch(e) { clog('error','Wallet: '+e.message); }
+}
+
+// ── Templates ──
+const TEMPLATES = [
+    { id:'blank', name:'Blank Project', desc:'Empty HTML / CSS / JS', files:{
+        'index.html':'<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My App</title>\n\x3c/head>\n<body>\n  <h1>Hello World</h1>\n  <div id="app">\x3c/div>\n\x3c/body>\n\x3c/html>',
+        'style.css':'body {\n  margin: 0;\n  padding: 24px;\n  font-family: system-ui, sans-serif;\n  background: #0f172a;\n  color: #e2e8f0;\n}\n\nh1 { color: #3b82f6; }',
+        'app.js':'console.log("App loaded!");\nconst app = document.getElementById("app");\napp.innerHTML = "<p>Start building...\x3c/p>";'
+    }},
+    { id:'wallet', name:'Wallet Connect', desc:'MetaMask + balance + network info', files:{
+        'index.html':'<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>Wallet Connect</title>\n  \x3cscript src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js">\x3c/script>\n\x3c/head>\n<body>\n  <div class="box">\n    <h1>Wallet Connect</h1>\n    <button id="btn" onclick="go()">Connect Wallet</button>\n    <div id="info" style="display:none">\n      <p><b>Address:</b> <span id="addr"></span>\x3c/p>\n      <p><b>Network:</b> <span id="net"></span>\x3c/p>\n      <p><b>Balance:</b> <span id="bal"></span>\x3c/p>\n    \x3c/div>\n  \x3c/div>\n\x3c/body>\n\x3c/html>',
+        'style.css':'* { margin:0; padding:0; box-sizing:border-box; }\nbody { font-family:system-ui,sans-serif; background:#0f172a; color:#e2e8f0; min-height:100vh; display:flex; align-items:center; justify-content:center; }\n.box { background:#1e293b; border:1px solid #334155; border-radius:16px; padding:32px; width:420px; }\nh1 { margin-bottom:20px; font-size:22px; }\nbutton { background:#3b82f6; color:#fff; border:none; padding:12px 24px; border-radius:8px; cursor:pointer; font-size:15px; width:100%; }\nbutton:hover { background:#2563eb; }\np { padding:10px 0; border-bottom:1px solid #334155; font-size:14px; }\np b { color:#94a3b8; }',
+        'app.js':'async function go() {\n  if (!window.ethereum) { alert("Install MetaMask!"); return; }\n  const p = new ethers.BrowserProvider(window.ethereum);\n  const a = await p.send("eth_requestAccounts",[]);\n  const n = await p.getNetwork();\n  const b = await p.getBalance(a[0]);\n  document.getElementById("addr").textContent = a[0];\n  document.getElementById("net").textContent = n.name;\n  document.getElementById("bal").textContent = ethers.formatEther(b) + " ETH";\n  document.getElementById("info").style.display = "block";\n  document.getElementById("btn").textContent = "Connected";\n  document.getElementById("btn").style.background = "#22c55e";\n}'
+    }},
+    { id:'erc20', name:'ERC-20 Token UI', desc:'Load token, check balance, transfer', files:{
+        'index.html':'<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>ERC-20</title>\n  \x3cscript src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js">\x3c/script>\n\x3c/head>\n<body>\n  <div class="box">\n    <h1>ERC-20 Token</h1>\n    <input id="ca" placeholder="Token contract address (0x...)">\n    <button onclick="load()">Load</button>\n    <div id="info" style="display:none">\n      <div class="grid">\n        <div class="card"><small>Name</small><div id="tn">-\x3c/div>\x3c/div>\n        <div class="card"><small>Symbol</small><div id="ts">-\x3c/div>\x3c/div>\n        <div class="card"><small>Balance</small><div id="tb">-\x3c/div>\x3c/div>\n        <div class="card"><small>Supply</small><div id="tt">-\x3c/div>\x3c/div>\n      \x3c/div>\n      <h3>Transfer</h3>\n      <input id="to" placeholder="Recipient address">\n      <input id="amt" placeholder="Amount">\n      <button onclick="send()">Send</button>\n    \x3c/div>\n    <p id="st">\x3c/p>\n  \x3c/div>\n\x3c/body>\n\x3c/html>',
+        'style.css':'* { margin:0; padding:0; box-sizing:border-box; }\nbody { font-family:system-ui,sans-serif; background:#0f172a; color:#e2e8f0; padding:24px; }\n.box { max-width:560px; margin:0 auto; }\nh1 { margin-bottom:16px; } h3 { margin:16px 0 8px; color:#94a3b8; }\ninput { width:100%; padding:10px; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#e2e8f0; font-size:14px; margin-bottom:8px; }\nbutton { background:#3b82f6; color:#fff; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-size:14px; width:100%; }\nbutton:hover { background:#2563eb; }\n.grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:16px 0; }\n.card { background:#1e293b; border:1px solid #334155; border-radius:8px; padding:12px; }\n.card small { color:#94a3b8; font-size:11px; }\n#st { color:#f59e0b; margin-top:12px; font-size:13px; }',
+        'app.js':'const ABI=["function name() view returns (string)","function symbol() view returns (string)","function decimals() view returns (uint8)","function totalSupply() view returns (uint256)","function balanceOf(address) view returns (uint256)","function transfer(address,uint256) returns (bool)"];\nlet token,signer;\nasync function load(){\n  if(!window.ethereum){st("Install MetaMask!");return;}\n  const p=new ethers.BrowserProvider(window.ethereum);\n  await p.send("eth_requestAccounts",[]);\n  signer=await p.getSigner();\n  token=new ethers.Contract(document.getElementById("ca").value,ABI,signer);\n  const[n,s,d,sup,bal]=await Promise.all([token.name(),token.symbol(),token.decimals(),token.totalSupply(),token.balanceOf(signer.address)]);\n  document.getElementById("tn").textContent=n;\n  document.getElementById("ts").textContent=s;\n  document.getElementById("tb").textContent=ethers.formatUnits(bal,d)+" "+s;\n  document.getElementById("tt").textContent=ethers.formatUnits(sup,d);\n  document.getElementById("info").style.display="block";\n}\nasync function send(){\n  const d=await token.decimals();\n  st("Sending...");\n  const tx=await token.transfer(document.getElementById("to").value,ethers.parseUnits(document.getElementById("amt").value,d));\n  st("Tx: "+tx.hash.slice(0,14)+"...");await tx.wait();st("Done!");load();\n}\nfunction st(m){document.getElementById("st").textContent=m;console.log(m);}'
+    }},
+    { id:'dashboard', name:'Dashboard', desc:'Stats, chart, event table', files:{
+        'index.html':'<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>Dashboard</title>\n\x3c/head>\n<body>\n  <div class="dash">\n    <header><h1>Dashboard</h1><span class="live">Live</span></header>\n    <div class="grid">\n      <div class="card"><small>Users</small><div class="big">14,892\x3c/div><div class="up">+12.5%\x3c/div>\x3c/div>\n      <div class="card"><small>Revenue</small><div class="big">$48,250\x3c/div><div class="up">+8.2%\x3c/div>\x3c/div>\n      <div class="card"><small>Active</small><div class="big">342\x3c/div><div class="up">live\x3c/div>\x3c/div>\n      <div class="card"><small>Conversion</small><div class="big">3.6%\x3c/div><div class="dn">-2.1%\x3c/div>\x3c/div>\n    \x3c/div>\n    <div class="panel"><h3>Activity</h3><canvas id="chart" width="800" height="180"></canvas>\x3c/div>\n    <div class="panel"><h3>Events</h3><table><thead><tr><th>Time</th><th>Event</th><th>User</th><th>Status</th></tr></thead><tbody id="ev"></tbody>\x3c/table>\x3c/div>\n  \x3c/div>\n\x3c/body>\n\x3c/html>',
+        'style.css':'* { margin:0; padding:0; box-sizing:border-box; }\nbody { font-family:system-ui,sans-serif; background:#0a0a12; color:#e2e8f0; }\n.dash { max-width:860px; margin:0 auto; padding:24px; }\nheader { display:flex; align-items:center; gap:12px; margin-bottom:20px; }\n.live { background:#22c55e; color:#000; font-size:11px; padding:2px 8px; border-radius:10px; font-weight:600; }\n.grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:20px; }\n.card { background:#1e293b; border:1px solid #334155; border-radius:10px; padding:14px; }\n.card small { color:#94a3b8; font-size:11px; }\n.big { font-size:26px; font-weight:700; margin:4px 0; }\n.up { color:#22c55e; font-size:12px; } .dn { color:#ef4444; font-size:12px; }\n.panel { background:#1e293b; border:1px solid #334155; border-radius:10px; padding:16px; margin-bottom:14px; }\nh3 { font-size:13px; color:#94a3b8; margin-bottom:10px; }\ncanvas { width:100%; }\ntable { width:100%; border-collapse:collapse; font-size:13px; }\nth { text-align:left; color:#94a3b8; padding:6px; border-bottom:1px solid #334155; }\ntd { padding:6px; border-bottom:1px solid #1e293b; }',
+        'app.js':'const c=document.getElementById("chart").getContext("2d");\nconst d=Array.from({length:48},()=>Math.random()*150+50);\nc.strokeStyle="#3b82f6";c.lineWidth=2;c.beginPath();\nd.forEach((v,i)=>{const x=(i/47)*800,y=180-(v/200)*180;i?c.lineTo(x,y):c.moveTo(x,y);});\nc.stroke();c.lineTo(800,180);c.lineTo(0,180);\nconst g=c.createLinearGradient(0,0,0,180);g.addColorStop(0,"rgba(59,130,246,.15)");g.addColorStop(1,"rgba(59,130,246,0)");c.fillStyle=g;c.fill();\nconst evts=["Login","Purchase","Signup","View","Click"];\nconst users=["alice.eth","bob.sol","carol_0x","dave.base"];\nconst sts=["success","pending","failed"];\nconst tb=document.getElementById("ev");\nfor(let i=0;i<8;i++){const t=new Date(Date.now()-i*300000).toLocaleTimeString(),e=evts[Math.random()*5|0],u=users[Math.random()*4|0],s=sts[Math.random()*3|0],clr=s==="success"?"#22c55e":s==="pending"?"#f59e0b":"#ef4444";tb.innerHTML+=`<tr><td>${t}</td><td>${e}</td><td>${u}</td><td style="color:${clr}">${s}</td></tr>`;}\nconsole.log("Dashboard loaded");'
+    }},
+    { id:'deployer', name:'Contract Deployer', desc:'Paste ABI + bytecode, deploy via MetaMask', files:{
+        'index.html':'<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>Deploy</title>\n  \x3cscript src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js">\x3c/script>\n\x3c/head>\n<body>\n  <div class="box">\n    <h1>Contract Deployer</h1>\n    <p class="hint">Paste compiled ABI and bytecode to deploy via MetaMask.\x3c/p>\n    <label>ABI (JSON)</label>\n    <textarea id="abi" rows="5" placeholder=\'[{"inputs":[],...}]\'></textarea>\n    <label>Bytecode (hex)</label>\n    <textarea id="bc" rows="2" placeholder="0x6080604052..."></textarea>\n    <label>Constructor Args (comma-separated)</label>\n    <input id="args" placeholder=\'"MyToken","MTK",1000000\'>\n    <button onclick="deploy()">Deploy Contract</button>\n    <div id="result" style="display:none">\n      <p><b>Address:</b> <span id="da"></span>\x3c/p>\n      <p><b>Tx:</b> <span id="dt"></span>\x3c/p>\n    \x3c/div>\n    <p id="st">\x3c/p>\n  \x3c/div>\n\x3c/body>\n\x3c/html>',
+        'style.css':'* { margin:0; padding:0; box-sizing:border-box; }\nbody { font-family:system-ui,sans-serif; background:#0f172a; color:#e2e8f0; padding:24px; }\n.box { max-width:560px; margin:0 auto; }\nh1 { margin-bottom:6px; } .hint { color:#94a3b8; font-size:13px; margin-bottom:16px; }\nlabel { display:block; color:#94a3b8; font-size:12px; margin-bottom:4px; }\ninput,textarea { width:100%; padding:10px; background:#1e293b; border:1px solid #334155; border-radius:6px; color:#e2e8f0; font:13px monospace; margin-bottom:10px; resize:vertical; }\nbutton { background:#3b82f6; color:#fff; border:none; padding:12px; border-radius:6px; cursor:pointer; font-size:15px; width:100%; }\nbutton:hover { background:#2563eb; }\np { padding:8px 0; font-size:13px; word-break:break-all; }\np b { color:#94a3b8; }\n#st { color:#f59e0b; }',
+        'app.js':'async function deploy(){\n  if(!window.ethereum){st("Install MetaMask!");return;}\n  try{\n    const abi=JSON.parse(document.getElementById("abi").value);\n    const bc=document.getElementById("bc").value.trim();\n    const p=new ethers.BrowserProvider(window.ethereum);\n    await p.send("eth_requestAccounts",[]);\n    const s=await p.getSigner();\n    const n=await p.getNetwork();\n    st("Deploying on "+n.name+"...");\n    const f=new ethers.ContractFactory(abi,bc,s);\n    const raw=document.getElementById("args").value.trim();\n    let c;\n    if(raw){const a=raw.split(",").map(x=>{x=x.trim();if(x.startsWith(\'"\')&&x.endsWith(\'"\'))return x.slice(1,-1);if(!isNaN(x))return BigInt(x);return x;});c=await f.deploy(...a);}else{c=await f.deploy();}\n    st("Tx: "+c.deploymentTransaction().hash.slice(0,14)+"...");\n    await c.waitForDeployment();\n    document.getElementById("da").textContent=await c.getAddress();\n    document.getElementById("dt").textContent=c.deploymentTransaction().hash;\n    document.getElementById("result").style.display="block";\n    st("Deployed!");\n  }catch(e){st("Error: "+e.message);}\n}\nfunction st(m){document.getElementById("st").textContent=m;console.log(m);}'
+    }}
+];
+
+function loadTpl(tpl) {
+    for (const n of [...files.keys()]) files.delete(n);
+    const names = Object.keys(tpl.files);
+    names.forEach(n => createFile(n, tpl.files[n]));
+    openFile(names.find(n => n.endsWith('.html')) || names[0]);
+    clearLog();
+    clog('sys', 'Template "'+tpl.name+'" loaded — click Run or Ctrl+S');
+}
+
+function buildMenu() {
+    const menu = $('tpl-menu');
+    TEMPLATES.forEach((tpl, i) => {
+        if (i > 0) { const s = document.createElement('div'); s.className='dd-sep'; menu.appendChild(s); }
+        const d = document.createElement('div');
+        d.className = 'dd-item';
+        d.innerHTML = '<b>'+tpl.name+'</b><span>'+tpl.desc+'</span>';
+        d.addEventListener('click', () => { loadTpl(tpl); menu.classList.remove('open'); });
+        menu.appendChild(d);
+    });
+}
+
+// ── Resize ──
+function initResize() {
+    const bar = $('resize-bar'), main = $('main'), ed = $('editor-side');
+    let dragging = false;
+    bar.addEventListener('mousedown', e => { dragging=true; bar.classList.add('drag'); e.preventDefault(); });
+    document.addEventListener('mousemove', e => { if(!dragging)return; const r=main.getBoundingClientRect(); const pct=Math.min(80,Math.max(20,((e.clientX-r.left)/r.width)*100)); ed.style.flex='none'; ed.style.width=pct+'%'; });
+    document.addEventListener('mouseup', () => { if(dragging){dragging=false; bar.classList.remove('drag');} });
+}
+
+// ── Editor events ──
+editorEl.addEventListener('input', () => {
+    if (activeFile && files.has(activeFile)) {
+        const f = files.get(activeFile);
+        f.content = editorEl.value;
+        f.dirty = true;
+        renderTabs();
+        if (autoRun) scheduleRun();
+    }
+});
+
+editorEl.addEventListener('keydown', e => {
+    // Ctrl+S = run
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); run(); }
+    // Tab = indent
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = editorEl.selectionStart, end = editorEl.selectionEnd;
+        editorEl.value = editorEl.value.substring(0,start) + '  ' + editorEl.value.substring(end);
+        editorEl.selectionStart = editorEl.selectionEnd = start + 2;
+        editorEl.dispatchEvent(new Event('input'));
+    }
+});
+
+// Cursor position
+editorEl.addEventListener('click', updateCursor);
+editorEl.addEventListener('keyup', updateCursor);
+function updateCursor() {
+    const val = editorEl.value.substring(0, editorEl.selectionStart);
+    const lines = val.split('\n');
+    $('cursor-lbl').textContent = 'Ln '+ lines.length +', Col '+ lines[lines.length-1].length;
+}
+
+// ── Wire everything ──
+buildMenu();
+initResize();
+
+$('btn-new').addEventListener('click', () => $('tpl-menu').classList.toggle('open'));
+$('btn-file').addEventListener('click', () => $('file-modal').classList.add('open'));
+$('tab-plus').addEventListener('click', () => $('file-modal').classList.add('open'));
+$('btn-run').addEventListener('click', run);
+$('btn-auto').addEventListener('click', function() { autoRun=!autoRun; this.classList.toggle('on',autoRun); clog('sys','Auto-run '+(autoRun?'on':'off')); });
+$('btn-wallet').addEventListener('click', connectWallet);
+$('btn-export').addEventListener('click', () => {
+    syncActive();
+    const out = {};
+    for (const [n,f] of files) out[n] = f.content;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(out,null,2)],{type:'application/json'}));
+    a.download = 'project.json'; a.click();
+    clog('info','Exported');
+});
+$('btn-console').addEventListener('click', () => $('console').classList.toggle('shut'));
+$('btn-refresh').addEventListener('click', run);
+$('btn-clr').addEventListener('click', clearLog);
+
+// New file modal
+$('nf-ok').addEventListener('click', () => {
+    const name = $('nf-name').value.trim();
+    if (!name) return;
+    createFile(name);
+    openFile(name);
+    $('file-modal').classList.remove('open');
+    $('nf-name').value = '';
+});
+$('nf-cancel').addEventListener('click', () => $('file-modal').classList.remove('open'));
+$('nf-name').addEventListener('keydown', e => { if(e.key==='Enter') $('nf-ok').click(); });
+
+// Close dropdowns
+document.addEventListener('click', e => {
+    if (!e.target.closest('.dd')) document.querySelectorAll('.dd-menu.open').forEach(m => m.classList.remove('open'));
+    if (e.target.classList.contains('modal-bg')) e.target.classList.remove('open');
+});
+
+// Load blank template immediately
+loadTpl(TEMPLATES[0]);
+clog('sys', 'dApp Builder ready');
+window.parent.postMessage({type:'dapp-builder-ready'}, '*');
+})();
+</script>
+</body>
+</html>

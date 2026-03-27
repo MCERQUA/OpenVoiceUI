@@ -785,13 +785,13 @@ def canvas_pages_proxy(path):
                 resp.headers['Content-Security-Policy'] = (
                     "default-src 'none'; "
                     "script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://games.jam-bot.com blob:; "
-                    "style-src 'unsafe-inline' https://games.jam-bot.com; "
+                    "style-src 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://games.jam-bot.com; "
                     "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob:; "
-                    "font-src 'self'; "
-                    "connect-src 'self' https://games.jam-bot.com; "
+                    "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; "
+                    "connect-src 'self' https://cdn.jsdelivr.net https://files.pythonhosted.org https://pypi.org https://games.jam-bot.com https://*.infura.io https://*.alchemy.com https://*.publicnode.com https://*.drpc.org; "
                     "worker-src blob:; "
-                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app"
+                    "frame-src 'self' blob: https://*.jam-bot.com https://*.netlify.app"
                 )
                 return resp
             else:

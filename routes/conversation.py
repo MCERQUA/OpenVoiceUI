@@ -1228,6 +1228,19 @@ def _conversation_inner():
                     _tts_pending = []   # [(done_event, result_dict), ...]
                     _chunks_sent = 0    # audio chunks already yielded early
 
+                    # ── Spoken status updates during long tool execution ──
+                    # Prevents dead silence when agent runs tools for 30-90+ seconds.
+                    _last_audio_time = time.time()   # last time we sent audio to browser
+                    _status_tts_count = 0            # how many "still working" messages sent
+                    _tools_seen = 0                  # count of tool starts seen
+                    _STATUS_SILENCE_THRESHOLD = 15   # seconds of no audio before first status
+                    _STATUS_REPEAT_INTERVAL = 30     # seconds between subsequent status msgs
+                    _STATUS_MESSAGES = [
+                        "Working on that.",
+                        "Still working, one moment.",
+                        "Almost there, still on it.",
+                    ]
+
                     full_response = None
                     _stream_start = time.time()
                     _STREAM_HARD_TIMEOUT = 310  # seconds — total allowed time
@@ -1256,6 +1269,7 @@ def _conversation_inner():
                             # Flush any TTS that finished during tool execution —
                             # without this, audio sits in _tts_pending for the
                             # entire duration of tool calls (30-60s+ silence).
+                            _flushed_audio = False
                             while _tts_pending and _tts_pending[0][0].is_set():
                                 _done_evt, _res = _tts_pending.pop(0)
                                 if _res.get('error'):
@@ -1263,6 +1277,28 @@ def _conversation_inner():
                                 elif _res.get('audio'):
                                     yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
+                                    _last_audio_time = time.time()
+                                    _flushed_audio = True
+                            # ── Spoken status: break silence during long tool execution ──
+                            # If tools are running and user has heard nothing for too long,
+                            # speak a brief status so they know the agent is alive.
+                            if not _flushed_audio and _tools_seen > 0 and not skip_tts:
+                                _silence_secs = time.time() - _last_audio_time
+                                _threshold = (
+                                    _STATUS_SILENCE_THRESHOLD if _status_tts_count == 0
+                                    else _STATUS_REPEAT_INTERVAL
+                                )
+                                if _silence_secs >= _threshold:
+                                    _msg_idx = min(_status_tts_count, len(_STATUS_MESSAGES) - 1)
+                                    _status_text = _STATUS_MESSAGES[_msg_idx]
+                                    logger.info(f"### STATUS TTS ({_status_tts_count}): '{_status_text}' (silence={_silence_secs:.0f}s)")
+                                    _status_done, _status_res = _fire_tts(_status_text)
+                                    _status_done.wait(timeout=10)
+                                    if _status_res.get('audio'):
+                                        yield _audio_event(_status_res['audio'], _chunks_sent)
+                                        _chunks_sent += 1
+                                        _last_audio_time = time.time()
+                                    _status_tts_count += 1
                             continue
 
                         if evt['type'] == 'delta':
@@ -1293,9 +1329,13 @@ def _conversation_inner():
                                 elif _res.get('audio'):
                                     yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
+                                    _last_audio_time = time.time()
                             continue
 
                         if evt['type'] == 'action':
+                            # Track tool starts for spoken status logic
+                            if evt.get('action', {}).get('phase') == 'start':
+                                _tools_seen += 1
                             # Flush any TTS chunks that already finished —
                             # avoids silence during long tool calls (the first
                             # sentence TTS completes ~1s in but would otherwise
@@ -1307,6 +1347,7 @@ def _conversation_inner():
                                 elif _res.get('audio'):
                                     yield _audio_event(_res['audio'], _chunks_sent)
                                     _chunks_sent += 1
+                                    _last_audio_time = time.time()
                             yield json.dumps({'type': 'action', 'action': evt['action']}) + '\n'
                             continue
 

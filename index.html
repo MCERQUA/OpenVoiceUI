@@ -66,6 +66,35 @@
     <script src="src/ui/face/FacePicker.js?v=2"></script>
     <script src="src/ui/settings/SettingsPanel.js?v=2"></script>
 
+    <!-- Pyodide — Python runtime in the browser (lazy-loaded, non-blocking) -->
+    <script>
+    window.PyodideManager = {
+        _promise: null, ready: false, py: null,
+        PYODIDE_CDN: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/',
+        init() {
+            if (this._promise) return this._promise;
+            this._promise = new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = this.PYODIDE_CDN + 'pyodide.js';
+                s.async = true;
+                s.onload = async () => {
+                    try {
+                        this.py = await loadPyodide({ indexURL: this.PYODIDE_CDN });
+                        this.ready = true;
+                        console.log('[Pyodide] Ready');
+                        resolve(this.py);
+                    } catch (e) { reject(e); }
+                };
+                s.onerror = () => reject(new Error('Failed to load Pyodide'));
+                document.head.appendChild(s);
+            });
+            return this._promise;
+        },
+        async run(code) { const py = await this.init(); return py.runPythonAsync(code); },
+        async install(pkgs) { const py = await this.init(); await py.loadPackage(pkgs); }
+    };
+    </script>
+
     <!-- Clerk Authentication (optional — set CLERK_PUBLISHABLE_KEY in .env) -->
     <script>
         // Only load Clerk if a key is injected by the server
