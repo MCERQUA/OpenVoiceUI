@@ -58,7 +58,13 @@ _whisper_model = None
 def get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError:
+            raise ImportError(
+                "Local STT requires faster-whisper. Install it with: "
+                "pip install faster-whisper"
+            )
         logger.info("Loading Faster-Whisper model (first STT request)...")
         _whisper_model = WhisperModel("tiny", device="cpu", compute_type="float32")
         logger.info("Faster-Whisper model ready.")

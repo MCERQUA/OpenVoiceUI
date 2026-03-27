@@ -15,8 +15,10 @@ python-dotenv==1.2.1
 # System monitoring
 psutil==7.2.2
 
-# Speech-to-text (Faster Whisper — optional, for local STT)
-faster-whisper==1.2.1
+# Speech-to-text (optional — adds ~200MB for onnxruntime + ctranslate2)
+# Only needed for LOCAL on-device STT. Most users use Groq or Deepgram API instead.
+# To pre-install: pip install faster-whisper
+# faster-whisper==1.2.1
 
 # TTS providers
 groq==1.0.0                 # Groq Orpheus TTS (required if using groq provider)
@@ -31,8 +33,8 @@ cryptography==46.0.5
 # deepface>=0.0.93
 # tf-keras>=2.19.0
 
-# AI providers (optional)
-google-generativeai==0.8.6  # Only if using Gemini
+# AI providers (optional — not required, agents handle their own API calls)
+# google-generativeai==0.8.6  # Unused — remove if still commented on next cleanup
 
 # Supertonic local TTS (optional — install manually if using local ONNX TTS)
 # onnxruntime>=1.23.1
