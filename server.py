@@ -419,6 +419,9 @@ def get_version():
 _github_cache = {"data": None, "expires": 0}
 
 
+_GITHUB_REPO = os.environ.get("GITHUB_REPO", "MCERQUA/OpenVoiceUI").strip()
+
+
 def _get_latest_main_commit():
     """Fetch latest commit on main from GitHub. Returns None on failure."""
     now = time.time()
@@ -426,7 +429,7 @@ def _get_latest_main_commit():
         return _github_cache["data"]
     try:
         resp = requests.get(
-            "https://api.github.com/repos/MCERQUA/OpenVoiceUI/commits/main",
+            f"https://api.github.com/repos/{_GITHUB_REPO}/commits/main",
             headers={"Accept": "application/vnd.github.v3+json"},
             timeout=5,
         )
@@ -445,53 +448,102 @@ def _get_latest_main_commit():
     return _github_cache.get("data")
 
 
+def _self_update():
+    """Pull latest code from git and restart the server process.
+
+    Works for native installs (Pinokio, self-hosted, dev mode) where
+    the app directory is a git repo. After pulling, re-execs the process
+    so the new code is loaded without any manual steps.
+    """
+    import sys
+    app_dir = Path(__file__).parent
+
+    logger.info("[update] Starting self-update...")
+
+    # Git pull
+    result = subprocess.run(
+        ["git", "pull", "origin", "main"],
+        cwd=str(app_dir), capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        logger.error(f"[update] git pull failed: {result.stderr[:300]}")
+        return False, f"git pull failed: {result.stderr[:200]}"
+    logger.info(f"[update] git pull: {result.stdout.strip()}")
+
+    # Install any new dependencies
+    pip_cmd = [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"]
+    result = subprocess.run(
+        pip_cmd, cwd=str(app_dir), capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode != 0:
+        logger.warning(f"[update] pip install had issues: {result.stderr[:200]}")
+
+    # Update version.json from git
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(app_dir), capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=str(app_dir), capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        version_file = app_dir / "version.json"
+        version_file.write_text(json.dumps({
+            "commit": commit,
+            "branch": branch,
+            "date": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }))
+    except Exception:
+        pass
+
+    # Schedule process restart after response is sent
+    def _restart():
+        time.sleep(1)  # Let the HTTP response finish
+        logger.info("[update] Restarting server process...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    threading.Thread(target=_restart, daemon=True).start()
+    return True, "ok"
+
+
 @app.route("/api/version/update", methods=["POST"])
 def trigger_update():
-    """Signal the host to recreate this container with the latest image.
+    """Update the app to the latest version.
 
-    Writes an update-request flag file to a well-known path on the shared
-    volume. The host-side update service picks it up and recreates the
-    container. Requires admin auth (Clerk user check).
+    Tries three strategies in order:
+    1. Self-update via git pull + process restart (native/Pinokio/dev installs)
+    2. Host update service (JamBot managed hosting)
+    3. Returns instructions as last resort
     """
-    # Determine client name from env
-    client_name = os.environ.get("CLIENT_NAME", "").strip()
-    if not client_name:
-        return jsonify({"status": "error", "error": "CLIENT_NAME not set"}), 500
-
     # Check if already current
     latest = _get_latest_main_commit()
     current = _VERSION_INFO.get("commit", "unknown")
     if latest and current != "unknown" and latest["sha"].startswith(current):
         return jsonify({"status": "current", "message": "Already up to date"})
 
-    # Write update request flag (host-side service watches for these)
-    flag_dir = Path("/app/runtime")
-    flag_dir.mkdir(parents=True, exist_ok=True)
-    flag_file = flag_dir / "update-requested"
-    flag_file.write_text(json.dumps({
-        "client": client_name,
-        "current_commit": current,
-        "requested_at": datetime.utcnow().isoformat(),
-        "latest_commit": latest["sha"] if latest else "unknown",
-    }))
+    # Strategy 1: Self-update if this is a git repo (native/Pinokio/dev)
+    app_dir = Path(__file__).parent
+    if (app_dir / ".git").is_dir():
+        success, msg = _self_update()
+        if success:
+            return jsonify({"status": "updating", "message": "Updating — app will restart in a moment"})
+        else:
+            return jsonify({"status": "error", "error": msg}), 500
 
-    # Also try to call the host update service directly
-    try:
-        requests.post(
-            f"http://host.docker.internal:5199/update/{client_name}",
-            timeout=3,
-        )
-    except Exception:
-        # Fallback: try the Docker gateway IP
-        try:
-            requests.post(
-                f"http://172.17.0.1:5199/update/{client_name}",
-                timeout=3,
-            )
-        except Exception:
-            pass
+    # Strategy 2: Host update service (JamBot / managed Docker)
+    client_name = os.environ.get("CLIENT_NAME", "").strip()
+    if client_name:
+        for host in ["host.docker.internal", "172.17.0.1"]:
+            try:
+                r = requests.post(f"http://{host}:5199/update/{client_name}", timeout=5)
+                if r.status_code == 200:
+                    return jsonify({"status": "updating", "message": "Updating — your system will restart in a moment"})
+            except Exception:
+                pass
 
-    return jsonify({"status": "updating", "message": "Update requested — container will restart shortly"})
+    # Strategy 3: Manual — shouldn't happen often
+    return jsonify({"status": "manual", "message": "Pull the latest version and rebuild to update"})
 
 
 # ---------------------------------------------------------------------------

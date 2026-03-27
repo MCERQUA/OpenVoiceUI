@@ -20,16 +20,9 @@ function createBanner(versionData) {
     const el = document.createElement('div');
     el.id = 'update-banner';
     el.innerHTML = `
-        <div class="update-banner-inner">
-            <div class="update-banner-text">
-                <span class="update-banner-title">Update available</span>
-                <span class="update-banner-detail">${versionData.latest_message || 'New version ready'}</span>
-            </div>
-            <div class="update-banner-actions">
-                <button class="update-banner-btn update-btn" id="update-apply-btn">Update now</button>
-                <button class="update-banner-btn dismiss-btn" id="update-dismiss-btn">Later</button>
-            </div>
-        </div>
+        <span class="update-banner-title">A new version of OpenVoiceUI is available</span>
+        <button class="update-banner-btn update-btn" id="update-apply-btn">Update</button>
+        <button class="update-banner-btn dismiss-btn" id="update-dismiss-btn">&times;</button>
     `;
     document.body.appendChild(el);
     _banner = el;
@@ -55,19 +48,25 @@ async function applyUpdate(bannerEl) {
     const origText = btn.textContent;
     btn.textContent = 'Updating...';
     btn.disabled = true;
+    // Update the title too
+    const title = bannerEl.querySelector('.update-banner-title');
+    if (title) title.textContent = 'Updating OpenVoiceUI...';
 
     try {
-        // Call host-side update service
         const resp = await fetch('/api/version/update', { method: 'POST' });
         const data = await resp.json();
 
         if (data.status === 'updating') {
-            btn.textContent = 'Restarting...';
-            // Poll until server comes back, then reload
+            if (title) title.textContent = 'Restarting — one moment...';
+            btn.style.display = 'none';
             pollForRestart();
         } else if (data.status === 'current') {
-            // Already up to date — just reload to pick up any cached changes
             window.location.reload();
+        } else if (data.status === 'manual') {
+            // No host update service — show update instructions inline
+            btn.textContent = 'How to update';
+            btn.disabled = false;
+            btn.onclick = () => showUpdateInstructions();
         } else {
             btn.textContent = data.error || 'Update failed';
             setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 3000);
@@ -118,6 +117,33 @@ async function checkForUpdate() {
     } catch (_) {
         // Silently fail — not critical
     }
+}
+
+function showUpdateInstructions() {
+    // Remove the banner
+    if (_banner) { _banner.remove(); _banner = null; }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'update-instructions-overlay';
+    overlay.innerHTML = `
+        <div class="update-instructions-modal">
+            <h3>Update OpenVoiceUI</h3>
+            <p>Run these commands where you installed OpenVoiceUI:</p>
+            <pre><code>git pull origin main
+docker compose build
+docker compose up -d</code></pre>
+            <p class="update-instructions-note">This will pull the latest version, rebuild, and restart your app.</p>
+            <button id="update-instructions-close">Got it</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#update-instructions-close').addEventListener('click', () => {
+        overlay.remove();
+        _dismissed = true;
+    });
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) { overlay.remove(); _dismissed = true; }
+    });
 }
 
 /**

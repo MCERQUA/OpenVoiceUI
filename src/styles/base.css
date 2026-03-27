@@ -3,77 +3,95 @@
    Controls, panels, music, party effects, settings, auth, canvas
    ============================================================= */
 
-/* Update Banner */
+/* Update Banner — floating notice popup */
 #update-banner {
+    display: none;
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 10000;
-    transform: translateY(-100%);
-    transition: transform 0.3s ease;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    background: var(--bg-elevated, #1a1a2e);
+    border: 1px solid #ff4444;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(255, 68, 68, 0.3);
 }
 #update-banner.visible {
-    transform: translateY(0);
-}
-.update-banner-inner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 10px 20px;
-    background: linear-gradient(135deg, #1a3a4a, #0d2833);
-    border-bottom: 1px solid rgba(100, 200, 255, 0.2);
-    font-family: var(--font-mono, monospace);
-    font-size: 13px;
-}
-.update-banner-text {
     display: flex;
     align-items: center;
     gap: 12px;
-    min-width: 0;
-    overflow: hidden;
+    animation: update-fade-in 0.3s ease;
+}
+@keyframes update-fade-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 .update-banner-title {
-    color: #64d8ff;
+    color: #ff4444;
     font-weight: 600;
-    white-space: nowrap;
-}
-.update-banner-detail {
-    color: rgba(255, 255, 255, 0.6);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.update-banner-actions {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
 }
 .update-banner-btn {
-    padding: 5px 14px;
+    padding: 4px 12px;
     border: none;
     border-radius: 4px;
     font-size: 12px;
-    font-family: var(--font-mono, monospace);
     cursor: pointer;
     transition: opacity 0.15s;
 }
 .update-banner-btn:hover { opacity: 0.85; }
 .update-banner-btn:disabled { opacity: 0.5; cursor: wait; }
 .update-banner-btn.update-btn {
-    background: #64d8ff;
-    color: #000;
+    background: #ff4444;
+    color: #fff;
     font-weight: 600;
 }
 .update-banner-btn.dismiss-btn {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.6);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    padding: 4px 8px;
 }
 @media (max-width: 500px) {
-    .update-banner-inner { flex-direction: column; gap: 8px; padding: 8px 12px; }
-    .update-banner-detail { display: none; }
+    #update-banner { white-space: normal; max-width: 90vw; top: 60px; }
 }
+/* Update instructions modal */
+#update-instructions-overlay {
+    position: fixed; inset: 0; z-index: 10001;
+    background: rgba(0,0,0,0.6); display: flex;
+    align-items: center; justify-content: center;
+}
+.update-instructions-modal {
+    background: var(--bg-elevated, #1a1a2e);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 24px 28px;
+    max-width: 440px; width: 90vw;
+}
+.update-instructions-modal h3 {
+    margin: 0 0 12px; color: #fff; font-size: 16px;
+}
+.update-instructions-modal p {
+    color: rgba(255,255,255,0.6); font-size: 13px; margin: 0 0 12px;
+}
+.update-instructions-modal pre {
+    background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px; padding: 12px 14px; margin: 0 0 12px;
+    overflow-x: auto;
+}
+.update-instructions-modal code {
+    color: #ff6464; font-size: 13px; font-family: var(--font-mono, monospace);
+}
+.update-instructions-modal .update-instructions-note {
+    font-size: 12px; color: rgba(255,255,255,0.35);
+}
+.update-instructions-modal button {
+    margin-top: 8px; padding: 6px 18px;
+    background: #ff4444; color: #fff; border: none;
+    border-radius: 4px; font-size: 13px; cursor: pointer;
+    font-weight: 600;
+}
+.update-instructions-modal button:hover { opacity: 0.85; }
 
 /* Canvas padded mode — OS-style inset for external URLs */
 #canvas-container.canvas-padded {
