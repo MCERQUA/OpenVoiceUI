@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.png" alt="OpenVoiceUI Banner" width="100%" />
+  <img src="docs/banner.jpg" alt="OpenVoiceUI Banner" width="100%" />
 </p>
 
 <h1 align="center">OpenVoiceUI</h1>
