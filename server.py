@@ -400,18 +400,22 @@ if _version_file.exists():
 
 @app.route("/api/version", methods=["GET"])
 def get_version():
-    """Return build version and check GitHub for latest."""
+    """Return build version and check GitHub for latest release."""
     data = {**_VERSION_INFO, "uptime_seconds": round(time.time() - SERVER_START_TIME)}
-    # Check for newer version on GitHub (cached, non-blocking)
-    latest = _get_latest_main_commit()
+    # Check for newer release on GitHub (cached, non-blocking)
+    latest = _get_latest_release_info()
     if latest:
         data["latest_commit"] = latest["sha"]
         data["latest_date"] = latest["date"]
         data["latest_message"] = latest["message"]
         data["latest_version"] = latest.get("latest_version", "")
+        # Only show update banner when a NEW RELEASE exists — not every commit.
+        # Compare the release tag's commit against what's running.
+        current = _VERSION_INFO.get("commit", "unknown")
         data["update_available"] = (
-            _VERSION_INFO.get("commit", "unknown") != "unknown"
-            and not latest["sha"].startswith(_VERSION_INFO.get("commit", ""))
+            current != "unknown"
+            and latest.get("sha")
+            and not latest["sha"].startswith(current)
         )
     return jsonify(data)
 
@@ -423,38 +427,48 @@ _github_cache = {"data": None, "expires": 0}
 _GITHUB_REPO = os.environ.get("GITHUB_REPO", "MCERQUA/OpenVoiceUI").strip()
 
 
-def _get_latest_main_commit():
-    """Fetch latest commit on main and latest release tag from GitHub."""
+def _get_latest_release_info():
+    """Fetch the latest GitHub release and its commit SHA.
+
+    Only compares against tagged releases — not every commit on main.
+    This prevents false "update available" banners from routine merges.
+    """
     now = time.time()
     if _github_cache["data"] and now < _github_cache["expires"]:
         return _github_cache["data"]
     try:
-        resp = requests.get(
-            f"https://api.github.com/repos/{_GITHUB_REPO}/commits/main",
+        # Get the latest release
+        rel = requests.get(
+            f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
             headers={"Accept": "application/vnd.github.v3+json"},
             timeout=5,
         )
-        if resp.status_code == 200:
-            j = resp.json()
-            result = {
-                "sha": j["sha"][:7],
-                "date": j["commit"]["committer"]["date"],
-                "message": j["commit"]["message"].split("\n")[0][:120],
-            }
-            # Fetch latest release tag
-            try:
-                rel = requests.get(
-                    f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
-                    headers={"Accept": "application/vnd.github.v3+json"},
-                    timeout=5,
-                )
-                if rel.status_code == 200:
-                    result["latest_version"] = rel.json().get("tag_name", "")
-            except Exception:
-                pass
-            _github_cache["data"] = result
-            _github_cache["expires"] = now + 300  # 5 min cache
-            return result
+        if rel.status_code != 200:
+            return _github_cache.get("data")
+
+        rel_data = rel.json()
+        tag_name = rel_data.get("tag_name", "")
+
+        # Get the commit SHA for this release tag
+        tag_resp = requests.get(
+            f"https://api.github.com/repos/{_GITHUB_REPO}/git/ref/tags/{tag_name}",
+            headers={"Accept": "application/vnd.github.v3+json"},
+            timeout=5,
+        )
+        sha = ""
+        if tag_resp.status_code == 200:
+            tag_obj = tag_resp.json().get("object", {})
+            sha = tag_obj.get("sha", "")[:7]
+
+        result = {
+            "sha": sha,
+            "date": rel_data.get("published_at", ""),
+            "message": rel_data.get("name", tag_name),
+            "latest_version": tag_name,
+        }
+        _github_cache["data"] = result
+        _github_cache["expires"] = now + 300  # 5 min cache
+        return result
     except Exception:
         pass
     return _github_cache.get("data")
