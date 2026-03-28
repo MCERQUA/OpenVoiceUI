@@ -9,7 +9,7 @@
 
 const { execSync } = require("child_process");
 
-const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml";
+const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.local.yml";
 const MAX_ATTEMPTS = 24;  // 24 × 5s = 2 minutes
 const DELAY_MS = 5000;
 

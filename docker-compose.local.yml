@@ -1,0 +1,12 @@
+# Local install override (used by CLI, Pinokio, and any local setup)
+# - Swaps openclaw-data named volume for local ./openclaw-data bind mount
+#   so setup-config.js generated files (openclaw.json, auth-profiles, device identity)
+#   are visible inside the container
+# - Injects .env into openclaw so API keys are available at runtime
+services:
+  openclaw:
+    env_file:
+      - .env
+    volumes:
+      - ./openclaw-data:/root/.openclaw
+      - canvas-pages:/root/.openclaw/workspace/canvas-pages

@@ -5,7 +5,7 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml up",
+        message: "docker compose -f docker-compose.yml -f docker-compose.local.yml up",
         on: [{
           // Match OpenVoiceUI's startup message (not OpenClaw's earlier "listening on ws://")
           event: "/OpenVoiceUI starting on port/i",

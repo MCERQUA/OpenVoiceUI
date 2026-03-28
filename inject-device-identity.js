@@ -17,7 +17,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml";
+const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.local.yml";
 const IDENTITY_FILE = "openclaw-data/pre-paired-device.json";
 const PAIRED_FILE = "openclaw-data/devices/paired.json";
 const CONTAINER_PATH = "/app/runtime/uploads/.device-identity.json";
