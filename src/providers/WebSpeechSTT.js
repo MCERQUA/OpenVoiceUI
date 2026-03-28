@@ -356,7 +356,9 @@ class WebSpeechSTT {
         this.isProcessing = false;
         this.accumulatedText = '';
 
-        if (this.isListening && this.recognition) {
+        // Restore listening state — stop()/pttRelease() may have set isListening=false
+        this.isListening = true;
+        if (this.recognition) {
             try { this.recognition.start(); } catch (e) {}
         }
     }
