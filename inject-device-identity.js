@@ -69,9 +69,34 @@ function writePairedJson(deviceId, publicKeyPem) {
     approvedAtMs: nowMs,
   };
 
-  fs.mkdirSync("openclaw-data/devices", { recursive: true });
-  fs.writeFileSync(PAIRED_FILE, JSON.stringify(paired, null, 2) + "\n");
-  fs.writeFileSync("openclaw-data/devices/pending.json", "{}\n");
+  var pairedContent = JSON.stringify(paired, null, 2) + "\n";
+
+  // Try direct write first (works when current user owns openclaw-data/devices/)
+  try {
+    fs.mkdirSync("openclaw-data/devices", { recursive: true });
+    fs.writeFileSync(PAIRED_FILE, pairedContent);
+    fs.writeFileSync("openclaw-data/devices/pending.json", "{}\n");
+    return;
+  } catch (e) {
+    if (e.code !== "EACCES") throw e;
+  }
+
+  // Fallback: openclaw container created devices/ as root via bind mount.
+  // Write via docker cp into the container — bind mount reflects it on host too.
+  console.log("  devices/ is root-owned — writing via docker cp");
+  var os = require("os");
+  var tmpPaired = path.join(os.tmpdir(), "ovu-paired.json");
+  var tmpPending = path.join(os.tmpdir(), "ovu-pending.json");
+  fs.writeFileSync(tmpPaired, pairedContent);
+  fs.writeFileSync(tmpPending, "{}\n");
+
+  var cid = exec(COMPOSE + " ps -q openclaw");
+  if (!cid) throw new Error("openclaw container not found for docker cp fallback");
+  exec("docker cp " + JSON.stringify(tmpPaired) + " " + cid + ":/root/.openclaw/devices/paired.json");
+  exec("docker cp " + JSON.stringify(tmpPending) + " " + cid + ":/root/.openclaw/devices/pending.json");
+
+  try { fs.unlinkSync(tmpPaired); } catch (e2) { /* ignore */ }
+  try { fs.unlinkSync(tmpPending); } catch (e2) { /* ignore */ }
 }
 
 // Step 1: Check if the container already has a device identity (from a previous run)
