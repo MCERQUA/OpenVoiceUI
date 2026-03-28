@@ -22,6 +22,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Sync version from release tag
+        if: github.event_name == 'release'
         run: |
           # Strip leading 'v' if present (e.g. v2026.3.28 -> 2026.3.28)
           TAG="${GITHUB_REF_NAME#v}"
