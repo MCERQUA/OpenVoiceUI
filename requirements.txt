@@ -28,7 +28,7 @@ PyYAML>=6.0
 groq==1.0.0                 # Groq Orpheus TTS (required if using groq provider)
 
 # Auth (Clerk JWT — optional, only if CANVAS_REQUIRE_AUTH=true)
-PyJWT==2.11.0
+PyJWT==2.12.1
 cryptography==46.0.5
 
 # Face recognition (optional — adds ~700MB for TensorFlow)
