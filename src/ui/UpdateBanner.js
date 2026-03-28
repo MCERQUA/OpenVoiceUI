@@ -4,6 +4,18 @@
  * On init, fetches /api/version to compare the running build against
  * the latest release on GitHub. If an update is available, shows a
  * floating notification with a one-click update button.
+ *
+ * Before applying, fetches /api/version/preview to show the user:
+ *   - How many files will change
+ *   - Whether local customisations were detected
+ *   - What update method will be used (AI agent or smart fallback)
+ *   - Risk level
+ *
+ * The update itself is handled by the intelligent UpdateManager which:
+ *   1. Detects available CLI agents (Claude Code, Codex, z-code, etc.)
+ *   2. Analyses diffs and detects local customisations
+ *   3. Uses the agent for conflict resolution, or a smart fallback
+ *   4. Backs up modified files and rolls back on failure
  */
 
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000; // Re-check every 30 min
@@ -43,7 +55,7 @@ function createBanner(versionData) {
     });
 
     el.querySelector('#update-apply-btn').addEventListener('click', () => {
-        if (!_updating) applyUpdate(el);
+        if (!_updating) startUpdate(el);
     });
 }
 
@@ -56,7 +68,12 @@ function setStatus(bannerEl, message, showSpinner) {
     `;
 }
 
-async function applyUpdate(bannerEl) {
+/**
+ * Start the update flow:
+ * 1. Fetch preview to show what will change
+ * 2. Apply the update via UpdateManager
+ */
+async function startUpdate(bannerEl) {
     _updating = true;
     const btn = bannerEl.querySelector('#update-apply-btn');
     const dismiss = bannerEl.querySelector('#update-dismiss-btn');
@@ -64,18 +81,70 @@ async function applyUpdate(bannerEl) {
     dismiss.style.opacity = '0.2';
     dismiss.style.pointerEvents = 'none';
 
-    setStatus(bannerEl, 'Downloading update...', true);
+    // ── Step 1: Preview — show the user what's coming ───────────────
+    setStatus(bannerEl, 'Analysing update...', true);
+
+    try {
+        const preview = await fetch('/api/version/preview');
+        if (preview.ok) {
+            const info = await preview.json();
+            const files = info.changed_file_count || 0;
+            const risk = info.risk || 'low';
+            const method = info.update_method || 'Smart update';
+            const conflicts = (info.conflicts || []).length;
+
+            let msg = `${files} file${files !== 1 ? 's' : ''} to update`;
+            if (conflicts > 0) msg += ` (${conflicts} conflict${conflicts !== 1 ? 's' : ''})`;
+            msg += ` — ${method}`;
+
+            setStatus(bannerEl, msg, true);
+            // Brief pause so user can read the preview
+            await new Promise(r => setTimeout(r, 1500));
+        }
+    } catch (_) {
+        // Preview unavailable — proceed anyway
+    }
+
+    // ── Step 2: Apply the update ────────────────────────────────────
+    setStatus(bannerEl, 'Applying update...', true);
+    applyUpdate(bannerEl);
+}
+
+async function applyUpdate(bannerEl) {
+    const btn = bannerEl.querySelector('#update-apply-btn');
+    const dismiss = bannerEl.querySelector('#update-dismiss-btn');
 
     try {
         const resp = await fetch('/api/version/update', { method: 'POST' });
         const data = await resp.json();
 
         if (data.status === 'updating') {
-            setStatus(bannerEl, 'Installing update — restarting app...', true);
+            // Show details if available
+            let msg = 'Installing update — restarting app...';
+            if (data.details) {
+                const preserved = data.details.customisations_preserved || [];
+                const warnings = data.details.warnings || [];
+                if (preserved.length > 0) {
+                    msg = `Updated (${preserved.length} customisation${preserved.length > 1 ? 's' : ''} preserved) — restarting...`;
+                }
+                if (warnings.length > 0) {
+                    console.warn('[update] Warnings:', warnings);
+                }
+            }
+            setStatus(bannerEl, msg, true);
             pollForRestart(bannerEl);
         } else if (data.status === 'current') {
             setStatus(bannerEl, 'Already up to date — reloading...', true);
             setTimeout(() => window.location.reload(), 1000);
+        } else if (data.status === 'rolled_back') {
+            // Update was applied but verification failed — rolled back
+            _updating = false;
+            const reason = data.reason || 'Health check failed after update';
+            setStatus(bannerEl, `Update rolled back: ${reason}`, false);
+            btn.style.display = '';
+            btn.textContent = 'Retry';
+            dismiss.style.opacity = '';
+            dismiss.style.pointerEvents = '';
         } else if (data.status === 'manual') {
             _updating = false;
             btn.style.display = '';
@@ -93,7 +162,7 @@ async function applyUpdate(bannerEl) {
             _updating = false;
         }
     } catch (e) {
-        // Server likely restarting already
+        // Server likely restarting already (connection dropped)
         setStatus(bannerEl, 'Installing update — restarting app...', true);
         pollForRestart(bannerEl);
     }

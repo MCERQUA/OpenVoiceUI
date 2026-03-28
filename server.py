@@ -22,6 +22,7 @@ import os
 import queue
 import re
 import requests
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -100,10 +101,25 @@ app.register_blueprint(canvas_bp)
 
 # Seed default pages into canvas-pages on startup (ships with the app image)
 # Default pages are app infrastructure (e.g. desktop menu) — auth is skipped in canvas.py.
+# Pages with a <!-- openvoiceui-version: X --> comment are re-seeded when version changes.
 from services.paths import DEFAULT_PAGES_DIR
+
+_VERSION_RE = re.compile(r'<!--\s*openvoiceui-version:\s*(\S+)\s*-->')
+
+def _extract_page_version(path, max_lines=5):
+    """Read version stamp from the first few lines of an HTML file."""
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            for _, line in zip(range(max_lines), f):
+                m = _VERSION_RE.search(line)
+                if m:
+                    return m.group(1)
+    except (OSError, UnicodeDecodeError):
+        pass
+    return None
+
 if DEFAULT_PAGES_DIR.is_dir():
     CANVAS_PAGES_DIR.mkdir(parents=True, exist_ok=True)
-    import shutil
     for src in DEFAULT_PAGES_DIR.iterdir():
         if not src.is_file():
             continue
@@ -111,6 +127,17 @@ if DEFAULT_PAGES_DIR.is_dir():
         if not dest.exists():
             shutil.copy2(src, dest)
             logger.info("Seeded default page: %s", src.name)
+        else:
+            # Re-seed if the shipped version is newer than the runtime copy
+            src_ver = _extract_page_version(src)
+            if src_ver is not None:
+                dest_ver = _extract_page_version(dest)
+                if dest_ver != src_ver:
+                    shutil.copy2(src, dest)
+                    logger.info(
+                        "Re-seeded default page %s (version %s -> %s)",
+                        src.name, dest_ver, src_ver,
+                    )
 
 from routes.static_files import static_files_bp, DJ_SOUNDS, SOUNDS_DIR
 app.register_blueprint(static_files_bp)
@@ -494,62 +521,42 @@ def _get_latest_release_info():
 
 
 def _self_update():
-    """Pull latest code from git and restart the server process.
+    """Intelligent update: analyse → detect agent → review → apply → verify.
 
-    Works for native installs (Pinokio, self-hosted, dev mode) where
-    the app directory is a git repo. After pulling, re-execs the process
-    so the new code is loaded without any manual steps.
+    Instead of a blind ``git pull``, this:
+    1. Analyses what changed upstream vs what's customised locally
+    2. Searches for an available CLI coding agent (claude, codex, z-code, etc.)
+    3. If an agent is found AND there are conflicts → spawns it with a
+       comprehensive prompt that enumerates every possible breaking point
+    4. If no agent or low risk → uses heuristic-based smart update with
+       automatic backup/rollback
+    5. Verifies health after every update; rolls back on failure
+
+    Works in all deployment scenarios: native, Docker, multi-tenant, Pinokio.
     """
-    import sys
+    from services.update_manager import UpdateManager
+
     app_dir = Path(__file__).parent
+    mgr = UpdateManager(app_dir)
+    return mgr.apply_update()
 
-    logger.info("[update] Starting self-update...")
 
-    # Git pull
-    result = subprocess.run(
-        ["git", "pull", "origin", "main"],
-        cwd=str(app_dir), capture_output=True, text=True, timeout=60,
-    )
-    if result.returncode != 0:
-        logger.error(f"[update] git pull failed: {result.stderr[:300]}")
-        return False, f"git pull failed: {result.stderr[:200]}"
-    logger.info(f"[update] git pull: {result.stdout.strip()}")
+@app.route("/api/version/preview", methods=["GET"])
+def preview_update():
+    """Return a preview of what an update would change, without applying it.
 
-    # Install any new dependencies
-    pip_cmd = [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"]
-    result = subprocess.run(
-        pip_cmd, cwd=str(app_dir), capture_output=True, text=True, timeout=120,
-    )
-    if result.returncode != 0:
-        logger.warning(f"[update] pip install had issues: {result.stderr[:200]}")
+    The frontend can call this to show the user:
+    - What files will change
+    - What local customisations exist
+    - What conflicts were detected
+    - Which update method will be used (AI agent or smart fallback)
+    - Risk level (low / medium / high)
+    """
+    from services.update_manager import UpdateManager
 
-    # Update version.json from git
-    try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(app_dir), capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-        branch = subprocess.run(
-            ["git", "branch", "--show-current"],
-            cwd=str(app_dir), capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-        version_file = app_dir / "version.json"
-        version_file.write_text(json.dumps({
-            "commit": commit,
-            "branch": branch,
-            "date": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }))
-    except Exception:
-        pass
-
-    # Schedule process restart after response is sent
-    def _restart():
-        time.sleep(1)  # Let the HTTP response finish
-        logger.info("[update] Restarting server process...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-
-    threading.Thread(target=_restart, daemon=True).start()
-    return True, "ok"
+    app_dir = Path(__file__).parent
+    mgr = UpdateManager(app_dir)
+    return jsonify(mgr.get_update_preview())
 
 
 @app.route("/api/version/update", methods=["POST"])
@@ -557,24 +564,49 @@ def trigger_update():
     """Update the app to the latest version.
 
     Tries three strategies in order:
-    1. Self-update via git pull + process restart (native/Pinokio/dev installs)
-    2. Host update service (JamBot managed hosting)
+    1. Intelligent self-update (analyses diffs, detects agent, backs up,
+       verifies) — works for native/Pinokio/dev/Docker installs with .git
+    2. Host update service (JamBot / managed Docker hosting)
     3. Returns instructions as last resort
     """
     # Check if already current
-    latest = _get_latest_main_commit()
+    latest = _get_latest_release_info()
     current = _VERSION_INFO.get("commit", "unknown")
     if latest and current != "unknown" and latest["sha"].startswith(current):
         return jsonify({"status": "current", "message": "Already up to date"})
 
-    # Strategy 1: Self-update if this is a git repo (native/Pinokio/dev)
+    # Strategy 1: Intelligent self-update if this is a git repo
     app_dir = Path(__file__).parent
     if (app_dir / ".git").is_dir():
-        success, msg = _self_update()
-        if success:
-            return jsonify({"status": "updating", "message": "Updating — app will restart in a moment"})
+        result = _self_update()
+        status = result.get("status", "error")
+
+        if status == "success":
+            return jsonify({
+                "status": "updating",
+                "message": "Update applied — app will restart in a moment",
+                "method": result.get("method", "unknown"),
+                "details": {
+                    "files_updated": len(result.get("files_updated", [])),
+                    "customisations_preserved": result.get("customisations_preserved", []),
+                    "warnings": result.get("warnings", []),
+                },
+            })
+        elif status == "current":
+            return jsonify({"status": "current", "message": "Already up to date"})
+        elif status == "rolled_back":
+            return jsonify({
+                "status": "rolled_back",
+                "message": "Update was rolled back due to issues",
+                "reason": result.get("reason", "Verification failed"),
+                "method": result.get("method", "unknown"),
+            }), 409
         else:
-            return jsonify({"status": "error", "error": msg}), 500
+            return jsonify({
+                "status": "error",
+                "error": result.get("reason", result.get("error", "Update failed")),
+                "method": result.get("method", "unknown"),
+            }), 500
 
     # Strategy 2: Host update service (JamBot / managed Docker)
     client_name = os.environ.get("CLIENT_NAME", "").strip()
