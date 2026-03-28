@@ -8,7 +8,7 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
-const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml";
+const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.local.yml";
 let failures = 0;
 
 function check(name, fn) {

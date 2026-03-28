@@ -4,7 +4,7 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml down",
+        message: "docker compose -f docker-compose.yml -f docker-compose.local.yml down",
       },
     },
 
@@ -23,7 +23,7 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        message: "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml build",
+        message: "docker compose -f docker-compose.yml -f docker-compose.local.yml build",
       },
     },
 

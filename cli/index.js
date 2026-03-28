@@ -8,6 +8,7 @@ const path = require("path");
 
 const VERSION = require("../package.json").version;
 const PROJECT_DIR = path.resolve(__dirname, "..");
+const COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.local.yml";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,7 +48,7 @@ function hasDocker() {
 
 function isRunning() {
   try {
-    const out = execSync("docker compose ps --format json", {
+    const out = execSync(`${COMPOSE} ps --format json`, {
       cwd: PROJECT_DIR,
       stdio: "pipe",
     }).toString();
@@ -210,7 +211,7 @@ async function cmdSetup() {
   });
 
   console.log("\n  Building Docker images (this may take a few minutes)...\n");
-  run("docker compose build");
+  run(`${COMPOSE} build`);
 
   console.log(`
   ════════════════════════════════════════════════════════
@@ -239,7 +240,7 @@ function cmdStart() {
   }
 
   console.log("  Starting OpenVoiceUI...\n");
-  run("docker compose up -d");
+  run(`${COMPOSE} up -d`);
 
   // Inject pre-paired device identity if available
   const prePairedPath = path.join(
@@ -269,15 +270,15 @@ function cmdStart() {
 // --- stop ---
 function cmdStop() {
   console.log("  Stopping OpenVoiceUI...\n");
-  run("docker compose down");
+  run(`${COMPOSE} down`);
   console.log("  Stopped.\n");
 }
 
 // --- restart ---
 function cmdRestart() {
   console.log("  Restarting OpenVoiceUI...\n");
-  run("docker compose down");
-  run("docker compose up -d");
+  run(`${COMPOSE} down`);
+  run(`${COMPOSE} up -d`);
 
   const port = getPort();
   console.log(`\n  Restarted. App: http://localhost:${port}\n`);
@@ -290,12 +291,12 @@ function cmdStatus() {
     console.error("  Docker not found.\n");
     process.exit(1);
   }
-  run("docker compose ps");
+  run(`${COMPOSE} ps`);
 }
 
 // --- logs ---
 function cmdLogs() {
-  const child = runLive("docker", ["compose", "logs", "-f", "--tail", "100"]);
+  const child = runLive("docker", ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.local.yml", "logs", "-f", "--tail", "100"]);
   process.on("SIGINT", () => {
     child.kill("SIGINT");
     process.exit(0);
@@ -317,11 +318,11 @@ function cmdUpdate() {
   }
 
   console.log("  Rebuilding Docker images...\n");
-  run("docker compose build --pull");
+  run(`${COMPOSE} build --pull`);
 
   if (isRunning()) {
     console.log("  Restarting containers...\n");
-    run("docker compose up -d");
+    run(`${COMPOSE} up -d`);
   }
 
   console.log("  Update complete!\n");

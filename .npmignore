@@ -16,7 +16,6 @@ install.js
 start.js
 stop.js
 update.js
-docker-compose.pinokio.yml
 auto-approve-devices.js
 inject-device-identity.js
 

@@ -352,7 +352,7 @@ module.exports = {
       params: {
         message: [
           "git rev-parse HEAD > GIT_HASH",
-          "docker compose -f docker-compose.yml -f docker-compose.pinokio.yml build",
+          "docker compose -f docker-compose.yml -f docker-compose.local.yml build",
         ],
       },
     },
