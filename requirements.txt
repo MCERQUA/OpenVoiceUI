@@ -7,7 +7,7 @@ flask-sock==0.7.0
 
 # WebSocket & HTTP
 websockets==16.0
-requests==2.32.5
+requests==2.33.0
 
 # Environment & config
 python-dotenv==1.2.1
