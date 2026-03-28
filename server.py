@@ -415,14 +415,27 @@ def get_version():
         data["latest_date"] = latest["date"]
         data["latest_message"] = latest["message"]
         data["latest_version"] = latest.get("latest_version", "")
-        # Only show update banner when a NEW RELEASE exists — not every commit.
-        # Compare the release tag's commit against what's running.
+        # Check if we need an update. If .git exists, use git to check
+        # whether the release tag is already in our history (handles being
+        # ahead of the release). Otherwise fall back to commit comparison.
         current = _VERSION_INFO.get("commit", "unknown")
-        data["update_available"] = (
-            current != "unknown"
-            and latest.get("sha")
-            and not latest["sha"].startswith(current)
-        )
+        data["update_available"] = False
+        if current != "unknown" and latest.get("sha"):
+            app_dir = Path(__file__).parent
+            if (app_dir / ".git").is_dir():
+                try:
+                    result = subprocess.run(
+                        ["git", "merge-base", "--is-ancestor",
+                         latest["sha"], "HEAD"],
+                        cwd=str(app_dir), capture_output=True, timeout=5,
+                    )
+                    # returncode 0 = release is ancestor of HEAD (up to date)
+                    # returncode 1 = release is NOT ancestor (need update)
+                    data["update_available"] = result.returncode != 0
+                except Exception:
+                    data["update_available"] = not latest["sha"].startswith(current)
+            else:
+                data["update_available"] = not latest["sha"].startswith(current)
     return jsonify(data)
 
 
