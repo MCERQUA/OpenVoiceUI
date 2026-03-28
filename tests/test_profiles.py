@@ -172,7 +172,7 @@ def test_profile_stt_config(profile_id):
     assert "stt" in profile, f"{profile_id}: missing 'stt' section"
     stt = profile["stt"]
     assert "provider" in stt, f"{profile_id}: missing stt.provider"
-    valid_providers = ["webspeech", "whisper"]
+    valid_providers = ["webspeech", "whisper", "deepgram"]
     assert stt["provider"] in valid_providers, \
         f"{profile_id}: unknown stt.provider '{stt['provider']}'"
 

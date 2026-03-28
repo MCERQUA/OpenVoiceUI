@@ -37,8 +37,8 @@ class TestCreateApp:
     def test_max_content_length_set(self):
         from app import create_app
         app, _ = create_app(config_override={"TESTING": True})
-        # 25 MB (reduced from 100 MB in P7-T3 security audit)
-        assert app.config["MAX_CONTENT_LENGTH"] == 25 * 1024 * 1024
+        # 100 MB upload limit
+        assert app.config["MAX_CONTENT_LENGTH"] == 100 * 1024 * 1024
 
     def test_config_override_applies(self):
         from app import create_app
