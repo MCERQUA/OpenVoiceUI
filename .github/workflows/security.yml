@@ -1,0 +1,68 @@
+name: Security Scan (Report-Only)
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scanners
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+
+      - name: Run Bandit (report-only)
+        run: |
+          bandit -r . -f json -o bandit-report.json || true
+          bandit -r . -f txt -o bandit-report.txt || true
+
+      - name: Run pip-audit (report-only)
+        run: |
+          if [ -f requirements.txt ]; then
+            pip-audit -r requirements.txt -f json -o pip-audit-report.json || true
+            pip-audit -r requirements.txt || true
+          else
+            echo '{"note":"No requirements.txt found"}' > pip-audit-report.json
+          fi
+
+      - name: Run Trivy filesystem scan (report-only)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: json
+          output: trivy-report.json
+        continue-on-error: true
+
+      - name: Upload scan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-scan-reports
+          path: |
+            bandit-report.json
+            bandit-report.txt
+            pip-audit-report.json
+            trivy-report.json
+          if-no-files-found: warn
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Security scan complete (report-only)."
+          echo "Review uploaded artifacts for findings."
