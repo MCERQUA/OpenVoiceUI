@@ -159,12 +159,12 @@ async function cmdSetup() {
   }
 
   const deepgramKey = await ask(
-    "  Deepgram API Key (console.deepgram.com) [REQUIRED]: "
+    "  Deepgram API Key (console.deepgram.com) [optional]: "
   );
   if (!deepgramKey) {
-    console.error("\n  ERROR: Deepgram API key is required for STT.\n");
-    rl.close();
-    process.exit(1);
+    console.log(
+      "  Skipped — browser speech recognition (WebSpeech) will be used for STT.\n"
+    );
   }
 
   console.log("\n  ── AI Provider Keys (pick at least one) ──────────────");
@@ -238,6 +238,13 @@ function cmdStart() {
     console.error("  ERROR: No .env file found. Run: openvoiceui setup\n");
     process.exit(1);
   }
+
+  // Pre-create devices directory before containers start. Without this,
+  // openclaw (running as root) creates it first via the bind mount, making
+  // it root-owned — then inject-device-identity.js can't write paired.json.
+  fs.mkdirSync(path.join(PROJECT_DIR, "openclaw-data", "devices"), {
+    recursive: true,
+  });
 
   console.log("  Starting OpenVoiceUI...\n");
   run(`${COMPOSE} up -d`);
@@ -355,7 +362,8 @@ function cmdHelp() {
 // Main
 // ---------------------------------------------------------------------------
 
-const command = process.argv[2] || "help";
+const rawCommand = process.argv[2] || "help";
+const command = (rawCommand === "--help" || rawCommand === "-h") ? "help" : rawCommand;
 
 if (commands[command]) {
   const result = commands[command].run();
