@@ -11,7 +11,7 @@
 
   "llm": {
     "provider": "gateway",
-    "model": "glm-4.7",
+    "model": "glm-5-turbo",
     "parameters": {
       "max_tokens": 256,
       "temperature": 0.8

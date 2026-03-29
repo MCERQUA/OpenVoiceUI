@@ -17,10 +17,10 @@ llm:
     zai:
       name: "Z.AI GLM"
       api_key: ${ZAI_API_KEY}
-      default_model: glm-4-7-flash
+      default_model: glm-5-turbo
       priority: 10
       models:
-        - id: glm-4-7-flash
+        - id: glm-5-turbo
           name: "GLM-4.7 Flash"
         - id: glm-4-plus
           name: "GLM-4 Plus"

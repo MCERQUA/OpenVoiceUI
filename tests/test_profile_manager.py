@@ -42,7 +42,7 @@ MINIMAL_PROFILE_DATA = {
     "id": "test-agent",
     "name": "Test Agent",
     "system_prompt": "You are a test agent for unit testing.",
-    "llm": {"provider": "zai", "model": "glm-4-7-flash"},
+    "llm": {"provider": "zai", "model": "glm-5-turbo"},
     "voice": {"tts_provider": "supertonic", "voice_id": "M1"},
     "stt": {"provider": "webspeech"},
     "features": {"canvas": True, "vision": False, "music": False, "tools": False},

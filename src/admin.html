@@ -939,7 +939,7 @@ const Builder = {
     const payload={
       id, name:name.trim(), description:'New AI voice agent', version:'1.0',
       system_prompt:'You are '+name.trim()+', an AI voice assistant. Be helpful, concise, and friendly.',
-      llm:{provider:'zai',model:'glm-4-7-flash',parameters:{max_tokens:512,temperature:0.7}},
+      llm:{provider:'zai',model:'glm-5-turbo',parameters:{max_tokens:512,temperature:0.7}},
       voice:{tts_provider:'supertonic',voice_id:'M1',speed:1.1,parameters:{total_step:16}},
       stt:{provider:'webspeech',language:'en-US'},
       features:{canvas:false,music:false,tools:false,vision:false},

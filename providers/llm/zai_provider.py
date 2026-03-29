@@ -21,7 +21,7 @@ class ZAIProvider(LLMProvider):
     def __init__(self, config: Dict[str, Any] = None) -> None:
         super().__init__(config)
         self.api_key = self._resolve_api_key()
-        self.default_model = self._config.get("default_model", "glm-4-7-flash")
+        self.default_model = self._config.get("default_model", "glm-5-turbo")
 
     def _resolve_api_key(self) -> str:
         key = self._config.get("api_key", "")
