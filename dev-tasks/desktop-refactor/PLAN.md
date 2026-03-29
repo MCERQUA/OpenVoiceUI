@@ -115,6 +115,64 @@ JavaScript uses 480px/1024px breakpoints. CSS uses 400px/600px media queries. Th
 
 **Fix:** Align both to 480px (phone) / 768px (tablet) / 1024px+ (desktop).
 
+### 1.6 Canvas Navigation Opens Wrong Page (Fuzzy Match Bug)
+**Severity:** Critical
+**Files:** `default-pages/desktop.html` line 2546, `src/app.js` lines 6510-6512, 6663-6693, 7373-7430
+**Observed:** User clicks "Awesome App Library" on desktop, parent frame loads a different page (e.g. "JAMBOT Admin Dashboard").
+
+**Root cause:** The navigation path has a design flaw — programmatic ID-based navigation and voice fuzzy-name navigation share the same code path.
+
+1. Desktop sends `openCanvasPage('ai-app-library')` via postMessage (line 2546)
+2. Parent receives it, calls `CanvasControl.showPage('ai-app-library')` (line 6512)
+3. `showPage()` calls `menu.findPageByName('ai-app-library')` (line 6679)
+4. `findPageByName()` does check exact page ID first (line 7380), BUT:
+   - If `menu.manifest` isn't loaded yet, it falls through to string-transform fallback (line 6669)
+   - The fuzzy matching (lines 7388-7425) scores partial substring matches on voice_aliases and display_names. A page with an alias that's a substring of the query (or vice versa) can score 80+ and win over the intended target
+   - Word-level matching (line 7417-7425) scores individual words — "app" alone could match multiple pages
+
+5. The fuzzy scorer has no minimum threshold. ANY partial match wins, even score 53 ("app" matching a 3-letter word).
+
+**Fix:** Split into two navigation modes:
+
+```javascript
+// In CanvasControl:
+showPageById(pageId) {
+  // Exact match only — used by desktop postMessage, agent [CANVAS:id] tags
+  const menu = window.CanvasMenu;
+  if (menu?.manifest?.pages?.[pageId]) {
+    menu.showPage(menu.manifest.pages[pageId].filename);
+    return;
+  }
+  // Direct fallback — pageId IS the filename stem
+  const filename = pageId + '.html';
+  if (this.iframe) {
+    this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
+    localStorage.setItem('canvas_last_page', filename);
+    this.show();
+  }
+},
+
+showPageByName(query) {
+  // Fuzzy match — used by voice input only
+  const match = window.CanvasMenu?.findPageByName(query);
+  if (match && match.score >= 70) {
+    window.CanvasMenu.showPage(match.page.filename);
+  }
+}
+```
+
+Then update the postMessage handler (line 6510-6512):
+```javascript
+case 'navigate':
+  // Desktop/programmatic sends exact page IDs — never fuzzy match
+  if (page) CanvasControl.showPageById(page);
+  break;
+```
+
+And voice/agent navigation uses `showPageByName()` with a minimum score threshold.
+
+**Also needed:** Add a minimum score threshold to `findPageByName()` — currently ANY match wins, no matter how weak. Suggested minimum: 70 (rejects single-word substring matches).
+
 ---
 
 ## Phase 2: Hardcoded Values & Config
@@ -429,24 +487,25 @@ These are inherent limitations of running inside an iframe:
 
 ## Suggested Issue Breakdown
 
-| Issue | Phase | Labels | Estimate |
-|-------|-------|--------|----------|
-| fix: desktop icon event listener memory leak | 1 | bug, performance | Small |
-| fix: fetchManifest/saveState race condition | 1 | bug | Small |
-| fix: window button duplication in createWindow | 1 | bug | Small |
-| fix: postMessage wildcard origin | 1 | bug, security | Tiny |
-| fix: mobile breakpoint mismatch JS vs CSS | 1 | bug, mobile | Tiny |
-| feat: extract desktop config (remove hardcoded values) | 2 | enhancement | Medium |
-| feat: dynamic username, pinned pages, dock items | 2 | enhancement | Small |
-| perf: DOM element reuse instead of innerHTML rebuild | 3 | performance | Medium |
-| perf: manifest ETag caching | 3 | performance | Medium |
-| feat: search in taskbar and start menu | 4 | enhancement | Medium |
-| feat: sort icons (name, date, category, auto-arrange) | 4 | enhancement | Small |
-| feat: window snap (drag to edge) | 4 | enhancement | Small |
-| feat: keyboard shortcuts (arrows, Alt+F4, Ctrl+A) | 4 | enhancement | Medium |
-| feat: pin to dock / pin to start menu | 4 | enhancement | Small |
-| feat: recent pages in start menu | 4 | enhancement | Small |
-| feat: notification area / system tray | 4 | enhancement | Medium |
-| refactor: encapsulate global state | 5 | refactor | Medium |
-| refactor: DRY explorer grid builders | 5 | refactor | Small |
-| a11y: add ARIA labels and roles | 5 | accessibility | Medium |
+| Issue | Phase | Labels | Estimate | GitHub |
+|-------|-------|--------|----------|--------|
+| fix: desktop icon event listener memory leak | 1 | bug, performance | Small | #231 |
+| fix: fetchManifest/saveState race condition | 1 | bug | Small | #232 |
+| fix: window button duplication in createWindow | 1 | bug | Small | #233 |
+| fix: postMessage wildcard origin | 1 | bug, security | Tiny | — |
+| fix: mobile breakpoint mismatch JS vs CSS | 1 | bug, mobile | Tiny | — |
+| fix: canvas navigation fuzzy match opens wrong page | 1 | bug | Medium | #238 |
+| feat: extract desktop config (remove hardcoded values) | 2 | enhancement | Medium | #234 |
+| feat: dynamic username, pinned pages, dock items | 2 | enhancement | Small | #234 |
+| perf: DOM element reuse instead of innerHTML rebuild | 3 | performance | Medium | #235 |
+| perf: manifest ETag caching | 3 | performance | Medium | #235 |
+| feat: search in taskbar and start menu | 4 | enhancement | Medium | #236 |
+| feat: sort icons (name, date, category, auto-arrange) | 4 | enhancement | Small | #236 |
+| feat: window snap (drag to edge) | 4 | enhancement | Small | #236 |
+| feat: keyboard shortcuts (arrows, Alt+F4, Ctrl+A) | 4 | enhancement | Medium | #236 |
+| feat: pin to dock / pin to start menu | 4 | enhancement | Small | #236 |
+| feat: recent pages in start menu | 4 | enhancement | Small | #236 |
+| feat: notification area / system tray | 4 | enhancement | Medium | #236 |
+| refactor: encapsulate global state | 5 | enhancement | Medium | #237 |
+| refactor: DRY explorer grid builders | 5 | enhancement | Small | #237 |
+| a11y: add ARIA labels and roles | 5 | enhancement | Medium | #237 |
