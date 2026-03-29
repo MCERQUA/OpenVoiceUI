@@ -3,7 +3,7 @@ name: Deploy Docs
 on:
   push:
     branches: [main]
-    paths: ['docs-site/**']
+    paths: ['docs/**', 'website/**']
   workflow_dispatch:
 
 permissions:
@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: docs-site
+        working-directory: website
     steps:
       - uses: actions/checkout@v4
 
@@ -28,14 +28,14 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: docs-site/package-lock.json
+          cache-dependency-path: website/package-lock.json
 
       - run: npm ci
       - run: npm run build
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs-site/build
+          path: website/build
 
   deploy:
     needs: build

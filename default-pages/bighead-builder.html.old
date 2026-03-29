@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BigHead Character Creator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; background: linear-gradient(135deg, #ff6b35 0%, #ffe135 45%, #ff3b3b 100%); background-attachment: fixed; color: #0d0d0d; min-height: 100vh; }
+
+        /* ── Header ── */
+        .header { text-align: center; padding: 16px 16px 12px; background: #0d0d0d; border-bottom: 4px solid #ffe135; }
+        .header h1 { font-family: 'Impact', 'Arial Black', sans-serif; font-size: 2em; font-weight: 700; color: #ffe135; text-transform: uppercase; letter-spacing: 0.05em; text-shadow: 3px 3px 0 rgba(0,0,0,0.3); }
+        .header p { font-size: 0.78em; color: rgba(255,255,255,0.6); margin-top: 2px; font-family: 'Courier New', monospace; text-transform: uppercase; letter-spacing: 0.08em; }
+
+        /* ── Steps nav ── */
+        .steps-nav { display: flex; justify-content: center; gap: 6px; padding: 12px 16px; background: rgba(0,0,0,0.06); }
+        .step-dot { width: 36px; height: 6px; border-radius: 3px; background: rgba(0,0,0,0.15); border: 2px solid #0d0d0d; cursor: pointer; transition: all 0.2s; }
+        .step-dot.active { background: #ffe135; width: 48px; box-shadow: 3px 3px 0 #0d0d0d; }
+        .step-dot.done { background: #00c86e; }
+
+        /* ── Panels ── */
+        .panel { display: none; padding: 12px 16px 80px; max-width: 900px; margin: 0 auto; }
+        .panel.active { display: block; }
+
+        /* ── Step 1: Appearance ── */
+        .appearance-layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+        @media (max-width: 700px) { .appearance-layout { grid-template-columns: 1fr; } }
+
+        .preview-wrap { background: #0d0d0d; border: 4px solid #0d0d0d; border-radius: 12px; overflow: hidden; aspect-ratio: 1; position: relative; box-shadow: 6px 6px 0 #0d0d0d; }
+        #preview-canvas { width: 100%; height: 100%; }
+
+        .traits-scroll { max-height: 65vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+        .traits-scroll::-webkit-scrollbar { width: 5px; }
+        .traits-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 3px; }
+
+        .trait-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255,255,255,0.55); border-radius: 8px; border: 3px solid #0d0d0d; box-shadow: 3px 3px 0 #0d0d0d; }
+        .trait-label { font-family: 'Courier New', monospace; font-size: 0.68em; color: #0d0d0d; text-transform: uppercase; letter-spacing: 0.06em; min-width: 65px; font-weight: 700; }
+        .trait-nav { display: flex; align-items: center; gap: 6px; flex: 1; }
+        .trait-arrow { width: 28px; height: 28px; border-radius: 6px; background: #ffe135; border: 2px solid #0d0d0d; color: #0d0d0d; font-size: 1em; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 2px 2px 0 #0d0d0d; transition: all 0.1s; }
+        .trait-arrow:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 #0d0d0d; }
+        .trait-arrow:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #0d0d0d; }
+        .trait-value { flex: 1; text-align: center; font-family: 'Impact', 'Arial Black', sans-serif; font-size: 0.82em; color: #0d0d0d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; }
+        .trait-idx { font-family: 'Courier New', monospace; font-size: 0.62em; color: rgba(0,0,0,0.4); min-width: 32px; text-align: right; }
+
+        /* ── Step 2: Identity ── */
+        .form-group { margin-bottom: 14px; }
+        .form-label { font-family: 'Impact', 'Arial Black', sans-serif; font-size: 0.8em; color: #0d0d0d; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; display: block; }
+        .form-input, .form-textarea, .form-select {
+            width: 100%; background: rgba(255,255,255,0.7); border: 3px solid #0d0d0d;
+            border-radius: 8px; color: #0d0d0d; padding: 10px 12px; font-size: 0.88em; outline: none; font-family: inherit; box-shadow: 3px 3px 0 #0d0d0d;
+        }
+        .form-input:focus, .form-textarea:focus, .form-select:focus { border-color: #ff6b35; box-shadow: 4px 4px 0 #0d0d0d; }
+        .form-input::placeholder, .form-textarea::placeholder { color: rgba(0,0,0,0.3); }
+        .form-textarea { min-height: 80px; resize: vertical; }
+        .form-select { cursor: pointer; }
+        .form-hint { font-family: 'Courier New', monospace; font-size: 0.68em; color: rgba(0,0,0,0.45); margin-top: 2px; letter-spacing: 0.04em; }
+
+        .archetype-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; margin-top: 6px; }
+        .arch-btn { padding: 8px; background: rgba(255,255,255,0.55); border: 3px solid #0d0d0d; border-radius: 8px; color: #0d0d0d; font-family: 'Courier New', monospace; font-size: 0.75em; font-weight: 700; cursor: pointer; text-align: center; text-transform: uppercase; letter-spacing: 0.04em; box-shadow: 3px 3px 0 #0d0d0d; transition: all 0.1s; }
+        .arch-btn:hover { transform: translate(-2px, -2px); box-shadow: 5px 5px 0 #0d0d0d; }
+        .arch-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #0d0d0d; }
+        .arch-btn.active { background: #ffe135; border-color: #0d0d0d; color: #0d0d0d; }
+
+        /* ── Memories section ── */
+        .mem-section { margin-top: 16px; padding: 16px; background: rgba(255,255,255,0.55); border: 3px solid #0d0d0d; border-radius: 12px; box-shadow: 4px 4px 0 #0d0d0d; }
+        .mem-section h3 { font-family: 'Impact', 'Arial Black', sans-serif; font-size: 1em; color: #0d0d0d; margin-bottom: 4px; text-transform: uppercase; }
+        .mem-section .form-hint { margin-bottom: 10px; }
+        .mem-category { margin-bottom: 12px; }
+        .mem-cat-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .mem-cat-icon { font-size: 1.1em; }
+        .mem-cat-label { font-family: 'Impact', 'Arial Black', sans-serif; font-size: 0.82em; color: #0d0d0d; text-transform: uppercase; }
+        .mem-cat-hint { font-family: 'Courier New', monospace; font-size: 0.65em; color: rgba(0,0,0,0.4); }
+        .mem-input-row { display: flex; gap: 6px; margin-bottom: 4px; }
+        .mem-input { flex: 1; background: rgba(255,255,255,0.7); border: 2px solid #0d0d0d; border-radius: 6px; color: #0d0d0d; padding: 7px 10px; font-size: 0.82em; outline: none; font-family: inherit; box-shadow: 2px 2px 0 #0d0d0d; }
+        .mem-input:focus { border-color: #ff6b35; }
+        .mem-input::placeholder { color: rgba(0,0,0,0.25); }
+        .mem-add-btn { padding: 7px 12px; background: #ffe135; border: 2px solid #0d0d0d; border-radius: 6px; color: #0d0d0d; font-family: 'Courier New', monospace; font-size: 0.72em; font-weight: 700; cursor: pointer; white-space: nowrap; text-transform: uppercase; box-shadow: 2px 2px 0 #0d0d0d; transition: all 0.1s; }
+        .mem-add-btn:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 #0d0d0d; }
+        .mem-add-btn:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 #0d0d0d; }
+        .mem-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+        .mem-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(255,255,255,0.6); border: 2px solid #0d0d0d; border-radius: 14px; font-size: 0.75em; color: #0d0d0d; font-weight: 600; }
+        .mem-tag-x { cursor: pointer; color: #ff3b3b; font-weight: 900; margin-left: 2px; }
+        .mem-tag-x:hover { color: #ff6b35; }
+        .mem-starters { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+        .mem-starter { padding: 3px 8px; background: rgba(255,255,255,0.35); border: 2px dashed rgba(0,0,0,0.2); border-radius: 12px; font-family: 'Courier New', monospace; font-size: 0.68em; color: rgba(0,0,0,0.5); cursor: pointer; }
+        .mem-starter:hover { border-color: #0d0d0d; color: #0d0d0d; background: #ffe135; }
+
+        /* ── Step 3: Voice ── */
+        .provider-section { margin-bottom: 16px; }
+        .provider-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 8px 12px; background: #0d0d0d; border-radius: 8px; }
+        .provider-name { font-family: 'Impact', 'Arial Black', sans-serif; font-size: 0.95em; color: #ffe135; text-transform: uppercase; letter-spacing: 0.04em; }
+        .provider-status { font-family: 'Courier New', monospace; font-size: 0.65em; padding: 2px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+        .provider-status.active { background: #00c86e; color: #0d0d0d; }
+        .provider-status.unavailable { background: #ff3b3b; color: #fef9ee; }
+        .provider-link { font-family: 'Courier New', monospace; font-size: 0.65em; color: rgba(255,255,255,0.5); text-decoration: none; margin-left: auto; }
+        .provider-link:hover { color: #ffe135; }
+        .voice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+        .voice-card { padding: 10px; background: rgba(255,255,255,0.55); border: 3px solid #0d0d0d; border-radius: 10px; cursor: pointer; box-shadow: 3px 3px 0 #0d0d0d; transition: all 0.1s; position: relative; }
+        .voice-card:hover { transform: translate(-2px,-2px); box-shadow: 5px 5px 0 #0d0d0d; }
+        .voice-card.active { background: #ffe135; border-color: #0d0d0d; }
+        .voice-card.unavailable { opacity: 0.6; border-color: #ff3b3b; }
+        .voice-card .vc-name { font-family: 'Impact', 'Arial Black', sans-serif; font-size: 0.85em; text-transform: uppercase; }
+        .voice-card .vc-type { font-family: 'Courier New', monospace; font-size: 0.62em; color: #ff3b3b; margin-top: 2px; font-weight: 700; text-transform: uppercase; }
+        .voice-card .vc-unavail { font-family: 'Courier New', monospace; font-size: 0.6em; color: #ff3b3b; margin-top: 3px; }
+        .vc-play { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: #0d0d0d; border: 2px solid #0d0d0d; border-radius: 50%; color: #ffe135; font-size: 0.75em; cursor: pointer; position: absolute; top: 8px; right: 8px; transition: all 0.1s; }
+        .vc-play:hover { background: #ffe135; color: #0d0d0d; }
+        .vc-play.playing { background: #ff3b3b; color: #fef9ee; }
+
+        /* ── Step 4: Review ── */
+        .review-card { background: rgba(255,255,255,0.55); border: 4px solid #0d0d0d; border-radius: 14px; padding: 20px; box-shadow: 6px 6px 0 #0d0d0d; }
+        .review-row { display: flex; gap: 12px; margin-bottom: 8px; }
+        .review-label { font-family: 'Courier New', monospace; font-size: 0.72em; color: rgba(0,0,0,0.5); min-width: 80px; text-transform: uppercase; letter-spacing: 0.06em; }
+        .review-val { font-size: 0.88em; color: #0d0d0d; }
+        .review-preview { width: 120px; height: 120px; border-radius: 10px; overflow: hidden; background: #0d0d0d; border: 3px solid #0d0d0d; flex-shrink: 0; box-shadow: 4px 4px 0 #0d0d0d; }
+        .review-preview canvas { width: 100%; height: 100%; }
+
+        /* ── Saved characters gallery ── */
+        .gallery-title { font-family: 'Impact', 'Arial Black', sans-serif; font-size: 1em; color: #0d0d0d; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+        .char-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+        .char-card { background: rgba(255,255,255,0.55); border: 3px solid #0d0d0d; border-radius: 10px; overflow: hidden; cursor: pointer; box-shadow: 4px 4px 0 #0d0d0d; transition: all 0.1s; }
+        .char-card:hover { transform: translate(-2px,-2px); box-shadow: 6px 6px 0 #0d0d0d; }
+        .char-card.active-char { background: #ffe135; }
+        .char-card canvas { width: 100%; aspect-ratio: 1; display: block; background: #0d0d0d; }
+        .char-card-info { padding: 8px; }
+        .char-card-name { font-family: 'Impact', 'Arial Black', sans-serif; font-size: 0.82em; text-transform: uppercase; }
+        .char-card-arch { font-family: 'Courier New', monospace; font-size: 0.65em; color: rgba(0,0,0,0.5); text-transform: uppercase; }
+        .char-card-actions { display: flex; gap: 4px; margin-top: 6px; }
+        .char-card-btn { padding: 3px 8px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.65em; font-weight: 700; cursor: pointer; border: 2px solid #0d0d0d; background: #fef9ee; color: #0d0d0d; text-transform: uppercase; box-shadow: 2px 2px 0 #0d0d0d; }
+        .char-card-btn.use { background: #00c86e; color: #0d0d0d; }
+        .char-card-btn:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 #0d0d0d; }
+
+        /* ── Bottom nav ── */
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; padding: 12px 16px; background: #0d0d0d; border-top: 3px solid #ffe135; display: flex; justify-content: space-between; align-items: center; z-index: 50; }
+        .btn { padding: 10px 22px; border-radius: 8px; font-family: 'Impact', 'Arial Black', sans-serif; font-size: 0.9em; cursor: pointer; border: 3px solid #0d0d0d; box-shadow: 3px 3px 0 rgba(0,0,0,0.3); transition: all 0.1s; text-transform: uppercase; letter-spacing: 0.04em; }
+        .btn:hover { transform: translate(-2px,-2px); box-shadow: 5px 5px 0 rgba(0,0,0,0.3); }
+        .btn:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 rgba(0,0,0,0.3); }
+        .btn-next { background: #ffe135; color: #0d0d0d; border-color: #ffe135; }
+        .btn-back { background: #fef9ee; color: #0d0d0d; border-color: #fef9ee; }
+        .btn-create { background: #00c86e; color: #0d0d0d; border-color: #00c86e; }
+        .btn-random { background: #ff3b3b; color: #fef9ee; border-color: #0d0d0d; }
+
+        .toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%) translateY(80px); background: #0d0d0d; border: 3px solid #ffe135; color: #ffe135; padding: 10px 20px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 0.82em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; box-shadow: 4px 4px 0 rgba(0,0,0,0.3); transition: transform 0.3s; z-index: 100; }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BigHead Character Creator</h1>
+        <p>Build characters with unique looks, personality, and voice</p>
+    </div>
+
+    <div class="steps-nav">
+        <div class="step-dot active" data-step="0" onclick="goStep(0)"></div>
+        <div class="step-dot" data-step="1" onclick="goStep(1)"></div>
+        <div class="step-dot" data-step="2" onclick="goStep(2)"></div>
+        <div class="step-dot" data-step="3" onclick="goStep(3)"></div>
+    </div>
+
+    <!-- Step 0: Gallery + appearance -->
+    <div class="panel active" id="panel-0">
+        <div class="appearance-layout">
+            <div>
+                <div class="preview-wrap"><canvas id="preview-canvas" width="1000" height="1000"></canvas></div>
+                <div style="text-align:center;margin-top:8px;">
+                    <button class="btn btn-random" onclick="randomize()" style="padding:6px 16px;font-size:0.8em;">Random</button>
+                </div>
+            </div>
+            <div class="traits-scroll" id="trait-rows"></div>
+        </div>
+        <!-- Saved characters -->
+        <div class="gallery-title" id="gallery-title" style="display:none;">Your Characters</div>
+        <div class="char-gallery" id="char-gallery"></div>
+    </div>
+
+    <!-- Step 1: Identity -->
+    <div class="panel" id="panel-1">
+        <div style="background:rgba(255,255,255,0.55);border:3px solid #0d0d0d;border-radius:12px;padding:16px;box-shadow:4px 4px 0 #0d0d0d;margin-bottom:14px;">
+        <div class="form-group">
+            <label class="form-label">Character Name</label>
+            <div style="display:flex;gap:6px;">
+                <input class="form-input" id="charName" placeholder="e.g. Kyle Valhalla" maxlength="40" style="flex:1;">
+                <button class="mem-add-btn" onclick="aiGenerate('name')" title="AI generates a random name">Generate</button>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Archetype</label>
+            <div class="archetype-grid" id="archGrid"></div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Personality / Speaking Style</label>
+            <div style="display:flex;gap:6px;margin-bottom:4px;">
+                <button class="mem-add-btn" onclick="aiGenerate('personality')" style="flex:1;">Generate from Archetype</button>
+                <button class="mem-add-btn" onclick="aiEnhance('charPersonality')" style="flex:1;">Enhance</button>
+            </div>
+            <textarea class="form-textarea" id="charPersonality" placeholder="How does this character talk? What's their vibe? e.g. 'Laid-back stoner energy, rambling tangents, confused optimism. Swears casually.'"></textarea>
+            <div class="form-hint">Be specific: tone, mannerisms, catchphrases, speech patterns, what they'd never say.</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Backstory</label>
+            <div style="display:flex;gap:6px;margin-bottom:4px;">
+                <button class="mem-add-btn" onclick="aiGenerate('backstory')" style="flex:1;">Generate</button>
+                <button class="mem-add-btn" onclick="aiEnhance('charBackstory')" style="flex:1;">Enhance</button>
+            </div>
+            <textarea class="form-textarea" id="charBackstory" placeholder="Where did they come from? What have they been through? What's their deal?"></textarea>
+        </div>
+
+        </div><!-- close identity card -->
+
+        <!-- Memories Section -->
+        <div class="mem-section">
+            <h3>Memories & Quirks</h3>
+            <div class="form-hint">These shape how your character reacts. The weirder the better. Characters with strong memories are 10x more entertaining.</div>
+
+            <div class="mem-category" data-cat="fears">
+                <div class="mem-cat-header">
+                    <span class="mem-cat-label">Fears & Phobias</span>
+                    <span class="mem-cat-hint">What makes them freak out?</span>
+                </div>
+                <div class="mem-input-row">
+                    <input class="mem-input" data-cat="fears" placeholder="e.g. Terrified of dolphins — saw one smile once...">
+                    <button class="mem-add-btn" onclick="addMem('fears')">+</button>
+                    <button class="mem-add-btn" onclick="aiGenerate('fears')">AI</button>
+                </div>
+                <div class="mem-tags" id="tags-fears"></div>
+                <div class="mem-starters" id="starters-fears"></div>
+            </div>
+
+            <div class="mem-category" data-cat="proudof">
+                <div class="mem-cat-header">
+                    <span class="mem-cat-label">Weirdly Proud Of</span>
+                    <span class="mem-cat-hint">Accomplishments only they care about</span>
+                </div>
+                <div class="mem-input-row">
+                    <input class="mem-input" data-cat="proudof" placeholder="e.g. Once ate 47 hot dogs in a competition (came in last)">
+                    <button class="mem-add-btn" onclick="addMem('proudof')">+</button>
+                    <button class="mem-add-btn" onclick="aiGenerate('proudof')">AI</button>
+                </div>
+                <div class="mem-tags" id="tags-proudof"></div>
+                <div class="mem-starters" id="starters-proudof"></div>
+            </div>
+
+            <div class="mem-category" data-cat="hottakes">
+                <div class="mem-cat-header">
+                    <span class="mem-cat-label">Hot Takes & Strong Opinions</span>
+                    <span class="mem-cat-hint">Hills they'll die on</span>
+                </div>
+                <div class="mem-input-row">
+                    <input class="mem-input" data-cat="hottakes" placeholder="e.g. Firmly believes birds aren't real">
+                    <button class="mem-add-btn" onclick="addMem('hottakes')">+</button>
+                    <button class="mem-add-btn" onclick="aiGenerate('hottakes')">AI</button>
+                </div>
+                <div class="mem-tags" id="tags-hottakes"></div>
+                <div class="mem-starters" id="starters-hottakes"></div>
+            </div>
+
+            <div class="mem-category" data-cat="grudges">
+                <div class="mem-cat-header">
+                    <span class="mem-cat-label">Grudges & Enemies</span>
+                    <span class="mem-cat-hint">Who wronged them and why</span>
+                </div>
+                <div class="mem-input-row">
+                    <input class="mem-input" data-cat="grudges" placeholder="e.g. Still mad at Dave for what he said at the BBQ in 2019">
+                    <button class="mem-add-btn" onclick="addMem('grudges')">+</button>
+                    <button class="mem-add-btn" onclick="aiGenerate('grudges')">AI</button>
+                </div>
+                <div class="mem-tags" id="tags-grudges"></div>
+                <div class="mem-starters" id="starters-grudges"></div>
+            </div>
+
+            <div class="mem-category" data-cat="catchphrases">
+                <div class="mem-cat-header">
+                    <span class="mem-cat-label">Catchphrases & Verbal Tics</span>
+                    <span class="mem-cat-hint">Things they always say</span>
+                </div>
+                <div class="mem-input-row">
+                    <input class="mem-input" data-cat="catchphrases" placeholder='e.g. Ends every story with "and that&apos;s on God"'>
+                    <button class="mem-add-btn" onclick="addMem('catchphrases')">+</button>
+                    <button class="mem-add-btn" onclick="aiGenerate('catchphrases')">AI</button>
+                </div>
+                <div class="mem-tags" id="tags-catchphrases"></div>
+                <div class="mem-starters" id="starters-catchphrases"></div>
+            </div>
+
+            <div class="mem-category" data-cat="secrets">
+                <div class="mem-cat-header">
+                    <span class="mem-cat-label">Embarrassing Secrets</span>
+                    <span class="mem-cat-hint">Things that slip out accidentally</span>
+                </div>
+                <div class="mem-input-row">
+                    <input class="mem-input" data-cat="secrets" placeholder="e.g. Cried during Frozen 2 and has never recovered">
+                    <button class="mem-add-btn" onclick="addMem('secrets')">+</button>
+                    <button class="mem-add-btn" onclick="aiGenerate('secrets')">AI</button>
+                </div>
+                <div class="mem-tags" id="tags-secrets"></div>
+                <div class="mem-starters" id="starters-secrets"></div>
+            </div>
+
+            <div class="mem-category" data-cat="skills">
+                <div class="mem-cat-header">
+                    <span class="mem-cat-label">Dubious Skills & Claims</span>
+                    <span class="mem-cat-hint">Things they insist they're good at</span>
+                </div>
+                <div class="mem-input-row">
+                    <input class="mem-input" data-cat="skills" placeholder="e.g. Claims to be a black belt but has never been in a fight">
+                    <button class="mem-add-btn" onclick="addMem('skills')">+</button>
+                    <button class="mem-add-btn" onclick="aiGenerate('skills')">AI</button>
+                </div>
+                <div class="mem-tags" id="tags-skills"></div>
+                <div class="mem-starters" id="starters-skills"></div>
+            </div>
+
+            <div style="margin-top:12px;">
+                <button class="mem-add-btn" onclick="aiGenerate('all-memories')" style="width:100%;padding:10px;text-align:center;">Auto-Fill All Memories (AI)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2: Voice -->
+    <div class="panel" id="panel-2">
+        <div class="form-group">
+            <label class="form-label">Select Voice</label>
+            <div class="form-hint" style="margin-bottom:8px;">Click play to preview, then select your character's voice</div>
+            <div id="voiceSelection" style="display:none; padding:10px 14px; background:#ffe135; border:3px solid #0d0d0d; border-radius:10px; margin-bottom:12px; box-shadow:3px 3px 0 #0d0d0d; position:sticky; top:0; z-index:10;">
+                <span style="font-family:'Courier New',monospace; font-size:0.7em; text-transform:uppercase; font-weight:700; letter-spacing:0.06em; color:rgba(0,0,0,0.5);">Selected:</span>
+                <span id="voiceSelName" style="font-family:'Impact','Arial Black',sans-serif; font-size:1em; margin-left:6px; text-transform:uppercase;"></span>
+                <span id="voiceSelProvider" style="font-family:'Courier New',monospace; font-size:0.65em; color:rgba(0,0,0,0.5); margin-left:4px;"></span>
+            </div>
+            <input type="text" id="voiceFilter" placeholder="Search voices..." oninput="filterVoices(this.value)" style="width:100%; padding:8px 12px; border:3px solid #0d0d0d; border-radius:8px; font-family:'Courier New',monospace; font-size:0.85em; background:rgba(255,255,255,0.7); margin-bottom:10px; box-shadow:3px 3px 0 #0d0d0d;">
+            <div id="voiceProviders"></div>
+        </div>
+    </div>
+
+    <!-- Step 3: Review & Create -->
+    <div class="panel" id="panel-3">
+        <div class="review-card">
+            <div style="display:flex;gap:16px;align-items:start;margin-bottom:16px;">
+                <div class="review-preview"><canvas id="review-canvas" width="200" height="200"></canvas></div>
+                <div style="flex:1;">
+                    <div id="reviewName" style="font-family:'Impact','Arial Black',sans-serif;font-size:1.4em;margin-bottom:4px;text-transform:uppercase;"></div>
+                    <div id="reviewArch" style="font-family:'Courier New',monospace;font-size:0.78em;color:#ff3b3b;margin-bottom:8px;text-transform:uppercase;font-weight:700;letter-spacing:0.06em;"></div>
+                    <div id="reviewVoice" style="font-family:'Courier New',monospace;font-size:0.78em;color:rgba(0,0,0,0.5);text-transform:uppercase;"></div>
+                </div>
+            </div>
+            <div id="reviewPersonality" style="font-size:0.85em;color:#0d0d0d;padding:10px;background:rgba(255,255,255,0.4);border-radius:8px;margin-bottom:10px;border:2px solid rgba(0,0,0,0.1);"></div>
+            <div id="reviewTraits" style="font-family:'Courier New',monospace;font-size:0.72em;color:rgba(0,0,0,0.45);letter-spacing:0.04em;white-space:pre-line;"></div>
+        </div>
+    </div>
+
+    <div class="bottom-nav">
+        <button class="btn btn-back" id="btnBack" onclick="prevStep()" style="display:none;">Back</button>
+        <div></div>
+        <button class="btn btn-next" id="btnNext" onclick="nextStep()">Next: Identity</button>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+<script>
+(function() {
+    'use strict';
+
+    const CDN = 'https://bhaleyart.github.io/BigHeadCharacterCooker';
+    const TRAITS = {
+        BODY: ['Blank','Charcoal','High Voltage','Nebulous','Pinky','Shockwave','Tangerine','Turquoise','Woody','Frogger','Area 51','Dark Tone','Mid Tone','Light Tone','Jolly Roger','Cyber Punk','Talking Corpse','Day Tripper','Meat Lover','Golden God','Chrome Dome','Candy Gloss','Man On Fire','Water Boy','Icecream Man','Reptilian','Juiced Up','Toxic Waste','Love Potion','Pop Artist','Autopsy','Ghostly','Blue Screen','Networker'],
+        HEAD: ['None','Antenna','Bandana Bro','Beanie','Blonde Beanie','Blonde Bun','Blue Bedhead','Brain Squid','Bravo','Brunette Beanie','Brunette Ponytail','Burger Crown','Captain Hat','Cat Hat','Chad Bandana','Cherry Sundae','Clown Wig','Fancy Hat','Fireman','Flame Princess','Fossilized','Gamer Girl','Ginger Ponytail','Heated','Horny Horns','Hunted','Jester','Kingly','Mad Hatter','Masked Up','Mohawk Blue','Mohawk Green','Mohawk Red','Mortricia','Outlaw','Overload','Patrol Cap','Pharaoh Hat','Pink Pigtails','Powdered Wig','Press Pass','Propeller','Rainbow Babe','Recon Helmet','Robin Hood','Santa Hat','Sewer Slime','Snapback Blue','Snapback Hippy','Snapback Red','Snapback Yellow','Sombrero','Spiritual','Surgeon','UwU Kitty','Valhalla Cap','Way Dizzy'],
+        EYES: ['Curious','Alien','Annoyed','Demonic','Diamond','Dots','Grumpy','Hypnotized','Infuriated','Insect','Joy','Light Bright','Monocle','Ouchy','Paranoid','Possessed','Ruby Stare','Spider','Stare','Stoney Eyes','Sunglasses','Surprised','Tears','Deceased','Too Chill','VR Headset','3D Glasses','Blink','Stern'],
+        MOUTH: ['Mmm','Simpleton','Stache','Creeper','Pierced','Fangs','Gold Teeth','Diamond Teeth','Birdy','Panic','Sss','Ahh','Ehh','Uhh','LLL','Rrr','Fff','Ooo','Thh','Eee','Haha','Rofl','Bean Frown','Bean Smile','Smirk','Bored','Gas Mask','Scuba'],
+        OUTFIT: ['None','Blue Tee','Blueberry Dye','Degen Green','Degen Purple','Earthy Dye','Hodl Black','Hodl White','Locked Up','Moto-X','Orange Zip','Passion Dye','Pink Zip','Raider Ref','Red Tee','Smally Bigs','Yellow Tee','Blue Zip','Red Zip','White Zip','Hornet Zip','Ghostly Zip','Gold Jacket','Tuxedo','Thrashed','The Fuzz','Pin Striped','Designer Zip','Luxury Zip','Explorer','Power Armor','Shinobi','Thrilled','Trenches','Ski Jacket','Sled Jacket','Commando','Space Cadet','Burgler','Commandant','Golden Knight','Honey Bee','Necromancer','Paladin','Refined Suit','Sexy Jacket','Stoner Hoodie','The Duke','Rave Hoodie','Scuba suit temp','Burger Suit','Scrubs'],
+        TEXTURE: ['None','Blood','Acid','Ink','Dart Frog Blue','Dart Frog Red','Dart Frog Yellow','Magical','Puzzled','Rug Life Ink','Pulverized'],
+        BACKGROUNDS: ['None','Natural','Mania','Regal','Lavish','Sunflower','Snowflake','Bleach','Vibes','Burst','Aquatic','Passionate','Envious','Enlightened','Haunted','Cursed']
+    };
+    const LAYER_ORDER = ['BACKGROUNDS','BODY','TEXTURE','OUTFIT','HEAD','MOUTH','EYES'];
+    const DISPLAY_ORDER = ['BODY','HEAD','EYES','MOUTH','OUTFIT','TEXTURE','BACKGROUNDS'];
+
+    const ARCHETYPES = [
+        { id: 'chill', label: 'Chill Stoner', prompt: 'Laid-back stoner energy, rambling tangents, confused optimism. Slow drawl. Swears casually. Everything is fine even when it isn\'t.' },
+        { id: 'anxious', label: 'Nervous Wreck', prompt: 'Worried, anxious energy. Short sharp sentences. Stutters when stressed. Sarcastic. Always expecting something to go wrong.' },
+        { id: 'hype', label: 'Hype Man', prompt: 'Over the top excited energy. Everything is AMAZING. Yells a lot. Uses slang. Pumps people up. Never has a bad day.' },
+        { id: 'villain', label: 'Smooth Villain', prompt: 'Calm, calculated, menacing tone. Speaks slowly and deliberately. Dark humor. Enjoys making others uncomfortable. Polite on the surface.' },
+        { id: 'nerd', label: 'Mega Nerd', prompt: 'Encyclopedic knowledge on random topics. Goes on detailed tangents about obscure facts. Socially awkward. Corrects people on technicalities.' },
+        { id: 'boss', label: 'The Boss', prompt: 'Commanding authoritative presence. Short decisive statements. Doesn\'t explain, just directs. Impatient with weakness. Respects hustle.' },
+        { id: 'comedian', label: 'Stand-Up', prompt: 'Everything is a joke or setup. Quick wit, observational humor. Self-deprecating. Turns serious moments into comedy. Can\'t help themselves.' },
+        { id: 'mystic', label: 'Mystic Sage', prompt: 'Speaks in riddles and metaphors. Deep, contemplative tone. References ancient wisdom. Pauses dramatically. Annoyingly cryptic but somehow helpful.' },
+        { id: 'custom', label: 'Custom', prompt: '' }
+    ];
+
+    // ── State ──
+    const state = {};
+    let step = 0;
+    let selectedArch = '';
+    let selectedVoice = null;
+    let voices = [];
+    let savedChars = [];
+    const imgCache = {};
+
+    DISPLAY_ORDER.forEach(c => { state[c] = 0; });
+    state.BODY = TRAITS.BODY.indexOf('Mid Tone');
+    state.HEAD = TRAITS.HEAD.indexOf('Outlaw');
+    state.EYES = 0;
+    state.MOUTH = 0;
+    state.OUTFIT = TRAITS.OUTFIT.indexOf('Tuxedo');
+
+    // ── Canvas rendering ──
+    function imgUrl(cat, name) { return `${CDN}/${cat}/${encodeURIComponent(name)}.png`; }
+    function loadImg(url) {
+        if (imgCache[url]) return Promise.resolve(imgCache[url]);
+        return new Promise((res, rej) => {
+            const i = new Image(); i.crossOrigin = 'anonymous';
+            i.onload = () => { imgCache[url] = i; res(i); };
+            i.onerror = () => rej(); i.src = url;
+        });
+    }
+
+    async function renderCanvas(canvas, traitState) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const layer of LAYER_ORDER) {
+            const name = TRAITS[layer][traitState ? traitState[layer] : state[layer]];
+            if (!name || name === 'None') continue;
+            try { const img = await loadImg(imgUrl(layer, name)); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); } catch(e) {}
+        }
+    }
+
+    function render() { renderCanvas(document.getElementById('preview-canvas')); }
+
+    // ── Trait rows ──
+    function buildTraitRows() {
+        const c = document.getElementById('trait-rows'); c.innerHTML = '';
+        DISPLAY_ORDER.forEach(cat => {
+            const row = document.createElement('div'); row.className = 'trait-row';
+            row.innerHTML = `<span class="trait-label">${cat}</span><div class="trait-nav">
+                <button class="trait-arrow" data-cat="${cat}" data-dir="-1">&lt;</button>
+                <span class="trait-value" id="val-${cat}">${TRAITS[cat][state[cat]]}</span>
+                <button class="trait-arrow" data-cat="${cat}" data-dir="1">&gt;</button>
+            </div><span class="trait-idx" id="idx-${cat}">${state[cat]+1}/${TRAITS[cat].length}</span>`;
+            c.appendChild(row);
+        });
+        c.querySelectorAll('.trait-arrow').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const cat = btn.dataset.cat, dir = parseInt(btn.dataset.dir), len = TRAITS[cat].length;
+                state[cat] = (state[cat] + dir + len) % len;
+                document.getElementById(`val-${cat}`).textContent = TRAITS[cat][state[cat]];
+                document.getElementById(`idx-${cat}`).textContent = `${state[cat]+1}/${len}`;
+                render();
+            });
+        });
+    }
+
+    // ── Memories ──
+    const memories = { fears: [], proudof: [], hottakes: [], grudges: [], catchphrases: [], secrets: [], skills: [] };
+    const MEM_LABELS = { fears: 'Fears & Phobias', proudof: 'Weirdly Proud Of', hottakes: 'Hot Takes', grudges: 'Grudges', catchphrases: 'Catchphrases', secrets: 'Secrets', skills: 'Dubious Skills' };
+
+    const STARTERS = {
+        fears: ['Terrified of clowns', 'Afraid of deep water', 'Hates the sound of chewing', 'Scared of being on camera', 'Fears commitment'],
+        proudof: ['Perfect parallel parking record', 'Once met a D-list celebrity', 'Has a huge vinyl collection', 'Undefeated at arm wrestling (3 matches)', 'Grew a really big tomato once'],
+        hottakes: ['Cereal is soup', 'Hot dogs are sandwiches', 'The moon landing was real but the footage was fake', 'Cats are smarter than people', 'Water is overrated'],
+        grudges: ['Still mad at a teacher from 5th grade', 'Betrayed by a coworker named Gary', 'A barista spelled their name wrong on purpose', 'Their neighbor stole their parking spot for 3 years', 'Got ghosted after the best date of their life'],
+        catchphrases: ['"That\'s what I\'m saying!"', '"Low key though..."', '"It is what it is"', '"On my mama"', '"Not gonna lie..."'],
+        secrets: ['Listens to ASMR to fall asleep', 'Has a secret Pinterest board', 'Still uses a nightlight', 'Has never done their own taxes', 'Once pretended to be sick for a whole week'],
+        skills: ['Claims to know karate', 'Says they can hack anything', 'Self-proclaimed grill master', 'Thinks they could survive in the wild', '"I could totally be a rapper if I wanted"']
+    };
+
+    function buildStarters() {
+        for (const cat of Object.keys(STARTERS)) {
+            const el = document.getElementById(`starters-${cat}`);
+            if (!el) continue;
+            el.innerHTML = '';
+            STARTERS[cat].forEach(s => {
+                const btn = document.createElement('span');
+                btn.className = 'mem-starter';
+                btn.textContent = s;
+                btn.addEventListener('click', () => {
+                    memories[cat].push(s);
+                    renderMemTags(cat);
+                    btn.remove();
+                });
+                el.appendChild(btn);
+            });
+        }
+    }
+
+    window.addMem = function(cat) {
+        const input = document.querySelector(`.mem-input[data-cat="${cat}"]`);
+        const val = input.value.trim();
+        if (!val) return;
+        memories[cat].push(val);
+        input.value = '';
+        renderMemTags(cat);
+    };
+
+    // Enter key support on memory inputs
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.target.classList.contains('mem-input')) {
+            const cat = e.target.dataset.cat;
+            if (cat) addMem(cat);
+        }
+    });
+
+    function renderMemTags(cat) {
+        const el = document.getElementById(`tags-${cat}`);
+        if (!el) return;
+        el.innerHTML = '';
+        memories[cat].forEach((m, i) => {
+            const tag = document.createElement('span');
+            tag.className = 'mem-tag';
+            tag.innerHTML = `${m} <span class="mem-tag-x" onclick="removeMem('${cat}',${i})">x</span>`;
+            el.appendChild(tag);
+        });
+    }
+
+    window.removeMem = function(cat, i) {
+        memories[cat].splice(i, 1);
+        renderMemTags(cat);
+    };
+
+    function getMemoriesPrompt() {
+        const sections = [];
+        for (const [cat, items] of Object.entries(memories)) {
+            if (!items.length) continue;
+            sections.push(`${MEM_LABELS[cat]}:\n${items.map(m => `- ${m}`).join('\n')}`);
+        }
+        return sections.length ? '\n\nMEMORIES & QUIRKS (reference these naturally — they\'re things you just know/remember/believe. Don\'t list them, let them come up in conversation):\n' + sections.join('\n\n') : '';
+    }
+
+    // ── AI Generation ──
+    async function aiCall(prompt) {
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: prompt, model: 'default', max_tokens: 300 })
+            });
+            if (!res.ok) return null;
+            const d = await res.json();
+            return d.response || d.text || d.content || null;
+        } catch(e) { return null; }
+    }
+
+    window.aiGenerate = async function(field) {
+        const name = document.getElementById('charName').value || 'this character';
+        const arch = ARCHETYPES.find(a => a.id === selectedArch);
+        const archLabel = arch ? arch.label : 'unique';
+        const personality = document.getElementById('charPersonality').value;
+        const appearance = DISPLAY_ORDER.map(c => `${c}: ${TRAITS[c][state[c]]}`).join(', ');
+
+        let prompt = '';
+        if (field === 'name') {
+            prompt = `Generate ONE funny unique character name for a BigHead cartoon character. Just the name, nothing else. Be creative — mix unexpected words. Examples: "Gravel Pete", "DJ Skullcap", "Baron Von Cheeseburger". The character looks like: ${appearance}. Reply with ONLY the name.`;
+        } else if (field === 'personality') {
+            prompt = `Write a personality description for a cartoon character named "${name}" with a "${archLabel}" archetype. Include: tone of voice, speech patterns, verbal tics, things they'd never say, and how they react under pressure. Be specific and funny. Keep it under 150 words. Don't use bullet points — write it as a flowing description.`;
+        } else if (field === 'backstory') {
+            prompt = `Write a short funny backstory for "${name}", a ${archLabel} cartoon character. Include one ridiculous origin story detail and one defining life event that shaped who they are. Keep it under 100 words. Be specific and absurd.`;
+        } else if (field === 'all-memories') {
+            const rng = Math.random().toString(36).substring(2, 8);
+            const existingAll = Object.entries(memories).filter(([,v]) => v.length).map(([k,v]) => `${k}: ${v.join('; ')}`).join('\n');
+            prompt = `Generate funny memories/quirks for a ${archLabel} cartoon character named "${name}". ${personality ? 'Their personality: ' + personality.substring(0, 200) : ''}
+${existingAll ? 'ALREADY HAVE (do NOT repeat):\n' + existingAll : ''}
+Return EXACTLY this JSON format (fill every category with 2-3 UNIQUE items each):
+{"fears":["..."],"proudof":["..."],"hottakes":["..."],"grudges":["..."],"catchphrases":["..."],"secrets":["..."],"skills":["..."]}
+Be wildly creative — sitcom-level absurd. NOT generic phobia names. Think specific embarrassing situations. Seed: ${rng}.`;
+        } else if (['fears','proudof','hottakes','grudges','catchphrases','secrets','skills'].includes(field)) {
+            const catLabels = {
+                fears: 'irrational fear, phobia, or thing that freaks them out',
+                proudof: 'ridiculous accomplishment or thing they brag about',
+                hottakes: 'absurd opinion or conspiracy theory they firmly believe',
+                grudges: 'petty grudge or beef they hold against someone',
+                catchphrases: 'catchphrase, verbal tic, or thing they always say',
+                secrets: 'embarrassing secret that sometimes slips out',
+                skills: 'skill they claim to have but are terrible at'
+            };
+            const existing = memories[field].length ? `\nALREADY USED (do NOT repeat these): ${memories[field].join('; ')}` : '';
+            const rng = Math.random().toString(36).substring(2, 8);
+            prompt = `Generate ONE funny unique ${catLabels[field]} for a ${archLabel} cartoon character named "${name}". ${personality ? 'Personality: ' + personality.substring(0, 100) : ''}${existing}\nBe wildly creative and specific — NOT generic phobia names. Think sitcom-level absurd. Seed: ${rng}. Reply with ONLY the item, one sentence max, no quotes.`;
+        }
+
+        if (!prompt) return;
+        showToast('Generating...');
+        const result = await aiCall(prompt);
+        if (!result) { showToast('AI generation failed — try again'); return; }
+
+        if (field === 'name') {
+            document.getElementById('charName').value = result.replace(/["']/g, '').trim();
+        } else if (field === 'personality') {
+            document.getElementById('charPersonality').value = result.trim();
+        } else if (field === 'backstory') {
+            document.getElementById('charBackstory').value = result.trim();
+        } else if (field === 'all-memories') {
+            try {
+                // Extract JSON from response
+                const jsonMatch = result.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    for (const [cat, items] of Object.entries(parsed)) {
+                        if (memories[cat] && Array.isArray(items)) {
+                            memories[cat] = [...memories[cat], ...items];
+                            renderMemTags(cat);
+                        }
+                    }
+                    showToast('Memories generated!');
+                    return;
+                }
+            } catch(e) {}
+            showToast('Could not parse AI response — try again');
+            return;
+        } else if (memories[field] !== undefined) {
+            memories[field].push(result.replace(/^["'\-\s]+|["'\s]+$/g, '').trim());
+            renderMemTags(field);
+        }
+        showToast('Done!');
+    };
+
+    window.aiEnhance = async function(fieldId) {
+        const el = document.getElementById(fieldId);
+        const current = el.value.trim();
+        if (!current) { showToast('Write something first, then enhance'); return; }
+        const name = document.getElementById('charName').value || 'this character';
+        showToast('Enhancing...');
+        const result = await aiCall(`Enhance and expand this character description. Make it more specific, funnier, and more vivid. Add concrete details — specific words they use, specific reactions, specific quirks. Keep the same tone but make it 2x better. Character: "${name}". Current text: "${current}". Reply with ONLY the enhanced version.`);
+        if (result) { el.value = result.trim(); showToast('Enhanced!'); }
+        else showToast('Enhancement failed — try again');
+    };
+
+    // ── Archetypes ──
+    function buildArchetypes() {
+        const g = document.getElementById('archGrid');
+        ARCHETYPES.forEach(a => {
+            const b = document.createElement('button'); b.className = 'arch-btn'; b.textContent = a.label;
+            b.dataset.id = a.id;
+            b.addEventListener('click', () => {
+                g.querySelectorAll('.arch-btn').forEach(x => x.classList.remove('active'));
+                b.classList.add('active');
+                selectedArch = a.id;
+                if (a.prompt && a.id !== 'custom') document.getElementById('charPersonality').value = a.prompt;
+            });
+            g.appendChild(b);
+        });
+    }
+
+    // ── Voices ──
+    const PROVIDER_INFO = {
+        supertonic: { name: 'Supertonic', url: 'https://github.com/playht/supertonic', desc: 'Free local TTS' },
+        groq: { name: 'Groq Orpheus', url: 'https://console.groq.com', desc: 'Fast cloud TTS' },
+        qwen3: { name: 'Qwen3 TTS', url: 'https://fal.ai', desc: 'Voice cloning + multilingual' },
+        resemble: { name: 'Resemble AI', url: 'https://app.resemble.ai', desc: 'Premium cloned voices' },
+        elevenlabs: { name: 'ElevenLabs', url: 'https://elevenlabs.io', desc: 'Premium voice AI' }
+    };
+
+    let _currentAudio = null;
+
+    function sampleUrl(provider, voiceId) {
+        const safe = `${provider}_${voiceId}`.replace(/[ ()/']/g, '-');
+        return `/uploads/voice-samples/${safe}`;
+    }
+
+    function playPreview(provider, voiceId, btn) {
+        // Stop any playing audio
+        if (_currentAudio) { _currentAudio.pause(); _currentAudio = null; }
+        document.querySelectorAll('.vc-play.playing').forEach(b => b.classList.remove('playing'));
+
+        const base = sampleUrl(provider, voiceId);
+        btn.classList.add('playing');
+
+        // Try .wav first, then .mp3
+        const audio = new Audio(base + '.wav');
+        let triedMp3 = false;
+
+        audio.onerror = () => {
+            if (!triedMp3) {
+                triedMp3 = true;
+                audio.src = base + '.mp3';
+            } else {
+                // No sample available — generate on the fly
+                btn.textContent = '...';
+                fetch('/api/tts/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: "Hey, what's up? I'm your new character. Pretty cool, right?", provider, voice: voiceId })
+                }).then(r => {
+                    if (!r.ok) throw new Error('TTS failed');
+                    return r.blob();
+                }).then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    const live = new Audio(url);
+                    live.onended = () => { btn.classList.remove('playing'); btn.innerHTML = '&#9654;'; _currentAudio = null; };
+                    live.play().catch(() => { btn.classList.remove('playing'); btn.innerHTML = '&#9654;'; });
+                    _currentAudio = live;
+                }).catch(() => {
+                    btn.classList.remove('playing');
+                    btn.innerHTML = '&#9654;';
+                });
+            }
+        };
+
+        audio.onended = () => { btn.classList.remove('playing'); _currentAudio = null; };
+        audio.play().catch(() => {
+            btn.classList.remove('playing');
+        });
+        _currentAudio = audio;
+    }
+
+    async function loadVoices() {
+        try {
+            const res = await fetch('/api/tts/providers');
+            if (!res.ok) return;
+            const d = await res.json();
+            const container = document.getElementById('voiceProviders');
+            container.innerHTML = '';
+            voices = [];
+
+            // Group voices by provider
+            const providers = d.providers || [];
+
+            for (const p of providers) {
+                const pid = p.provider_id;
+                const info = PROVIDER_INFO[pid] || { name: pid, url: '#', desc: '' };
+                const isActive = p.status === 'active';
+                const provVoices = [];
+
+                // Cloned voices first
+                for (const cv of (p.cloned_voices || [])) {
+                    provVoices.push({ id: cv.voice_id, name: cv.name, provider: pid, type: 'Cloned', active: isActive });
+                }
+                // Stock voices — show all
+                const stockVoices = p.voices || [];
+                const displayVoices = stockVoices;
+                for (const v of displayVoices) {
+                    provVoices.push({ id: v, name: v, provider: pid, type: 'Stock', active: isActive });
+                }
+
+                if (provVoices.length === 0) continue;
+                voices.push(...provVoices);
+
+                // Build provider section
+                const section = document.createElement('div');
+                section.className = 'provider-section';
+
+                const header = document.createElement('div');
+                header.className = 'provider-header';
+                header.innerHTML = `
+                    <span class="provider-name">${info.name}</span>
+                    <span class="provider-status ${isActive ? 'active' : 'unavailable'}">${isActive ? 'Active' : 'API Key Required'}</span>
+                    <a class="provider-link" href="${info.url}" target="_blank">${info.desc}</a>
+                `;
+                section.appendChild(header);
+
+                const grid = document.createElement('div');
+                grid.className = 'voice-grid';
+
+                for (const v of provVoices) {
+                    const card = document.createElement('div');
+                    const isSelected = selectedVoice && selectedVoice.id === v.id && selectedVoice.provider === v.provider;
+                    card.className = 'voice-card' + (isSelected ? ' active' : '') + (!isActive ? ' unavailable' : '');
+                    card.innerHTML = `
+                        <div class="vc-name">${v.name}</div>
+                        ${v.type === 'Cloned' ? '<div class="vc-type">Cloned Voice</div>' : ''}
+                        ${!isActive ? '<div class="vc-unavail">API key required</div>' : ''}
+                        <div class="vc-play" title="Preview">&#9654;</div>
+                    `;
+
+                    // Play button
+                    card.querySelector('.vc-play').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        playPreview(v.provider, v.id, card.querySelector('.vc-play'));
+                    });
+
+                    // Select voice
+                    card.addEventListener('click', () => {
+                        if (!isActive) return; // Can't select unavailable voices
+                        container.querySelectorAll('.voice-card').forEach(c => c.classList.remove('active'));
+                        card.classList.add('active');
+                        selectedVoice = v;
+                        // Update sticky selection banner
+                        const banner = document.getElementById('voiceSelection');
+                        banner.style.display = '';
+                        document.getElementById('voiceSelName').textContent = v.name;
+                        document.getElementById('voiceSelProvider').textContent = `(${v.provider})`;
+                    });
+
+                    grid.appendChild(card);
+                }
+
+                section.appendChild(grid);
+                container.appendChild(section);
+            }
+        } catch(e) { console.error('Failed to load voices:', e); }
+    }
+
+    // ── Voice filter ──
+    window.filterVoices = function(q) {
+        q = q.toLowerCase();
+        document.querySelectorAll('#voiceProviders .voice-card').forEach(card => {
+            const name = card.querySelector('.vc-name')?.textContent?.toLowerCase() || '';
+            card.style.display = !q || name.includes(q) ? '' : 'none';
+        });
+    };
+
+    // ── Step navigation ──
+    const STEP_LABELS = ['Next: Identity', 'Next: Voice', 'Next: Review', 'Create Character'];
+
+    window.goStep = function(s) {
+        step = Math.max(0, Math.min(3, s));
+        document.querySelectorAll('.panel').forEach((p, i) => p.classList.toggle('active', i === step));
+        document.querySelectorAll('.step-dot').forEach((d, i) => { d.classList.toggle('active', i === step); d.classList.toggle('done', i < step); });
+        document.getElementById('btnBack').style.display = step > 0 ? '' : 'none';
+        const btn = document.getElementById('btnNext');
+        btn.textContent = STEP_LABELS[step];
+        btn.className = step === 3 ? 'btn btn-create' : 'btn btn-next';
+
+        if (step === 2) loadVoices();
+        if (step === 3) buildReview();
+    };
+    window.nextStep = function() {
+        if (step === 3) { createCharacter(); return; }
+        goStep(step + 1);
+    };
+    window.prevStep = function() { goStep(step - 1); };
+
+    // ── Review ──
+    function buildReview() {
+        document.getElementById('reviewName').textContent = document.getElementById('charName').value || 'Unnamed';
+        const arch = ARCHETYPES.find(a => a.id === selectedArch);
+        document.getElementById('reviewArch').textContent = arch ? arch.label : 'Custom';
+        document.getElementById('reviewVoice').textContent = selectedVoice ? `${selectedVoice.name} (${selectedVoice.provider})` : 'Default';
+        document.getElementById('reviewPersonality').textContent = document.getElementById('charPersonality').value || '(no personality set)';
+        const traits = DISPLAY_ORDER.map(c => `${c}: ${TRAITS[c][state[c]]}`).join(' / ');
+        document.getElementById('reviewTraits').textContent = traits;
+        // Show memory count
+        const memCount = Object.values(memories).reduce((s, a) => s + a.length, 0);
+        const memSummary = memCount > 0 ? Object.entries(memories).filter(([,v]) => v.length).map(([k,v]) => `${MEM_LABELS[k]}: ${v.length}`).join(', ') : 'No memories set';
+        document.getElementById('reviewTraits').textContent = traits + '\n' + memSummary;
+        renderCanvas(document.getElementById('review-canvas'));
+    }
+
+    // ── Randomize ──
+    window.randomize = function() {
+        DISPLAY_ORDER.forEach(cat => {
+            state[cat] = Math.floor(Math.random() * TRAITS[cat].length);
+            const v = document.getElementById(`val-${cat}`), x = document.getElementById(`idx-${cat}`);
+            if (v) v.textContent = TRAITS[cat][state[cat]];
+            if (x) x.textContent = `${state[cat]+1}/${TRAITS[cat].length}`;
+        });
+        render();
+    };
+
+    // ── Create character ──
+    async function createCharacter() {
+        const name = document.getElementById('charName').value.trim();
+        if (!name) { showToast('Enter a character name'); goStep(1); return; }
+        const personality = document.getElementById('charPersonality').value.trim();
+        if (!personality) { showToast('Set a personality'); goStep(1); return; }
+
+        const backstory = document.getElementById('charBackstory').value.trim();
+        const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const voice = selectedVoice || { id: 'M1', provider: 'supertonic' };
+
+        // Build system prompt
+        let sysPrompt = `You ARE ${name}. Stay in character always. Never break character. Never act like an assistant. Swear naturally if it fits your character.\n\nPERSONALITY: ${personality}`;
+        if (backstory) sysPrompt += `\n\nBACKSTORY: ${backstory}`;
+        sysPrompt += getMemoriesPrompt();
+        sysPrompt += `\n\nFACIAL EXPRESSIONS: Use [MOOD:happy] [MOOD:sad] [MOOD:angry] [MOOD:surprised] [MOOD:thinking] [MOOD:neutral] tags inline with your speech to change your facial expression.`;
+
+        // Build traits config
+        const traitsCfg = {};
+        DISPLAY_ORDER.forEach(c => { traitsCfg[c] = TRAITS[c][state[c]]; });
+
+        // Build profile
+        const profile = {
+            id: id,
+            name: name,
+            description: `BigHead character: ${name}`,
+            version: '1.0',
+            system_prompt: sysPrompt,
+            adapter: 'clawdbot',
+            llm: { provider: 'gateway', model: 'glm-4.7', parameters: { max_tokens: 256, temperature: 0.8 }, queue: { mode: 'steer', block_streaming_chunk: 60, block_streaming_coalesce: false } },
+            voice: { tts_provider: voice.provider, voice_id: voice.id, speed: 1.0, parameters: {}, parallel_sentences: true, min_sentence_chars: 40, inter_sentence_gap_ms: null },
+            stt: { provider: 'deepgram', language: 'en-US', silence_timeout_ms: 3500, continuous: true, wake_words: ['wake up'], wake_word_required: null, ptt_default: null },
+            context: { enable_fts: true, enable_briefing: false, enable_history: true, max_history_messages: 8 },
+            features: { canvas: true, vision: true, music: false, tools: true },
+            ui: { theme: 'dark', theme_preset: 'blue', face_enabled: true, face_mode: 'bighead', face_config: traitsCfg, face_mood: 'neutral', transcript_panel: true, thought_bubbles: false, show_mode_badge: true, mode_badge_text: name, visualizer_enabled: true, music_autoplay: false },
+            conversation: { greeting: null, auto_hangup_silence_ms: null, interruption_enabled: true, max_response_chars: 1500 },
+            modes: { normal: true, listen: true, ptt: true, a2a: false },
+            session: { key_strategy: 'persistent', key_prefix: `voice-${id}` },
+            auth: { required: null, allowed_roles: null },
+            adapter_config: { sessionKey: `voice-${id}-1`, agentId: id }
+        };
+
+        // Save profile
+        try {
+            let res = await fetch('/api/profiles', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(profile)
+            });
+            if (res.status === 409) {
+                // Already exists — update
+                res = await fetch(`/api/profiles/${id}`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(profile)
+                });
+            }
+            if (!res.ok) { const e = await res.json(); showToast('Error: ' + (e.error || e.errors?.join(', '))); return; }
+        } catch(e) { showToast('Failed to save profile: ' + e.message); return; }
+
+        // Save BigHead visual config
+        const charData = { ...traitsCfg, name, id, female: false, archetype: selectedArch, voiceProvider: voice.provider, voiceId: voice.id };
+        try {
+            await fetch('/api/bighead/characters', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(charData)
+            });
+        } catch(e) {}
+
+        // Set as active bighead
+        try {
+            await fetch('/api/bighead/active', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(charData)
+            });
+        } catch(e) {}
+
+        // Create openclaw agent files (SOUL.md, memories, character config)
+        try {
+            await fetch('/api/bighead/create-agent', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id, name, personality, backstory,
+                    archetype: selectedArch,
+                    traits: traitsCfg,
+                    memories: getMemoriesPrompt()
+                })
+            });
+        } catch(e) { console.warn('Agent files creation failed:', e); }
+
+        // Activate the profile immediately
+        try {
+            await fetch('/api/profiles/activate', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile_id: id })
+            });
+        } catch(e) {}
+
+        // Notify parent to update agent dropdown (no page reload needed)
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'profile-created', profileId: id }, '*');
+            }
+        } catch(e) {}
+
+        showToast(`${name} created and activated!`);
+        loadSavedCharacters();
+        goStep(0);
+    }
+
+    // ── Gallery ──
+    async function loadSavedCharacters() {
+        try {
+            const res = await fetch('/api/bighead/characters');
+            if (!res.ok) return;
+            savedChars = await res.json();
+            const grid = document.getElementById('char-gallery');
+            const title = document.getElementById('gallery-title');
+            if (!savedChars.length) { title.style.display = 'none'; grid.innerHTML = ''; return; }
+            title.style.display = '';
+            grid.innerHTML = '';
+
+            for (const ch of savedChars) {
+                const card = document.createElement('div');
+                card.className = 'char-card';
+                const mini = document.createElement('canvas');
+                mini.width = 280; mini.height = 280;
+                card.appendChild(mini);
+
+                const info = document.createElement('div');
+                info.className = 'char-card-info';
+                info.innerHTML = `<div class="char-card-name">${ch.name || 'Unnamed'}</div>
+                    <div class="char-card-arch">${ch.archetype || ''}</div>
+                    <div class="char-card-actions">
+                        <button class="char-card-btn use" data-id="${ch.id}">Use</button>
+                        <button class="char-card-btn" data-edit="${ch.id}">Edit</button>
+                        <button class="char-card-btn" data-delete="${ch.id}" style="background:#ff3b3b;color:#fef9ee;">Del</button>
+                    </div>`;
+                card.appendChild(info);
+                grid.appendChild(card);
+
+                // Render mini
+                const ts = {};
+                DISPLAY_ORDER.forEach(c => {
+                    const idx = TRAITS[c].indexOf(ch[c]);
+                    ts[c] = idx >= 0 ? idx : 0;
+                });
+                renderCanvas(mini, ts);
+
+                // Use button
+                info.querySelector('.use').addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    try {
+                        await fetch('/api/bighead/active', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ch) });
+                        // Activate profile
+                        if (ch.id) await fetch('/api/profiles/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ch.id }) });
+                        showToast(`Switched to ${ch.name}`);
+                        try { if (window.parent?.BigHeadFace) window.parent.BigHeadFace.setCharacter(ch); } catch(e) {}
+                    } catch(e) { showToast('Error: ' + e.message); }
+                });
+
+                // Edit = load ALL character + profile data into builder
+                info.querySelector('[data-edit]').addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    DISPLAY_ORDER.forEach(c => {
+                        const idx = TRAITS[c].indexOf(ch[c]);
+                        if (idx >= 0) state[c] = idx;
+                    });
+                    DISPLAY_ORDER.forEach(c => {
+                        const v = document.getElementById(`val-${c}`), x = document.getElementById(`idx-${c}`);
+                        if (v) v.textContent = TRAITS[c][state[c]];
+                        if (x) x.textContent = `${state[c]+1}/${TRAITS[c].length}`;
+                    });
+                    render();
+                    if (ch.name) document.getElementById('charName').value = ch.name;
+                    if (ch.archetype) {
+                        selectedArch = ch.archetype;
+                        document.querySelectorAll('.arch-card').forEach(ac => {
+                            ac.classList.toggle('active', ac.dataset.arch === ch.archetype);
+                        });
+                    }
+                    try {
+                        const profRes = await fetch(`/api/profiles/${ch.id}`);
+                        if (profRes.ok) {
+                            const prof = await profRes.json();
+                            const sp = prof.system_prompt || '';
+                            const persMatch = sp.match(/PERSONALITY:\s*([\s\S]*?)(?:\n\n[A-Z]|\nFACIAL|\nCORE|\nHOW|\nYOUR|$)/);
+                            if (persMatch) document.getElementById('charPersonality').value = persMatch[1].trim();
+                            const backMatch = sp.match(/BACKSTORY:\s*([\s\S]*?)(?:\n\n[A-Z]|\nFACIAL|$)/);
+                            if (backMatch) document.getElementById('charBackstory').value = backMatch[1].trim();
+                            if (!persMatch && !backMatch && sp.length > 50) {
+                                const lines = sp.split('\n').filter(l => l.trim());
+                                if (lines.length > 1) document.getElementById('charPersonality').value = lines.slice(1).join('\n').trim();
+                            }
+                            if (prof.voice?.voice_id) {
+                                selectedVoice = { id: prof.voice.voice_id, name: prof.voice.voice_id, provider: prof.voice.tts_provider || 'supertonic' };
+                            }
+                        }
+                    } catch(err) {}
+                    if (!selectedVoice && ch.voiceId) {
+                        selectedVoice = { id: ch.voiceId, name: ch.voiceId, provider: ch.voiceProvider || 'supertonic' };
+                    }
+                    goStep(0);
+                });
+
+                // Delete button
+                info.querySelector('[data-delete]').addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`Delete "${ch.name}"? This cannot be undone.`)) return;
+                    try {
+                        await fetch(`/api/bighead/characters/${ch.id}`, { method: 'DELETE' });
+                        await fetch(`/api/profiles/${ch.id}`, { method: 'DELETE' });
+                        showToast(`Deleted ${ch.name}`);
+                        try { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'profile-created', profileId: 'default' }, '*'); } catch(e) {}
+                        loadSavedCharacters();
+                    } catch(err) { showToast('Delete failed: ' + err.message); }
+                });
+            }
+        } catch(e) {}
+    }
+
+    // ── Toast ──
+    function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+
+    // ── Auth token from parent ──
+    window.addEventListener('message', (e) => { if (e.data?.type === 'clerk-token' && e.data.token) window.__clerkToken = e.data.token; });
+
+    // ── Init ──
+    buildTraitRows();
+    buildArchetypes();
+    buildStarters();
+    render();
+    loadSavedCharacters();
+})();
+</script>
+</body>
+</html>
