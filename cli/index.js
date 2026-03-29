@@ -263,6 +263,15 @@ function cmdStart() {
     }
   }
 
+  // Connect ByteRover memory provider (free, no API key needed)
+  // Runs inside the openclaw container after it's healthy
+  try {
+    run(`${COMPOSE} exec -T openclaw brv providers connect byterover`, { silent: true });
+    console.log("  [OK] ByteRover memory connected\n");
+  } catch {
+    // Non-fatal — brv will prompt on first use
+  }
+
   const port = getPort();
   console.log(`
   OpenVoiceUI is running!

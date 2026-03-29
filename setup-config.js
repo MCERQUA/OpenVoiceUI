@@ -28,11 +28,11 @@ const secret = crypto.randomBytes(32).toString("hex");
 
 // Pick default model based on which keys the user provided
 let defaultModel = "groq/llama-3.3-70b-versatile"; // fallback — Groq is required
-if (getKey("ZAI_API_KEY"))       defaultModel = "z-ai/glm-4.7";
+if (getKey("ZAI_API_KEY"))       defaultModel = "zai/glm-5-turbo";
 if (getKey("ANTHROPIC_API_KEY")) defaultModel = "anthropic/claude-sonnet-4-5";
 if (getKey("OPENAI_API_KEY"))    defaultModel = "openai/gpt-4o";
 // Z.AI wins if multiple are set (best value)
-if (getKey("ZAI_API_KEY"))       defaultModel = "z-ai/glm-4.7";
+if (getKey("ZAI_API_KEY"))       defaultModel = "zai/glm-5-turbo";
 
 const openclawConfig = {
   gateway: {
@@ -52,9 +52,38 @@ const openclawConfig = {
       thinkingDefault: "off",
       blockStreamingDefault: "on",
       blockStreamingBreak: "text_end",
-      timeoutSeconds: 300,
+      timeoutSeconds: 120,
+      memorySearch: { enabled: true },
+      compaction: {
+        mode: "default",
+        reserveTokens: 80000,
+        keepRecentTokens: 8000,
+        reserveTokensFloor: 80000,
+        memoryFlush: { enabled: true, softThresholdTokens: 6000 },
+      },
+      contextPruning: {
+        mode: "cache-ttl",
+        ttl: "30m",
+        keepLastAssistants: 3,
+        softTrimRatio: 0.3,
+        hardClearRatio: 0.5,
+      },
     },
     list: [{ id: "main", default: true, workspace: "/root/.openclaw/workspace" }],
+  },
+  plugins: {
+    slots: {
+      contextEngine: "byterover",
+    },
+    entries: {
+      byterover: {
+        enabled: true,
+        config: {
+          brvPath: "/usr/local/bin/brv-direct",
+          cwd: "/root/.openclaw/workspace",
+        },
+      },
+    },
   },
 };
 

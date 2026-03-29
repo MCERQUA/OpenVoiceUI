@@ -28,7 +28,7 @@ class ClawdbotProvider(LLMProvider):
             or os.getenv("CLAWDBOT_AUTH_TOKEN", "")
         )
         self.default_agent = self._config.get("default_agent", "main")
-        self.default_model = "glm-4-7-flash"  # Gateway uses Z.AI/GLM
+        self.default_model = "glm-5-turbo"  # Gateway uses Z.AI/GLM
 
     def generate(
         self,

@@ -1020,8 +1020,10 @@ async function fetchManifest(forceSync) {
     // Detect new pages
     const currentIds = Object.keys(PAGES);
     if (knownPages.length === 0) {
-      // First run — seed knownPages without flooding desktop
+      // First run — seed knownPages AND add all pages to desktop
+      // Users expect to see their pages. Empty desktop is confusing.
       knownPages = currentIds.slice();
+      desktopPages = currentIds.slice();
       saveState();
     } else {
       const newFound = currentIds.filter(id => !knownPages.includes(id));

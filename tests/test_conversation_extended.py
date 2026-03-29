@@ -166,7 +166,7 @@ class TestLogMetrics:
             conv_mod.log_metrics({
                 "session_id": "sess-1",
                 "profile": "default",
-                "model": "glm-4.7",
+                "model": "glm-5-turbo",
                 "handshake_ms": 100,
                 "llm_inference_ms": 500,
                 "tts_generation_ms": 200,

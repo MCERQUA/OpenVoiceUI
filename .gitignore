@@ -151,7 +151,5 @@ dev-notes/
 # User-created profiles (keep shipped defaults tracked)
 profiles/*
 !profiles/default.json
-!profiles/kyle-valhalla.json
-!profiles/bryce-bighead.json
 !profiles/manager.py
 !profiles/schema.json

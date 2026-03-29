@@ -715,7 +715,7 @@ def _conversation_inner():
     t_request_start = time.time()
     metrics = {
         'profile': 'gateway',
-        'model': 'glm-4.7-flash',
+        'model': 'glm-5-turbo',
         'tts_success': 1,
         'fallback_used': 0,
         'tool_count': 0,
@@ -1454,7 +1454,7 @@ def _conversation_inner():
                                 if a.get('type') == 'tool' and a.get('phase') == 'start'
                             )
                             metrics['profile'] = 'gateway'
-                            metrics['model'] = 'glm-4.7-flash'
+                            metrics['model'] = 'glm-5-turbo'
                             # Estimate tokens: ~4 chars/token for English text
                             _resp_chars = len(full_response or '')
                             _ctx_chars = len(context_prefix) if context_prefix else 0
@@ -1585,7 +1585,7 @@ def _conversation_inner():
                                                 'content-type': 'application/json',
                                             },
                                             json={
-                                                'model': 'glm-4.7',
+                                                'model': 'glm-5-turbo',
                                                 'max_tokens': 1500,
                                                 'messages': [{'role': 'user', 'content': _fallback_msg}],
                                             },
@@ -1803,7 +1803,7 @@ def _conversation_inner():
                     if a.get('type') == 'tool' and a.get('phase') == 'start'
                 )
                 metrics['profile'] = 'gateway'
-                metrics['model'] = 'glm-4.7-flash'
+                metrics['model'] = 'glm-5-turbo'
                 _resp_chars2 = len(ai_response or '')
                 _ctx_chars2 = len(context_prefix) if context_prefix else 0
                 metrics['est_input_tokens'] = _ctx_chars2 // 4

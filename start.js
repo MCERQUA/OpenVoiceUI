@@ -27,6 +27,14 @@ module.exports = {
       },
     },
 
+    // Connect ByteRover memory provider (free, no API key needed)
+    {
+      method: "shell.run",
+      params: {
+        message: "docker compose -f docker-compose.yml -f docker-compose.local.yml exec -T openclaw brv providers connect byterover || true",
+      },
+    },
+
     // Set URL so Pinokio shows "Open" button.
     // Device is already pre-paired — no approval step needed.
     {

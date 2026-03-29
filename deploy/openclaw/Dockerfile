@@ -17,8 +17,23 @@ RUN mkdir -p $PNPM_HOME
 
 # OpenClaw version — pinned to the version tested with this OpenVoiceUI release.
 # Override at build time: docker compose build --build-arg OPENCLAW_VERSION=2026.3.7
-ARG OPENCLAW_VERSION=2026.3.13
+ARG OPENCLAW_VERSION=2026.3.24
 RUN pnpm add -g openclaw@${OPENCLAW_VERSION} && pnpm approve-builds -g
+
+# ByteRover — long-term structured memory via context engine plugin
+# brv CLI: query/curate knowledge in .brv/context-tree/ (human-readable markdown)
+# Plugin: auto-runs brv query before each LLM call, brv curate after each turn
+RUN pnpm add -g byterover-cli clawhub \
+    && BRV_RUN=$(find /usr/local/share/pnpm/global -name 'run.js' -path '*/byterover-cli/bin/*' | head -1) \
+    && printf '#!/bin/sh\nexec /usr/local/bin/node "%s" "$@"\n' "$BRV_RUN" > /usr/local/bin/brv-direct \
+    && chmod +x /usr/local/bin/brv-direct \
+    && mkdir -p /home/node/.openclaw/extensions/byterover \
+    && cd /home/node/.openclaw/extensions/byterover \
+    && npm init -y --silent \
+    && npm install --save @byterover/byterover \
+    && printf '{"name":"byterover","version":"1.1.2","private":true,"main":"node_modules/@byterover/byterover/index.ts","openclaw":{"compat":{"pluginApi":">=2026.3.22"},"extensions":["./node_modules/@byterover/byterover/index.ts"]}}\n' > package.json \
+    && printf '{"id":"byterover","name":"ByteRover","description":"ByteRover context engine plugin","version":"1.1.2","configSchema":{"type":"object","properties":{"brvPath":{"type":"string"},"cwd":{"type":"string"},"queryTimeoutMs":{"type":"number"},"curateTimeoutMs":{"type":"number"}}}}\n' > openclaw.plugin.json \
+    && chown -R node:node /home/node/.openclaw
 
 # Optional: install a coding CLI so the coding-agent skill is available.
 # Set CODING_CLI at build time:  docker compose build --build-arg CODING_CLI=codex
