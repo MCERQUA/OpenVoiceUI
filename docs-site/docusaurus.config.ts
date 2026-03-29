@@ -11,8 +11,8 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://docs.openvoiceui.com',
-  baseUrl: '/',
+  url: 'https://mcerqua.github.io',
+  baseUrl: '/OpenVoiceUI/',
 
   organizationName: 'MCERQUA',
   projectName: 'OpenVoiceUI',
