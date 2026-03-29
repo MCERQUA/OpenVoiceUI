@@ -31,9 +31,10 @@ const config: Config = {
       'classic',
       {
         docs: {
+          path: '../docs',
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
-          editUrl: 'https://github.com/MCERQUA/OpenVoiceUI/edit/main/docs-site/',
+          editUrl: 'https://github.com/MCERQUA/OpenVoiceUI/edit/main/',
         },
         blog: false,
         theme: {

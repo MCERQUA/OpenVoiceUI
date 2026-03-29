@@ -1,0 +1,2951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI App Library</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg:           #13141a;
+  --surface:      #1a1b23;
+  --surface-2:    #21222c;
+  --surface-hover:#282936;
+  --surface-3:    #2e3040;
+  --border:       #2a2b37;
+  --border-light: #353648;
+  --border-heavy: #42445a;
+  --brand:        #3b82f6;
+  --brand-light:  #60a5fa;
+  --brand-dim:    rgba(59,130,246,0.12);
+  --brand-glow:   rgba(59,130,246,0.15);
+  --brand-border: rgba(59,130,246,0.25);
+  --success:       #34d399;
+  --success-dim:   rgba(52,211,153,0.1);
+  --success-border:rgba(52,211,153,0.2);
+  --warning:       #fbbf24;
+  --warning-dim:   rgba(251,191,36,0.1);
+  --danger:        #f87171;
+  --info:          #60a5fa;
+  --info-dim:      rgba(96,165,250,0.1);
+  --cyan:          #22d3ee;
+  --cyan-dim:      rgba(34,211,238,0.1);
+  --text:          #e8eaf0;
+  --text-secondary:#9498ab;
+  --text-muted:    #5f6380;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-xs: 6px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Header ─────────────────────────────────────── */
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 20px 28px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(12px);
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.header-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.header-title span { color: var(--brand); }
+
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-brand { background: var(--brand-dim); color: var(--brand-light); }
+.badge-success { background: var(--success-dim); color: var(--success); }
+
+.badge svg { width: 13px; height: 13px; fill: currentColor; }
+
+/* ── Search & Filter Bar ────────────────────────── */
+.filter-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.search-box {
+  flex: 1;
+  min-width: 200px;
+  position: relative;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 9px 14px 9px 36px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search-box input:focus { border-color: var(--brand); }
+.search-box input::placeholder { color: var(--text-muted); }
+
+.search-box svg {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  fill: var(--text-muted);
+}
+
+.filter-select {
+  padding: 9px 32px 9px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='%235f6380' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  outline: none;
+}
+
+.filter-select:focus { border-color: var(--brand); }
+
+.result-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+/* ── Category Chips ─────────────────────────────── */
+.category-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 12px 28px 0;
+}
+
+.chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.chip:hover { border-color: var(--border-light); color: var(--text); }
+.chip.active { background: var(--brand-dim); border-color: var(--brand-border); color: var(--brand-light); }
+
+.chip .chip-count {
+  margin-left: 4px;
+  opacity: 0.6;
+}
+
+/* ── Card Grid ──────────────────────────────────── */
+.grid-container {
+  padding: 20px 28px 40px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.card:hover {
+  border-color: var(--border-light);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+.card-cat {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--brand-light);
+  margin-bottom: 8px;
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.card-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  flex: 1;
+  margin-bottom: 12px;
+}
+
+.card-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tag {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tag-model { background: rgba(34,211,238,0.1); color: var(--cyan); }
+.tag-framework { background: rgba(251,191,36,0.1); color: var(--warning); }
+.tag-difficulty { background: var(--surface-2); color: var(--text-secondary); }
+
+.card-difficulty {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.diff-dot {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.diff-dot span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-heavy);
+}
+
+.diff-dot.beginner span:nth-child(1) { background: var(--success); }
+.diff-dot.intermediate span:nth-child(1),
+.diff-dot.intermediate span:nth-child(2) { background: var(--warning); }
+.diff-dot.advanced span:nth-child(1),
+.diff-dot.advanced span:nth-child(2),
+.diff-dot.advanced span:nth-child(3) { background: var(--danger); }
+
+/* ── Detail Modal ───────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.modal-overlay.open { display: flex; }
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 720px;
+  max-height: 85vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.modal-header {
+  padding: 24px 28px 16px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 10;
+}
+
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.modal-close:hover { border-color: var(--danger); color: var(--danger); }
+
+.modal-cat {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--brand-light);
+  margin-bottom: 6px;
+}
+
+.modal-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  padding-right: 40px;
+}
+
+.modal-body {
+  padding: 20px 28px 28px;
+}
+
+.modal-section {
+  margin-bottom: 20px;
+}
+
+.modal-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.modal-desc {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.modal-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.info-card {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.info-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.info-card-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.code-block {
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #c9d1d9;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  position: relative;
+}
+
+.code-block .kw { color: #ff7b72; }
+.code-block .str { color: #a5d6ff; }
+.code-block .fn { color: #d2a8ff; }
+.code-block .cm { color: #8b949e; }
+.code-block .num { color: #79c0ff; }
+
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.copy-btn:hover { border-color: var(--brand); color: var(--brand-light); }
+
+.build-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--brand);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+  width: 100%;
+  justify-content: center;
+}
+
+.build-btn:hover { background: var(--brand-light); }
+
+.build-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-decoration: none;
+  transition: all 0.15s;
+  font-family: inherit;
+  width: 100%;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.github-link:hover { border-color: var(--brand-border); color: var(--text); }
+.github-link svg { width: 16px; height: 16px; fill: currentColor; }
+
+.prompt-box {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  font-style: italic;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.prompt-box:hover { border-left-color: var(--brand-light); }
+
+.prompt-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  font-style: normal;
+}
+
+/* ── Empty State ────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state h3 {
+  font-size: 16px;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+}
+
+.empty-state p { font-size: 13px; }
+
+/* ── Responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  .header { padding: 16px 16px 12px; }
+  .category-chips { padding: 10px 16px 0; }
+  .grid-container { padding: 16px 16px 32px; }
+  .card-grid { grid-template-columns: 1fr; }
+  .modal-info-grid { grid-template-columns: 1fr; }
+  .filter-bar { flex-direction: column; }
+  .search-box { min-width: 100%; }
+}
+
+/* ── Scrollbar ──────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-heavy); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-top">
+    <div class="header-title">AI App <span>Library</span></div>
+    <div class="header-meta">
+      <span class="badge badge-brand" id="total-count">119 Apps</span>
+      <span class="badge badge-success">
+        <svg viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.192a.75.75 0 01-1.088.791L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.194L.818 6.374a.75.75 0 01.416-1.28l4.21-.611L7.327.668A.75.75 0 018 .25z"/></svg>
+        104K Stars
+      </span>
+    </div>
+  </div>
+  <div class="filter-bar">
+    <div class="search-box">
+      <svg viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85a1.007 1.007 0 00-.115-.1zM12 6.5a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z"/></svg>
+      <input type="text" id="search-input" placeholder="Search apps by name, description, model, or framework...">
+    </div>
+    <select class="filter-select" id="difficulty-filter">
+      <option value="">All Levels</option>
+      <option value="beginner">Beginner</option>
+      <option value="intermediate">Intermediate</option>
+      <option value="advanced">Advanced</option>
+    </select>
+    <select class="filter-select" id="model-filter">
+      <option value="">All Models</option>
+      <option value="openai">OpenAI</option>
+      <option value="gemini">Google Gemini</option>
+      <option value="llama">Meta Llama</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="claude">Claude</option>
+      <option value="groq">Groq</option>
+      <option value="local">Local / Open Source</option>
+    </select>
+    <span class="result-count" id="result-count"></span>
+  </div>
+</div>
+
+<!-- Category Chips -->
+<div class="category-chips" id="category-chips"></div>
+
+<!-- Card Grid -->
+<div class="grid-container">
+  <div class="card-grid" id="card-grid"></div>
+  <div class="empty-state" id="empty-state" style="display:none;">
+    <h3>No matching apps found</h3>
+    <p>Try adjusting your search or filters</p>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <div class="modal-cat" id="modal-cat"></div>
+      <div class="modal-title" id="modal-title"></div>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  AI APP LIBRARY — Full Catalog from awesome-llm-apps
+//  Source: github.com/Shubhamsaboo/awesome-llm-apps
+// ═══════════════════════════════════════════════════════════
+
+const REPO = "https://github.com/Shubhamsaboo/awesome-llm-apps/tree/main";
+
+const APPS = [
+  // ── Starter AI Agents ────────────────────────────────────
+  {
+    id: "blog-to-podcast",
+    name: "AI Blog to Podcast Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/ai_blog_to_podcast_agent",
+    desc: "Converts any blog post URL into a natural-sounding podcast episode. Extracts text, summarizes key points, generates a conversational script, and synthesizes audio.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "requests", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Content repurposing — turn your written content into podcasts automatically.",
+    agentPrompt: "I want to build an app that converts blog posts into podcast episodes. It should take a URL, extract the content, create a conversational script using GPT-4o, then generate audio. Use the awesome-llm-apps blog-to-podcast tutorial as reference.",
+    codeSnippet: `<span class="cm"># Core pattern: Blog URL → Script → Audio</span>
+<span class="kw">from</span> agno.agent <span class="kw">import</span> Agent
+<span class="kw">from</span> agno.models.openai <span class="kw">import</span> OpenAIChat
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    description=<span class="str">"Convert blog content to podcast script"</span>,
+    instructions=[
+        <span class="str">"Extract key points from the blog"</span>,
+        <span class="str">"Write a conversational 2-person script"</span>,
+        <span class="str">"Keep it engaging and natural"</span>,
+    ],
+)
+
+<span class="cm"># Fetch blog → generate script → synthesize audio</span>
+result = agent.run(<span class="str">"Convert this blog to podcast: {url}"</span>)`
+  },
+  {
+    id: "breakup-recovery",
+    name: "AI Breakup Recovery Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/ai_breakup_recovery_agent",
+    desc: "Empathetic AI companion that provides emotional support, coping strategies, and recovery guidance during relationship transitions.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Wellness chatbot — empathetic conversational AI for emotional support use cases.",
+    agentPrompt: "Build me a supportive chatbot that helps people through difficult times. It should be empathetic, offer coping strategies, and maintain context across the conversation. Reference the awesome-llm-apps breakup recovery agent pattern.",
+    codeSnippet: `<span class="cm"># Empathetic agent with memory</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    description=<span class="str">"Empathetic recovery companion"</span>,
+    instructions=[
+        <span class="str">"Be warm, non-judgmental, supportive"</span>,
+        <span class="str">"Offer practical coping strategies"</span>,
+        <span class="str">"Remember context from earlier in chat"</span>,
+    ],
+    add_history_to_messages=<span class="num">True</span>,
+    markdown=<span class="num">True</span>,
+)`
+  },
+  {
+    id: "data-analysis",
+    name: "AI Data Analysis Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/ai_data_analysis_agent",
+    desc: "Upload CSV/Excel data and get automated analysis — statistical summaries, visualizations, trend identification, and natural language insights.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "pandas", "plotly", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Business intelligence — instant data analysis without writing code. Upload a spreadsheet, get charts and insights.",
+    agentPrompt: "I want a data analysis tool where I can upload a CSV file and the AI automatically generates statistical summaries, charts, and natural language insights. Use Plotly for visualizations. Reference the awesome-llm-apps data analysis agent.",
+    codeSnippet: `<span class="cm"># Data analysis with code execution</span>
+<span class="kw">from</span> agno.tools.python <span class="kw">import</span> PythonTools
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[PythonTools()],
+    instructions=[
+        <span class="str">"Analyze uploaded data thoroughly"</span>,
+        <span class="str">"Generate plotly visualizations"</span>,
+        <span class="str">"Provide statistical summaries"</span>,
+    ],
+    show_tool_calls=<span class="num">True</span>,
+)`
+  },
+  {
+    id: "medical-imaging",
+    name: "AI Medical Imaging Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/ai_medical_imaging_agent",
+    desc: "Analyzes medical images (X-rays, MRIs, scans) using multimodal AI. Identifies potential findings and generates structured radiology-style reports.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "streamlit", "pillow"],
+    difficulty: "intermediate",
+    useCase: "Healthcare AI — image analysis for medical professionals. Educational/screening tool, not diagnostic.",
+    agentPrompt: "Build a medical image analysis tool that can look at uploaded X-rays or medical scans and provide structured observations. It should note findings, areas of concern, and generate a report format. Reference the awesome-llm-apps medical imaging agent.",
+    codeSnippet: `<span class="cm"># Multimodal medical image analysis</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    description=<span class="str">"Medical imaging analysis assistant"</span>,
+    instructions=[
+        <span class="str">"Analyze the medical image systematically"</span>,
+        <span class="str">"Note any abnormal findings"</span>,
+        <span class="str">"Generate structured radiology report"</span>,
+        <span class="str">"Always add disclaimer: not diagnostic"</span>,
+    ],
+)
+
+<span class="cm"># Send image for analysis</span>
+result = agent.run(<span class="str">"Analyze this scan"</span>, images=[image_path])`
+  },
+  {
+    id: "meme-generator",
+    name: "AI Meme Generator Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/ai_meme_generator_agent_browseruse",
+    desc: "Creates memes using browser automation. Takes a topic, finds relevant templates, adds AI-generated captions, and produces shareable meme images.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["BrowserUse", "Agno"],
+    packages: ["browser-use", "agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Social media automation — generate topical memes from text prompts using browser-based image editing.",
+    agentPrompt: "Build a meme generator that uses browser automation to create memes. Given a topic, it should pick a template, generate funny captions with AI, and produce the final image. Reference the awesome-llm-apps meme generator with browser-use.",
+    codeSnippet: `<span class="cm"># Browser-automated meme creation</span>
+<span class="kw">from</span> browser_use <span class="kw">import</span> Agent <span class="kw">as</span> BrowserAgent
+
+agent = BrowserAgent(
+    task=<span class="str">"""Go to imgflip.com, find a meme template
+    for '{topic}', add the caption: '{caption}',
+    and download the result"""</span>,
+    llm=ChatOpenAI(model=<span class="str">"gpt-4o"</span>),
+)`
+  },
+  {
+    id: "music-generator",
+    name: "AI Music Generator Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/ai_music_generator_agent",
+    desc: "Generates original music from text descriptions. Describe a mood, genre, or scenario and get an AI-composed audio track using ModelsLab API.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "requests", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Creative AI — generate background music, jingles, or ambient tracks from text descriptions.",
+    agentPrompt: "I want to build a music generator where I describe a mood or scene and get an AI-generated audio track. Use GPT-4o for prompt enhancement and ModelsLab for audio synthesis. Reference the awesome-llm-apps music generator tutorial.",
+    codeSnippet: `<span class="cm"># Music generation pipeline</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    description=<span class="str">"Music generation assistant"</span>,
+    instructions=[
+        <span class="str">"Enhance the user's music prompt"</span>,
+        <span class="str">"Add genre, instrument, tempo details"</span>,
+    ],
+)
+
+<span class="cm"># GPT enhances prompt → ModelsLab generates audio</span>
+enhanced = agent.run(user_prompt)
+audio = modelslab_api.generate(enhanced.content)`
+  },
+  {
+    id: "travel-agent",
+    name: "AI Travel Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/ai_travel_agent",
+    desc: "Plans complete trip itineraries with flights, hotels, activities, and local tips. Considers budget, dates, interests, and travel style preferences.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Travel planning — generate detailed day-by-day itineraries with budgets, activities, and logistics.",
+    agentPrompt: "Build a travel planning agent that takes destination, dates, budget, and interests, then creates a complete day-by-day itinerary with hotels, activities, restaurants, and transport. Reference the awesome-llm-apps travel agent.",
+    codeSnippet: `<span class="cm"># Travel planning agent with web search</span>
+<span class="kw">from</span> agno.tools.duckduckgo <span class="kw">import</span> DuckDuckGo
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[DuckDuckGo()],
+    instructions=[
+        <span class="str">"Search for current prices and availability"</span>,
+        <span class="str">"Create day-by-day itinerary"</span>,
+        <span class="str">"Include budget breakdown"</span>,
+        <span class="str">"Suggest local hidden gems"</span>,
+    ],
+)`
+  },
+  {
+    id: "gemini-multimodal",
+    name: "Gemini Multimodal Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/gemini_multimodal_agent_demo",
+    desc: "Processes text, images, and documents simultaneously using Google Gemini's native multimodal capabilities. Demonstrates cross-modal reasoning.",
+    models: ["Google Gemini"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "google-generativeai", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Multimodal AI — build apps that understand images, text, and documents together in one conversation.",
+    agentPrompt: "Build a multimodal AI app using Google Gemini that can analyze images and text together. Users should be able to upload an image and ask questions about it, or combine document analysis with image understanding. Reference the awesome-llm-apps Gemini multimodal demo.",
+    codeSnippet: `<span class="cm"># Gemini multimodal processing</span>
+<span class="kw">from</span> agno.models.google <span class="kw">import</span> Gemini
+
+agent = Agent(
+    model=Gemini(id=<span class="str">"gemini-2.0-flash"</span>),
+    instructions=[
+        <span class="str">"Analyze both text and images"</span>,
+        <span class="str">"Cross-reference visual and textual info"</span>,
+    ],
+    markdown=<span class="num">True</span>,
+)
+
+result = agent.run(<span class="str">"What's in this image?"</span>, images=[img])`
+  },
+  {
+    id: "mixture-of-agents",
+    name: "Mixture of Agents",
+    category: "Starter Agents",
+    path: "starter_ai_agents/mixture_of_agents",
+    desc: "Orchestrates multiple specialized AI agents working in parallel, then synthesizes their outputs. Each agent has different expertise (research, writing, analysis).",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Agent orchestration — combine multiple specialized agents for higher quality output than any single agent.",
+    agentPrompt: "Build a mixture-of-agents system where multiple specialized agents (researcher, writer, critic) each process the same query independently, then a synthesizer agent combines their best outputs into a superior final answer. Reference the awesome-llm-apps mixture of agents pattern.",
+    codeSnippet: `<span class="cm"># Parallel agent ensemble</span>
+researcher = Agent(model=m, role=<span class="str">"Deep researcher"</span>)
+writer = Agent(model=m, role=<span class="str">"Creative writer"</span>)
+analyst = Agent(model=m, role=<span class="str">"Critical analyst"</span>)
+
+synthesizer = Agent(
+    model=m,
+    team=[researcher, writer, analyst],
+    instructions=[<span class="str">"Combine the best insights"</span>],
+)`
+  },
+  {
+    id: "xai-finance",
+    name: "xAI Finance Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/xai_finance_agent",
+    desc: "Financial analysis agent using xAI's Grok model. Analyzes market data, company fundamentals, and provides investment insights with real-time data.",
+    models: ["xAI Grok"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "xai-sdk", "yfinance", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Financial analysis — AI-powered stock analysis and market insights using alternative models.",
+    agentPrompt: "Build a finance agent that analyzes stocks and market data. It should pull real-time data from Yahoo Finance, analyze company fundamentals, and provide investment insights. Reference the awesome-llm-apps xAI finance agent.",
+    codeSnippet: `<span class="cm"># Finance agent with market tools</span>
+<span class="kw">from</span> agno.tools.yfinance <span class="kw">import</span> YFinanceTools
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"grok-2"</span>,
+        base_url=<span class="str">"https://api.x.ai/v1"</span>),
+    tools=[YFinanceTools(
+        stock_price=<span class="num">True</span>,
+        analyst_recommendations=<span class="num">True</span>,
+        company_info=<span class="num">True</span>,
+    )],
+)`
+  },
+  {
+    id: "openai-research",
+    name: "OpenAI Research Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/openai_research_agent",
+    desc: "Autonomous research agent that searches the web, reads articles, synthesizes findings, and produces structured research reports with citations.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["OpenAI Agents SDK"],
+    packages: ["openai-agents", "requests"],
+    difficulty: "beginner",
+    useCase: "Research automation — get comprehensive research reports on any topic with sourced citations.",
+    agentPrompt: "Build an autonomous research agent using the OpenAI Agents SDK. It should search the web for information on a topic, read multiple sources, and produce a structured report with citations. Reference the awesome-llm-apps OpenAI research agent.",
+    codeSnippet: `<span class="cm"># OpenAI Agents SDK research pipeline</span>
+<span class="kw">from</span> agents <span class="kw">import</span> Agent, Runner
+<span class="kw">from</span> agents.tools <span class="kw">import</span> WebSearchTool
+
+agent = Agent(
+    name=<span class="str">"Research Agent"</span>,
+    instructions=<span class="str">"Search, read, and synthesize"</span>,
+    tools=[WebSearchTool()],
+)
+
+result = Runner.run_sync(agent, <span class="str">"Research {topic}"</span>)`
+  },
+  {
+    id: "web-scraping",
+    name: "Web Scraping AI Agent",
+    category: "Starter Agents",
+    path: "starter_ai_agents/web_scraping_ai_agent",
+    desc: "Intelligent web scraper that navigates sites, extracts structured data, and handles pagination. Works both with cloud APIs and local open-source models.",
+    models: ["OpenAI GPT-4o", "Local LLMs"],
+    frameworks: ["Agno", "Firecrawl"],
+    packages: ["agno", "firecrawl-py", "openai"],
+    difficulty: "beginner",
+    useCase: "Data extraction — scrape websites intelligently using AI to understand page structure and extract clean data.",
+    agentPrompt: "Build a web scraping tool that uses AI to intelligently extract structured data from any website. It should handle pagination, understand page layouts, and output clean JSON/CSV. Reference the awesome-llm-apps web scraping agent.",
+    codeSnippet: `<span class="cm"># AI-powered web scraping</span>
+<span class="kw">from</span> agno.tools.firecrawl <span class="kw">import</span> FirecrawlTools
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[FirecrawlTools()],
+    instructions=[
+        <span class="str">"Scrape the target URL"</span>,
+        <span class="str">"Extract data into structured format"</span>,
+        <span class="str">"Handle pagination if present"</span>,
+    ],
+)`
+  },
+
+  // ── Advanced Single Agents ───────────────────────────────
+  {
+    id: "deep-research",
+    name: "AI Deep Research Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_deep_research_agent",
+    desc: "Multi-step autonomous researcher that plans research strategy, executes parallel searches, evaluates source quality, and produces comprehensive reports with a knowledge graph.",
+    models: ["OpenAI GPT-4o", "Google Gemini"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "tavily-python"],
+    difficulty: "advanced",
+    useCase: "Deep research — when simple search isn't enough. Multi-source, multi-step research with quality evaluation.",
+    agentPrompt: "Build an advanced deep research system that plans a research strategy, searches multiple sources in parallel, evaluates source quality, builds a knowledge graph, and produces a comprehensive report. Reference the awesome-llm-apps deep research agent.",
+    codeSnippet: `<span class="cm"># Multi-step deep research pipeline</span>
+planner = Agent(role=<span class="str">"Research Planner"</span>,
+    instructions=[<span class="str">"Break topic into sub-questions"</span>])
+researcher = Agent(role=<span class="str">"Researcher"</span>,
+    tools=[TavilyTools(), DuckDuckGo()])
+evaluator = Agent(role=<span class="str">"Source Evaluator"</span>,
+    instructions=[<span class="str">"Rate source credibility"</span>])
+writer = Agent(role=<span class="str">"Report Writer"</span>,
+    team=[planner, researcher, evaluator])`
+  },
+  {
+    id: "consultant-agent",
+    name: "AI Consultant Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_consultant_agent",
+    desc: "Strategic business consultant that analyzes company data, market conditions, and competitors to provide actionable business recommendations.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "streamlit"],
+    difficulty: "intermediate",
+    useCase: "Business consulting — AI that analyzes your business situation and provides strategic recommendations.",
+    agentPrompt: "Build a business consulting AI that takes company details, market context, and challenges, then provides strategic analysis and actionable recommendations. Reference the awesome-llm-apps consultant agent.",
+    codeSnippet: `<span class="cm"># Strategic consulting agent</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    instructions=[
+        <span class="str">"Analyze business situation thoroughly"</span>,
+        <span class="str">"Consider market dynamics"</span>,
+        <span class="str">"Provide actionable recommendations"</span>,
+        <span class="str">"Include risk assessment"</span>,
+    ],
+    add_history_to_messages=<span class="num">True</span>,
+)`
+  },
+  {
+    id: "system-architect",
+    name: "AI System Architect Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_system_architect_r1",
+    desc: "Designs complete system architectures from requirements. Generates architecture diagrams, API specs, database schemas, and deployment strategies using reasoning models.",
+    models: ["DeepSeek R1"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "streamlit"],
+    difficulty: "advanced",
+    useCase: "Software architecture — generate complete system designs from requirements, including diagrams and specs.",
+    agentPrompt: "Build a system architecture agent that takes software requirements and generates complete architecture designs including component diagrams, API specs, database schemas, and deployment strategies. Use a reasoning model for deep analysis. Reference the awesome-llm-apps system architect.",
+    codeSnippet: `<span class="cm"># Architecture design with reasoning</span>
+architect = Agent(
+    model=OpenAIChat(id=<span class="str">"deepseek-r1"</span>),
+    instructions=[
+        <span class="str">"Analyze requirements completely"</span>,
+        <span class="str">"Design scalable architecture"</span>,
+        <span class="str">"Include API specifications"</span>,
+        <span class="str">"Plan database schema"</span>,
+        <span class="str">"Suggest deployment strategy"</span>,
+    ],
+)`
+  },
+  {
+    id: "movie-production",
+    name: "AI Movie Production Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_movie_production_agent",
+    desc: "Manages end-to-end film production planning — from script breakdown and casting suggestions to budgeting, scheduling, and location scouting.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "streamlit"],
+    difficulty: "intermediate",
+    useCase: "Creative production — AI-assisted film/video production planning and management.",
+    agentPrompt: "Build a movie production planning agent that takes a script or concept and generates a complete production plan: casting suggestions, budget estimates, shooting schedule, and location requirements. Reference the awesome-llm-apps movie production agent.",
+    codeSnippet: `<span class="cm"># Production planning agent</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    instructions=[
+        <span class="str">"Break down the script into scenes"</span>,
+        <span class="str">"Estimate production budget"</span>,
+        <span class="str">"Create shooting schedule"</span>,
+        <span class="str">"Suggest cast and locations"</span>,
+    ],
+)`
+  },
+  {
+    id: "investment-agent",
+    name: "AI Investment Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_investment_agent",
+    desc: "Analyzes investment opportunities across stocks, crypto, and real estate. Provides portfolio recommendations based on risk tolerance and financial goals.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "yfinance", "streamlit"],
+    difficulty: "intermediate",
+    useCase: "Investment analysis — AI-powered portfolio analysis and investment recommendations across asset classes.",
+    agentPrompt: "Build an investment analysis agent that evaluates stocks, crypto, and other assets based on risk tolerance and goals. It should pull market data, analyze fundamentals, and provide portfolio recommendations. Reference the awesome-llm-apps investment agent.",
+    codeSnippet: `<span class="cm"># Investment analysis with market data</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[YFinanceTools(
+        stock_price=<span class="num">True</span>,
+        analyst_recommendations=<span class="num">True</span>,
+        stock_fundamentals=<span class="num">True</span>,
+    )],
+    instructions=[<span class="str">"Analyze risk/reward ratio"</span>],
+)`
+  },
+  {
+    id: "health-fitness",
+    name: "AI Health & Fitness Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_health_fitness_agent",
+    desc: "Creates personalized workout plans, nutrition guides, and wellness recommendations based on user goals, body type, and health conditions.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Health & wellness — personalized fitness and nutrition planning with AI.",
+    agentPrompt: "Build a health and fitness agent that creates personalized workout plans and nutrition guides based on user goals, fitness level, and any health conditions. Reference the awesome-llm-apps health fitness agent.",
+    codeSnippet: `<span class="cm"># Personalized fitness planning</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    instructions=[
+        <span class="str">"Create personalized workout plan"</span>,
+        <span class="str">"Design nutrition guide"</span>,
+        <span class="str">"Consider user's limitations"</span>,
+        <span class="str">"Include progressive overload"</span>,
+    ],
+)`
+  },
+  {
+    id: "fraud-investigation",
+    name: "AI Fraud Investigation Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_fraud_investigation_agent",
+    desc: "Detects and investigates fraud patterns in transaction data. Identifies anomalies, traces suspicious activity chains, and generates investigation reports.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "pandas"],
+    difficulty: "advanced",
+    useCase: "Fraud detection — analyze transaction patterns, detect anomalies, and generate investigation reports.",
+    agentPrompt: "Build a fraud investigation agent that analyzes transaction data, identifies anomalies and suspicious patterns, traces activity chains, and generates structured investigation reports. Reference the awesome-llm-apps fraud investigation agent.",
+    codeSnippet: `<span class="cm"># Fraud detection pipeline</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[PythonTools()],
+    instructions=[
+        <span class="str">"Analyze transaction patterns"</span>,
+        <span class="str">"Flag statistical anomalies"</span>,
+        <span class="str">"Trace suspicious chains"</span>,
+        <span class="str">"Generate investigation report"</span>,
+    ],
+)`
+  },
+  {
+    id: "journalist-agent",
+    name: "AI Journalist Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_journalist_agent",
+    desc: "Researches topics from multiple sources, fact-checks claims, and writes balanced news articles with proper attribution and journalistic standards.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "newspaper3k"],
+    difficulty: "intermediate",
+    useCase: "Content creation — AI journalist that researches, fact-checks, and writes articles to professional standards.",
+    agentPrompt: "Build an AI journalist that takes a topic, researches it from multiple sources, fact-checks claims, and writes a balanced news article with proper citations. Reference the awesome-llm-apps journalist agent.",
+    codeSnippet: `<span class="cm"># Journalistic research and writing</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[DuckDuckGo(), NewspaperTools()],
+    instructions=[
+        <span class="str">"Research from multiple sources"</span>,
+        <span class="str">"Verify facts before including"</span>,
+        <span class="str">"Write balanced, objective article"</span>,
+        <span class="str">"Include proper attribution"</span>,
+    ],
+)`
+  },
+  {
+    id: "meeting-agent",
+    name: "AI Meeting Agent",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/ai_meeting_agent",
+    desc: "Manages meetings end-to-end: schedules, creates agendas, takes notes during meetings, extracts action items, and sends follow-up summaries.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "openai", "streamlit"],
+    difficulty: "intermediate",
+    useCase: "Productivity — AI meeting assistant that handles scheduling, notes, action items, and follow-ups.",
+    agentPrompt: "Build a meeting management agent that creates agendas, takes notes, extracts action items, and generates follow-up summaries. Reference the awesome-llm-apps meeting agent.",
+    codeSnippet: `<span class="cm"># Meeting management agent</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    instructions=[
+        <span class="str">"Create structured meeting agenda"</span>,
+        <span class="str">"Extract action items with owners"</span>,
+        <span class="str">"Generate concise summary"</span>,
+        <span class="str">"Track follow-up deadlines"</span>,
+    ],
+    storage=SqlAgentStorage(table=<span class="str">"meetings"</span>),
+)`
+  },
+  {
+    id: "research-planner-gemini",
+    name: "AI Research Planner & Executor",
+    category: "Advanced Agents",
+    path: "advanced_ai_agents/single_agent_apps/research_agent_gemini_interaction_api",
+    desc: "Uses Google Gemini's Interactions API for multi-turn research planning and execution. Plans research strategy, executes in phases, and iterates on findings.",
+    models: ["Google Gemini"],
+    frameworks: ["Google ADK"],
+    packages: ["google-generativeai", "google-adk"],
+    difficulty: "advanced",
+    useCase: "Advanced research — multi-phase research with planning, execution, and iterative refinement using Gemini.",
+    agentPrompt: "Build an advanced research system using Google Gemini that plans a research strategy, executes in phases, and iteratively refines findings. Use the Interactions API for multi-turn reasoning. Reference the awesome-llm-apps research planner with Gemini.",
+    codeSnippet: `<span class="cm"># Gemini Interactions API research</span>
+<span class="kw">import</span> google.generativeai <span class="kw">as</span> genai
+
+model = genai.GenerativeModel(<span class="str">"gemini-2.0-flash"</span>)
+chat = model.start_chat()
+
+<span class="cm"># Phase 1: Plan</span>
+plan = chat.send_message(<span class="str">"Plan research on {topic}"</span>)
+<span class="cm"># Phase 2: Execute each step</span>
+<span class="kw">for</span> step <span class="kw">in</span> plan.steps:
+    result = chat.send_message(f<span class="str">"Execute: {step}"</span>)`
+  },
+
+  // ── Multi-Agent Apps ─────────────────────────────────────
+  {
+    id: "home-renovation",
+    name: "AI Home Renovation Agent",
+    category: "Multi-Agent Apps",
+    path: "advanced_ai_agents/multi_agent_apps/ai_home_renovation_agent",
+    desc: "Plans home improvements with multiple specialized agents: designer for aesthetics, contractor for feasibility, budgeter for costs, and a project coordinator.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Home improvement — AI team that designs, estimates, and plans renovation projects.",
+    agentPrompt: "Build a multi-agent home renovation planner with agents for design, contractor feasibility, budget estimation, and project coordination. They should collaborate to produce a complete renovation plan. Reference the awesome-llm-apps home renovation agent.",
+    codeSnippet: `<span class="cm"># Multi-agent renovation team</span>
+designer = Agent(role=<span class="str">"Interior Designer"</span>)
+contractor = Agent(role=<span class="str">"General Contractor"</span>)
+budgeter = Agent(role=<span class="str">"Cost Estimator"</span>)
+
+coordinator = Agent(
+    role=<span class="str">"Project Coordinator"</span>,
+    team=[designer, contractor, budgeter],
+    instructions=[<span class="str">"Coordinate renovation plan"</span>],
+)`
+  },
+  {
+    id: "devpulse-ai",
+    name: "DevPulse AI Signal Intelligence",
+    category: "Multi-Agent Apps",
+    path: "advanced_ai_agents/multi_agent_apps/devpulse_ai",
+    desc: "Multi-agent system that monitors developer ecosystem signals — GitHub trends, npm downloads, Stack Overflow activity — to identify emerging technologies.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "requests"],
+    difficulty: "advanced",
+    useCase: "Market intelligence — track emerging developer tools and technologies before they go mainstream.",
+    agentPrompt: "Build a developer ecosystem intelligence system with multiple agents monitoring GitHub trends, npm/PyPI downloads, and Stack Overflow activity. It should identify emerging technologies and produce weekly reports. Reference the awesome-llm-apps DevPulse AI.",
+    codeSnippet: `<span class="cm"># Signal intelligence agents</span>
+github_agent = Agent(role=<span class="str">"GitHub Trend Monitor"</span>,
+    tools=[GitHubTools()])
+npm_agent = Agent(role=<span class="str">"Package Tracker"</span>,
+    tools=[NPMTools()])
+so_agent = Agent(role=<span class="str">"SO Activity Monitor"</span>,
+    tools=[StackOverflowTools()])
+
+intel = Agent(
+    role=<span class="str">"Signal Synthesizer"</span>,
+    team=[github_agent, npm_agent, so_agent],
+)`
+  },
+  {
+    id: "financial-coach",
+    name: "AI Financial Coach Agent",
+    category: "Multi-Agent Apps",
+    path: "advanced_ai_agents/multi_agent_apps/ai_financial_coach_agent",
+    desc: "Multi-agent financial coaching: budget analyst, investment advisor, and debt strategist work together to create comprehensive personal finance plans.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Personal finance — AI coaching team that helps with budgeting, investing, and debt management.",
+    agentPrompt: "Build a multi-agent financial coaching system with budget analyst, investment advisor, and debt strategist agents that collaborate to create comprehensive personal finance plans. Reference the awesome-llm-apps financial coach agent.",
+    codeSnippet: `<span class="cm"># Financial coaching team</span>
+budget_agent = Agent(role=<span class="str">"Budget Analyst"</span>)
+invest_agent = Agent(role=<span class="str">"Investment Advisor"</span>,
+    tools=[YFinanceTools()])
+debt_agent = Agent(role=<span class="str">"Debt Strategist"</span>)
+
+coach = Agent(
+    role=<span class="str">"Financial Coach"</span>,
+    team=[budget_agent, invest_agent, debt_agent],
+)`
+  },
+  {
+    id: "mental-wellbeing",
+    name: "AI Mental Wellbeing Agent",
+    category: "Multi-Agent Apps",
+    path: "advanced_ai_agents/multi_agent_apps/ai_mental_wellbeing_agent",
+    desc: "Multi-agent mental health support: therapist, mindfulness guide, and crisis assessor work together to provide holistic wellness support.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Mental health — AI wellness team with specialized support agents for different aspects of mental health.",
+    agentPrompt: "Build a mental wellbeing support system with agents for therapeutic conversation, mindfulness exercises, and crisis assessment. They should collaborate to provide holistic support. Reference the awesome-llm-apps mental wellbeing agent.",
+    codeSnippet: `<span class="cm"># Mental health support team</span>
+therapist = Agent(role=<span class="str">"Therapeutic Listener"</span>)
+mindfulness = Agent(role=<span class="str">"Mindfulness Guide"</span>)
+safety = Agent(role=<span class="str">"Safety Assessor"</span>)
+
+wellness = Agent(
+    role=<span class="str">"Wellness Coordinator"</span>,
+    team=[therapist, mindfulness, safety],
+    instructions=[
+        <span class="str">"Prioritize safety assessment"</span>,
+        <span class="str">"Provide empathetic support"</span>,
+    ],
+)`
+  },
+  {
+    id: "self-evolving",
+    name: "AI Self-Evolving Agent",
+    category: "Multi-Agent Apps",
+    path: "advanced_ai_agents/multi_agent_apps/ai_self_evolving_agent",
+    desc: "Agent that improves its own capabilities over time. Tracks performance, identifies weaknesses, generates self-improvement strategies, and updates its behavior.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "Meta-AI — an agent that tracks its performance and iteratively improves its own behavior and instructions.",
+    agentPrompt: "Build a self-evolving agent system that monitors its own performance, identifies areas of weakness, generates improvement strategies, and updates its own instructions over time. Reference the awesome-llm-apps self-evolving agent.",
+    codeSnippet: `<span class="cm"># Self-improvement loop</span>
+performer = Agent(role=<span class="str">"Task Performer"</span>)
+evaluator = Agent(role=<span class="str">"Performance Evaluator"</span>)
+improver = Agent(role=<span class="str">"Strategy Improver"</span>,
+    instructions=[
+        <span class="str">"Analyze failure patterns"</span>,
+        <span class="str">"Generate improved instructions"</span>,
+        <span class="str">"Test improvements before applying"</span>,
+    ])`
+  },
+  {
+    id: "news-podcast",
+    name: "AI News & Podcast Agent",
+    category: "Multi-Agent Apps",
+    path: "advanced_ai_agents/multi_agent_apps/ai_news_and_podcast_agents",
+    desc: "Multi-agent content pipeline: news curator finds stories, summarizer creates digests, and podcast producer generates audio episodes from trending topics.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "requests"],
+    difficulty: "intermediate",
+    useCase: "Content automation — automated news digest and podcast production pipeline from trending topics.",
+    agentPrompt: "Build a multi-agent news and podcast system: one agent curates trending news, another creates summaries, and a third produces podcast scripts and audio. Reference the awesome-llm-apps news and podcast agent.",
+    codeSnippet: `<span class="cm"># News to podcast pipeline</span>
+curator = Agent(role=<span class="str">"News Curator"</span>,
+    tools=[DuckDuckGo()])
+summarizer = Agent(role=<span class="str">"Content Summarizer"</span>)
+producer = Agent(role=<span class="str">"Podcast Producer"</span>,
+    instructions=[<span class="str">"Create engaging script"</span>])
+
+pipeline = Agent(
+    team=[curator, summarizer, producer],
+)`
+  },
+  {
+    id: "product-launch-intel",
+    name: "AI Product Launch Intelligence",
+    category: "Multi-Agent Apps",
+    path: "advanced_ai_agents/multi_agent_apps/product_launch_intelligence_agent",
+    desc: "Coordinates product launch analysis with agents for market research, competitor analysis, pricing strategy, and launch timing optimization.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "Product strategy — AI team that analyzes market timing, competition, and pricing for product launches.",
+    agentPrompt: "Build a product launch intelligence system with agents for market research, competitor analysis, pricing strategy, and launch timing. They should produce a comprehensive go-to-market recommendation. Reference the awesome-llm-apps product launch intelligence agent.",
+    codeSnippet: `<span class="cm"># Product launch analysis team</span>
+market = Agent(role=<span class="str">"Market Researcher"</span>,
+    tools=[DuckDuckGo()])
+competitor = Agent(role=<span class="str">"Competitor Analyst"</span>)
+pricing = Agent(role=<span class="str">"Pricing Strategist"</span>)
+timing = Agent(role=<span class="str">"Launch Timer"</span>)
+
+launch_intel = Agent(
+    role=<span class="str">"Launch Coordinator"</span>,
+    team=[market, competitor, pricing, timing],
+)`
+  },
+
+  // ── Agent Teams ──────────────────────────────────────────
+  {
+    id: "vc-due-diligence",
+    name: "AI VC Due Diligence Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_vc_due_diligence_agent_team",
+    desc: "Venture capital due diligence team: market analyst, financial auditor, legal reviewer, and technical evaluator assess startup investment opportunities.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "Investment due diligence — comprehensive AI-powered startup evaluation for investors.",
+    agentPrompt: "Build a VC due diligence team with agents for market analysis, financial audit, legal review, and technical evaluation. They should produce a comprehensive investment memo. Reference the awesome-llm-apps VC due diligence team.",
+    codeSnippet: `<span class="cm"># VC due diligence team</span>
+market = Agent(role=<span class="str">"Market Analyst"</span>)
+financial = Agent(role=<span class="str">"Financial Auditor"</span>)
+legal = Agent(role=<span class="str">"Legal Reviewer"</span>)
+technical = Agent(role=<span class="str">"Technical Evaluator"</span>)
+
+dd_team = Agent(
+    role=<span class="str">"Due Diligence Lead"</span>,
+    team=[market, financial, legal, technical],
+)`
+  },
+  {
+    id: "finance-team",
+    name: "AI Finance Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_finance_agent_team",
+    desc: "Financial analysis team: portfolio manager, risk analyst, macro economist, and quant work together for comprehensive financial intelligence.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "yfinance"],
+    difficulty: "intermediate",
+    useCase: "Financial intelligence — team of specialized finance agents for comprehensive market analysis.",
+    agentPrompt: "Build a finance agent team with portfolio manager, risk analyst, macro economist, and quant agents. They should collaborate on comprehensive financial analysis. Reference the awesome-llm-apps finance agent team.",
+    codeSnippet: `<span class="cm"># Finance agent team</span>
+portfolio = Agent(role=<span class="str">"Portfolio Manager"</span>,
+    tools=[YFinanceTools()])
+risk = Agent(role=<span class="str">"Risk Analyst"</span>)
+macro = Agent(role=<span class="str">"Macro Economist"</span>)
+
+team = Agent(role=<span class="str">"Chief Strategist"</span>,
+    team=[portfolio, risk, macro])`
+  },
+  {
+    id: "game-design-team",
+    name: "AI Game Design Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_game_design_agent_team",
+    desc: "Game development team: game designer, narrative writer, level designer, and balance tester collaborate to create game design documents.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Game development — AI team that creates complete game design documents with mechanics, story, and balance.",
+    agentPrompt: "Build a game design team with agents for game mechanics, narrative design, level layout, and balance testing. They should produce a complete game design document. Reference the awesome-llm-apps game design team.",
+    codeSnippet: `<span class="cm"># Game design team</span>
+designer = Agent(role=<span class="str">"Game Designer"</span>)
+writer = Agent(role=<span class="str">"Narrative Writer"</span>)
+level = Agent(role=<span class="str">"Level Designer"</span>)
+balance = Agent(role=<span class="str">"Balance Tester"</span>)
+
+team = Agent(role=<span class="str">"Creative Director"</span>,
+    team=[designer, writer, level, balance])`
+  },
+  {
+    id: "legal-team",
+    name: "AI Legal Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_legal_agent_team",
+    desc: "Legal analysis team: contract reviewer, compliance officer, and litigation strategist collaborate on legal matters. Cloud and local model options.",
+    models: ["OpenAI GPT-4o", "Local LLMs"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "Legal AI — team of agents for contract review, compliance checking, and legal strategy.",
+    agentPrompt: "Build a legal agent team with contract reviewer, compliance officer, and litigation strategist. They should be able to analyze contracts, check compliance, and advise on legal strategy. Reference the awesome-llm-apps legal agent team.",
+    codeSnippet: `<span class="cm"># Legal analysis team</span>
+contracts = Agent(role=<span class="str">"Contract Reviewer"</span>)
+compliance = Agent(role=<span class="str">"Compliance Officer"</span>)
+litigation = Agent(role=<span class="str">"Litigation Strategist"</span>)
+
+legal = Agent(role=<span class="str">"Legal Director"</span>,
+    team=[contracts, compliance, litigation])`
+  },
+  {
+    id: "recruitment-team",
+    name: "AI Recruitment Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_recruitment_agent_team",
+    desc: "Recruitment team: sourcer finds candidates, screener evaluates resumes, interviewer designs questions, and coordinator manages the hiring pipeline.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "HR automation — AI recruitment pipeline from sourcing to screening to interview preparation.",
+    agentPrompt: "Build a recruitment team with agents for candidate sourcing, resume screening, interview question design, and pipeline coordination. Reference the awesome-llm-apps recruitment agent team.",
+    codeSnippet: `<span class="cm"># Recruitment pipeline team</span>
+sourcer = Agent(role=<span class="str">"Candidate Sourcer"</span>,
+    tools=[DuckDuckGo()])
+screener = Agent(role=<span class="str">"Resume Screener"</span>)
+interviewer = Agent(role=<span class="str">"Interview Designer"</span>)
+
+hiring = Agent(role=<span class="str">"Hiring Manager"</span>,
+    team=[sourcer, screener, interviewer])`
+  },
+  {
+    id: "real-estate-team",
+    name: "AI Real Estate Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_real_estate_agent_team",
+    desc: "Real estate analysis team: market analyst, property evaluator, mortgage calculator, and neighborhood researcher work together on property decisions.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Real estate — AI team for property analysis, market evaluation, and investment decisions.",
+    agentPrompt: "Build a real estate analysis team with agents for market analysis, property evaluation, mortgage calculation, and neighborhood research. Reference the awesome-llm-apps real estate team.",
+    codeSnippet: `<span class="cm"># Real estate analysis team</span>
+market = Agent(role=<span class="str">"Market Analyst"</span>)
+property = Agent(role=<span class="str">"Property Evaluator"</span>)
+mortgage = Agent(role=<span class="str">"Mortgage Calculator"</span>)
+neighborhood = Agent(role=<span class="str">"Area Researcher"</span>)
+
+team = Agent(role=<span class="str">"Real Estate Advisor"</span>,
+    team=[market, property, mortgage, neighborhood])`
+  },
+  {
+    id: "sales-intelligence-team",
+    name: "AI Sales Intelligence Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_sales_intelligence_agent_team",
+    desc: "Sales team: lead researcher, email writer, objection handler, and deal closer collaborate to optimize the sales pipeline.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Sales automation — AI sales team that researches leads, writes outreach, handles objections, and closes deals.",
+    agentPrompt: "Build a sales intelligence team with agents for lead research, email outreach, objection handling, and deal closing. They should work together to optimize the sales pipeline. Reference the awesome-llm-apps sales intelligence team.",
+    codeSnippet: `<span class="cm"># Sales intelligence team</span>
+researcher = Agent(role=<span class="str">"Lead Researcher"</span>,
+    tools=[DuckDuckGo()])
+email = Agent(role=<span class="str">"Email Writer"</span>)
+objection = Agent(role=<span class="str">"Objection Handler"</span>)
+
+sales = Agent(role=<span class="str">"Sales Manager"</span>,
+    team=[researcher, email, objection])`
+  },
+  {
+    id: "services-agency",
+    name: "AI Services Agency (CrewAI)",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_services_agency",
+    desc: "Full-service AI agency built with CrewAI: project manager, developer, designer, and QA engineer deliver complete projects.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["CrewAI"],
+    packages: ["crewai", "openai"],
+    difficulty: "advanced",
+    useCase: "CrewAI example — build a complete AI services agency with multiple specialized roles using the CrewAI framework.",
+    agentPrompt: "Build an AI services agency using CrewAI with project manager, developer, designer, and QA agents that collaborate to deliver complete projects. Reference the awesome-llm-apps services agency with CrewAI.",
+    codeSnippet: `<span class="cm"># CrewAI services agency</span>
+<span class="kw">from</span> crewai <span class="kw">import</span> Agent, Task, Crew
+
+pm = Agent(role=<span class="str">"Project Manager"</span>)
+dev = Agent(role=<span class="str">"Developer"</span>)
+designer = Agent(role=<span class="str">"Designer"</span>)
+qa = Agent(role=<span class="str">"QA Engineer"</span>)
+
+crew = Crew(agents=[pm, dev, designer, qa],
+    tasks=[...], verbose=<span class="num">True</span>)`
+  },
+  {
+    id: "teaching-team",
+    name: "AI Teaching Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_teaching_agent_team",
+    desc: "Educational team: curriculum planner, content creator, quiz maker, and tutor deliver personalized learning experiences.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Education — AI teaching team that creates curricula, content, quizzes, and personalized tutoring.",
+    agentPrompt: "Build a teaching agent team with curriculum planner, content creator, quiz maker, and personal tutor agents. They should create complete learning paths for any subject. Reference the awesome-llm-apps teaching agent team.",
+    codeSnippet: `<span class="cm"># Teaching agent team</span>
+curriculum = Agent(role=<span class="str">"Curriculum Planner"</span>)
+content = Agent(role=<span class="str">"Content Creator"</span>)
+quiz = Agent(role=<span class="str">"Quiz Designer"</span>)
+tutor = Agent(role=<span class="str">"Personal Tutor"</span>)
+
+teacher = Agent(role=<span class="str">"Head of Learning"</span>,
+    team=[curriculum, content, quiz, tutor])`
+  },
+  {
+    id: "coding-agent-team",
+    name: "Multimodal Coding Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/multimodal_coding_agent_team",
+    desc: "Coding team: architect designs systems, coder writes code, reviewer catches bugs, and documenter writes docs. Handles images of mockups too.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "Software development — AI coding team that architects, codes, reviews, and documents from specs or mockups.",
+    agentPrompt: "Build a multimodal coding team that can take a mockup image or text spec, architect the solution, write code, review for bugs, and generate documentation. Reference the awesome-llm-apps multimodal coding team.",
+    codeSnippet: `<span class="cm"># Coding agent team</span>
+architect = Agent(role=<span class="str">"System Architect"</span>)
+coder = Agent(role=<span class="str">"Developer"</span>,
+    tools=[PythonTools()])
+reviewer = Agent(role=<span class="str">"Code Reviewer"</span>)
+docs = Agent(role=<span class="str">"Technical Writer"</span>)
+
+lead = Agent(role=<span class="str">"Tech Lead"</span>,
+    team=[architect, coder, reviewer, docs])`
+  },
+  {
+    id: "design-agent-team",
+    name: "Multimodal Design Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/multimodal_design_agent_team",
+    desc: "Design team: UX researcher, visual designer, copywriter, and accessibility expert collaborate on complete design projects.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Design — AI design team for UX research, visual design, copywriting, and accessibility review.",
+    agentPrompt: "Build a design agent team with UX researcher, visual designer, copywriter, and accessibility expert agents. They should produce complete design deliverables. Reference the awesome-llm-apps design agent team.",
+    codeSnippet: `<span class="cm"># Design team</span>
+ux = Agent(role=<span class="str">"UX Researcher"</span>)
+visual = Agent(role=<span class="str">"Visual Designer"</span>)
+copy = Agent(role=<span class="str">"Copywriter"</span>)
+a11y = Agent(role=<span class="str">"Accessibility Expert"</span>)
+
+design = Agent(role=<span class="str">"Design Director"</span>,
+    team=[ux, visual, copy, a11y])`
+  },
+  {
+    id: "uiux-feedback-team",
+    name: "UI/UX Feedback Agent Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/multimodal_uiux_feedback_agent_team",
+    desc: "Multimodal UI/UX evaluation team: takes screenshots of interfaces and provides structured feedback on usability, accessibility, and visual design.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Design review — upload UI screenshots and get structured feedback on usability, accessibility, and aesthetics.",
+    agentPrompt: "Build a UI/UX feedback system that takes screenshots of interfaces and provides structured critique on usability, accessibility, visual hierarchy, and consistency. Reference the awesome-llm-apps UI/UX feedback team.",
+    codeSnippet: `<span class="cm"># UI/UX evaluation team</span>
+usability = Agent(role=<span class="str">"Usability Expert"</span>)
+a11y = Agent(role=<span class="str">"Accessibility Auditor"</span>)
+visual = Agent(role=<span class="str">"Visual Critic"</span>)
+
+feedback = Agent(role=<span class="str">"UX Director"</span>,
+    team=[usability, a11y, visual])
+
+<span class="cm"># Send screenshot for review</span>
+result = feedback.run(<span class="str">"Review this UI"</span>,
+    images=[<span class="str">"screenshot.png"</span>])`
+  },
+  {
+    id: "travel-planner-team",
+    name: "AI Travel Planner Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_travel_planner_agent_team",
+    desc: "Travel planning team: destination researcher, accommodation finder, activity planner, and budget optimizer create comprehensive trip plans.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Travel — AI team that handles every aspect of trip planning from research to booking recommendations.",
+    agentPrompt: "Build a travel planning team with agents for destination research, accommodation finding, activity planning, and budget optimization. Reference the awesome-llm-apps travel planner team.",
+    codeSnippet: `<span class="cm"># Travel planning team</span>
+destination = Agent(role=<span class="str">"Destination Expert"</span>,
+    tools=[DuckDuckGo()])
+hotel = Agent(role=<span class="str">"Accommodation Finder"</span>)
+activity = Agent(role=<span class="str">"Activity Planner"</span>)
+budget = Agent(role=<span class="str">"Budget Optimizer"</span>)
+
+planner = Agent(role=<span class="str">"Trip Planner"</span>,
+    team=[destination, hotel, activity, budget])`
+  },
+  {
+    id: "competitor-intel-team",
+    name: "AI Competitor Intelligence Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ai_competitor_intelligence_agent_team",
+    desc: "Competitive intelligence team: web monitor, social listener, product analyst, and strategy advisor track and analyze competitors.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "Business intelligence — comprehensive competitor monitoring and analysis across web, social, and product dimensions.",
+    agentPrompt: "Build a competitor intelligence team with agents for web monitoring, social listening, product analysis, and strategic recommendations. Reference the awesome-llm-apps competitor intelligence team.",
+    codeSnippet: `<span class="cm"># Competitor intelligence team</span>
+web = Agent(role=<span class="str">"Web Monitor"</span>,
+    tools=[FirecrawlTools()])
+social = Agent(role=<span class="str">"Social Listener"</span>)
+product = Agent(role=<span class="str">"Product Analyst"</span>)
+
+intel = Agent(role=<span class="str">"Strategy Advisor"</span>,
+    team=[web, social, product])`
+  },
+  {
+    id: "adaptive-research-team",
+    name: "AG2 Adaptive Research Team",
+    category: "Agent Teams",
+    path: "advanced_ai_agents/multi_agent_apps/agent_teams/ag2_adaptive_research_team",
+    desc: "Built with the AG2 (AutoGen 2) framework. Adaptive research team that adjusts research strategy based on intermediate findings.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["AG2 / AutoGen"],
+    packages: ["ag2", "openai"],
+    difficulty: "advanced",
+    useCase: "AG2 framework example — adaptive multi-agent research using AutoGen 2 with dynamic strategy adjustment.",
+    agentPrompt: "Build an adaptive research team using the AG2 (AutoGen 2) framework. Agents should adjust their research strategy dynamically based on intermediate findings. Reference the awesome-llm-apps AG2 adaptive research team.",
+    codeSnippet: `<span class="cm"># AG2 adaptive research</span>
+<span class="kw">from</span> ag2 <span class="kw">import</span> Agent, GroupChat
+
+researcher = Agent(name=<span class="str">"Researcher"</span>)
+critic = Agent(name=<span class="str">"Critic"</span>)
+planner = Agent(name=<span class="str">"Planner"</span>)
+
+chat = GroupChat(
+    agents=[researcher, critic, planner],
+    messages=[], max_round=<span class="num">10</span>,
+)`
+  },
+
+  // ── Game Playing Agents ──────────────────────────────────
+  {
+    id: "chess-agent",
+    name: "AI Chess Agent",
+    category: "Game Agents",
+    path: "advanced_ai_agents/autonomous_game_playing_agent_apps/ai_chess_agent",
+    desc: "Plays chess autonomously using LLM reasoning. Evaluates board positions, considers multiple move sequences, and explains its strategic thinking.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "python-chess"],
+    difficulty: "advanced",
+    useCase: "Game AI — chess-playing agent that explains its reasoning and strategic thinking.",
+    agentPrompt: "Build an AI chess agent that can play chess, evaluate board positions, and explain its strategic reasoning for each move. Reference the awesome-llm-apps chess agent.",
+    codeSnippet: `<span class="cm"># Chess playing agent</span>
+<span class="kw">import</span> chess
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    instructions=[
+        <span class="str">"Evaluate the board position"</span>,
+        <span class="str">"Consider 3-move sequences"</span>,
+        <span class="str">"Explain your reasoning"</span>,
+    ],
+)
+
+board = chess.Board()
+move = agent.run(f<span class="str">"Best move for: {board.fen()}"</span>)`
+  },
+  {
+    id: "3d-pygame",
+    name: "AI 3D Pygame Agent",
+    category: "Game Agents",
+    path: "advanced_ai_agents/autonomous_game_playing_agent_apps/ai_3dpygame_r1",
+    desc: "AI agent that plays 3D games built with Pygame. Uses reasoning to understand 3D game states and make strategic decisions.",
+    models: ["DeepSeek R1"],
+    frameworks: ["Agno"],
+    packages: ["agno", "pygame", "openai"],
+    difficulty: "advanced",
+    useCase: "Game AI — agent that plays 3D games by reasoning about spatial relationships and game states.",
+    agentPrompt: "Build an AI agent that plays 3D Pygame games by reasoning about the 3D game state and making strategic decisions. Reference the awesome-llm-apps 3D Pygame agent.",
+    codeSnippet: `<span class="cm"># 3D game-playing agent</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"deepseek-r1"</span>),
+    instructions=[
+        <span class="str">"Analyze 3D game state"</span>,
+        <span class="str">"Consider spatial relationships"</span>,
+        <span class="str">"Choose optimal action"</span>,
+    ],
+)`
+  },
+  {
+    id: "tic-tac-toe",
+    name: "AI Tic-Tac-Toe Agent",
+    category: "Game Agents",
+    path: "advanced_ai_agents/autonomous_game_playing_agent_apps/ai_tic_tac_toe_agent",
+    desc: "Simple but instructive: AI plays tic-tac-toe using LLM reasoning. Great starter project for understanding game-playing AI agents.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "beginner",
+    useCase: "Learning project — simplest game-playing agent. Great for understanding how LLMs reason about games.",
+    agentPrompt: "Build a tic-tac-toe playing agent as a learning exercise for game AI. The agent should reason about board state and make optimal moves. Reference the awesome-llm-apps tic-tac-toe agent.",
+    codeSnippet: `<span class="cm"># Simple game agent</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    instructions=[
+        <span class="str">"You are playing tic-tac-toe as X"</span>,
+        <span class="str">"Analyze the board state"</span>,
+        <span class="str">"Choose the optimal move"</span>,
+        <span class="str">"Respond with row,col only"</span>,
+    ],
+)`
+  },
+
+  // ── Voice AI Agents ──────────────────────────────────────
+  {
+    id: "audio-tour",
+    name: "AI Audio Tour Agent",
+    category: "Voice AI",
+    path: "voice_ai_agents/ai_audio_tour_agent",
+    desc: "Creates guided audio tours for any location. Researches points of interest, writes engaging narration scripts, and generates spoken audio guides.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "elevenlabs"],
+    difficulty: "intermediate",
+    useCase: "Audio content — generate guided audio tours for locations, museums, or historical sites.",
+    agentPrompt: "Build an audio tour generator that takes a location, researches points of interest, writes engaging narration, and generates spoken audio. Reference the awesome-llm-apps audio tour agent.",
+    codeSnippet: `<span class="cm"># Audio tour generation</span>
+<span class="kw">from</span> agno.tools.eleven_labs <span class="kw">import</span> ElevenLabsTools
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[ElevenLabsTools(), DuckDuckGo()],
+    instructions=[
+        <span class="str">"Research the location"</span>,
+        <span class="str">"Write engaging narration"</span>,
+        <span class="str">"Generate audio for each stop"</span>,
+    ],
+)`
+  },
+  {
+    id: "customer-support-voice",
+    name: "Customer Support Voice Agent",
+    category: "Voice AI",
+    path: "voice_ai_agents/customer_support_voice_agent",
+    desc: "Voice-based customer support agent that handles phone-like interactions. Understands speech, looks up account info, resolves issues, and responds naturally.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "elevenlabs"],
+    difficulty: "intermediate",
+    useCase: "Customer service — voice AI that handles support calls naturally with account lookup and issue resolution.",
+    agentPrompt: "Build a voice-based customer support agent that handles spoken interactions, looks up account information, resolves common issues, and responds with natural speech. Reference the awesome-llm-apps customer support voice agent.",
+    codeSnippet: `<span class="cm"># Voice customer support</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[AccountLookup(), TicketSystem()],
+    instructions=[
+        <span class="str">"Greet the customer warmly"</span>,
+        <span class="str">"Identify the issue quickly"</span>,
+        <span class="str">"Resolve or escalate"</span>,
+        <span class="str">"Keep responses concise for voice"</span>,
+    ],
+)`
+  },
+  {
+    id: "voice-rag",
+    name: "Voice RAG Agent",
+    category: "Voice AI",
+    path: "voice_ai_agents/voice_rag_openaisdk",
+    desc: "Combines voice interaction with RAG retrieval. Ask questions by voice, the agent searches a knowledge base and responds with spoken answers.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["OpenAI SDK"],
+    packages: ["openai", "qdrant-client"],
+    difficulty: "advanced",
+    useCase: "Voice + Knowledge — ask questions by voice and get spoken answers from a custom knowledge base.",
+    agentPrompt: "Build a voice RAG system that accepts spoken questions, searches a vector knowledge base, and responds with spoken answers using OpenAI's SDK. Reference the awesome-llm-apps voice RAG agent.",
+    codeSnippet: `<span class="cm"># Voice + RAG pipeline</span>
+<span class="kw">from</span> openai <span class="kw">import</span> OpenAI
+<span class="kw">from</span> qdrant_client <span class="kw">import</span> QdrantClient
+
+<span class="cm"># Speech → Text → RAG → Text → Speech</span>
+transcript = openai.audio.transcriptions.create(
+    model=<span class="str">"whisper-1"</span>, file=audio)
+results = qdrant.search(query=transcript.text)
+answer = openai.chat.completions.create(
+    model=<span class="str">"gpt-4o"</span>,
+    messages=[{<span class="str">"role"</span>: <span class="str">"user"</span>,
+        <span class="str">"content"</span>: f<span class="str">"{results} Q: {transcript.text}"</span>}])
+speech = openai.audio.speech.create(
+    model=<span class="str">"tts-1"</span>, input=answer.content)`
+  },
+
+  // ── MCP AI Agents ────────────────────────────────────────
+  {
+    id: "browser-mcp",
+    name: "Browser MCP Agent",
+    category: "MCP Agents",
+    path: "mcp_ai_agents/browser_mcp_agent",
+    desc: "Uses Model Context Protocol to automate browser tasks. Navigates websites, fills forms, clicks buttons, and extracts data through a standardized interface.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["MCP"],
+    packages: ["mcp", "openai", "playwright"],
+    difficulty: "advanced",
+    useCase: "Browser automation — standardized browser control through MCP for web tasks, form filling, and data extraction.",
+    agentPrompt: "Build a browser automation agent using the Model Context Protocol (MCP). It should navigate websites, fill forms, click buttons, and extract data. Reference the awesome-llm-apps browser MCP agent.",
+    codeSnippet: `<span class="cm"># MCP browser automation</span>
+<span class="kw">from</span> mcp <span class="kw">import</span> MCPClient
+
+client = MCPClient()
+browser = client.connect(<span class="str">"browser-mcp-server"</span>)
+
+<span class="cm"># Navigate and interact</span>
+browser.navigate(<span class="str">"https://example.com"</span>)
+browser.fill(<span class="str">"#search"</span>, <span class="str">"query"</span>)
+results = browser.extract(<span class="str">".results"</span>)`
+  },
+  {
+    id: "github-mcp",
+    name: "GitHub MCP Agent",
+    category: "MCP Agents",
+    path: "mcp_ai_agents/github_mcp_agent",
+    desc: "Manages GitHub repositories through MCP — creates issues, reviews PRs, manages releases, and automates project workflows.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["MCP"],
+    packages: ["mcp", "openai"],
+    difficulty: "intermediate",
+    useCase: "GitHub automation — manage repos, issues, PRs, and releases through a standardized AI interface.",
+    agentPrompt: "Build a GitHub management agent using MCP that can create issues, review pull requests, manage releases, and automate project workflows. Reference the awesome-llm-apps GitHub MCP agent.",
+    codeSnippet: `<span class="cm"># GitHub operations via MCP</span>
+<span class="kw">from</span> mcp <span class="kw">import</span> MCPClient
+
+github = MCPClient().connect(<span class="str">"github-mcp-server"</span>)
+
+<span class="cm"># Manage repo</span>
+github.create_issue(title=<span class="str">"Bug fix"</span>, body=<span class="str">"..."</span>)
+github.review_pr(pr_number=<span class="num">42</span>)
+github.create_release(tag=<span class="str">"v1.0.0"</span>)`
+  },
+  {
+    id: "notion-mcp",
+    name: "Notion MCP Agent",
+    category: "MCP Agents",
+    path: "mcp_ai_agents/notion_mcp_agent",
+    desc: "Integrates with Notion workspaces through MCP. Creates pages, updates databases, manages tasks, and organizes knowledge bases.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["MCP"],
+    packages: ["mcp", "openai"],
+    difficulty: "intermediate",
+    useCase: "Notion automation — manage pages, databases, and tasks in Notion through AI.",
+    agentPrompt: "Build a Notion integration agent using MCP that can create pages, update databases, manage tasks, and organize content in Notion workspaces. Reference the awesome-llm-apps Notion MCP agent.",
+    codeSnippet: `<span class="cm"># Notion workspace via MCP</span>
+notion = MCPClient().connect(<span class="str">"notion-mcp-server"</span>)
+
+notion.create_page(
+    parent=<span class="str">"Projects DB"</span>,
+    title=<span class="str">"New Feature"</span>,
+    properties={<span class="str">"Status"</span>: <span class="str">"In Progress"</span>}
+)`
+  },
+  {
+    id: "multi-mcp-router",
+    name: "Multi-MCP Agent Router",
+    category: "MCP Agents",
+    path: "mcp_ai_agents/multi_mcp_agent_router",
+    desc: "Routes requests across multiple MCP servers. Intelligently decides which tool (browser, GitHub, Notion, etc.) to use for each task.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["MCP"],
+    packages: ["mcp", "openai"],
+    difficulty: "advanced",
+    useCase: "MCP orchestration — single agent that routes tasks to the right MCP tool server automatically.",
+    agentPrompt: "Build a multi-MCP router that connects to multiple MCP servers (browser, GitHub, Notion) and intelligently routes each request to the right tool. Reference the awesome-llm-apps multi-MCP router.",
+    codeSnippet: `<span class="cm"># Multi-MCP routing</span>
+browser = MCPClient().connect(<span class="str">"browser-server"</span>)
+github = MCPClient().connect(<span class="str">"github-server"</span>)
+notion = MCPClient().connect(<span class="str">"notion-server"</span>)
+
+router = Agent(
+    tools=[browser.tools, github.tools, notion.tools],
+    instructions=[<span class="str">"Route to the right tool"</span>],
+)`
+  },
+  {
+    id: "travel-mcp",
+    name: "AI Travel Planner MCP Agent",
+    category: "MCP Agents",
+    path: "mcp_ai_agents/ai_travel_planner_mcp_agent_team",
+    desc: "Travel planning through MCP — searches flights, books hotels, and creates itineraries using standardized tool interfaces.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["MCP"],
+    packages: ["mcp", "openai"],
+    difficulty: "intermediate",
+    useCase: "Travel + MCP — plan trips using MCP-connected booking and search services.",
+    agentPrompt: "Build a travel planning agent using MCP that searches flights, finds hotels, and creates itineraries through standardized MCP tool interfaces. Reference the awesome-llm-apps travel MCP agent.",
+    codeSnippet: `<span class="cm"># Travel planning via MCP</span>
+flights = MCPClient().connect(<span class="str">"flights-server"</span>)
+hotels = MCPClient().connect(<span class="str">"hotels-server"</span>)
+
+planner = Agent(
+    tools=[flights.tools, hotels.tools],
+    instructions=[
+        <span class="str">"Search for best flights"</span>,
+        <span class="str">"Find accommodation options"</span>,
+        <span class="str">"Create day-by-day itinerary"</span>,
+    ],
+)`
+  },
+
+  // ── RAG Tutorials ────────────────────────────────────────
+  {
+    id: "rag-chain",
+    name: "Basic RAG Chain",
+    category: "RAG",
+    path: "rag_tutorials/rag_chain",
+    desc: "Foundational RAG implementation: chunk documents, create embeddings, store in vector DB, and retrieve relevant context for LLM responses.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["LangChain"],
+    packages: ["langchain", "openai", "chromadb"],
+    difficulty: "beginner",
+    useCase: "Foundation — start here to understand RAG basics. Document chunking, embeddings, vector search, augmented generation.",
+    agentPrompt: "Build a basic RAG system that chunks documents, creates embeddings, stores them in a vector database, and retrieves relevant context to augment LLM responses. Reference the awesome-llm-apps basic RAG chain tutorial.",
+    codeSnippet: `<span class="cm"># Basic RAG pipeline</span>
+<span class="kw">from</span> langchain.text_splitter <span class="kw">import</span> RecursiveCharacterTextSplitter
+<span class="kw">from</span> langchain.vectorstores <span class="kw">import</span> Chroma
+
+<span class="cm"># Chunk → Embed → Store → Retrieve → Generate</span>
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=<span class="num">1000</span>, chunk_overlap=<span class="num">200</span>)
+chunks = splitter.split_documents(docs)
+vectorstore = Chroma.from_documents(chunks, embeddings)
+retriever = vectorstore.as_retriever(k=<span class="num">4</span>)`
+  },
+  {
+    id: "agentic-rag",
+    name: "Agentic RAG with Reasoning",
+    category: "RAG",
+    path: "rag_tutorials/agentic_rag_with_reasoning",
+    desc: "RAG system where the agent reasons about what to retrieve, evaluates results, and iteratively refines queries until it finds the right information.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "qdrant-client"],
+    difficulty: "intermediate",
+    useCase: "Smart retrieval — agent that reasons about what to search for and iteratively refines until finding the answer.",
+    agentPrompt: "Build an agentic RAG system where the AI reasons about what to retrieve, evaluates search results, and iteratively refines its queries. Reference the awesome-llm-apps agentic RAG with reasoning tutorial.",
+    codeSnippet: `<span class="cm"># Agentic RAG with reasoning loop</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[QdrantTools(collection=<span class="str">"docs"</span>)],
+    instructions=[
+        <span class="str">"Reason about what to search"</span>,
+        <span class="str">"Evaluate retrieved results"</span>,
+        <span class="str">"Refine query if needed"</span>,
+        <span class="str">"Synthesize final answer"</span>,
+    ],
+)`
+  },
+  {
+    id: "corrective-rag",
+    name: "Corrective RAG (CRAG)",
+    category: "RAG",
+    path: "rag_tutorials/corrective_rag",
+    desc: "Self-correcting RAG that evaluates retrieval quality and falls back to web search when local documents are insufficient.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "tavily-python"],
+    difficulty: "intermediate",
+    useCase: "Reliable RAG — system that self-corrects by falling back to web search when local retrieval fails.",
+    agentPrompt: "Build a corrective RAG system that evaluates retrieval quality and automatically falls back to web search when local documents are insufficient. Reference the awesome-llm-apps CRAG tutorial.",
+    codeSnippet: `<span class="cm"># Corrective RAG with fallback</span>
+agent = Agent(
+    tools=[VectorDBTool(), TavilySearch()],
+    instructions=[
+        <span class="str">"Search local knowledge base first"</span>,
+        <span class="str">"Evaluate relevance of results"</span>,
+        <span class="str">"If low relevance, search the web"</span>,
+        <span class="str">"Combine sources for final answer"</span>,
+    ],
+)`
+  },
+  {
+    id: "autonomous-rag",
+    name: "Autonomous RAG",
+    category: "RAG",
+    path: "rag_tutorials/autonomous_rag",
+    desc: "Fully autonomous RAG agent that decides when to retrieve, what sources to use, and when it has enough information to answer — without hard-coded pipelines.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "Autonomous retrieval — no pipeline, the agent decides when and how to retrieve information dynamically.",
+    agentPrompt: "Build a fully autonomous RAG agent that dynamically decides when to retrieve, from which sources, and when it has enough info to answer. No hard-coded retrieval pipeline. Reference the awesome-llm-apps autonomous RAG tutorial.",
+    codeSnippet: `<span class="cm"># Autonomous retrieval decisions</span>
+agent = Agent(
+    tools=[
+        VectorSearch(), WebSearch(),
+        SQLQuery(), FileReader()
+    ],
+    instructions=[
+        <span class="str">"Decide if you need more info"</span>,
+        <span class="str">"Choose the best source"</span>,
+        <span class="str">"Stop when confident"</span>,
+    ],
+)`
+  },
+  {
+    id: "hybrid-search-rag",
+    name: "Hybrid Search RAG",
+    category: "RAG",
+    path: "rag_tutorials/hybrid_search_rag",
+    desc: "Combines dense vector search with sparse keyword search (BM25) for more robust retrieval. Best of both semantic and lexical matching.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "qdrant-client"],
+    difficulty: "intermediate",
+    useCase: "Better retrieval — combine semantic search with keyword search for more accurate document retrieval.",
+    agentPrompt: "Build a hybrid search RAG system that combines dense vector search with sparse BM25 keyword search for more robust retrieval. Reference the awesome-llm-apps hybrid search RAG tutorial.",
+    codeSnippet: `<span class="cm"># Hybrid search: vector + BM25</span>
+<span class="cm"># Dense (semantic) + Sparse (keyword) retrieval</span>
+vector_results = qdrant.search(
+    query_vector=embed(query), limit=<span class="num">5</span>)
+bm25_results = bm25_search(query, limit=<span class="num">5</span>)
+
+<span class="cm"># Reciprocal rank fusion</span>
+merged = rrf_merge(vector_results, bm25_results)`
+  },
+  {
+    id: "local-rag",
+    name: "Local RAG Agent",
+    category: "RAG",
+    path: "rag_tutorials/local_rag_agent",
+    desc: "Fully local RAG pipeline using open-source models. No API keys needed — runs entirely on your machine with Ollama.",
+    models: ["Local LLMs (Ollama)"],
+    frameworks: ["Agno"],
+    packages: ["agno", "ollama", "chromadb"],
+    difficulty: "beginner",
+    useCase: "Privacy-first RAG — run everything locally with no data leaving your machine. Great for sensitive documents.",
+    agentPrompt: "Build a fully local RAG system using Ollama and open-source models. No API keys, everything runs on the local machine. Reference the awesome-llm-apps local RAG agent tutorial.",
+    codeSnippet: `<span class="cm"># Fully local RAG — no API keys</span>
+<span class="kw">from</span> agno.models.ollama <span class="kw">import</span> Ollama
+
+agent = Agent(
+    model=Ollama(id=<span class="str">"llama3.1"</span>),
+    tools=[ChromaDBTools(collection=<span class="str">"docs"</span>)],
+    embedder=OllamaEmbedder(),  <span class="cm"># local embeddings</span>
+)`
+  },
+  {
+    id: "llama-local-rag",
+    name: "Llama 3.1 Local RAG",
+    category: "RAG",
+    path: "rag_tutorials/llama3.1_local_rag",
+    desc: "RAG powered by Meta's Llama 3.1 running locally. Optimized for Llama's instruction format with local vector storage.",
+    models: ["Meta Llama 3.1"],
+    frameworks: ["Agno"],
+    packages: ["agno", "ollama"],
+    difficulty: "beginner",
+    useCase: "Llama-powered RAG — use Meta's open-source Llama model for local, private document Q&A.",
+    agentPrompt: "Build a RAG system using Llama 3.1 running locally via Ollama. Optimize for Llama's instruction format. Reference the awesome-llm-apps Llama 3.1 local RAG tutorial.",
+    codeSnippet: `<span class="cm"># Llama 3.1 local RAG</span>
+agent = Agent(
+    model=Ollama(id=<span class="str">"llama3.1:8b"</span>),
+    tools=[VectorDBTools()],
+    instructions=[
+        <span class="str">"Search knowledge base for context"</span>,
+        <span class="str">"Answer based on retrieved docs"</span>,
+        <span class="str">"Cite your sources"</span>,
+    ],
+)`
+  },
+  {
+    id: "deepseek-rag",
+    name: "DeepSeek Local RAG Agent",
+    category: "RAG",
+    path: "rag_tutorials/deepseek_local_rag_agent",
+    desc: "RAG using DeepSeek models locally. Leverages DeepSeek's strong reasoning for complex document understanding and question answering.",
+    models: ["DeepSeek"],
+    frameworks: ["Agno"],
+    packages: ["agno", "ollama"],
+    difficulty: "intermediate",
+    useCase: "Reasoning RAG — use DeepSeek's reasoning capabilities for complex document analysis and Q&A.",
+    agentPrompt: "Build a RAG system using DeepSeek running locally for complex document reasoning and Q&A. Reference the awesome-llm-apps DeepSeek local RAG tutorial.",
+    codeSnippet: `<span class="cm"># DeepSeek reasoning RAG</span>
+agent = Agent(
+    model=Ollama(id=<span class="str">"deepseek-r1:8b"</span>),
+    tools=[VectorDBTools()],
+    instructions=[
+        <span class="str">"Reason carefully about the query"</span>,
+        <span class="str">"Search for relevant documents"</span>,
+        <span class="str">"Provide well-reasoned answer"</span>,
+    ],
+)`
+  },
+  {
+    id: "gemini-rag",
+    name: "Gemini Agentic RAG",
+    category: "RAG",
+    path: "rag_tutorials/gemini_agentic_rag",
+    desc: "RAG powered by Google Gemini with agentic retrieval. Uses Gemini's large context window and multimodal capabilities for document understanding.",
+    models: ["Google Gemini"],
+    frameworks: ["Agno"],
+    packages: ["agno", "google-generativeai"],
+    difficulty: "intermediate",
+    useCase: "Gemini RAG — leverage Gemini's massive context window and multimodal capabilities for document Q&A.",
+    agentPrompt: "Build an agentic RAG system using Google Gemini, leveraging its large context window and multimodal capabilities. Reference the awesome-llm-apps Gemini agentic RAG tutorial.",
+    codeSnippet: `<span class="cm"># Gemini-powered RAG</span>
+<span class="kw">from</span> agno.models.google <span class="kw">import</span> Gemini
+
+agent = Agent(
+    model=Gemini(id=<span class="str">"gemini-2.0-flash"</span>),
+    tools=[VectorDBTools()],
+    instructions=[<span class="str">"Use Gemini's context window"</span>],
+)`
+  },
+  {
+    id: "vision-rag",
+    name: "Vision RAG",
+    category: "RAG",
+    path: "rag_tutorials/vision_rag",
+    desc: "RAG for images: index images with descriptions, retrieve visually similar content, and answer questions about image collections.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "pillow"],
+    difficulty: "advanced",
+    useCase: "Visual RAG — index and search image collections using AI-generated descriptions and visual embeddings.",
+    agentPrompt: "Build a vision RAG system that indexes images with AI-generated descriptions, stores visual embeddings, and answers questions about image collections. Reference the awesome-llm-apps vision RAG tutorial.",
+    codeSnippet: `<span class="cm"># Vision RAG — images as knowledge</span>
+<span class="cm"># 1. Generate descriptions for images</span>
+<span class="cm"># 2. Embed descriptions + visual features</span>
+<span class="cm"># 3. Retrieve relevant images by query</span>
+<span class="cm"># 4. Answer using retrieved visual context</span>
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[ImageVectorSearch()],
+)`
+  },
+  {
+    id: "blog-search-rag",
+    name: "AI Blog Search (RAG)",
+    category: "RAG",
+    path: "rag_tutorials/ai_blog_search",
+    desc: "Search engine for blog content. Indexes blog posts into a vector database and provides semantic search with AI-generated answers.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "qdrant-client"],
+    difficulty: "beginner",
+    useCase: "Content search — build a smart search engine for your blog or content library using RAG.",
+    agentPrompt: "Build a blog search engine using RAG that indexes blog posts into a vector database and provides semantic search with AI-generated summaries. Reference the awesome-llm-apps blog search tutorial.",
+    codeSnippet: `<span class="cm"># Blog search with RAG</span>
+<span class="cm"># Index blog posts → semantic search</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[QdrantTools(collection=<span class="str">"blogs"</span>)],
+    instructions=[
+        <span class="str">"Search the blog index"</span>,
+        <span class="str">"Summarize relevant posts"</span>,
+        <span class="str">"Link to original articles"</span>,
+    ],
+)`
+  },
+  {
+    id: "rag-as-service",
+    name: "RAG-as-a-Service",
+    category: "RAG",
+    path: "rag_tutorials/rag-as-a-service",
+    desc: "Deploy RAG as a hosted API service. Multi-tenant document ingestion, retrieval endpoints, and managed vector storage.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["FastAPI"],
+    packages: ["fastapi", "openai", "qdrant-client"],
+    difficulty: "advanced",
+    useCase: "SaaS RAG — build a multi-tenant RAG service with API endpoints for document ingestion and retrieval.",
+    agentPrompt: "Build a RAG-as-a-Service with FastAPI that provides multi-tenant document ingestion and retrieval endpoints. Reference the awesome-llm-apps RAG-as-a-Service tutorial.",
+    codeSnippet: `<span class="cm"># RAG service API</span>
+<span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI
+
+app = FastAPI()
+
+<span class="kw">@app.post</span>(<span class="str">"/ingest"</span>)
+<span class="kw">async def</span> <span class="fn">ingest</span>(docs, tenant_id):
+    <span class="cm"># Chunk, embed, store per tenant</span>
+
+<span class="kw">@app.post</span>(<span class="str">"/query"</span>)
+<span class="kw">async def</span> <span class="fn">query</span>(question, tenant_id):
+    <span class="cm"># Retrieve + generate per tenant</span>`
+  },
+  {
+    id: "cohere-rag",
+    name: "RAG Agent with Cohere",
+    category: "RAG",
+    path: "rag_tutorials/rag_agent_cohere",
+    desc: "RAG using Cohere's embed and rerank models for high-quality retrieval. Cohere's reranker dramatically improves retrieval precision.",
+    models: ["Cohere"],
+    frameworks: ["Agno"],
+    packages: ["agno", "cohere"],
+    difficulty: "intermediate",
+    useCase: "Cohere RAG — use Cohere's embed and rerank models for premium retrieval quality.",
+    agentPrompt: "Build a RAG system using Cohere's embedding and reranking models for high-precision retrieval. Reference the awesome-llm-apps Cohere RAG tutorial.",
+    codeSnippet: `<span class="cm"># Cohere RAG with reranking</span>
+<span class="kw">import</span> cohere
+
+co = cohere.Client()
+
+<span class="cm"># Embed → Retrieve → Rerank → Generate</span>
+embeds = co.embed(texts=chunks, model=<span class="str">"embed-v4"</span>)
+results = vector_search(query_embed, k=<span class="num">20</span>)
+reranked = co.rerank(query, results, top_n=<span class="num">5</span>)`
+  },
+  {
+    id: "db-routing-rag",
+    name: "RAG with Database Routing",
+    category: "RAG",
+    path: "rag_tutorials/rag_database_routing",
+    desc: "Routes RAG queries to the right database based on query type — SQL for structured data, vector for documents, graph for relationships.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "Smart routing — automatically route queries to the right data store (SQL, vector, graph) based on the question.",
+    agentPrompt: "Build a RAG system that routes queries to the right database type — SQL for structured data, vector store for documents, graph DB for relationships. Reference the awesome-llm-apps database routing RAG.",
+    codeSnippet: `<span class="cm"># Query routing to right DB</span>
+agent = Agent(
+    tools=[
+        SQLTool(db=<span class="str">"structured_data"</span>),
+        VectorTool(collection=<span class="str">"docs"</span>),
+        GraphTool(db=<span class="str">"knowledge_graph"</span>),
+    ],
+    instructions=[
+        <span class="str">"Route to SQL for numbers/stats"</span>,
+        <span class="str">"Route to vector for content"</span>,
+        <span class="str">"Route to graph for relations"</span>,
+    ],
+)`
+  },
+  {
+    id: "knowledge-graph-rag",
+    name: "Knowledge Graph RAG with Citations",
+    category: "RAG",
+    path: "rag_tutorials/knowledge_graph_rag_citations",
+    desc: "Combines knowledge graph structure with vector retrieval. Answers include citations and reasoning paths through the graph.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "neo4j"],
+    difficulty: "advanced",
+    useCase: "Knowledge graph RAG — structured reasoning with citations through a graph database.",
+    agentPrompt: "Build a knowledge graph RAG system that combines graph structure with vector retrieval and includes citations and reasoning paths. Reference the awesome-llm-apps knowledge graph RAG tutorial.",
+    codeSnippet: `<span class="cm"># Knowledge graph + vector RAG</span>
+agent = Agent(
+    tools=[
+        Neo4jGraphSearch(),
+        VectorSearch(),
+    ],
+    instructions=[
+        <span class="str">"Trace reasoning through graph"</span>,
+        <span class="str">"Include citations for claims"</span>,
+    ],
+)`
+  },
+  {
+    id: "rag-diagnostics",
+    name: "RAG Failure Diagnostics Clinic",
+    category: "RAG",
+    path: "rag_tutorials/rag_failure_diagnostics_clinic",
+    desc: "Debug and fix RAG systems. Diagnoses common failure modes: poor chunking, embedding drift, retrieval misses, and hallucination patterns.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "advanced",
+    useCase: "RAG debugging — systematic diagnosis and repair of RAG system failure modes.",
+    agentPrompt: "Build a RAG diagnostics tool that identifies and fixes common RAG failures: poor chunking, embedding drift, retrieval misses, and hallucination. Reference the awesome-llm-apps RAG failure diagnostics clinic.",
+    codeSnippet: `<span class="cm"># RAG diagnostics pipeline</span>
+<span class="cm"># 1. Test retrieval precision/recall</span>
+<span class="cm"># 2. Check embedding quality</span>
+<span class="cm"># 3. Evaluate chunk boundaries</span>
+<span class="cm"># 4. Detect hallucination patterns</span>
+<span class="cm"># 5. Recommend fixes</span>
+
+diagnostics = RAGDiagnostics(
+    vectorstore=vs, embedder=emb, llm=llm)`
+  },
+  {
+    id: "contextualai-rag",
+    name: "Contextual AI RAG Agent",
+    category: "RAG",
+    path: "rag_tutorials/contextualai_rag_agent",
+    desc: "Uses Contextual AI's specialized RAG platform for enterprise-grade retrieval with built-in hallucination prevention and source attribution.",
+    models: ["Contextual AI"],
+    frameworks: ["Agno"],
+    packages: ["agno", "contextual-ai"],
+    difficulty: "intermediate",
+    useCase: "Enterprise RAG — production-grade retrieval with hallucination prevention using Contextual AI platform.",
+    agentPrompt: "Build a RAG system using Contextual AI's platform for enterprise-grade retrieval with hallucination prevention and source attribution. Reference the awesome-llm-apps Contextual AI RAG tutorial.",
+    codeSnippet: `<span class="cm"># Contextual AI enterprise RAG</span>
+<span class="kw">from</span> contextual <span class="kw">import</span> ContextualAI
+
+rag = ContextualAI(
+    knowledge_base=<span class="str">"my-docs"</span>,
+    hallucination_check=<span class="num">True</span>,
+    source_attribution=<span class="num">True</span>,
+)
+
+answer = rag.query(<span class="str">"What is our refund policy?"</span>)`
+  },
+  {
+    id: "embedding-gemma-rag",
+    name: "Agentic RAG with Embedding Gemma",
+    category: "RAG",
+    path: "rag_tutorials/agentic_rag_embedding_gemma",
+    desc: "RAG using Google's Gemma embedding model. Lightweight, fast embeddings that can run locally for privacy-conscious applications.",
+    models: ["Google Gemma"],
+    frameworks: ["Agno"],
+    packages: ["agno", "google-generativeai"],
+    difficulty: "intermediate",
+    useCase: "Gemma embeddings — lightweight, fast embeddings for RAG that can run locally.",
+    agentPrompt: "Build an agentic RAG system using Google's Gemma embedding model for fast, lightweight embeddings. Reference the awesome-llm-apps Gemma embedding RAG tutorial.",
+    codeSnippet: `<span class="cm"># Gemma-embedded agentic RAG</span>
+<span class="kw">from</span> agno.embedder.google <span class="kw">import</span> GeminiEmbedder
+
+agent = Agent(
+    model=Gemini(id=<span class="str">"gemini-2.0-flash"</span>),
+    embedder=GeminiEmbedder(model=<span class="str">"gemma-2"</span>),
+    tools=[VectorDBTools()],
+)`
+  },
+
+  // ── LLM Apps with Memory ─────────────────────────────────
+  {
+    id: "arxiv-memory",
+    name: "AI ArXiv Agent with Memory",
+    category: "Memory Apps",
+    path: "advanced_llm_apps/llm_apps_with_memory_tutorials/ai_arxiv_agent_memory",
+    desc: "Research agent that remembers your interests, past searches, and paper preferences. Improves recommendations over time as it learns your research focus.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "arxiv"],
+    difficulty: "intermediate",
+    useCase: "Personalized research — agent that learns your research interests and improves paper recommendations over time.",
+    agentPrompt: "Build an ArXiv research agent with persistent memory that learns my research interests and improves paper recommendations over time. Reference the awesome-llm-apps ArXiv agent with memory tutorial.",
+    codeSnippet: `<span class="cm"># ArXiv agent with persistent memory</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[ArxivTools()],
+    storage=SqlAgentStorage(table=<span class="str">"arxiv_memory"</span>),
+    add_history_to_messages=<span class="num">True</span>,
+    num_history_responses=<span class="num">10</span>,
+)`
+  },
+  {
+    id: "travel-memory",
+    name: "AI Travel Agent with Memory",
+    category: "Memory Apps",
+    path: "advanced_llm_apps/llm_apps_with_memory_tutorials/ai_travel_agent_memory",
+    desc: "Travel planner that remembers your preferences — favorite airlines, hotel styles, dietary needs, past destinations. Gets better at planning trips for you.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Personalized travel — agent that learns your travel preferences and tailors recommendations over sessions.",
+    agentPrompt: "Build a travel agent with persistent memory that remembers my preferences (airlines, hotels, dietary needs, past trips) and improves over time. Reference the awesome-llm-apps travel agent with memory.",
+    codeSnippet: `<span class="cm"># Travel agent with preference memory</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    storage=SqlAgentStorage(table=<span class="str">"travel_prefs"</span>),
+    add_history_to_messages=<span class="num">True</span>,
+    instructions=[
+        <span class="str">"Remember travel preferences"</span>,
+        <span class="str">"Reference past trips"</span>,
+        <span class="str">"Personalize recommendations"</span>,
+    ],
+)`
+  },
+  {
+    id: "stateful-chat",
+    name: "Llama3 Stateful Chat",
+    category: "Memory Apps",
+    path: "advanced_llm_apps/llm_apps_with_memory_tutorials/llama3_stateful_chat",
+    desc: "ChatGPT-like experience with Llama 3 running locally. Maintains conversation state across sessions with persistent storage.",
+    models: ["Meta Llama 3"],
+    frameworks: ["Agno"],
+    packages: ["agno", "ollama"],
+    difficulty: "beginner",
+    useCase: "Local chat with memory — persistent ChatGPT-like experience using Llama 3 with no cloud dependency.",
+    agentPrompt: "Build a stateful chatbot using Llama 3 locally that maintains conversation history across sessions. Reference the awesome-llm-apps Llama3 stateful chat tutorial.",
+    codeSnippet: `<span class="cm"># Llama3 chat with session memory</span>
+agent = Agent(
+    model=Ollama(id=<span class="str">"llama3"</span>),
+    storage=SqlAgentStorage(
+        table=<span class="str">"chat_sessions"</span>,
+        db_file=<span class="str">"chat.db"</span>),
+    add_history_to_messages=<span class="num">True</span>,
+)`
+  },
+  {
+    id: "personalized-memory",
+    name: "LLM App with Personalized Memory",
+    category: "Memory Apps",
+    path: "advanced_llm_apps/llm_apps_with_memory_tutorials/llm_app_personalized_memory",
+    desc: "Demonstrates user-specific memory: each user gets their own context. The app remembers facts, preferences, and conversation patterns per individual.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai"],
+    difficulty: "intermediate",
+    useCase: "Per-user personalization — app that maintains individual user profiles and adapts behavior to each person.",
+    agentPrompt: "Build an app with per-user personalized memory where each user gets their own stored context, preferences, and conversation history. Reference the awesome-llm-apps personalized memory tutorial.",
+    codeSnippet: `<span class="cm"># Per-user personalized memory</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    storage=SqlAgentStorage(
+        table=<span class="str">"user_memory"</span>),
+    instructions=[
+        <span class="str">"Remember user preferences"</span>,
+        <span class="str">"Adapt to their style"</span>,
+    ],
+    session_id=user_id,  <span class="cm"># per-user context</span>
+)`
+  },
+  {
+    id: "local-chatgpt-memory",
+    name: "Local ChatGPT Clone with Memory",
+    category: "Memory Apps",
+    path: "advanced_llm_apps/llm_apps_with_memory_tutorials/local_chatgpt_with_memory",
+    desc: "Self-hosted ChatGPT alternative with persistent memory. Runs locally, no data leaves your machine, and remembers everything across restarts.",
+    models: ["Local LLMs (Ollama)"],
+    frameworks: ["Agno", "Streamlit"],
+    packages: ["agno", "ollama", "streamlit"],
+    difficulty: "beginner",
+    useCase: "Private ChatGPT — fully local chatbot with persistent memory. Complete privacy, no cloud dependency.",
+    agentPrompt: "Build a fully local ChatGPT clone with persistent memory using Ollama. No data leaves the machine, memory persists across restarts. Reference the awesome-llm-apps local ChatGPT with memory tutorial.",
+    codeSnippet: `<span class="cm"># Local ChatGPT clone</span>
+agent = Agent(
+    model=Ollama(id=<span class="str">"llama3"</span>),
+    storage=SqlAgentStorage(
+        table=<span class="str">"chat_history"</span>,
+        db_file=<span class="str">"local_chat.db"</span>),
+    add_history_to_messages=<span class="num">True</span>,
+    markdown=<span class="num">True</span>,
+)`
+  },
+  {
+    id: "multi-llm-memory",
+    name: "Multi-LLM with Shared Memory",
+    category: "Memory Apps",
+    path: "advanced_llm_apps/llm_apps_with_memory_tutorials/multi_llm_memory",
+    desc: "Multiple different LLMs sharing the same memory store. Switch models mid-conversation and the new model has full context from the previous one.",
+    models: ["OpenAI GPT-4o", "Google Gemini", "Claude"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "google-generativeai", "anthropic"],
+    difficulty: "advanced",
+    useCase: "Model switching — seamlessly switch between different LLMs while maintaining shared conversation context.",
+    agentPrompt: "Build a multi-LLM chat app where users can switch between OpenAI, Gemini, and Claude mid-conversation, with all models sharing the same memory store. Reference the awesome-llm-apps multi-LLM shared memory tutorial.",
+    codeSnippet: `<span class="cm"># Shared memory across models</span>
+shared_storage = SqlAgentStorage(table=<span class="str">"shared"</span>)
+
+gpt_agent = Agent(model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    storage=shared_storage)
+gemini_agent = Agent(model=Gemini(id=<span class="str">"gemini-2.0"</span>),
+    storage=shared_storage)
+claude_agent = Agent(model=Claude(id=<span class="str">"claude-4"</span>),
+    storage=shared_storage)
+
+<span class="cm"># All share the same memory!</span>`
+  },
+
+  // ── Chat with X ──────────────────────────────────────────
+  {
+    id: "chat-github",
+    name: "Chat with GitHub",
+    category: "Chat with X",
+    path: "advanced_llm_apps/chat_with_X_tutorials/chat_with_github",
+    desc: "Ask questions about any GitHub repository in natural language. Indexes repo structure, code, issues, and PRs for conversational exploration.",
+    models: ["OpenAI GPT-4o", "Meta Llama 3"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "pygithub"],
+    difficulty: "intermediate",
+    useCase: "Code exploration — chat with any GitHub repository to understand code, issues, and architecture.",
+    agentPrompt: "Build a 'Chat with GitHub' app that indexes any repo and lets users ask questions about the code, architecture, issues, and PRs in natural language. Reference the awesome-llm-apps chat with GitHub tutorial.",
+    codeSnippet: `<span class="cm"># Chat with any GitHub repo</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[GitHubTools(repo=<span class="str">"owner/repo"</span>)],
+    instructions=[
+        <span class="str">"Explore repo structure"</span>,
+        <span class="str">"Read and explain code"</span>,
+        <span class="str">"Summarize open issues"</span>,
+    ],
+)`
+  },
+  {
+    id: "chat-gmail",
+    name: "Chat with Gmail",
+    category: "Chat with X",
+    path: "advanced_llm_apps/chat_with_X_tutorials/chat_with_gmail",
+    desc: "Search and analyze your Gmail inbox conversationally. Find emails by context rather than keywords, summarize threads, and extract action items.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "google-auth"],
+    difficulty: "intermediate",
+    useCase: "Email intelligence — search Gmail by meaning, summarize threads, and extract action items conversationally.",
+    agentPrompt: "Build a 'Chat with Gmail' app that lets users search their inbox conversationally, summarize email threads, and extract action items. Reference the awesome-llm-apps chat with Gmail tutorial.",
+    codeSnippet: `<span class="cm"># Chat with Gmail</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[GmailTools()],
+    instructions=[
+        <span class="str">"Search emails semantically"</span>,
+        <span class="str">"Summarize email threads"</span>,
+        <span class="str">"Extract action items"</span>,
+    ],
+)`
+  },
+  {
+    id: "chat-pdf",
+    name: "Chat with PDF",
+    category: "Chat with X",
+    path: "advanced_llm_apps/chat_with_X_tutorials/chat_with_pdf",
+    desc: "Upload any PDF and ask questions about its contents. Handles long documents, tables, and figures. Available with both cloud and local models.",
+    models: ["OpenAI GPT-4o", "Meta Llama 3"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "pypdf2"],
+    difficulty: "beginner",
+    useCase: "Document Q&A — upload PDFs and get instant answers about their contents, including tables and figures.",
+    agentPrompt: "Build a 'Chat with PDF' app where users upload a PDF and ask questions about it. Handle long documents with RAG chunking. Reference the awesome-llm-apps chat with PDF tutorial.",
+    codeSnippet: `<span class="cm"># Chat with any PDF</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[PDFReaderTools()],
+    knowledge_base=PDFKnowledgeBase(
+        path=<span class="str">"uploaded.pdf"</span>),
+    instructions=[<span class="str">"Answer from the PDF content"</span>],
+)`
+  },
+  {
+    id: "chat-research",
+    name: "Chat with Research Papers",
+    category: "Chat with X",
+    path: "advanced_llm_apps/chat_with_X_tutorials/chat_with_research_papers",
+    desc: "Query ArXiv research papers conversationally. Search by topic, read abstracts, and get explanations of complex papers in plain language.",
+    models: ["OpenAI GPT-4o", "Meta Llama 3"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "arxiv"],
+    difficulty: "intermediate",
+    useCase: "Research assistant — search and understand academic papers through natural conversation.",
+    agentPrompt: "Build a research paper Q&A system that searches ArXiv, retrieves papers, and explains complex content in plain language. Reference the awesome-llm-apps chat with research papers tutorial.",
+    codeSnippet: `<span class="cm"># Chat with ArXiv papers</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    tools=[ArxivTools()],
+    knowledge_base=ArxivKnowledgeBase(),
+    instructions=[
+        <span class="str">"Search for relevant papers"</span>,
+        <span class="str">"Explain in plain language"</span>,
+    ],
+)`
+  },
+  {
+    id: "chat-youtube",
+    name: "Chat with YouTube Videos",
+    category: "Chat with X",
+    path: "advanced_llm_apps/chat_with_X_tutorials/chat_with_youtube_videos",
+    desc: "Ask questions about YouTube video content. Extracts and indexes transcripts for conversational Q&A about any video.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "youtube-transcript-api"],
+    difficulty: "beginner",
+    useCase: "Video Q&A — ask questions about YouTube videos without watching them. Great for long lectures and tutorials.",
+    agentPrompt: "Build a 'Chat with YouTube' app that extracts video transcripts and lets users ask questions about the content. Reference the awesome-llm-apps chat with YouTube tutorial.",
+    codeSnippet: `<span class="cm"># Chat with YouTube videos</span>
+<span class="kw">from</span> youtube_transcript_api <span class="kw">import</span> YouTubeTranscriptApi
+
+transcript = YouTubeTranscriptApi.get_transcript(video_id)
+
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    knowledge_base=TextKnowledgeBase(
+        texts=[transcript_text]),
+)`
+  },
+  {
+    id: "chat-substack",
+    name: "Chat with Substack",
+    category: "Chat with X",
+    path: "advanced_llm_apps/chat_with_X_tutorials/chat_with_substack",
+    desc: "Index Substack newsletters and query them conversationally. Search across all issues, find recurring themes, and get summaries.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["Agno"],
+    packages: ["agno", "openai", "requests"],
+    difficulty: "intermediate",
+    useCase: "Newsletter search — index and search Substack newsletters conversationally across all published issues.",
+    agentPrompt: "Build a 'Chat with Substack' app that indexes newsletter issues and enables conversational search across all content. Reference the awesome-llm-apps chat with Substack tutorial.",
+    codeSnippet: `<span class="cm"># Chat with Substack newsletter</span>
+agent = Agent(
+    model=OpenAIChat(id=<span class="str">"gpt-4o"</span>),
+    knowledge_base=SubstackKnowledgeBase(
+        url=<span class="str">"newsletter.substack.com"</span>),
+    instructions=[
+        <span class="str">"Search across all issues"</span>,
+        <span class="str">"Identify recurring themes"</span>,
+    ],
+)`
+  },
+
+  // ── LLM Optimization ────────────────────────────────────
+  {
+    id: "toonify",
+    name: "Toonify Token Optimization",
+    category: "Optimization",
+    path: "advanced_llm_apps/llm_optimization_tools/toonify_token_optimization",
+    desc: "Reduces LLM costs by 30-60% using TOON format — a compressed representation that preserves meaning while dramatically reducing token count.",
+    models: ["Any LLM"],
+    frameworks: ["Toonify"],
+    packages: ["toonify"],
+    difficulty: "intermediate",
+    useCase: "Cost reduction — compress prompts and context to use 30-60% fewer tokens without losing meaning.",
+    agentPrompt: "Build a token optimization system using Toonify's TOON format to reduce LLM costs by 30-60%. Reference the awesome-llm-apps Toonify token optimization tutorial.",
+    codeSnippet: `<span class="cm"># Token optimization with TOON format</span>
+<span class="kw">from</span> toonify <span class="kw">import</span> compress
+
+<span class="cm"># Original: 1000 tokens</span>
+compressed = compress(long_context)
+<span class="cm"># Compressed: 400-700 tokens, same meaning</span>
+
+response = llm.chat(compressed + query)`
+  },
+  {
+    id: "headroom",
+    name: "Headroom Context Optimization",
+    category: "Optimization",
+    path: "advanced_llm_apps/llm_optimization_tools/headroom_context_optimization",
+    desc: "Reduces context costs by 50-90% using intelligent context compression. Identifies and removes redundant information while preserving critical context.",
+    models: ["Any LLM"],
+    frameworks: ["Headroom"],
+    packages: ["headroom"],
+    difficulty: "intermediate",
+    useCase: "Context compression — reduce context window costs by 50-90% while keeping essential information.",
+    agentPrompt: "Build a context optimization system using Headroom to compress context by 50-90% while preserving critical information. Reference the awesome-llm-apps Headroom context optimization tutorial.",
+    codeSnippet: `<span class="cm"># Context compression with Headroom</span>
+<span class="kw">from</span> headroom <span class="kw">import</span> optimize_context
+
+<span class="cm"># Original: 50K tokens of context</span>
+optimized = optimize_context(
+    documents, query,
+    target_reduction=<span class="num">0.7</span>)
+<span class="cm"># Result: 15K tokens, key info preserved</span>`
+  },
+
+  // ── Fine-tuning ──────────────────────────────────────────
+  {
+    id: "gemma-finetune",
+    name: "Gemma 3 Fine-tuning",
+    category: "Fine-tuning",
+    path: "advanced_llm_apps/llm_finetuning_tutorials/gemma3_finetuning",
+    desc: "Step-by-step guide to fine-tune Google's Gemma 3 model on custom data. Covers dataset preparation, training config, and evaluation.",
+    models: ["Google Gemma 3"],
+    frameworks: ["HuggingFace", "PEFT"],
+    packages: ["transformers", "peft", "datasets"],
+    difficulty: "advanced",
+    useCase: "Model customization — fine-tune Gemma 3 on your own data for domain-specific tasks.",
+    agentPrompt: "Walk me through fine-tuning Google's Gemma 3 model on custom data, including dataset preparation, training configuration, and evaluation. Reference the awesome-llm-apps Gemma 3 fine-tuning tutorial.",
+    codeSnippet: `<span class="cm"># Gemma 3 fine-tuning</span>
+<span class="kw">from</span> transformers <span class="kw">import</span> AutoModelForCausalLM
+<span class="kw">from</span> peft <span class="kw">import</span> LoraConfig, get_peft_model
+
+model = AutoModelForCausalLM.from_pretrained(
+    <span class="str">"google/gemma-3-2b"</span>)
+lora = LoraConfig(r=<span class="num">16</span>, lora_alpha=<span class="num">32</span>)
+model = get_peft_model(model, lora)
+<span class="cm"># Train on your dataset...</span>`
+  },
+  {
+    id: "llama-finetune",
+    name: "Llama 3.2 Fine-tuning",
+    category: "Fine-tuning",
+    path: "advanced_llm_apps/llm_finetuning_tutorials/llama3.2_finetuning",
+    desc: "Fine-tune Meta's Llama 3.2 for custom tasks. Covers QLoRA, dataset formatting, training loops, and model merging.",
+    models: ["Meta Llama 3.2"],
+    frameworks: ["HuggingFace", "PEFT"],
+    packages: ["transformers", "peft", "trl", "bitsandbytes"],
+    difficulty: "advanced",
+    useCase: "Model customization — fine-tune Llama 3.2 with QLoRA for efficient training on consumer GPUs.",
+    agentPrompt: "Walk me through fine-tuning Llama 3.2 using QLoRA, including dataset preparation, training, and model merging. Reference the awesome-llm-apps Llama 3.2 fine-tuning tutorial.",
+    codeSnippet: `<span class="cm"># Llama 3.2 QLoRA fine-tuning</span>
+<span class="kw">from</span> trl <span class="kw">import</span> SFTTrainer
+
+trainer = SFTTrainer(
+    model=model,
+    train_dataset=dataset,
+    peft_config=LoraConfig(
+        r=<span class="num">8</span>, lora_alpha=<span class="num">16</span>,
+        target_modules=[<span class="str">"q_proj"</span>, <span class="str">"v_proj"</span>]),
+    max_seq_length=<span class="num">2048</span>,
+)
+trainer.train()`
+  },
+
+  // ── Framework Crash Courses ──────────────────────────────
+  {
+    id: "google-adk-course",
+    name: "Google ADK Crash Course",
+    category: "Framework Courses",
+    path: "ai_agent_framework_crash_course/google_adk_crash_course",
+    desc: "Comprehensive crash course on Google's Agent Development Kit (ADK). Covers tools, memory, multi-agent patterns, and deployment with Google Cloud.",
+    models: ["Google Gemini"],
+    frameworks: ["Google ADK"],
+    packages: ["google-adk", "google-generativeai"],
+    difficulty: "intermediate",
+    useCase: "Framework learning — learn Google's ADK framework for building agents with tools, memory, and multi-agent orchestration.",
+    agentPrompt: "I want to learn Google's Agent Development Kit (ADK). Walk me through the key concepts: tools, memory, multi-agent patterns, and deployment. Reference the awesome-llm-apps Google ADK crash course.",
+    codeSnippet: `<span class="cm"># Google ADK agent</span>
+<span class="kw">from</span> google_adk <span class="kw">import</span> Agent, Tool
+
+@Tool
+<span class="kw">def</span> <span class="fn">search_web</span>(query: str) -> str:
+    <span class="str">"""Search the web for information"""</span>
+    ...
+
+agent = Agent(
+    model=<span class="str">"gemini-2.0-flash"</span>,
+    tools=[search_web],
+    memory=MemoryStore(),
+)`
+  },
+  {
+    id: "openai-sdk-course",
+    name: "OpenAI Agents SDK Crash Course",
+    category: "Framework Courses",
+    path: "ai_agent_framework_crash_course/openai_sdk_crash_course",
+    desc: "Deep dive into OpenAI's Agents SDK. Covers function calling, structured outputs, multi-agent orchestration, and production patterns.",
+    models: ["OpenAI GPT-4o"],
+    frameworks: ["OpenAI Agents SDK"],
+    packages: ["openai-agents"],
+    difficulty: "intermediate",
+    useCase: "Framework learning — master OpenAI's Agents SDK for function calling, structured outputs, and agent orchestration.",
+    agentPrompt: "I want to learn the OpenAI Agents SDK. Walk me through function calling, structured outputs, multi-agent orchestration, and production patterns. Reference the awesome-llm-apps OpenAI SDK crash course.",
+    codeSnippet: `<span class="cm"># OpenAI Agents SDK</span>
+<span class="kw">from</span> agents <span class="kw">import</span> Agent, Runner, function_tool
+
+@function_tool
+<span class="kw">def</span> <span class="fn">get_weather</span>(city: str) -> str:
+    <span class="str">"""Get weather for a city"""</span>
+    ...
+
+agent = Agent(
+    name=<span class="str">"Weather Agent"</span>,
+    tools=[get_weather],
+    model=<span class="str">"gpt-4o"</span>,
+)
+
+result = Runner.run_sync(agent, <span class="str">"Weather in NYC?"</span>)`
+  },
+];
+
+// ═══════════════════════════════════════════════════════════
+//  UI Logic
+// ═══════════════════════════════════════════════════════════
+
+const categories = [...new Set(APPS.map(a => a.category))];
+let activeCategory = null;
+
+function init() {
+  renderChips();
+  renderCards();
+  document.getElementById('search-input').addEventListener('input', renderCards);
+  document.getElementById('difficulty-filter').addEventListener('change', renderCards);
+  document.getElementById('model-filter').addEventListener('change', renderCards);
+  document.getElementById('modal-overlay').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeModal();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+  document.getElementById('total-count').textContent = APPS.length + ' Apps';
+}
+
+function renderChips() {
+  const el = document.getElementById('category-chips');
+  const counts = {};
+  categories.forEach(c => counts[c] = APPS.filter(a => a.category === c).length);
+
+  el.innerHTML = `<div class="chip ${!activeCategory ? 'active' : ''}" onclick="setCategory(null)">All<span class="chip-count">${APPS.length}</span></div>` +
+    categories.map(c =>
+      `<div class="chip ${activeCategory === c ? 'active' : ''}" onclick="setCategory('${c}')">${c}<span class="chip-count">${counts[c]}</span></div>`
+    ).join('');
+}
+
+function setCategory(cat) {
+  activeCategory = cat;
+  renderChips();
+  renderCards();
+}
+
+function getFilteredApps() {
+  const q = document.getElementById('search-input').value.toLowerCase();
+  const diff = document.getElementById('difficulty-filter').value;
+  const model = document.getElementById('model-filter').value;
+
+  return APPS.filter(a => {
+    if (activeCategory && a.category !== activeCategory) return false;
+    if (diff && a.difficulty !== diff) return false;
+    if (model) {
+      const modelStr = a.models.join(' ').toLowerCase() + ' ' + a.frameworks.join(' ').toLowerCase();
+      if (model === 'local' && !modelStr.match(/local|ollama|open.source/)) return false;
+      else if (model !== 'local' && !modelStr.includes(model)) return false;
+    }
+    if (q) {
+      const searchStr = [a.name, a.desc, a.category, a.useCase, ...a.models, ...a.frameworks, ...a.packages].join(' ').toLowerCase();
+      return searchStr.includes(q);
+    }
+    return true;
+  });
+}
+
+function renderCards() {
+  const apps = getFilteredApps();
+  const grid = document.getElementById('card-grid');
+  const empty = document.getElementById('empty-state');
+  const count = document.getElementById('result-count');
+
+  count.textContent = apps.length === APPS.length ? '' : `${apps.length} of ${APPS.length}`;
+
+  if (!apps.length) {
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  grid.innerHTML = apps.map(a => `
+    <div class="card" onclick="openModal('${a.id}')">
+      <div class="card-difficulty">
+        <div class="diff-dot ${a.difficulty}">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+      <div class="card-cat">${a.category}</div>
+      <div class="card-title">${a.name}</div>
+      <div class="card-desc">${a.desc.length > 140 ? a.desc.slice(0, 140) + '...' : a.desc}</div>
+      <div class="card-tags">
+        ${a.models.slice(0, 2).map(m => `<span class="tag tag-model">${m}</span>`).join('')}
+        ${a.frameworks.slice(0, 1).map(f => `<span class="tag tag-framework">${f}</span>`).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function openModal(id) {
+  const a = APPS.find(x => x.id === id);
+  if (!a) return;
+
+  document.getElementById('modal-cat').textContent = a.category;
+  document.getElementById('modal-title').textContent = a.name;
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="modal-section">
+      <h3>Description</h3>
+      <div class="modal-desc">${a.desc}</div>
+    </div>
+
+    <div class="modal-info-grid">
+      <div class="info-card">
+        <div class="info-card-label">Difficulty</div>
+        <div class="info-card-value">${a.difficulty.charAt(0).toUpperCase() + a.difficulty.slice(1)}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Models</div>
+        <div class="info-card-value">${a.models.join(', ')}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Frameworks</div>
+        <div class="info-card-value">${a.frameworks.join(', ')}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-card-label">Key Packages</div>
+        <div class="info-card-value" style="font-family: monospace; font-size: 12px;">${a.packages.join(', ')}</div>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <h3>Use Case</h3>
+      <div class="modal-desc">${a.useCase}</div>
+    </div>
+
+    <div class="modal-section">
+      <h3>Code Pattern</h3>
+      <div class="code-block">
+        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+        ${a.codeSnippet}
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <h3>Ask Your Agent to Build This</h3>
+      <div class="prompt-box" onclick="copyPrompt(this)" title="Click to copy">
+        "${a.agentPrompt}"
+        <div class="prompt-hint">Click to copy this prompt — paste it to your agent to get started</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 20px;">
+      <a class="github-link" href="${REPO}/${a.path}" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View Source on GitHub
+      </a>
+    </div>
+  `;
+
+  document.getElementById('modal-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function copyCode(btn) {
+  const block = btn.parentElement;
+  const text = block.textContent.replace('Copy', '').trim();
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1500);
+  });
+}
+
+function copyPrompt(el) {
+  const text = el.textContent.replace('Click to copy this prompt — paste it to your agent to get started', '').trim().replace(/^"|"$/g, '');
+  navigator.clipboard.writeText(text).then(() => {
+    const hint = el.querySelector('.prompt-hint');
+    if (hint) { hint.textContent = 'Copied to clipboard!'; setTimeout(() => hint.textContent = 'Click to copy this prompt — paste it to your agent to get started', 1500); }
+  });
+}
+
+init();
+</script>
+
+</body>
+</html>
