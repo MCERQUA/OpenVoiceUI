@@ -8922,6 +8922,23 @@ initUpdateChecker();
         window._interruptionEnabled = false;
         window._maxResponseChars = null;
 
+        // Listen for admin panel profile switches (BroadcastChannel)
+        try {
+            const _profileBC = new BroadcastChannel('profile-switch');
+            _profileBC.onmessage = function(evt) {
+                if (evt.data?.type === 'profile-activated' && evt.data?.profileId) {
+                    console.log('[ProfileSync] Admin switched to:', evt.data.profileId);
+                    localStorage.setItem('active_profile_id', evt.data.profileId);
+                    // Reload the profile in the dropdown and apply settings
+                    const select = document.getElementById('voice-mode-select');
+                    if (select) {
+                        select.value = evt.data.profileId;
+                        select.dispatchEvent(new Event('change'));
+                    }
+                }
+            };
+        } catch(e) { /* BroadcastChannel not supported — user must refresh manually */ }
+
         window.applyProfile = function(profile) {
             window._activeProfileData = profile;
 

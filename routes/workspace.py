@@ -36,6 +36,7 @@ HIDDEN_PREFIXES = {'.git', '__pycache__', 'node_modules', '.venv', 'venv'}
 # workspace/Uploads/foo → RUNTIME_DIR/uploads/foo (writable)
 # workspace/Agent/...   → read-only, no mapping
 _WRITABLE_MAP = {
+    'Agent':        RUNTIME_DIR / 'workspace' / 'Agent',
     'Uploads':      RUNTIME_DIR / 'uploads',
     'Canvas':       RUNTIME_DIR / 'canvas-pages',
     'Music':        RUNTIME_DIR / 'music',
@@ -273,6 +274,57 @@ def mkdir():
         return jsonify({'path': rel, 'created': True})
     except PermissionError:
         return jsonify({'error': 'Permission denied'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@workspace_bp.route('/api/workspace/file', methods=['PUT'])
+def write_file():
+    """Write content to a file in a writable workspace area."""
+    rel = request.args.get('path', '')
+    if not rel:
+        return jsonify({'error': 'Missing path parameter'}), 400
+
+    target = _writable_path(rel)
+    if target is None:
+        return jsonify({'error': 'Cannot write here (read-only area)'}), 403
+
+    data = request.get_json(silent=True) or {}
+    content = data.get('content')
+    if content is None:
+        return jsonify({'error': 'Missing content field'}), 400
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding='utf-8')
+        return jsonify({'ok': True, 'path': rel, 'size': len(content)})
+    except PermissionError:
+        return jsonify({'error': 'Permission denied'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@workspace_bp.route('/api/workspace/file', methods=['DELETE'])
+def delete_file():
+    """Archive a file in a writable workspace area (renames to .deleted)."""
+    rel = request.args.get('path', '')
+    if not rel:
+        return jsonify({'error': 'Missing path parameter'}), 400
+
+    target = _writable_path(rel)
+    if target is None:
+        return jsonify({'error': 'Cannot delete here (read-only area)'}), 403
+
+    if not target.exists():
+        return jsonify({'error': 'File not found'}), 404
+
+    if target.is_dir():
+        return jsonify({'error': 'Cannot delete directories'}), 400
+
+    try:
+        renamed = target.with_suffix(target.suffix + '.deleted')
+        target.rename(renamed)
+        return jsonify({'ok': True, 'archived': renamed.name})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -184,10 +184,88 @@ select{cursor:pointer}
 .ali-name{font-size:13px;font-weight:600;color:var(--text)}
 .ali-model{font-size:11px;color:var(--dim);margin-top:2px;font-family:var(--mono)}
 .builder-editor{flex:1;overflow-y:auto;padding:24px 28px}
-.be-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:18px}
-.be-tab{padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;color:var(--dim);border-bottom:2px solid transparent;transition:all .15s;user-select:none;white-space:nowrap}
+.builder-mobile-select{display:none;padding:12px 14px;border-bottom:1px solid var(--border);background:var(--panel2)}
+.builder-mobile-select select{width:100%;padding:8px 12px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px}
+.be-tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:18px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.be-tab{padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;color:var(--dim);border-bottom:2px solid transparent;transition:all .15s;user-select:none;white-space:nowrap;flex-shrink:0}
 .be-tab:hover{color:var(--text)}
 .be-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+/* Agent Files sub-layout inside builder */
+.af-layout{display:grid;grid-template-columns:200px 1fr;gap:12px;min-height:300px}
+.af-list{overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel2)}
+.af-editor-wrap{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.af-editor{flex:1;background:var(--bg);border:none;outline:none;resize:none;padding:12px;font-family:var(--mono);font-size:12px;color:var(--text);line-height:1.6;min-height:250px}
+/* ── Mobile: sidebar overlay + stacked layouts ── */
+@media(max-width:768px){
+  /* App grid: single column, sidebar becomes overlay */
+  #app{grid-template-columns:1fr!important}
+  #sidebar{position:fixed;left:0;top:var(--header);bottom:0;width:260px;z-index:300;
+    transform:translateX(-100%);transition:transform .25s ease;box-shadow:4px 0 24px rgba(0,0,0,.5)}
+  #sidebar.mobile-open{transform:translateX(0)}
+  .sidebar-backdrop{display:none;position:fixed;inset:0;top:var(--header);background:rgba(0,0,0,.5);z-index:299}
+  .sidebar-backdrop.show{display:block}
+  /* Bigger nav items for touch */
+  .nav-item{padding:12px 16px;font-size:14px;min-height:44px}
+  .nav-icon{font-size:18px}
+  /* Header compact */
+  .hdr-logo{font-size:14px}
+  .hdr-pill{font-size:11px;padding:3px 8px}
+  .hdr-back{display:none}
+  /* Main content */
+  .panel-inner{padding:14px!important}
+  .ph-title{font-size:18px}
+  .ph-sub{font-size:12px}
+  .ph-row{flex-wrap:wrap;gap:8px}
+  /* All multi-column grids → single column */
+  .g2,.g3,.g4,.gauto,.form-row{grid-template-columns:1fr!important}
+  /* Profile cards 2-col on mobile */
+  .g4{grid-template-columns:1fr 1fr!important}
+  /* Builder */
+  .builder-layout{flex-direction:column}
+  .builder-list{display:none}
+  .builder-mobile-select{display:block}
+  .builder-editor{padding:14px}
+  .be-tabs{gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .be-tab{padding:10px 14px;font-size:13px;flex-shrink:0;min-height:44px}
+  .af-layout{grid-template-columns:1fr}
+  .af-list{max-height:150px}
+  /* Features grid stays 2-col */
+  .tools-grid{grid-template-columns:1fr 1fr!important}
+  /* Tables: horizontal scroll */
+  .tbl{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tbl thead,.tbl tbody,.tbl tr,.tbl th,.tbl td{white-space:nowrap}
+  /* Buttons bigger touch targets */
+  .btn{min-height:36px;padding:8px 14px}
+  .btn-sm{min-height:32px;padding:6px 12px}
+  /* Boxes */
+  .box-title{padding:12px 14px 8px}
+  .box-body{padding:12px 14px}
+  /* Provider config */
+  .prov-item{padding:12px 14px;min-height:44px}
+  /* Workspace file browser */
+  .ws-layout{grid-template-columns:1fr!important}
+  .ws-layout>.box:first-child{max-height:200px}
+  #panel-workspace .panel-inner{height:auto!important}
+  /* Music table scroll */
+  #music-songs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #music-songs table{min-width:500px}
+  /* Canvas pages table scroll */
+  #canvas-pages-list{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #canvas-pages-list table{min-width:600px}
+  /* Clients table scroll */
+  #clients-tbody{white-space:nowrap}
+}
+/* Extra small (phones in portrait) */
+@media(max-width:480px){
+  .g4{grid-template-columns:1fr!important}
+  .profile-card{padding:12px}
+  .pc-name{font-size:13px}
+  .pc-desc{font-size:11px}
+  .pc-actions{flex-wrap:wrap}
+  .hc-grid{grid-template-columns:1fr 1fr!important}
+  .hc{padding:10px}
+  .hc-val{font-size:18px}
+}
 .voice-grid{display:flex;flex-wrap:wrap;gap:6px}
 .voice-btn{padding:6px 12px;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px;color:var(--dim);transition:all .15s;font-family:var(--mono)}
 .voice-btn:hover{border-color:var(--dim);color:var(--text)}
@@ -278,28 +356,28 @@ select{cursor:pointer}
 <nav id="sidebar">
   <div class="nav-section">
     <div class="nav-label">Agents</div>
-    <div class="nav-item active" id="nav-agents" onclick="show('agents')"><span class="nav-icon">&#x1F916;</span><span class="nav-text">Agent Profiles</span></div>
-    <div class="nav-item" id="nav-builder" onclick="show('builder')"><span class="nav-icon">&#x1F527;</span><span class="nav-text">Agent Builder</span></div>
-    <div class="nav-item" id="nav-instructions" onclick="show('instructions')"><span class="nav-icon">&#x1F4DD;</span><span class="nav-text">Instructions</span></div>
-  </div>
-  <div class="nav-section">
-    <div class="nav-label">Frameworks</div>
-    <div class="nav-item" id="nav-frameworks" onclick="show('frameworks')"><span class="nav-icon">&#x1F50C;</span><span class="nav-text">Framework Registry</span></div>
-    <div class="nav-item" id="nav-install" onclick="show('install')"><span class="nav-icon">&#x1F4E6;</span><span class="nav-text">Install Framework</span></div>
-    <div class="nav-item" id="nav-tests" onclick="show('tests')"><span class="nav-icon">&#x1F9EA;</span><span class="nav-text">Connector Tests</span></div>
-  </div>
-  <div class="nav-section">
-    <div class="nav-label">Providers</div>
-    <div class="nav-item" id="nav-providers" onclick="show('providers')"><span class="nav-icon">&#x26A1;</span><span class="nav-text">Provider Config</span></div>
+    <div class="nav-item active" id="nav-agents" onclick="show('agents')"><span class="nav-icon">&#x1F916;</span><span class="nav-text">Profiles</span></div>
+    <div class="nav-item" id="nav-builder" onclick="show('builder')"><span class="nav-icon">&#x1F527;</span><span class="nav-text">Agent Editor</span></div>
+    <div class="nav-item" id="nav-plugins" onclick="show('plugins')"><span class="nav-icon">&#x1F9E9;</span><span class="nav-text">Plugins</span></div>
   </div>
   <div class="nav-section">
     <div class="nav-label">Content</div>
-    <div class="nav-item" id="nav-djtools" onclick="show('djtools')"><span class="nav-icon">🎵</span><span class="nav-text">Music Agent</span></div>
-    <div class="nav-item" id="nav-canvas" onclick="show('canvas')"><span class="nav-icon">🖥️</span><span class="nav-text">Canvas Pages</span></div>
+    <div class="nav-item" id="nav-canvas" onclick="show('canvas')"><span class="nav-icon">&#x25A3;</span><span class="nav-text">Canvas Pages</span></div>
+    <div class="nav-item" id="nav-workspace" onclick="show('workspace')"><span class="nav-icon">&#x1F4C2;</span><span class="nav-text">Workspace Files</span></div>
+    <div class="nav-item" id="nav-music" onclick="show('music')"><span class="nav-icon">&#x266B;</span><span class="nav-text">Music (Suno)</span></div>
+  </div>
+  <div class="nav-section" id="nav-section-platform" style="display:none">
+    <div class="nav-label">Platform</div>
+    <div class="nav-item" id="nav-clients" onclick="show('clients')"><span class="nav-icon">&#x1F465;</span><span class="nav-text">Clients</span></div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">Config</div>
+    <div class="nav-item" id="nav-providers" onclick="show('providers')"><span class="nav-icon">&#x26A1;</span><span class="nav-text">Provider Config</span></div>
   </div>
   <div class="nav-section">
     <div class="nav-label">System</div>
-    <div class="nav-item" id="nav-system" onclick="show('system')"><span class="nav-icon">&#x2699;&#xFE0F;</span><span class="nav-text">System &amp; Health</span></div>
+    <div class="nav-item" id="nav-system" onclick="show('system')"><span class="nav-icon">&#x2699;</span><span class="nav-text">Health &amp; Stats</span></div>
+    <div class="nav-item" id="nav-tests" onclick="show('tests')"><span class="nav-icon">&#x2713;</span><span class="nav-text">Connector Tests</span></div>
   </div>
   <div class="sidebar-footer">
     <div class="nav-item" onclick="location.href='/'"><span class="nav-icon">&#8592;</span><span class="nav-text">Back to App</span></div>
@@ -319,7 +397,7 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <!-- AGENT BUILDER -->
+  <!-- AGENT EDITOR -->
   <div class="panel" id="panel-builder">
     <div class="builder-layout">
       <div class="builder-list">
@@ -329,45 +407,92 @@ select{cursor:pointer}
         </div>
         <div id="builder-agent-list"><div class="loading" style="padding:14px"><div class="spin"></div>Loading...</div></div>
       </div>
-      <div class="builder-editor" id="builder-editor">
-        <div class="empty"><div class="empty-icon">&#x1F527;</div>Select an agent from the list to edit</div>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">
+        <div class="builder-mobile-select">
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="builder-mobile-sel" onchange="Builder.selectAgent(this.value)" style="flex:1"></select>
+            <button class="btn btn-p btn-sm" onclick="Builder.newAgent()">+ New</button>
+          </div>
+        </div>
+        <div class="builder-editor" id="builder-editor">
+          <div class="empty"><div class="empty-icon">&#x1F527;</div>Select an agent from the list to edit</div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- FRAMEWORKS -->
-  <div class="panel" id="panel-frameworks">
+  <!-- PLUGINS -->
+  <div class="panel" id="panel-plugins">
     <div class="panel-inner">
-      <div class="ph"><div class="ph-title">Framework Registry</div><div class="ph-sub">All installed agent frameworks &mdash; health, capabilities, and configuration</div></div>
-      <div class="ph-row"><button class="btn btn-o" onclick="Frameworks.load()">&#8634; Refresh</button><button class="btn btn-p" onclick="show('install')">+ Install New</button></div>
-      <div class="box" style="padding:0;overflow:hidden;margin-bottom:20px">
-        <table class="tbl" id="fw-table">
-          <thead><tr><th>Framework</th><th>Status</th><th>Capabilities</th><th>LLM</th><th>TTS</th><th>Actions</th></tr></thead>
-          <tbody id="fw-tbody"><tr><td colspan="6"><div class="loading" style="padding:14px"><div class="spin"></div></div></td></tr></tbody>
+      <div class="ph"><div class="ph-title">Plugins</div><div class="ph-sub">Manage installed plugins &mdash; face packs, gateways, and extensions</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="Plugins.load()">&#8634; Refresh</button></div>
+      <div class="g2" style="gap:16px">
+        <div class="box"><div class="box-title">Installed</div><div class="box-body" id="plugins-installed"><div class="loading"><div class="spin"></div>Loading...</div></div></div>
+        <div class="box"><div class="box-title">Available</div><div class="box-body" id="plugins-available"><div class="loading"><div class="spin"></div>Loading...</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WORKSPACE BROWSER -->
+  <div class="panel" id="panel-workspace">
+    <div class="panel-inner" style="height:calc(100vh - var(--header) - 48px);display:flex;flex-direction:column">
+      <div class="ph"><div class="ph-title">Workspace Files</div><div class="ph-sub">Browse and edit agent workspace files</div></div>
+      <div class="ws-layout" style="display:grid;grid-template-columns:280px 1fr;gap:16px;flex:1;min-height:0">
+        <div class="box" style="overflow-y:auto">
+          <div class="box-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Files</span>
+            <button class="btn btn-o btn-sm" onclick="Workspace.load()">&#8634;</button>
+          </div>
+          <div id="ws-tree" style="padding:4px 0;font-size:13px"><div class="loading" style="padding:14px"><div class="spin"></div></div></div>
+        </div>
+        <div class="box" style="display:flex;flex-direction:column;overflow:hidden">
+          <div class="box-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span id="ws-file-title">Select a file</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span id="ws-file-size" style="font-size:11px;color:var(--dim)"></span>
+              <button id="ws-save-btn" class="btn btn-g btn-sm" style="display:none" onclick="Workspace.save()">Save</button>
+              <button id="ws-del-btn" class="btn btn-d btn-sm" style="display:none" onclick="Workspace.deleteFile(Workspace.currentFile)">Delete</button>
+            </div>
+          </div>
+          <textarea id="ws-editor"
+            style="flex:1;background:var(--bg);border:none;outline:none;resize:none;padding:16px;font-family:var(--mono);font-size:13px;color:var(--text);line-height:1.6;min-height:0"
+            placeholder="Select a file from the tree to view/edit..."
+            oninput="Workspace.dirty=true;$('ws-save-btn').style.display=''"
+          ></textarea>
+          <div id="ws-media" style="display:none;flex:1;padding:16px;overflow-y:auto;background:var(--bg);text-align:center"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MUSIC (SUNO) -->
+  <div class="panel" id="panel-music">
+    <div class="panel-inner">
+      <div class="ph">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><div class="ph-title">Music</div><div class="ph-sub">AI-generated songs via Suno</div></div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span id="music-status" style="font-size:12px;color:var(--dim)"></span>
+            <span id="music-gen-status" style="font-size:12px"></span>
+            <button class="btn btn-o btn-sm" onclick="Music.load()">Refresh</button>
+          </div>
+        </div>
+      </div>
+      <div class="box"><div class="box-body" id="music-songs" style="max-height:calc(100vh - 200px);overflow-y:auto"><div class="loading"><div class="spin"></div></div></div></div>
+    </div>
+  </div>
+
+  <!-- CLIENTS -->
+  <div class="panel" id="panel-clients">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Clients</div><div class="ph-sub">All connected clients &mdash; status, domain, and container health</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="Clients.load()">&#8634; Refresh</button><span id="clients-count" style="font-size:12px;color:var(--dim)"></span></div>
+      <div class="box" style="padding:0;overflow:hidden">
+        <table class="tbl">
+          <thead><tr><th>Client</th><th>Domain</th><th>Port</th><th>OpenClaw</th><th>OVU</th><th>Last Activity</th></tr></thead>
+          <tbody id="clients-tbody"><tr><td colspan="6"><div class="loading" style="padding:14px"><div class="spin"></div></div></td></tr></tbody>
         </table>
       </div>
-      <div class="box"><div class="box-title">Config Viewer</div><div class="box-body" id="fw-config"><div class="empty"><div class="empty-icon">&#x1F50C;</div>Click "Config" on a framework above</div></div></div>
-    </div>
-  </div>
-
-  <!-- INSTALL -->
-  <div class="panel" id="panel-install">
-    <div class="panel-inner">
-      <div class="ph"><div class="ph-title">Install Framework</div><div class="ph-sub">Provide a GitHub URL or package name &mdash; the agent researches, installs, writes a connector, tests, and registers it automatically</div></div>
-      <div class="install-steps">
-        <div class="ist" id="ist-research">1 &middot; Research</div>
-        <div class="ist" id="ist-plan">2 &middot; Plan</div>
-        <div class="ist" id="ist-install">3 &middot; Install</div>
-        <div class="ist" id="ist-connector">4 &middot; Connector</div>
-        <div class="ist" id="ist-test">5 &middot; Test</div>
-        <div class="ist" id="ist-register">6 &middot; Register</div>
-      </div>
-      <div class="url-bar">
-        <input type="url" id="install-url" placeholder="https://github.com/org/repo  or  pipecat-ai  or  livekit-agents">
-        <button class="btn btn-p" id="install-btn" onclick="Install.start()">&#9654; Start</button>
-        <button class="btn btn-o" onclick="Install.clear()">&#x2715; Clear</button>
-      </div>
-      <div class="term" id="install-term"><span class="t-dim">Enter a URL or package name above and click Start.</span><br><span class="t-dim">The agent will handle everything: research &rarr; install &rarr; connector &rarr; test &rarr; register.</span></div>
     </div>
   </div>
 
@@ -394,21 +519,6 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <!-- MUSIC AGENT (coming soon) -->
-  <div class="panel" id="panel-djtools">
-    <div class="panel-inner">
-      <div class="ph"><div class="ph-title">Music Agent</div><div class="ph-sub">Music configuration &mdash; tracks, prompt, sound effects, and music scheduling</div></div>
-      <div style="background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:40px;text-align:center;margin-top:20px">
-        <div style="font-size:40px;margin-bottom:16px;opacity:.4">🎵</div>
-        <div style="font-size:16px;font-weight:600;color:var(--bright);margin-bottom:8px">Music Agent Settings</div>
-        <div style="font-size:13px;color:var(--dim);max-width:400px;margin:0 auto 20px">Track library, DJ prompt, sound effects, and music scheduling will be managed here.</div>
-        <div style="display:flex;gap:10px;justify-content:center">
-          <button class="btn btn-p" onclick="show('builder');Builder.load()">Configure Music Agent</button>
-          <span class="badge b-yellow" style="align-self:center;padding:6px 12px">Coming Soon</span>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- SYSTEM -->
   <div class="panel" id="panel-system">
@@ -430,42 +540,6 @@ select{cursor:pointer}
     </div>
   </div>
 
-  <!-- INSTRUCTIONS -->
-  <div class="panel" id="panel-instructions">
-    <div class="panel-inner">
-      <div class="ph">
-        <div class="ph-title">Agent Instructions</div>
-        <div class="ph-sub">Live instruction files injected into the agent. App-scope files reload on the next message &mdash; no restart needed. OpenClaw files are read fresh each session.</div>
-      </div>
-      <div class="ph-row">
-        <button class="btn btn-o" onclick="Instructions.load()">&#8634; Refresh</button>
-      </div>
-      <div id="instr-layout" style="display:grid;grid-template-columns:220px 1fr;gap:16px;height:calc(100vh - 220px)">
-        <!-- File list -->
-        <div class="box" style="overflow-y:auto">
-          <div class="box-title">Files</div>
-          <div id="instr-list" style="padding:8px 0"><div class="loading"><div class="spin"></div>Loading...</div></div>
-        </div>
-        <!-- Editor -->
-        <div class="box" style="display:flex;flex-direction:column;overflow:hidden">
-          <div class="box-title" style="display:flex;align-items:center;justify-content:space-between">
-            <span id="instr-editor-title">Select a file</span>
-            <div style="display:flex;gap:8px;align-items:center">
-              <span id="instr-badge" class="badge b-gray" style="display:none"></span>
-              <button id="instr-save-btn" class="btn btn-g btn-sm" style="display:none" onclick="Instructions.save()">&#x1F4BE; Save</button>
-            </div>
-          </div>
-          <div id="instr-desc" style="padding:8px 16px;font-size:12px;color:var(--dim);border-bottom:1px solid var(--border2)"></div>
-          <textarea id="instr-editor"
-            style="flex:1;background:var(--bg);border:none;outline:none;resize:none;padding:16px;font-family:var(--mono);font-size:13px;color:var(--text);line-height:1.6;min-height:0"
-            placeholder="Select a file from the list to edit..."
-            oninput="Instructions.onEdit()"
-          ></textarea>
-          <div id="instr-status" style="padding:6px 16px;font-size:11px;color:var(--dim);border-top:1px solid var(--border2);min-height:24px"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- CANVAS PAGES -->
   <div class="panel" id="panel-canvas">
@@ -483,28 +557,42 @@ select{cursor:pointer}
 </main>
 </div>
 
+<div class="sidebar-backdrop" id="sidebar-backdrop" onclick="closeMobileSidebar()"></div>
 <div id="toast" style="position:fixed;bottom:24px;right:24px;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;opacity:0;transition:opacity .3s;box-shadow:0 4px 20px rgba(0,0,0,.5)"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-// Sidebar
+// Sidebar — desktop collapse + mobile overlay
 let collapsed = false;
-function toggleSidebar(){collapsed=!collapsed;$('app').classList.toggle('sidebar-collapsed',collapsed)}
+const _isMobile=()=>window.innerWidth<=768;
+function toggleSidebar(){
+  if(_isMobile()){
+    const sb=$('sidebar');const bd=$('sidebar-backdrop');
+    const open=sb.classList.toggle('mobile-open');
+    bd.classList.toggle('show',open);
+  }else{
+    collapsed=!collapsed;$('app').classList.toggle('sidebar-collapsed',collapsed);
+  }
+}
+function closeMobileSidebar(){
+  $('sidebar').classList.remove('mobile-open');
+  $('sidebar-backdrop').classList.remove('show');
+}
 
 // Panel routing
 const loaders = {
   agents:()=>Agents.load(),
   builder:()=>Builder.load(),
-  frameworks:()=>Frameworks.load(),
-  install:()=>{},
-  tests:()=>Tests.initSel(),
+  plugins:()=>Plugins.load(),
+  canvas:()=>CanvasPages.load(),
+  workspace:()=>Workspace.load(),
+  music:()=>Music.load(),
+  clients:()=>Clients.load(),
   providers:()=>Providers.load(),
-  djtools:()=>DJTools.load(),
   system:()=>System.load(),
-  instructions:()=>Instructions.load(),
-  canvas:()=>CanvasPages.load()
+  tests:()=>Tests.initSel(),
 };
 
 function show(name){
@@ -513,11 +601,13 @@ function show(name){
   $('panel-'+name)?.classList.add('active');
   $('nav-'+name)?.classList.add('active');
   loaders[name]?.();
+  closeMobileSidebar();
+  location.hash=name;
 }
 
 // Agents
-const ICONS = {'default':'🤖','hume-evi':'🌊','hume_evi':'🌊','elevenlabs-classic':'🎙️','elevenlabs_classic':'🎙️',developer:'🛠️'};
-const LLMS = {'default':'GLM-4.7','hume-evi':'eLLM','elevenlabs-classic':'EL-AI',developer:'GLM-4.7'};
+const ICONS = {'default':'\u2699','hume-evi':'\u223F','hume_evi':'\u223F','elevenlabs-classic':'\u266A','elevenlabs_classic':'\u266A',developer:'\u2692'};
+const LLMS = {'default':'GLM-5-turbo','hume-evi':'eLLM','elevenlabs-classic':'EL-AI',developer:'GLM-5-turbo'};
 const TTSS = {'default':'Groq/Supertonic','hume-evi':'Hume EVI','elevenlabs-classic':'ElevenLabs',developer:'Supertonic'};
 
 const Agents = {
@@ -554,7 +644,18 @@ const Agents = {
   async activate(id){
     try{
       const d=await(await fetch('/api/profiles/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile_id:id})})).json();
-      if(d.active||d.profile){this.active=id;this.renderBanner();this.renderGrid();toast('Activated: '+id,'green')}
+      if(d.active||d.profile){
+        this.active=id;this.renderBanner();this.renderGrid();
+        // Sync to main app — clear localStorage override so main app uses server's active on next load
+        // Also broadcast to any open tabs on this origin
+        try{
+          localStorage.setItem('active_profile_id',id);
+          const bc=new BroadcastChannel('profile-switch');
+          bc.postMessage({type:'profile-activated',profileId:id});
+          bc.close();
+        }catch(e2){}
+        toast('Activated: '+id+' (refresh voice app to apply)','green');
+      }
       else toast(d.error||'Failed','red');
     }catch(e){toast(e.message,'red')}
   }
@@ -575,6 +676,7 @@ const Builder = {
   },
 
   renderList(){
+    // Desktop sidebar
     $('builder-agent-list').innerHTML=this.profiles.map(p=>
       '<div class="agent-list-item'+(p.id===this.currentId?' active':'')+'" id="ali-'+p.id+'" onclick="Builder.selectAgent(\''+esc(p.id)+'\')">' +
       '<div style="display:flex;align-items:center;gap:6px">' +
@@ -583,6 +685,11 @@ const Builder = {
       '</div>' +
       '<div class="ali-model">'+esc(p.llm?.provider||LLMS[p.id]||'—')+'</div></div>'
     ).join('');
+    // Mobile dropdown
+    const msel=$('builder-mobile-sel');
+    if(msel){msel.innerHTML=this.profiles.map(p=>
+      '<option value="'+esc(p.id)+'"'+(p.id===this.currentId?' selected':'')+'>'+esc(p.name)+(p.id===this.activeId?' (LIVE)':'')+'</option>'
+    ).join('')}
   },
 
   async selectAgent(id){
@@ -664,8 +771,14 @@ const Builder = {
       '<div class="sect-label">Framework</div>'+
       '<div class="g2" style="margin-bottom:14px">'+
         '<div class="fg"><label class="fl">LLM / Agent System</label><select id="be-llm">'+
-          '<option value="zai"'+(llmProv==='zai'?' selected':'')+'>Z.AI GLM via OpenClaw Gateway</option>'+
-          '<option value="gateway"'+(llmProv==='gateway'?' selected':'')+'>OpenClaw Direct</option>'+
+          '<option value="gateway"'+(llmProv==='gateway'?' selected':'')+'>OpenClaw Gateway (default)</option>'+
+          '<option value="zai"'+(llmProv==='zai'?' selected':'')+'>Z.AI GLM-5-turbo</option>'+
+          '<option value="zai/glm-5.1"'+((llmProv==='zai/glm-5.1')?' selected':'')+'>Z.AI GLM-5.1</option>'+
+          '<option value="zai/glm-5-turbo"'+((llmProv==='zai/glm-5-turbo')?' selected':'')+'>Z.AI GLM-5-turbo (direct)</option>'+
+          '<option value="groq"'+(llmProv==='groq'?' selected':'')+'>Groq (Llama / Qwen)</option>'+
+          '<option value="minimax"'+(llmProv==='minimax'?' selected':'')+'>MiniMax M2.7</option>'+
+          '<option value="kimi"'+(llmProv==='kimi'?' selected':'')+'>Kimi K2.5</option>'+
+          '<option value="gemini"'+(llmProv==='gemini'?' selected':'')+'>Google Gemini</option>'+
           '<option value="hume_evi"'+(llmProv==='hume_evi'?' selected':'')+'>Hume EVI</option>'+
           '<option value="elevenlabs"'+(llmProv==='elevenlabs'?' selected':'')+'>ElevenLabs AI</option>'+
           '<option value="openai"'+(llmProv==='openai'?' selected':'')+'>OpenAI</option>'+
@@ -686,8 +799,9 @@ const Builder = {
       '<div class="fg">'+
         '<label class="fl">Vision Model <span style="font-size:10px;color:var(--dim)">&mdash; used for &ldquo;look at&rdquo; triggers and face recognition</span></label>'+
         '<select id="be-vision-model">'+
-          '<option value="glm-4.6v"'+(     (p.vision?.model||'glm-4.6v')==='glm-4.6v'      ?' selected':'')+'>GLM-4.6V (128K &middot; Paid)</option>'+
-          '<option value="glm-4v-plus"'+(  (p.vision?.model||'glm-4.6v')==='glm-4v-plus'   ?' selected':'')+'>GLM-4V Plus (Legacy &middot; Paid)</option>'+
+          '<option value="groq/llama-4-scout"'+((p.vision?.model||'groq/llama-4-scout')==='groq/llama-4-scout'?' selected':'')+'>Groq Llama 4 Scout (Fast &middot; Free)</option>'+
+          '<option value="glm-4.6v"'+((p.vision?.model)==='glm-4.6v'?' selected':'')+'>GLM-4.6V (128K &middot; Paid)</option>'+
+          '<option value="gemini"'+((p.vision?.model)==='gemini'?' selected':'')+'>Google Gemini Vision</option>'+
         '</select>'+
         '<div style="font-size:11px;color:var(--dim);margin-top:4px">Requires camera to be enabled. Model processes frames for &ldquo;what do you see&rdquo; and face ID.</div>'+
       '</div>'+
@@ -720,47 +834,63 @@ const Builder = {
         '<div class="fg"><label class="fl">Max Response Tokens</label><input type="text" id="be-maxtok" value="'+esc(String(p.llm?.parameters?.max_tokens||512))+'"></div>'+
       '</div>';
 
+    const agentFilesTab=
+      '<div style="font-size:12px;color:var(--dim);margin-bottom:12px">Workspace files bootstrapped into this agent. Changes take effect on the next session.</div>'+
+      '<div class="af-layout">'+
+        '<div class="af-list" id="af-file-list"><div style="padding:12px;color:var(--dim);font-size:12px">Loading...</div></div>'+
+        '<div class="af-editor-wrap">'+
+          '<div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--panel2)">'+
+            '<span id="af-file-title" style="font-size:12px;font-weight:600;color:var(--bright)">Select a file</span>'+
+            '<div style="display:flex;gap:6px;align-items:center">'+
+              '<span id="af-file-status" style="font-size:11px;color:var(--dim)"></span>'+
+              '<button id="af-save-btn" class="btn btn-g btn-sm" style="display:none" onclick="Builder.saveFile()">Save</button>'+
+            '</div>'+
+          '</div>'+
+          '<textarea id="af-editor" class="af-editor" placeholder="Select a file to view/edit..." oninput="Builder._afDirty=true;$(\'af-save-btn\').style.display=\'\'"></textarea>'+
+        '</div>'+
+      '</div>';
+
     $('builder-editor').innerHTML=
       '<div class="ph" style="margin-bottom:14px">'+
-        '<div style="display:flex;align-items:center;gap:10px">'+
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
           '<div class="ph-title">'+esc(p.name||id)+'</div>'+
           (id===this.activeId?'<span class="badge b-green">&#x25CF; Live</span>':
-           '<button class="btn btn-p btn-sm" onclick="Agents.activate(\''+esc(id)+'\').then(()=>Builder.load())">&#9654; Activate</button>')+
+           '<button class="btn btn-p btn-sm" onclick="Agents.activate(\''+esc(id)+'\').then(()=>Builder.load())">Activate</button>')+
         '</div>'+
         '<div class="ph-sub">'+esc(id)+' &nbsp;&#183;&nbsp; v'+esc(p.version||'1.0')+'</div>'+
       '</div>'+
       '<div class="be-tabs">'+
-        ['general','instructions','features'].map(t=>
+        ['general','instructions','features','agentfiles'].map(t=>
           '<div class="be-tab'+(this.activeTab===t?' active':'')+'" onclick="Builder.switchTab(\''+t+'\')">'+
-          {general:'&#9881; General',instructions:'&#x1F4DD; Instructions',features:'&#x1F527; Features'}[t]+'</div>'
+          {general:'Profile',instructions:'System Prompt',features:'Features',agentfiles:'Agent Files'}[t]+'</div>'
         ).join('')+
       '</div>'+
       '<div id="be-tab-general" class="be-tab-body"'+(this.activeTab==='general'?'':' style="display:none"')+'>'+generalTab+'</div>'+
       '<div id="be-tab-instructions" class="be-tab-body"'+(this.activeTab==='instructions'?'':' style="display:none"')+'>'+instrTab+'</div>'+
       '<div id="be-tab-features" class="be-tab-body"'+(this.activeTab==='features'?'':' style="display:none"')+'>'+featTab+'</div>'+
-      '<div class="div"></div>'+
-      '<div style="display:flex;gap:8px">'+
-        '<button class="btn btn-p" onclick="Builder.save(\''+esc(id)+'\')">&#x1F4BE; Save Changes</button>'+
-        '<button class="btn btn-o" onclick="Builder.selectAgent(\''+esc(id)+'\')">&#8634; Discard</button>'+
-        (id!=='default'?'<button class="btn btn-d" onclick="Builder.delete(\''+esc(id)+'\')">&#x1F5D1; Delete</button>':'')+
+      '<div id="be-tab-agentfiles" class="be-tab-body"'+(this.activeTab==='agentfiles'?'':' style="display:none"')+'>'+agentFilesTab+'</div>'+
+      '<div style="height:16px"></div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="btn btn-p" onclick="Builder.save(\''+esc(id)+'\')">Save Changes</button>'+
+        '<button class="btn btn-o" onclick="Builder.selectAgent(\''+esc(id)+'\')">Discard</button>'+
+        (id!=='default'?'<button class="btn btn-d" onclick="Builder.delete(\''+esc(id)+'\')">Delete</button>':'')+
       '</div>';
     // Load voice list for the selected TTS provider
     this._loadProviderVoices().then(()=>this._renderVoiceGrid(ttsProv,selVoice));
+    // Load agent files if on that tab
+    if(this.activeTab==='agentfiles') this._loadAgentFiles();
   },
 
   switchTab(tab){
     this.activeTab=tab;
-    ['general','instructions','features'].forEach(t=>{
+    ['general','instructions','features','agentfiles'].forEach(t=>{
       const body=$('be-tab-'+t); if(body) body.style.display=t===tab?'':'none';
     });
+    const tabLabels={general:'Profile',instructions:'System Prompt',features:'Features',agentfiles:'Agent Files'};
     document.querySelectorAll('.be-tab').forEach(el=>{
-      el.classList.toggle('active', el.onclick?.toString().includes("'"+tab+"'"));
+      el.classList.toggle('active', el.textContent.trim()===tabLabels[tab]);
     });
-    // Re-query by content since onclick toString varies
-    document.querySelectorAll('.be-tab').forEach(el=>{
-      const matches={general:'General',instructions:'Instructions',features:'Features'};
-      el.classList.toggle('active', el.textContent.trim().includes(matches[tab]||''));
-    });
+    if(tab==='agentfiles') this._loadAgentFiles();
   },
 
   setVoice(v,isFemale){
@@ -832,107 +962,314 @@ const Builder = {
       if(d.ok||d.deleted){toast('Deleted','green'); this.currentId=null; await this.load();}
       else toast(d.error||'Failed','red');
     }catch(e){toast(e.message,'red')}
+  },
+
+  // Agent Files (Instructions) — integrated into builder
+  _afFiles:[],_afCurrent:null,_afDirty:false,
+
+  async _loadAgentFiles(){
+    const list=$('af-file-list');
+    if(!list)return;
+    list.innerHTML='<div style="padding:12px;color:var(--dim);font-size:12px">Loading...</div>';
+    try{
+      const d=await(await fetch('/api/instructions')).json();
+      this._afFiles=d.files||[];
+      list.innerHTML=this._afFiles.map(f=>{
+        const active=f.id===this._afCurrent;
+        const dot=f.scope==='app'?'<span style="color:var(--green);font-size:8px">&#9679;</span>':'<span style="color:var(--blue);font-size:8px">&#9679;</span>';
+        return'<div onclick="Builder._selectFile(\''+esc(f.id)+'\')" style="padding:7px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:5px;border-left:2px solid '+(active?'var(--blue)':'transparent')+';background:'+(active?'var(--blue-bg)':'transparent')+';transition:background .1s" onmouseover="this.style.background=\'rgba(177,186,196,.06)\'" onmouseout="this.style.background=\''+(active?'var(--blue-bg)':'transparent')+'\'">'+
+          dot+'<span>'+esc(f.label)+'</span>'+
+          (!f.exists?' <span style="color:var(--dim);font-size:10px">(new)</span>':'')+
+        '</div>'
+      }).join('')||'<div style="padding:12px;color:var(--dim);font-size:12px">No files found</div>';
+      // Auto-select first if none selected
+      if(!this._afCurrent&&this._afFiles.length) this._selectFile(this._afFiles[0].id);
+    }catch(e){list.innerHTML='<div style="padding:12px;color:var(--red);font-size:12px">'+esc(e.message)+'</div>'}
+  },
+
+  async _selectFile(id){
+    if(this._afDirty&&!confirm('Unsaved changes to current file. Discard?'))return;
+    this._afCurrent=id;this._afDirty=false;
+    $('af-save-btn').style.display='none';
+    const meta=this._afFiles.find(f=>f.id===id);
+    $('af-file-title').textContent=meta?meta.label:id;
+    $('af-editor').value='Loading...';
+    this._loadAgentFiles(); // refresh list highlighting
+    try{
+      const d=await(await fetch('/api/instructions/'+id)).json();
+      if(d.error){$('af-editor').value='Error: '+d.error;return}
+      $('af-editor').value=d.content||'';
+      $('af-file-status').textContent=d.exists?(d.size+' chars'):'New file — save to create';
+      $('af-editor').disabled=false;
+    }catch(e){$('af-editor').value='Error: '+e.message}
+  },
+
+  async saveFile(){
+    if(!this._afCurrent)return;
+    const content=$('af-editor').value;
+    try{
+      const d=await(await fetch('/api/instructions/'+this._afCurrent,{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({content})
+      })).json();
+      if(d.ok){
+        this._afDirty=false;$('af-save-btn').style.display='none';
+        $('af-file-status').textContent=d.size+' chars — saved';
+        toast('Saved: '+this._afCurrent,'green');
+      }else toast(d.error||'Save failed','red');
+    }catch(e){toast(e.message,'red')}
   }
 };
 
-// Frameworks
-const Frameworks={
-  CAPS:{'default':['Voice','Tools','Memory','Canvas','Files'],'hume-evi':['Voice','Emotion','Real-time'],'elevenlabs-classic':['Voice','Music','Caller','Phone'],developer:['Voice','Debug']},
+// Plugins
+const Plugins={
   async load(){
-    const tbody=$('fw-tbody');
+    const [ir,ar]=await Promise.all([fetch('/api/plugins').catch(()=>null),fetch('/api/plugins/available').catch(()=>null)]);
+    // Installed
+    const installed=ir?await ir.json():{plugins:[]};
+    const iel=$('plugins-installed');
+    if(!installed.plugins?.length){iel.innerHTML='<div class="empty" style="padding:16px;font-size:13px;color:var(--dim)">No plugins installed</div>'}
+    else{iel.innerHTML=installed.plugins.map(p=>
+      '<div style="padding:10px 0;border-bottom:1px solid var(--border2)">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between">'+
+          '<div><div style="font-weight:600;color:var(--bright)">'+esc(p.name)+'</div>'+
+          '<div style="font-size:11px;color:var(--dim);margin-top:2px">'+esc(p.id)+' v'+esc(p.version||'?')+' &middot; '+esc(p.type||'extension')+'</div></div>'+
+          '<div style="display:flex;gap:6px;align-items:center">'+
+            '<span class="badge '+(p.status==='active'?'b-green':'b-gray')+'">'+esc(p.status||'?')+'</span>'+
+            '<button class="btn btn-d btn-sm" onclick="Plugins.uninstall(\''+esc(p.id)+'\')">Remove</button>'+
+          '</div>'+
+        '</div>'+
+        '<div style="font-size:12px;color:var(--dim);margin-top:4px">'+esc(p.description||'')+'</div>'+
+        (p.faces?.length?'<div style="font-size:11px;color:var(--cyan);margin-top:4px">Faces: '+p.faces.map(f=>esc(f)).join(', ')+'</div>':'')+
+        (p.pages?.length?'<div style="font-size:11px;color:var(--blue);margin-top:2px">Pages: '+p.pages.map(f=>esc(f)).join(', ')+'</div>':'')+
+      '</div>'
+    ).join('')}
+    // Available
+    const ael=$('plugins-available');
+    if(!ar||!ar.ok){ael.innerHTML='<div class="empty" style="padding:16px;font-size:13px;color:var(--dim)">No plugin catalog available</div>';return}
+    const available=await ar.json();
+    const avail=(available.plugins||[]).filter(p=>!installed.plugins?.find(i=>i.id===p.id));
+    if(!avail.length){ael.innerHTML='<div style="padding:16px;font-size:13px;color:var(--dim)">All available plugins are installed</div>'}
+    else{ael.innerHTML=avail.map(p=>
+      '<div style="padding:10px 0;border-bottom:1px solid var(--border2)">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between">'+
+          '<div><div style="font-weight:600;color:var(--bright)">'+esc(p.name)+'</div>'+
+          '<div style="font-size:11px;color:var(--dim);margin-top:2px">'+esc(p.id)+' &middot; '+esc(p.type||'extension')+'</div></div>'+
+          '<button class="btn btn-p btn-sm" onclick="Plugins.install(\''+esc(p.id)+'\')">Install</button>'+
+        '</div>'+
+        '<div style="font-size:12px;color:var(--dim);margin-top:4px">'+esc(p.description||'')+'</div>'+
+      '</div>'
+    ).join('')}
+  },
+  async install(id){
+    try{const r=await fetch('/api/plugins/'+id+'/install',{method:'POST'});const d=await r.json();toast(d.ok||d.installed?'Installed: '+id:'Error: '+(d.error||'failed'),d.ok||d.installed?'green':'red');this.load()}
+    catch(e){toast(e.message,'red')}
+  },
+  async uninstall(id){
+    if(!confirm('Remove plugin "'+id+'"? Container restart may be needed.'))return;
+    try{const r=await fetch('/api/plugins/'+id,{method:'DELETE'});toast(r.ok?'Removed: '+id:'Error removing','green');this.load()}
+    catch(e){toast(e.message,'red')}
+  }
+};
+
+// Workspace Browser
+const Workspace={
+  currentPath:'',currentFile:null,dirty:false,
+  async load(path){
+    path=path||'';
+    this.currentPath=path;
+    const tree=$('ws-tree');
+    try{
+      const d=await(await fetch('/api/workspace/browse?path='+encodeURIComponent(path))).json();
+      let html='';
+      if(path){html+='<div onclick="Workspace.load(\''+esc(path.split('/').slice(0,-1).join('/'))+'\')" style="padding:6px 12px;cursor:pointer;color:var(--blue);font-size:12px">&larr; Back</div>'}
+      for(const e of d.entries||[]){
+        if(e.type==='dir'){
+          html+='<div onclick="Workspace.load(\''+esc((path?path+'/':'')+e.name)+'\')" style="padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;border-left:2px solid transparent" onmouseover="this.style.background=\'rgba(177,186,196,.06)\'" onmouseout="this.style.background=\'transparent\'">'+
+            '<span style="color:var(--blue)">&#x1F4C1;</span><span>'+esc(e.name)+'</span></div>';
+        }else{
+          const fpath=(path?path+'/':'')+e.name;
+          const sz=e.size>1024?(e.size/1024).toFixed(1)+'K':e.size+'B';
+          html+='<div onclick="Workspace.openFile(\''+esc(fpath)+'\')" style="padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;justify-content:space-between;border-left:2px solid '+(this.currentFile===fpath?'var(--blue)':'transparent')+'" onmouseover="this.style.background=\'rgba(177,186,196,.06)\'" onmouseout="this.style.background=\'transparent\'">'+
+            '<span style="display:flex;align-items:center;gap:6px"><span style="color:var(--dim)">&#x1F4C4;</span><span>'+esc(e.name)+'</span></span>'+
+            '<span style="font-size:10px;color:var(--subtle)">'+sz+'</span></div>';
+        }
+      }
+      tree.innerHTML=html||'<div style="padding:16px;color:var(--dim);font-size:13px">Empty directory</div>';
+    }catch(e){tree.innerHTML='<div style="padding:16px;color:var(--red)">'+esc(e.message)+'</div>'}
+  },
+  _AUDIO_EXT:new Set(['.mp3','.wav','.ogg','.m4a','.flac','.aac']),
+  _IMAGE_EXT:new Set(['.png','.jpg','.jpeg','.gif','.webp','.svg','.bmp','.ico']),
+  _VIDEO_EXT:new Set(['.mp4','.webm','.mov']),
+
+  async openFile(path){
+    if(this.dirty&&!confirm('Unsaved changes. Discard?'))return;
+    this.currentFile=path;this.dirty=false;
+    const name=path.split('/').pop();
+    const ext='.'+name.split('.').pop().toLowerCase();
+    $('ws-file-title').textContent=name;
+    $('ws-save-btn').style.display='none';
+    $('ws-del-btn').style.display='';
+
+    const editor=$('ws-editor');
+    const media=$('ws-media');
+    const rawUrl='/api/workspace/raw?path='+encodeURIComponent(path);
+
+    // Media files — show preview instead of text editor
+    if(this._AUDIO_EXT.has(ext)){
+      editor.style.display='none';media.style.display='flex';
+      media.innerHTML='<div style="width:100%;display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px 0">'+
+        '<div style="font-size:48px;color:var(--dim)">&#x266B;</div>'+
+        '<div style="font-weight:600;color:var(--bright);font-size:16px">'+esc(name)+'</div>'+
+        '<audio controls preload="metadata" style="width:100%;max-width:400px"><source src="'+esc(rawUrl)+'"></audio>'+
+        '<a href="'+esc(rawUrl)+'" download="'+esc(name)+'" class="btn btn-o btn-sm" style="text-decoration:none">Download</a>'+
+      '</div>';
+      $('ws-file-size').textContent='audio';
+      this.load(this.currentPath);return;
+    }
+    if(this._IMAGE_EXT.has(ext)){
+      editor.style.display='none';media.style.display='flex';
+      media.innerHTML='<div style="width:100%;display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 0">'+
+        '<img src="'+esc(rawUrl)+'" alt="'+esc(name)+'" style="max-width:100%;max-height:60vh;border-radius:6px;border:1px solid var(--border)">'+
+        '<div style="font-size:12px;color:var(--dim)">'+esc(name)+'</div>'+
+      '</div>';
+      $('ws-file-size').textContent='image';
+      this.load(this.currentPath);return;
+    }
+    if(this._VIDEO_EXT.has(ext)){
+      editor.style.display='none';media.style.display='flex';
+      media.innerHTML='<div style="width:100%;display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 0">'+
+        '<video controls preload="metadata" style="max-width:100%;max-height:60vh;border-radius:6px"><source src="'+esc(rawUrl)+'"></video>'+
+        '<div style="font-size:12px;color:var(--dim)">'+esc(name)+'</div>'+
+      '</div>';
+      $('ws-file-size').textContent='video';
+      this.load(this.currentPath);return;
+    }
+
+    // Text files — show editor
+    editor.style.display='';media.style.display='none';
+    editor.value='Loading...';
+    try{
+      const d=await(await fetch('/api/workspace/file?path='+encodeURIComponent(path))).json();
+      if(d.error){editor.value='Error: '+d.error;return}
+      editor.value=d.content||'';
+      $('ws-file-size').textContent=(d.content||'').length+' chars';
+      editor.disabled=false;
+      this.load(this.currentPath);
+    }catch(e){editor.value='Error: '+e.message}
+  },
+  async save(){
+    if(!this.currentFile)return;
+    try{
+      const r=await fetch('/api/workspace/file?path='+encodeURIComponent(this.currentFile),{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({content:$('ws-editor').value})
+      });
+      if(r.ok){this.dirty=false;$('ws-save-btn').style.display='none';toast('Saved: '+this.currentFile.split('/').pop(),'green')}
+      else{const d=await r.json();toast(d.error||'Save failed','red')}
+    }catch(e){toast(e.message,'red')}
+  },
+  async deleteFile(path){
+    const name=path.split('/').pop();
+    if(!confirm('Delete "'+name+'"?\n\nThe file will be archived (renamed .deleted), not permanently removed.'))return;
+    try{
+      const r=await fetch('/api/workspace/file?path='+encodeURIComponent(path),{method:'DELETE'});
+      const d=await r.json();
+      if(d.ok){
+        toast('Archived: '+name,'green');
+        if(this.currentFile===path){this.currentFile=null;$('ws-editor').value='';$('ws-file-title').textContent='Select a file'}
+        this.load(this.currentPath);
+      }else toast(d.error||'Failed','red');
+    }catch(e){toast(e.message,'red')}
+  }
+};
+
+// Music (Suno)
+const Music={
+  async load(){
+    const [sr,lr]=await Promise.all([
+      fetch('/api/suno?action=status').catch(()=>null),
+      fetch('/api/suno?action=list').catch(()=>null)
+    ]);
+    // Inline status badge
+    const sel=$('music-gen-status');
+    try{
+      const st=sr?await sr.json():{};
+      const sm={no_jobs:'Idle',generating:'Generating...',queued:'Queued',complete:'Complete'};
+      const cls=st.status==='generating'?'b-blue':st.status==='no_jobs'?'b-gray':'b-green';
+      sel.innerHTML='<span class="badge '+cls+'">'+(sm[st.status]||esc(st.status||'?'))+'</span>';
+    }catch(e){sel.innerHTML=''}
+    // Full song list
+    const songs=$('music-songs');
+    try{
+      const cd=lr?await lr.json():{songs:[]};
+      $('music-status').textContent=(cd.count||0)+' tracks';
+      if(!cd.songs?.length){songs.innerHTML='<div style="padding:24px;font-size:13px;color:var(--dim);text-align:center">No songs yet. Generate songs via the voice agent.</div>';return}
+      songs.innerHTML='<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--border);font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">'+
+        '<th style="padding:8px 12px;text-align:left">Title</th>'+
+        '<th style="padding:8px 12px;text-align:left">Genre</th>'+
+        '<th style="padding:8px 12px;text-align:right">Size</th>'+
+        '<th style="padding:8px 12px;text-align:center">Play</th>'+
+        '<th style="padding:8px 12px;width:40px"></th>'+
+      '</tr></thead><tbody>'+
+      cd.songs.map(s=>{
+        const sz=s.size_bytes>1024*1024?(s.size_bytes/(1024*1024)).toFixed(1)+' MB':(s.size_bytes/1024).toFixed(0)+' KB';
+        return'<tr style="border-bottom:1px solid var(--border2)" id="song-'+esc(s.filename)+'">'+
+          '<td style="padding:8px 12px"><div style="font-weight:500;color:var(--bright);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.title||s.filename)+'</div></td>'+
+          '<td style="padding:8px 12px;font-size:12px;color:var(--dim)">'+esc(s.genre||'—')+'</td>'+
+          '<td style="padding:8px 12px;font-size:12px;color:var(--dim);text-align:right;font-family:var(--mono)">'+sz+'</td>'+
+          '<td style="padding:8px 12px;text-align:center"><audio controls preload="none" style="height:28px;width:160px"><source src="'+esc(s.url)+'"></audio></td>'+
+          '<td style="padding:8px 12px;text-align:center"><button class="btn btn-d btn-sm" onclick="Music.deleteSong(\''+esc(s.filename)+'\',\''+esc(s.title||s.filename)+'\')">x</button></td>'+
+        '</tr>'
+      }).join('')+'</tbody></table>'
+    }catch(e){songs.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>'}
+  },
+  async deleteSong(filename,title){
+    if(!confirm('Delete song "'+title+'"?\\n\\nThe file will be archived (renamed .deleted), not permanently removed.'))return;
+    try{
+      const r=await fetch('/api/suno/song/'+encodeURIComponent(filename),{method:'DELETE'});
+      const d=await r.json();
+      if(d.ok){toast('Archived: '+title,'green');const el=$('song-'+filename);if(el)el.remove();
+        const ct=parseInt($('music-status').textContent)||0;$('music-status').textContent=(ct-1)+' songs on disk'}
+      else toast(d.error||'Failed','red');
+    }catch(e){toast(e.message,'red')}
+  }
+};
+
+// Clients Overview
+const Clients={
+  async load(){
+    const tbody=$('clients-tbody');
     tbody.innerHTML='<tr><td colspan="6"><div class="loading" style="padding:14px"><div class="spin"></div></div></td></tr>';
     try{
-      const d=await(await fetch('/api/profiles')).json();
-      const profiles=d.profiles||[],active=d.active;
-      tbody.innerHTML=profiles.map(p=>{
-        const caps=(this.CAPS[p.id]||['Voice']).map(c=>'<span>'+esc(c)+'</span>').join('');
+      const r=await fetch('/api/admin/clients');
+      if(!r.ok){
+        // If endpoint doesn't exist yet, scan from monitoring events
+        tbody.innerHTML='<tr><td colspan="6" style="padding:14px;color:var(--dim)">Client API not available — check admin.py</td></tr>';
+        return;
+      }
+      const d=await r.json();
+      const clients=d.clients||[];
+      $('clients-count').textContent=clients.length+' clients';
+      if(!clients.length){tbody.innerHTML='<tr><td colspan="6" style="padding:14px;color:var(--dim)">No clients found</td></tr>';return}
+      tbody.innerHTML=clients.map(c=>{
+        const ocStatus=c.openclaw_status||'unknown';
+        const ovuStatus=c.ovu_status||'unknown';
+        const statusCls={running:'g',suspended:'y',stopped:'r',unknown:''};
         return'<tr>'+
-          '<td><div style="font-weight:600;color:var(--bright)">'+esc(p.name)+'</div><div style="font-size:11px;color:var(--subtle);font-family:var(--mono)">'+esc(p.id)+'</div></td>'+
-          '<td>'+(p.id===active?'<span class="badge b-green">&#x25CF; Active</span>':'<span class="badge b-gray">Ready</span>')+'</td>'+
-          '<td><div class="fw-cap">'+caps+'</div></td>'+
-          '<td><span style="font-family:var(--mono);font-size:12px">'+esc(LLMS[p.id]||'&mdash;')+'</span></td>'+
-          '<td><span style="font-family:var(--mono);font-size:12px">'+esc(TTSS[p.id]||'&mdash;')+'</span></td>'+
-          '<td style="display:flex;gap:6px">'+
-            '<button class="btn btn-o btn-sm" onclick="Frameworks.cfg(\''+esc(p.id)+'\',\''+esc(p.name)+'\')">Config</button>'+
-            (p.id!==active?'<button class="btn btn-p btn-sm" onclick="Agents.activate(\''+esc(p.id)+'\');Frameworks.load()">Activate</button>':'')+
-          '</td></tr>'
+          '<td style="padding:10px 12px"><div style="font-weight:500;color:var(--bright)">'+esc(c.username)+'</div></td>'+
+          '<td style="padding:10px 12px"><a href="https://'+esc(c.domain)+'/admin" target="_blank" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.domain)+'</a></td>'+
+          '<td style="padding:10px 12px;font-family:var(--mono);font-size:12px">'+esc(c.port||'—')+'</td>'+
+          '<td style="padding:10px 12px"><span class="badge '+(statusCls[ocStatus]?'b-'+({g:'green',y:'yellow',r:'red'}[statusCls[ocStatus]]||'gray'):'b-gray')+'">'+esc(ocStatus)+'</span></td>'+
+          '<td style="padding:10px 12px"><span class="badge '+(statusCls[ovuStatus]?'b-'+({g:'green',y:'yellow',r:'red'}[statusCls[ovuStatus]]||'gray'):'b-gray')+'">'+esc(ovuStatus)+'</span></td>'+
+          '<td style="padding:10px 12px;font-size:12px;color:var(--dim)">'+esc(c.last_activity||'—')+'</td>'+
+        '</tr>'
       }).join('');
-    }catch(e){tbody.innerHTML='<tr><td colspan="6" style="color:var(--red)">'+esc(e.message)+'</td></tr>'}
-  },
-  async cfg(id,name){
-    const el=$('fw-config');el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
-    try{
-      const d=await(await fetch('/api/profiles/'+id)).json();
-      el.innerHTML='<div style="font-weight:600;color:var(--bright);margin-bottom:10px">'+esc(name)+'</div><pre style="background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:14px;font-family:var(--mono);font-size:11px;overflow-x:auto;color:var(--text)">'+esc(JSON.stringify(d.profile||d,null,2))+'</pre>';
-    }catch(e){el.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>'}
+    }catch(e){tbody.innerHTML='<tr><td colspan="6" style="padding:14px;color:var(--red)">'+esc(e.message)+'</td></tr>'}
   }
 };
 
-// Install
-const Install={
-  running:false,
-  setStep(n){
-    const all=['research','plan','install','connector','test','register'];
-    all.forEach(s=>{
-      const el=$('ist-'+s);if(!el)return;
-      el.className='ist';
-      if(s===n)el.classList.add('active');
-      else if(all.indexOf(s)<all.indexOf(n))el.classList.add('done');
-    });
-  },
-  log(html){const t=$('install-term');t.innerHTML+=html+'\n';t.scrollTop=t.scrollHeight},
-  clear(){
-    $('install-term').innerHTML='<span class="t-dim">Enter a URL or package name above and click Start.</span>';
-    $('install-url').value='';
-    ['research','plan','install','connector','test','register'].forEach(s=>{const e=$('ist-'+s);if(e)e.className='ist'});
-    this.running=false;$('install-btn').disabled=false;
-  },
-  async start(){
-    const url=$('install-url').value.trim();
-    if(!url){toast('Enter a URL or framework name','yellow');return}
-    if(this.running)return;
-    this.running=true;$('install-btn').disabled=true;
-    $('install-term').innerHTML='';
-    this.setStep('research');
-    this.log('<span class="t-c">-- Installing: '+esc(url)+' --</span>');
-    try{
-      const r=await fetch('/api/admin/install/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
-      if(r.headers.get('content-type')?.includes('text/event-stream')){
-        const reader=r.body.getReader(),dec=new TextDecoder();
-        while(true){
-          const{done,value}=await reader.read();if(done)break;
-          for(const line of dec.decode(value).split('\n')){
-            if(line.startsWith('data: ')){
-              try{const e=JSON.parse(line.slice(6));this.handleEvt(e)}catch{this.log(esc(line.slice(6)))}
-            }
-          }
-        }
-      }else{
-        const d=await r.json();
-        this.log('<span class="t-b">'+esc(d.message||JSON.stringify(d))+'</span>');
-      }
-    }catch(e){
-      this.log('<span class="t-y">Routing through gateway...</span>');
-      try{
-        const r=await fetch('/api/admin/gateway/rpc',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({method:'chat.send',params:{sessionKey:'admin-install',message:'[ADMIN INSTALL] Install framework: '+url+'. Research, install, write connector, test, register. Report each step.'}})});
-        const d=await r.json();
-        this.log('<span class="t-g">&#x2713; Agent dispatched</span>');
-        this.log('<span class="t-dim">'+esc((d.message||JSON.stringify(d)).slice(0,300))+'</span>');
-      }catch(e2){this.log('<span class="t-r">&#x2715; '+esc(e2.message)+'</span>')}
-    }
-    this.running=false;$('install-btn').disabled=false;
-  },
-  handleEvt(e){
-    const sm={research:'research',plan:'plan',install:'install',connector:'connector',test:'test',register:'register'};
-    if(e.step&&sm[e.step])this.setStep(e.step);
-    if(e.message||e.data){
-      const cls=e.level==='error'?'t-r':e.level==='success'?'t-g':e.level==='section'?'t-sec':'t-dim';
-      this.log('<span class="'+cls+'">'+esc(e.message||e.data)+'</span>');
-    }
-    if(e.type==='done'){this.log('<span class="t-g">&#x2713; Complete!</span>');this.setStep('register')}
-  }
-};
+
 
 // Tests
 const TESTS=[
@@ -969,17 +1306,17 @@ const Tests={
   async run(){
     this.res={};$('test-sum').textContent='Running...';$('run-btn').disabled=true;this.renderList(true);
     const run=async(id,fn)=>{const s=Date.now();try{const d=await fn();this.res[id]={pass:true,detail:d,ms:Date.now()-s}}catch(e){this.res[id]={pass:false,detail:e.message,ms:Date.now()-s}};this.renderList(true)};
-    await run('health',async()=>{const d=await(await fetch('/api/health')).json();if(d.status!=='ok')throw new Error(d.status);return d.service});
+    await run('health',async()=>{const d=await(await fetch('/health/live')).json();if(!d.healthy)throw new Error('unhealthy');return'up '+((d.details?.uptime_seconds||0)/3600).toFixed(1)+'h'});
     await run('profile',async()=>{const d=await(await fetch('/api/profiles/active')).json();return d.profile?.name||d.active||'?'});
     await run('gateway',async()=>{const d=await(await fetch('/api/admin/gateway/status')).json();if(!d.ok&&!d.healthy&&!d.connected)throw new Error(d.error||'not connected');return'connected'});
     await run('profiles_api',async()=>{const d=await(await fetch('/api/profiles')).json();if(!d.profiles)throw new Error('no profiles');return d.profiles.length+' profiles'});
-    await run('tts',async()=>{const r=await fetch('/api/tts/voices').catch(()=>null);return r?.ok?(await r.json()).voices?.length+' voices':'endpoint ok'});
+    await run('tts',async()=>{const r=await fetch('/api/tts/voices').catch(()=>null);if(!r?.ok)return'endpoint ok';const d=await r.json();const v=d.voices||{};const n=typeof v==='object'&&!Array.isArray(v)?Object.keys(v).length:Array.isArray(v)?v.length:0;return n+' providers'});
     await run('music',async()=>{const d=await(await fetch('/api/music?action=status')).json();return d.status||'ok'});
-    await run('dj_prompt',async()=>{const d=await(await fetch('/api/dj-prompt')).json();if(!d.prompt&&!d.text&&!d.content)throw new Error('no prompt');return'loaded'});
+    await run('dj_prompt',async()=>{const r=await fetch('/api/dj-prompt');if(!r.ok)return r.status===404?'not configured':'status '+r.status;const d=await r.json();if(!d.prompt&&!d.text&&!d.content)throw new Error('no prompt');return'loaded'});
     await run('server_stats',async()=>{const d=await(await fetch('/api/server-stats')).json();return'cpu '+(d.cpu_percent||'?')+'%'});
     await run('session',async()=>{const r=await fetch('/api/session').catch(()=>null);return r?.ok?'ok':'endpoint ok'});
-    await run('canvas',async()=>{const d=await(await fetch('/api/canvas/manifest')).json();return(d.pages||[]).length+' pages'});
-    await run('latency',async()=>{const t=Date.now();await fetch('/api/health');return(Date.now()-t)+'ms'});
+    await run('canvas',async()=>{const d=await(await fetch('/api/canvas/manifest')).json();const p=d.pages||{};const n=typeof p==='object'&&!Array.isArray(p)?Object.keys(p).length:Array.isArray(p)?p.length:0;return n+' pages'});
+    await run('latency',async()=>{const t=Date.now();await fetch('/health/live');return(Date.now()-t)+'ms'});
     await run('conversation',async()=>'skipped (would use tokens)');
     const pass=Object.values(this.res).filter(r=>r.pass).length;
     $('test-sum').textContent=pass+'/'+TESTS.length+' passed';$('run-btn').disabled=false;this.renderList(false);
@@ -989,72 +1326,99 @@ const Tests={
 // Providers
 const Providers={
   sel:{llm:null,tts:null,stt:null},
+  profileId:null,
   PROV:{
     llm:[
-      {id:'gateway',name:'OpenClaw Gateway',detail:'GLM-4.7-Flash · Full tools · Memory · Canvas',badge:'b-green',badgeTxt:'ACTIVE'},
-      {id:'zai_direct',name:'Z.AI Direct',detail:'GLM-4.5-Flash · No tools · Fast',badge:'b-gray',badgeTxt:'ALT'},
-      {id:'hume_evi',name:'Hume EVI',detail:'Built-in eLLM · Emotion-aware · Real-time',badge:'b-orange',badgeTxt:'CLOUD'},
-      {id:'elevenlabs',name:'ElevenLabs AI',detail:'Conversational AI · Built-in',badge:'b-orange',badgeTxt:'CLOUD'},
+      {id:'gateway',name:'OpenClaw Gateway',detail:'GLM-5-turbo via OpenClaw. Full tools, memory, canvas.'},
+      {id:'zai',name:'Z.AI Direct',detail:'GLM-5-turbo / GLM-5.1. No agent tools.'},
+      {id:'groq',name:'Groq',detail:'Llama 4 Scout / Qwen3-32b. Fast inference.'},
+      {id:'minimax',name:'MiniMax',detail:'M2.7-highspeed. Custom provider "mx".'},
+      {id:'kimi',name:'Kimi',detail:'K2.5 / Moonshot AI.'},
+      {id:'gemini',name:'Google Gemini',detail:'Gemini 3. Multimodal.'},
+      {id:'hume_evi',name:'Hume EVI',detail:'Built-in eLLM. Emotion-aware.'},
+      {id:'elevenlabs',name:'ElevenLabs AI',detail:'Conversational AI. Built-in.'},
+      {id:'openai',name:'OpenAI',detail:'GPT-4o / GPT-4.1. Cloud.'},
     ],
     tts:[
-      {id:'supertonic',name:'Supertonic',detail:'Local ONNX · Free · 10 voices · ~2s',badge:'b-green',badgeTxt:'LOCAL'},
-      {id:'groq',name:'Groq Orpheus',detail:'Cloud API · Fast · ~300ms',badge:'b-blue',badgeTxt:'CLOUD'},
-      {id:'hume',name:'Hume EVI',detail:'Emotional · Real-time · Paired with Hume LLM',badge:'b-orange',badgeTxt:'CLOUD'},
-      {id:'elevenlabs',name:'ElevenLabs',detail:'High quality · Many voices · API',badge:'b-orange',badgeTxt:'CLOUD'},
+      {id:'supertonic',name:'Supertonic',detail:'Local ONNX. Free. 10 voices. ~2s.'},
+      {id:'groq',name:'Groq Orpheus',detail:'Cloud API. Fast. ~300ms.'},
+      {id:'resemble',name:'Resemble AI',detail:'Premium cloned voices. Cloud.'},
+      {id:'qwen3',name:'Qwen3 Voice Clone',detail:'Fal.ai. Clone + generate.'},
+      {id:'hume',name:'Hume EVI',detail:'Emotional. Real-time.'},
+      {id:'elevenlabs',name:'ElevenLabs',detail:'High quality. Many voices.'},
     ],
     stt:[
-      {id:'webspeech',name:'Web Speech API',detail:'Browser-native · Chrome/Edge · Free',badge:'b-green',badgeTxt:'LOCAL'},
-      {id:'groq_whisper',name:'Groq Whisper',detail:'Cloud · Fast · Accurate',badge:'b-blue',badgeTxt:'CLOUD'},
-      {id:'local_whisper',name:'Local Whisper',detail:'faster-whisper · Private · GPU optional',badge:'b-purple',badgeTxt:'LOCAL'},
+      {id:'webspeech',name:'Web Speech API',detail:'Browser-native. Chrome/Edge. Free.'},
+      {id:'deepgram',name:'Deepgram',detail:'Cloud. Accurate. Streaming.'},
+      {id:'groq_whisper',name:'Groq Whisper',detail:'Cloud. Fast. Accurate.'},
     ]
   },
-  load(){
-    this.sel={llm:'gateway',tts:'supertonic',stt:'webspeech'};
+  async load(){
+    // Load active profile to get current selections
+    try{
+      const d=await(await fetch('/api/profiles/active')).json();
+      this.profileId=d.id;
+      this.sel={
+        llm:d.llm?.provider||'gateway',
+        tts:d.voice?.tts_provider||'supertonic',
+        stt:d.stt?.provider||'webspeech'
+      };
+    }catch(e){this.sel={llm:'gateway',tts:'supertonic',stt:'webspeech'}}
+    this.render();
+  },
+  render(){
     const mkCol=(type,label,items)=>
       '<div class="prov-col">'+
-        '<div class="prov-col-hdr">'+label+'</div>'+
+        '<div class="prov-col-hdr">'+label+(this.sel[type]?' <span style="font-size:10px;color:var(--green);font-weight:400">'+esc(this.sel[type])+'</span>':'')+'</div>'+
         '<div class="prov-list">'+
           items.map(p=>
             '<div class="prov-item'+(this.sel[type]===p.id?' sel':'')+'" id="pi-'+type+'-'+p.id+'" onclick="Providers.select(\''+type+'\',\''+p.id+'\')">'+
               '<div class="prov-radio"></div>'+
               '<div style="flex:1;min-width:0">'+
-                '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'+
-                  '<div class="prov-info-name">'+esc(p.name)+'</div>'+
-                  '<span class="badge '+p.badge+'" style="font-size:9px">'+p.badgeTxt+'</span>'+
-                '</div>'+
+                '<div class="prov-info-name">'+esc(p.name)+'</div>'+
                 '<div class="prov-info-detail">'+esc(p.detail)+'</div>'+
-                '<div class="prov-config">'+
-                  (type==='llm'&&p.id==='gateway'?'<div class="fg"><label class="fl">Session Key</label><input type="text" value="voice-main-3"></div>':'')+
-                  (type==='tts'&&p.id==='groq'?'<div class="fg"><label class="fl">API Key</label><input type="password" placeholder="gsk_..."></div>':'')+
-                  (type==='tts'&&p.id==='supertonic'?'<div class="fg"><label class="fl" style="margin-bottom:4px">Speed</label><input type="range" min="0.5" max="2" step="0.1" value="1.1" style="width:100%"></div>':'')+
-                  '<button class="test-btn" id="tb-'+type+'-'+p.id+'" onclick="Providers.test(\''+type+'\',\''+p.id+'\')">&#9654; Test Connection</button>'+
-                '</div>'+
               '</div>'+
             '</div>'
           ).join('')+
         '</div>'+
       '</div>';
-    $('prov-grid').innerHTML=mkCol('llm','LLM',this.PROV.llm)+mkCol('tts','TTS',this.PROV.tts)+mkCol('stt','STT',this.PROV.stt);
+    $('prov-grid').innerHTML=mkCol('llm','LLM Provider',this.PROV.llm)+mkCol('tts','TTS Provider',this.PROV.tts)+mkCol('stt','STT Provider',this.PROV.stt)+
+      '<div style="grid-column:1/-1;display:flex;gap:8px;padding-top:12px">'+
+        '<button class="btn btn-g" onclick="Providers.save()">Save to Active Profile</button>'+
+        '<button class="btn btn-o" onclick="Providers.testAll()">Test All Connections</button>'+
+        '<span id="prov-status" style="font-size:12px;color:var(--dim);align-self:center"></span>'+
+      '</div>';
   },
   select(type,id){
     this.sel[type]=id;
     document.querySelectorAll('[id^="pi-'+type+'-"]').forEach(el=>el.classList.remove('sel'));
     $('pi-'+type+'-'+id)?.classList.add('sel');
-    toast(type.toUpperCase()+': '+id,'blue');
   },
-  async test(type,id){
-    const btn=$('tb-'+type+'-'+id);if(!btn)return;
-    btn.className='test-btn testing';btn.textContent='Testing...';
+  async save(){
+    if(!this.profileId){toast('No active profile','red');return}
+    const payload={
+      llm:{provider:this.sel.llm},
+      voice:{tts_provider:this.sel.tts},
+      stt:{provider:this.sel.stt}
+    };
     try{
-      if(type==='llm'){const d=await(await fetch('/api/admin/gateway/status')).json();const ok=d.ok||d.healthy;btn.className='test-btn '+(ok?'pass':'fail');btn.textContent=ok?'&#x2713; Connected':'&#x2715; Failed'}
-      else if(type==='tts'){const d=await(await fetch('/api/health/ready')).json();const ok=d.details?.tts?.healthy;btn.className='test-btn '+(ok?'pass':'fail');btn.textContent=ok?'&#x2713; TTS Ready':'&#x2715; TTS Error'}
-      else{btn.className='test-btn pass';btn.textContent='&#x2713; Browser API Ready'}
-    }catch(e){btn.className='test-btn fail';btn.textContent='&#x2715; Error: '+e.message.slice(0,30)}
+      const r=await fetch('/api/profiles/'+this.profileId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d=await r.json();
+      if(d.id||d.name){toast('Saved providers to '+this.profileId,'green');$('prov-status').textContent='Saved'}
+      else toast(d.error||'Save failed','red');
+    }catch(e){toast(e.message,'red')}
+  },
+  async testAll(){
+    $('prov-status').textContent='Testing...';
+    const results=[];
+    try{const d=await(await fetch('/api/admin/gateway/status')).json();results.push('LLM: '+(d.ok||d.healthy||d.connected?'OK':'FAIL'))}catch{results.push('LLM: error')}
+    try{const d=await(await fetch('/health/ready')).json();results.push('TTS: '+(d.details?.tts?.healthy?'OK':'FAIL'))}catch{results.push('TTS: error')}
+    results.push('STT: OK (browser)');
+    $('prov-status').textContent=results.join(' | ');
+    toast(results.join(' | '),'blue');
   }
 };
 
-// DJ Tools (Music Agent placeholder - no-op)
-const DJTools={load(){}};
 
 // System
 const System={
@@ -1115,111 +1479,6 @@ const System={
 };
 
 // Instructions editor
-const Instructions = {
-  files: [],
-  current: null,
-  dirty: false,
-
-  async load() {
-    $('instr-list').innerHTML = '<div class="loading"><div class="spin"></div>Loading...</div>';
-    try {
-      const d = await (await fetch('/api/instructions')).json();
-      this.files = d.files || [];
-      this.renderList();
-      // Auto-select first app-scope file
-      if (!this.current) {
-        const first = this.files.find(f => f.scope === 'app' && f.exists !== false);
-        if (first) this.select(first.id);
-      }
-    } catch(e) {
-      $('instr-list').innerHTML = '<div class="empty" style="padding:16px"><span style="color:var(--red)">'+esc(e.message)+'</span></div>';
-    }
-  },
-
-  renderList() {
-    const app = this.files.filter(f => f.scope === 'app');
-    const oc = this.files.filter(f => f.scope === 'openclaw');
-    let html = '';
-    if (app.length) {
-      html += '<div style="padding:6px 12px 2px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--subtle)">This App</div>';
-      html += app.map(f => this._fileItem(f)).join('');
-    }
-    if (oc.length) {
-      html += '<div style="padding:10px 12px 2px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--subtle)">OpenClaw Workspace</div>';
-      html += oc.map(f => this._fileItem(f)).join('');
-    }
-    $('instr-list').innerHTML = html || '<div class="empty" style="padding:16px">No files found</div>';
-  },
-
-  _fileItem(f) {
-    const active = f.id === this.current ? 'background:var(--blue-bg);color:var(--blue);border-left:2px solid var(--blue)' : 'border-left:2px solid transparent';
-    const dot = f.scope === 'app'
-      ? '<span style="font-size:10px;color:var(--green)">&#9679;</span>'
-      : '<span style="font-size:10px;color:var(--purple)">&#9679;</span>';
-    const missing = !f.exists ? ' <span style="color:var(--dim);font-size:10px">(missing)</span>' : '';
-    return '<div onclick="Instructions.select(\''+f.id+'\')" style="padding:8px 12px;cursor:pointer;font-size:13px;'+active+';display:flex;align-items:center;gap:6px;transition:background .1s" onmouseover="this.style.background=\'rgba(177,186,196,.06)\'" onmouseout="this.style.background=\''+(f.id===this.current?'var(--blue-bg)':'transparent')+'\'">'+dot+esc(f.label)+missing+'</div>';
-  },
-
-  async select(id) {
-    if (this.dirty && this.current) {
-      if (!confirm('You have unsaved changes. Discard?')) return;
-    }
-    this.current = id;
-    this.dirty = false;
-    this.renderList();
-    const meta = this.files.find(f => f.id === id);
-    $('instr-editor-title').textContent = meta ? meta.label : id;
-    $('instr-desc').textContent = meta ? meta.description : '';
-    const badge = $('instr-badge');
-    const saveBtn = $('instr-save-btn');
-    if (meta) {
-      badge.textContent = meta.scope === 'app' ? 'hot-reload' : 'openclaw';
-      badge.className = 'badge ' + (meta.scope === 'app' ? 'b-green' : 'b-purple');
-      badge.style.display = '';
-    }
-    saveBtn.style.display = meta && meta.scope === 'app' ? '' : 'none';
-    $('instr-editor').value = '';
-    $('instr-status').textContent = 'Loading...';
-    try {
-      const d = await (await fetch('/api/instructions/'+id)).json();
-      if (d.error) { $('instr-status').textContent = 'Error: '+d.error; return; }
-      $('instr-editor').value = d.content || '';
-      $('instr-status').textContent = d.exists ? (d.size+' chars') : 'File does not exist yet — save to create it.';
-      $('instr-editor').disabled = meta && meta.scope === 'openclaw';
-    } catch(e) {
-      $('instr-status').textContent = 'Error: '+e.message;
-    }
-  },
-
-  onEdit() {
-    this.dirty = true;
-    const len = $('instr-editor').value.length;
-    $('instr-status').textContent = len+' chars (unsaved)';
-  },
-
-  async save() {
-    if (!this.current) return;
-    const content = $('instr-editor').value;
-    $('instr-save-btn').disabled = true;
-    try {
-      const d = await (await fetch('/api/instructions/'+this.current, {
-        method: 'PUT',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({content})
-      })).json();
-      if (d.ok) {
-        this.dirty = false;
-        $('instr-status').textContent = d.message+' ('+d.size+' chars)';
-        toast('Saved: '+this.current, 'green');
-      } else {
-        toast(d.error||'Save failed', 'red');
-      }
-    } catch(e) {
-      toast(e.message, 'red');
-    }
-    $('instr-save-btn').disabled = false;
-  }
-};
 
 // Toast
 let toastT;
@@ -1236,8 +1495,11 @@ function toast(msg,color){
 document.addEventListener('keydown',function(e){
   if((e.ctrlKey||e.metaKey)&&e.key==='s'){
     e.preventDefault();
-    if($('panel-builder').classList.contains('active')&&Builder.currentId) Builder.save(Builder.currentId);
-    if($('panel-instructions').classList.contains('active')&&Instructions.current) Instructions.save();
+    if($('panel-builder').classList.contains('active')){
+      if(Builder.activeTab==='agentfiles'&&Builder._afCurrent&&Builder._afDirty) Builder.saveFile();
+      else if(Builder.currentId) Builder.save(Builder.currentId);
+    }
+    if($('panel-workspace').classList.contains('active')&&Workspace.currentFile&&Workspace.dirty) Workspace.save();
   }
 });
 
@@ -1269,6 +1531,7 @@ const CanvasPages = {
       '<th style="padding:8px 12px;text-align:left">Category</th>' +
       '<th style="padding:8px 12px;text-align:center">Lock</th>' +
       '<th style="padding:8px 12px;text-align:right">Visibility</th>' +
+      '<th style="padding:8px 12px;text-align:center;width:60px"></th>' +
       '</tr></thead><tbody>' +
       ids.map(id => {
         const p = this.pages[id];
@@ -1301,7 +1564,10 @@ const CanvasPages = {
           'color:'+(pub?'var(--green)':'var(--dim)')+';' +
           'padding:4px 12px;border-radius:20px;cursor:pointer;font-size:12px;transition:all .15s">' +
           (pub ? '🌐 Public' : '🔒 Private') +
-          '</button></td></tr>';
+          '</button></td>' +
+          '<td style="padding:10px 12px;text-align:center">' +
+          '<button onclick="CanvasPages.deletePage(\''+esc(id)+'\')" class="btn btn-d btn-sm" title="Delete page">x</button>' +
+          '</td></tr>';
       }).join('') +
       '</tbody></table>';
   },
@@ -1348,7 +1614,21 @@ const CanvasPages = {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       this.pages[id].is_locked = newLocked;
       this.render();
-      toast((newLocked ? '🔐 Locked: ' : '🔓 Unlocked: ') + esc(page.display_name||id), newLocked?'yellow':'blue');
+      toast((newLocked ? 'Locked: ' : 'Unlocked: ') + esc(page.display_name||id), newLocked?'yellow':'blue');
+    } catch(e) {
+      toast('Failed: '+e.message, 'red');
+    }
+  },
+  async deletePage(id) {
+    const page = this.pages[id];
+    const name = page?.display_name || id;
+    if (!confirm('Delete canvas page "'+name+'"?\n\nThe file will be archived (.bak), not permanently removed.')) return;
+    try {
+      const r = await fetch('/api/canvas/manifest/page/'+id, {method: 'DELETE'});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      delete this.pages[id];
+      this.render();
+      toast('Deleted: ' + name, 'green');
     } catch(e) {
       toast('Failed: '+e.message, 'red');
     }
@@ -1375,8 +1655,12 @@ async function initAdminAuth() {
 addEventListener('DOMContentLoaded', async function(){
   await initAdminAuth();
   System.health();
+  // Show Platform section only if /api/admin/clients is available (test-dev / admin only)
+  fetch('/api/admin/clients').then(r=>{if(r.ok)return r.json();throw 0}).then(d=>{
+    if(d.clients?.length)$('nav-section-platform').style.display=''
+  }).catch(()=>{});
   const hash=location.hash.slice(1);
-  const valid=['agents','builder','frameworks','install','tests','providers','djtools','system','instructions','canvas'];
+  const valid=['agents','builder','tests','providers','system','canvas','plugins','workspace','music','clients'];
   show(valid.includes(hash)?hash:'agents');
 });
 </script>

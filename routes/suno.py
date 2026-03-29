@@ -662,3 +662,26 @@ def suno_completed():
     if completed_songs_queue:
         return jsonify({'has_completed': True, 'songs': completed_songs_queue, 'count': len(completed_songs_queue)})
     return jsonify({'has_completed': False, 'songs': [], 'count': 0})
+
+
+@suno_bp.route('/api/suno/song/<filename>', methods=['DELETE'])
+def delete_song(filename):
+    """Delete a generated song file. Renames to .deleted (never truly removes)."""
+    import re
+    # Validate filename — only allow safe characters
+    if not re.match(r'^[\w\-. ]+\.(mp3|wav|ogg|m4a)$', filename):
+        return jsonify({'error': 'Invalid filename'}), 400
+
+    target = GENERATED_MUSIC_DIR / filename
+    if not target.exists():
+        return jsonify({'error': 'File not found'}), 404
+
+    # Rename to .deleted instead of removing (NEVER DELETE rule)
+    renamed = target.with_suffix(target.suffix + '.deleted')
+    try:
+        target.rename(renamed)
+        logger.info(f'[suno] Archived song: {filename} -> {renamed.name}')
+        return jsonify({'ok': True, 'archived': renamed.name})
+    except Exception as e:
+        logger.error(f'[suno] Failed to archive {filename}: {e}')
+        return jsonify({'error': str(e)}), 500

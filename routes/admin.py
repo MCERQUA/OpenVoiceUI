@@ -513,3 +513,83 @@ def install_start():
 
     from flask import Response as _Response
     return _Response(generate(), mimetype='text/event-stream', headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/clients — list all clients with status
+# ---------------------------------------------------------------------------
+
+@admin_bp.route('/api/admin/clients', methods=['GET'])
+def list_clients():
+    """Scan /mnt/clients/ for all client directories and report status."""
+    clients_dir = Path('/mnt/clients')
+    if not clients_dir.is_dir():
+        return jsonify({"clients": [], "error": "No /mnt/clients mount"})
+
+    skip = {'.pnpm-store', 'lost+found'}
+    clients = []
+
+    for entry in sorted(clients_dir.iterdir()):
+        if not entry.is_dir() or entry.name.startswith('.') or entry.name in skip:
+            continue
+
+        username = entry.name
+        client = {"username": username, "domain": f"{username}.jam-bot.com"}
+
+        # Read host port from docker-compose.yml (format: "5003:5001")
+        compose_file = entry / 'compose' / 'docker-compose.yml'
+        port = None
+        if compose_file.exists():
+            try:
+                import re
+                content = compose_file.read_text()
+                m = re.search(r'"(\d+):5001"', content)
+                if m:
+                    port = m.group(1)
+            except Exception:
+                pass
+        client['port'] = port
+
+        # Check monitoring events for last activity
+        events_file = Path(f'/app/runtime/monitoring-events/{username}.jsonl')
+        last_activity = None
+        ovu_status = 'unknown'
+        oc_status = 'unknown'
+        if events_file.exists():
+            try:
+                # Read last few lines
+                lines = events_file.read_text().strip().split('\n')
+                for line in reversed(lines[-20:]):
+                    try:
+                        evt = json.loads(line)
+                        if not last_activity:
+                            last_activity = evt.get('ts', '')
+                        etype = evt.get('type', '')
+                        if etype == 'startup' and evt.get('source') == 'ovu':
+                            ovu_status = 'running'
+                        elif etype in ('claw_listening', 'claw_health_monitor'):
+                            oc_status = 'running'
+                    except json.JSONDecodeError:
+                        continue
+            except Exception:
+                pass
+
+        # If no recent events (>2h old), mark as likely suspended
+        if last_activity and ovu_status == 'unknown' and oc_status == 'unknown':
+            try:
+                from datetime import datetime as _dt
+                last_ts = _dt.fromisoformat(last_activity.replace('Z', '+00:00'))
+                age_hours = (datetime.now(timezone.utc) - last_ts).total_seconds() / 3600
+                if age_hours > 2:
+                    ovu_status = 'suspended'
+                    oc_status = 'suspended'
+            except Exception:
+                pass
+
+        client['ovu_status'] = ovu_status
+        client['openclaw_status'] = oc_status
+        client['last_activity'] = last_activity
+
+        clients.append(client)
+
+    return jsonify({"clients": clients})
