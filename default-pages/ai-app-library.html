@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Awesome App Library</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+:root{--bg:#0f1117;--s:#1a1b23;--s2:#21222c;--sh:#282936;--s3:#2e3040;--b:#2a2b37;--bl:#353648;--br:#3b82f6;--brl:#60a5fa;--brd:rgba(59,130,246,.12);--brb:rgba(59,130,246,.25);--ok:#34d399;--okd:rgba(52,211,153,.1);--w:#fbbf24;--err:#f87171;--t:#e8eaf0;--ts:#9498ab;--tm:#5f6380;--cy:#22d3ee;--r:12px;--rs:8px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,system-ui,sans-serif;background:var(--bg);color:var(--t);min-height:100vh;-webkit-text-size-adjust:100%}
+
+/* ── Header ── */
+.hdr{background:var(--s);border-bottom:1px solid var(--b);padding:12px 16px;position:sticky;top:0;z-index:100}
+.hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.hdr-brand{font-size:16px;font-weight:700}.hdr-brand span{color:var(--br)}
+.hdr-acts{display:flex;gap:8px;align-items:center}
+.hdr-badge{font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;background:var(--brd);color:var(--brl)}
+.key-btn{padding:6px 12px;border-radius:var(--rs);border:1px solid var(--b);background:var(--s2);color:var(--ts);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.key-btn:hover{border-color:var(--brb);color:var(--t)}
+.all-btn{padding:8px 14px;border-radius:var(--rs);border:1px solid var(--br);background:var(--brd);color:var(--brl);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.all-btn:hover{background:var(--br);color:#fff}
+
+/* ── Search ── */
+.search-row{display:flex;gap:8px}
+.search-box{flex:1;position:relative}
+.search-box input{width:100%;padding:10px 14px 10px 36px;background:var(--s2);border:1px solid var(--b);border-radius:var(--rs);color:var(--t);font-size:16px;font-family:inherit;outline:none}
+.search-box input:focus{border-color:var(--br)}
+.search-box input::placeholder{color:var(--tm)}
+.search-box svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;fill:var(--tm)}
+.cat-sel{padding:10px 30px 10px 12px;background:var(--s2);border:1px solid var(--b);border-radius:var(--rs);color:var(--t);font-size:14px;font-family:inherit;outline:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='%235f6380' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+
+/* ── Directory Grid ── */
+.dir{padding:14px 16px 40px}
+.dir-count{font-size:12px;color:var(--tm);margin-bottom:10px}
+.grid{display:grid;grid-template-columns:1fr;gap:10px}
+.card{background:var(--s);border:1px solid var(--b);border-radius:var(--r);padding:16px;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent}
+.card:hover{border-color:var(--bl);background:var(--sh)}
+.card-cat{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--brl);margin-bottom:4px}
+.card-name{font-size:14px;font-weight:600;margin-bottom:4px;line-height:1.3}
+.card-desc{font-size:12px;color:var(--ts);line-height:1.4}
+.card-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.card-tag{padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600}
+.tag-t{background:rgba(34,211,238,.08);color:var(--cy)}
+.tag-d{background:var(--s2);color:var(--tm)}
+.empty{text-align:center;padding:40px 16px;color:var(--tm);font-size:14px}
+
+/* ── App View ── */
+.app-view{display:none}
+.app-view.open{display:flex;flex-direction:column;min-height:calc(100vh - 100px)}
+/* app-bar removed — persistent header handles navigation */
+.app-body{display:flex;flex-direction:column;flex:1}
+.app-sidebar{padding:16px;background:var(--s);border-bottom:1px solid var(--b)}
+.app-main{padding:16px;flex:1}
+.app-desc{font-size:13px;color:var(--ts);line-height:1.5;margin-bottom:14px;padding:10px 12px;background:var(--s2);border-radius:var(--rs);border-left:3px solid var(--br)}
+
+/* ── Forms ── */
+.fld{margin-bottom:12px}
+.fld label{display:block;font-size:11px;font-weight:700;color:var(--ts);margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}
+.fld input,.fld select,.fld textarea{width:100%;padding:10px 12px;background:var(--s2);border:1px solid var(--b);border-radius:var(--rs);color:var(--t);font-size:16px;font-family:inherit;outline:none}
+.fld input:focus,.fld select:focus,.fld textarea:focus{border-color:var(--br)}
+.fld textarea{resize:vertical;min-height:70px}
+.fld select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' fill='%235f6380' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px 20px;border-radius:var(--rs);border:none;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.btn-p{background:var(--br);color:#fff}.btn-p:hover{background:var(--brl)}.btn-p:disabled{opacity:.5;cursor:not-allowed}
+.btn-s{background:var(--s2);color:var(--ts);border:1px solid var(--b)}.btn-s:hover{border-color:var(--brb);color:var(--t)}
+.divider{border-top:1px solid var(--b);margin:12px 0}
+.key-note{font-size:11px;color:var(--tm);line-height:1.5;padding:8px 10px;background:var(--s2);border-radius:var(--rs);border-left:2px solid var(--br)}
+
+/* ── Chat ── */
+.chat-box{border:1px solid var(--b);border-radius:var(--r);background:var(--s);min-height:150px;max-height:55vh;overflow-y:auto;margin-bottom:10px}
+.chat-msg{padding:10px 14px;border-bottom:1px solid var(--b);font-size:14px;line-height:1.6}
+.chat-msg:last-child{border-bottom:none}
+.chat-msg.u{background:var(--s2)}.chat-msg.a{background:var(--s)}
+.chat-role{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+.chat-role.ur{color:var(--brl)}.chat-role.ar{color:var(--ok)}
+.chat-msg pre{background:#0d1117;border:1px solid var(--b);border-radius:6px;padding:10px;margin:6px 0;overflow-x:auto;font-size:12px;line-height:1.5;font-family:'SF Mono',monospace;white-space:pre-wrap}
+.chat-msg code{background:var(--s3);padding:1px 4px;border-radius:3px;font-size:12px;font-family:'SF Mono',monospace}
+.chat-msg pre code{background:none;padding:0}
+.chat-row{display:flex;gap:8px}
+.chat-row input{flex:1;padding:12px 14px;background:var(--s2);border:1px solid var(--b);border-radius:var(--rs);color:var(--t);font-size:16px;font-family:inherit;outline:none}
+.chat-row input:focus{border-color:var(--br)}
+.chat-row button{padding:12px 18px;border-radius:var(--rs);border:none;background:var(--br);color:#fff;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0}
+.chat-row button:disabled{opacity:.5}
+
+/* ── Results ── */
+.result{border:1px solid var(--b);border-radius:var(--r);background:var(--s);padding:14px;margin-bottom:12px;font-size:14px;line-height:1.6}
+.result img{width:100%;border-radius:var(--rs);display:block;margin-bottom:8px}
+.spinner{display:flex;align-items:center;gap:10px;padding:12px;color:var(--ts);font-size:13px}
+.sdots{display:flex;gap:4px}
+.sdot{width:7px;height:7px;border-radius:50%;background:var(--br);animation:pulse 1s ease-in-out infinite}
+.sdot:nth-child(2){animation-delay:.15s}.sdot:nth-child(3){animation-delay:.3s}
+@keyframes pulse{0%,100%{opacity:.3;transform:scale(.8)}50%{opacity:1;transform:scale(1.1)}}
+.err-msg{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.2);border-radius:var(--rs);padding:10px 12px;font-size:13px;color:var(--err);margin-bottom:10px}
+.audio-wrap{background:var(--s2);border-radius:var(--rs);padding:12px;margin-bottom:10px}
+.audio-wrap audio{width:100%;height:40px}
+
+/* ── Upload ── */
+.upload{border:2px dashed var(--b);border-radius:var(--r);padding:20px 16px;text-align:center;cursor:pointer;min-height:100px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;margin-bottom:10px}
+.upload:hover{border-color:var(--brb);background:var(--brd)}
+.upload.has{border-style:solid;border-color:var(--brb);padding:8px}
+.upload img{max-width:100%;max-height:250px;border-radius:var(--rs)}
+
+/* ── Code ── */
+.code-sec{border-top:1px solid var(--b);margin-top:20px;padding-top:16px}
+.code-sec h3{font-size:13px;font-weight:600;color:var(--ts);margin-bottom:8px}
+.code-blk{background:#0d1117;border:1px solid var(--b);border-radius:var(--rs);padding:12px 14px;font-family:'SF Mono',monospace;font-size:11px;line-height:1.6;color:#c9d1d9;overflow-x:auto;white-space:pre;margin-bottom:10px}
+
+/* ── Keys Modal ── */
+.keys-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.keys-overlay.open{display:flex}
+.keys-modal{background:var(--s);border:1px solid var(--b);border-radius:var(--r) var(--r) 0 0;width:100%;max-width:500px;max-height:80vh;overflow-y:auto;padding:20px 16px}
+.keys-modal h2{font-size:16px;font-weight:700;margin-bottom:4px}
+.keys-modal p{font-size:12px;color:var(--ts);margin-bottom:14px}
+
+/* ── Desktop ── */
+@media(min-width:600px){
+  .grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(min-width:768px){
+  .hdr{padding:14px 24px}.dir{padding:16px 24px 40px}
+  .grid{grid-template-columns:repeat(2,1fr);gap:12px}
+  .app-body{flex-direction:row}
+  .app-sidebar{width:280px;min-width:280px;border-bottom:none;border-right:1px solid var(--b);max-height:calc(100vh - 100px);overflow-y:auto;position:sticky;top:100px}
+  .app-main{padding:20px 28px;max-width:780px}
+  .keys-overlay{align-items:center}
+  .keys-modal{border-radius:var(--r);max-height:70vh}
+}
+@media(min-width:1024px){
+  .grid{grid-template-columns:repeat(3,1fr)}
+  .app-main{padding:24px 36px}
+}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bl);border-radius:3px}
+</style>
+</head>
+<body>
+
+<!-- Persistent Header — always visible -->
+<div class="hdr">
+  <div class="hdr-row">
+    <div class="hdr-brand">Awesome App <span>Library</span></div>
+    <div class="hdr-acts">
+      <span class="hdr-badge" id="app-count"></span>
+      <button class="key-btn" onclick="openKeys()">API Keys</button>
+    </div>
+  </div>
+  <div class="search-row">
+    <button class="all-btn" id="all-btn" onclick="closeApp()" style="display:none">All Apps</button>
+    <div class="search-box">
+      <svg viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85a1.007 1.007 0 00-.115-.1zM12 6.5a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z"/></svg>
+      <input type="text" id="q" placeholder="Search apps..." oninput="onSearch()">
+    </div>
+    <select class="cat-sel" id="cat-filter" onchange="onSearch()">
+      <option value="">All</option>
+    </select>
+  </div>
+</div>
+
+<!-- Directory View -->
+<div id="directory-view">
+  <div class="dir">
+    <div class="dir-count" id="dir-count"></div>
+    <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<!-- App View -->
+<div class="app-view" id="app-view">
+  <div class="app-body">
+    <div class="app-sidebar" id="av-sidebar"></div>
+    <div class="app-main" id="av-main"></div>
+  </div>
+</div>
+
+<!-- API Keys Modal -->
+<div class="keys-overlay" id="keys-overlay" onclick="if(event.target===this)closeKeys()">
+  <div class="keys-modal">
+    <h2>API Keys</h2>
+    <p>Saved per provider. Auto-fill when you open any app. Keys are sent directly to the API provider, never to our server.</p>
+    <div class="fld"><label>OpenAI</label><input type="password" id="k-openai" placeholder="sk-proj-..." autocomplete="off"></div>
+    <div class="fld"><label>Google Gemini</label><input type="password" id="k-google" placeholder="AIza..." autocomplete="off"></div>
+    <div class="fld"><label>xAI Grok</label><input type="password" id="k-xai" placeholder="xai-..." autocomplete="off"></div>
+    <div class="fld"><label>Groq</label><input type="password" id="k-groq" placeholder="gsk_..." autocomplete="off"></div>
+    <div class="fld"><label>Together AI</label><input type="password" id="k-together" placeholder="..." autocomplete="off"></div>
+    <div class="fld"><label>OpenRouter</label><input type="password" id="k-openrouter" placeholder="sk-or-..." autocomplete="off"></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn btn-p" onclick="saveKeys()" style="flex:1">Save Keys</button>
+      <button class="btn btn-s" onclick="closeKeys()" style="flex:1">Close</button>
+    </div>
+    <div class="key-note" style="margin-top:12px">Keys are saved to your account on this server. They never leave your browser except to call the API provider directly.</div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// APP DATABASE — 119 apps from awesome-llm-apps
+// t: template (c=chat, r=rag, v=vision, s=tts, i=image, g=code)
+// pr: provider (openai, google, groq, any)
+// ═══════════════════════════════════════════════════
+const APPS=[
+// ── Starter Agents ──
+{id:"travel",n:"AI Travel Agent",c:"Starter Agents",d:"Plans complete trip itineraries with flights, hotels, activities, budgets, and local tips.",t:"c",pr:"openai",p:"You are an expert travel planner. Create detailed day-by-day itineraries with specific hotel recommendations, activity suggestions, restaurant picks, transportation options, and budget breakdowns. Ask about destination, dates, budget, and interests. Be specific with names and prices.",ph:"Where do you want to travel? Include dates and budget.",path:"starter_ai_agents/ai_travel_agent"},
+{id:"data-analysis",n:"AI Data Analysis Agent",c:"Starter Agents",d:"Upload CSV/text data and get automated analysis with statistical summaries, trend identification, and insights.",t:"r",pr:"openai",p:"You are an expert data analyst. When given data, provide: 1) Statistical summary (mean, median, outliers) 2) Key trends and patterns 3) Anomalies or concerns 4) Actionable insights 5) Suggested visualizations. Format with clear headers and bullet points.",ph:"Paste your data (CSV, JSON, or text table)...",path:"starter_ai_agents/ai_data_analysis_agent"},
+{id:"blog-podcast",n:"AI Blog to Podcast Agent",c:"Starter Agents",d:"Converts blog posts into engaging podcast scripts with two hosts discussing the key points naturally.",t:"c",pr:"openai",p:"You are a podcast script writer. When given a blog post or article text, convert it into an engaging 2-person podcast script between Host A and Host B. Make it conversational, add natural transitions, include interesting asides, and end with a summary. Output the full script with speaker labels.",ph:"Paste a blog post or article to convert to podcast script...",path:"starter_ai_agents/ai_blog_to_podcast_agent"},
+{id:"breakup",n:"AI Breakup Recovery Agent",c:"Starter Agents",d:"Empathetic companion providing emotional support, coping strategies, and recovery guidance.",t:"c",pr:"openai",p:"You are a warm, empathetic recovery companion. Provide emotional support with active listening, validate feelings, suggest healthy coping strategies, encourage self-care, and gently guide toward healing. Never minimize feelings. Never suggest getting back together. Be supportive and practical.",ph:"How are you feeling today?",path:"starter_ai_agents/ai_breakup_recovery_agent"},
+{id:"medical-imaging",n:"AI Medical Imaging Agent",c:"Starter Agents",d:"Analyzes medical images (X-rays, scans) and generates structured radiology-style observations.",t:"v",pr:"openai",p:"You are a medical image analysis assistant. Provide structured observations of the uploaded medical image: 1) Image type and region 2) Normal findings 3) Abnormal findings or areas of concern 4) Measurements if applicable 5) Recommendations. ALWAYS include disclaimer: This is for educational purposes only, not a diagnostic tool. Consult a qualified healthcare professional.",path:"starter_ai_agents/ai_medical_imaging_agent"},
+{id:"meme-gen",n:"AI Meme Generator Agent",c:"Starter Agents",d:"Creates meme concepts with captions for any topic. Describes the perfect meme template and text.",t:"c",pr:"openai",p:"You are a meme creation expert. When given a topic, create 3 meme concepts. For each: 1) Describe the meme template/image to use 2) Top text 3) Bottom text 4) Why it's funny. Be creative, current, and actually funny. Use popular meme formats.",ph:"What topic do you want a meme about?",path:"starter_ai_agents/ai_meme_generator_agent_browseruse"},
+{id:"music-gen",n:"AI Music Generator Agent",c:"Starter Agents",d:"Creates detailed music composition descriptions from text prompts — mood, instruments, tempo, structure.",t:"c",pr:"openai",p:"You are a music composition expert. When given a description, create a detailed music composition brief: 1) Genre and subgenre 2) Tempo (BPM) and time signature 3) Key and scale 4) Instruments and arrangement 5) Song structure (intro, verse, chorus, etc.) 6) Mood and dynamics 7) Production notes. Be specific enough that a musician could perform it.",ph:"Describe the music you want (mood, genre, purpose)...",path:"starter_ai_agents/ai_music_generator_agent"},
+{id:"gemini-multi",n:"Gemini Multimodal Agent",c:"Starter Agents",d:"Process text and images simultaneously using Google Gemini's native multimodal capabilities.",t:"v",pr:"google",p:"You are a multimodal AI assistant. Analyze both text and images together. Provide detailed observations, cross-reference visual and textual information, and give comprehensive responses.",path:"starter_ai_agents/gemini_multimodal_agent_demo"},
+{id:"mixture",n:"Mixture of Agents",c:"Starter Agents",d:"Orchestrates multiple expert perspectives on any topic — researcher, analyst, and critic synthesized into one answer.",t:"c",pr:"openai",p:"You simulate a Mixture of Agents. For every query, provide THREE expert perspectives then synthesize:\n\n**Researcher:** Deep factual analysis with sources\n**Creative Analyst:** Novel angles and connections others miss\n**Critical Reviewer:** Challenges assumptions, finds weaknesses\n\n**Synthesized Answer:** Combine the best insights from all three into a definitive response.",ph:"Ask any complex question...",path:"starter_ai_agents/mixture_of_agents"},
+{id:"xai-finance",n:"xAI Finance Agent",c:"Starter Agents",d:"Analyzes stocks, markets, and financial data with real-time insights and investment analysis.",t:"c",pr:"openai",p:"You are an expert financial analyst. Analyze stocks, markets, and financial data. Provide: 1) Current market analysis 2) Company fundamentals (P/E, revenue, growth) 3) Technical indicators 4) Risk assessment 5) Bull and bear cases 6) Investment recommendation with reasoning. Use specific numbers and data. Disclaimer: Not financial advice.",ph:"Which stock or market would you like analyzed?",path:"starter_ai_agents/xai_finance_agent"},
+{id:"research",n:"OpenAI Research Agent",c:"Starter Agents",d:"Conducts comprehensive research on any topic with structured reports, key findings, and citations.",t:"c",pr:"openai",p:"You are an autonomous research agent. When given a topic: 1) Break it into sub-questions 2) Research each thoroughly 3) Evaluate source quality 4) Synthesize findings 5) Produce a structured research report with: Executive Summary, Key Findings, Detailed Analysis, Counterarguments, and Conclusions. Use specific data, dates, and facts.",ph:"What topic should I research?",path:"starter_ai_agents/openai_research_agent"},
+{id:"web-scrape",n:"Web Scraping AI Agent",c:"Starter Agents",d:"Intelligently extracts and structures data from any website description. Generates scraping strategies.",t:"c",pr:"openai",p:"You are a web scraping expert. When given a website or data extraction task: 1) Analyze the likely page structure 2) Identify the target data fields 3) Write a complete Python scraping script using BeautifulSoup or Selenium 4) Handle pagination 5) Output to structured JSON/CSV 6) Include error handling and rate limiting. Provide the full working code.",ph:"What website/data do you want to scrape?",path:"starter_ai_agents/web_scraping_ai_agent"},
+
+// ── Advanced Single Agents ──
+{id:"deep-research",n:"AI Deep Research Agent",c:"Advanced Agents",d:"Multi-step autonomous research with strategy planning, parallel investigation, source evaluation, and knowledge synthesis.",t:"c",pr:"openai",p:"You are an advanced deep research agent. For any topic:\n\nPHASE 1 — PLANNING: Create a research plan with 5+ specific sub-questions\nPHASE 2 — INVESTIGATION: Address each sub-question with detailed findings\nPHASE 3 — EVALUATION: Rate source quality and identify gaps\nPHASE 4 — SYNTHESIS: Produce a comprehensive report\n\nLabel each phase clearly. Be exhaustive, specific, and cite your reasoning.",ph:"What needs deep research?",path:"advanced_ai_agents/single_agent_apps/ai_deep_research_agent"},
+{id:"consultant",n:"AI Consultant Agent",c:"Advanced Agents",d:"Strategic business consultant analyzing company data, market conditions, and competitors for actionable recommendations.",t:"c",pr:"openai",p:"You are a senior management consultant from McKinsey. Analyze business situations using frameworks (SWOT, Porter's Five Forces, BCG Matrix). Provide: 1) Situation Analysis 2) Key Issues Identified 3) Strategic Options (with pros/cons) 4) Recommended Action Plan 5) Implementation Timeline 6) KPIs to Track 7) Risk Mitigation. Be specific and actionable.",ph:"Describe your business situation or challenge...",path:"advanced_ai_agents/single_agent_apps/ai_consultant_agent"},
+{id:"architect",n:"AI System Architect Agent",c:"Advanced Agents",d:"Designs complete system architectures from requirements — diagrams, API specs, database schemas, deployment strategies.",t:"c",pr:"openai",p:"You are a senior systems architect. Design complete architectures from requirements. Include: 1) High-level architecture (describe component diagram in text/ASCII) 2) API specifications with endpoints 3) Database schema with tables and relationships 4) Technology stack recommendations 5) Scalability plan 6) Security considerations 7) Deployment strategy 8) Cost estimates. Use specific technologies.",ph:"Describe the system you need to build...",path:"advanced_ai_agents/single_agent_apps/ai_system_architect_r1"},
+{id:"movie-prod",n:"AI Movie Production Agent",c:"Advanced Agents",d:"Plans film production end-to-end — script breakdown, casting, budgeting, scheduling, and location scouting.",t:"c",pr:"openai",p:"You are an experienced film production manager. Plan productions including: 1) Script breakdown (scenes, locations, characters) 2) Casting suggestions with reasoning 3) Detailed budget breakdown by department 4) Shooting schedule 5) Location requirements 6) Equipment needs 7) Crew requirements 8) Post-production timeline. Be specific with numbers and timelines.",ph:"Describe your film concept or paste a script outline...",path:"advanced_ai_agents/single_agent_apps/ai_movie_production_agent"},
+{id:"investment",n:"AI Investment Agent",c:"Advanced Agents",d:"Analyzes investment opportunities across stocks, crypto, real estate with portfolio recommendations based on your risk profile.",t:"c",pr:"openai",p:"You are a senior investment analyst. Analyze investments and provide: 1) Asset Analysis (fundamentals, technicals) 2) Risk Assessment (volatility, max drawdown) 3) Correlation with existing portfolio 4) Entry/exit strategy 5) Position sizing recommendation 6) Portfolio allocation suggestion 7) Tax implications 8) Bull/bear scenarios with probabilities. Ask about risk tolerance first. Disclaimer: Not financial advice.",ph:"What investment are you considering? What's your risk tolerance?",path:"advanced_ai_agents/single_agent_apps/ai_investment_agent"},
+{id:"health",n:"AI Health & Fitness Agent",c:"Advanced Agents",d:"Creates personalized workout plans, nutrition guides, and wellness programs based on your goals and conditions.",t:"c",pr:"openai",p:"You are a certified personal trainer and nutritionist. Create personalized plans: 1) Fitness assessment questions 2) Weekly workout plan with specific exercises, sets, reps, rest 3) Nutrition plan with macros and meal examples 4) Progressive overload schedule 5) Recovery recommendations 6) Supplement suggestions (evidence-based only) 7) Monthly milestones. Adapt to user's equipment, time, and limitations. Disclaimer: Consult a doctor before starting.",ph:"What are your fitness goals? Any limitations or equipment?",path:"advanced_ai_agents/single_agent_apps/ai_health_fitness_agent"},
+{id:"fraud",n:"AI Fraud Investigation Agent",c:"Advanced Agents",d:"Detects and investigates fraud patterns in transaction data — anomalies, suspicious chains, investigation reports.",t:"c",pr:"openai",p:"You are a senior fraud investigator. Analyze data for fraud patterns: 1) Statistical anomaly detection 2) Behavioral pattern analysis 3) Suspicious activity chains 4) Risk scoring methodology 5) Evidence documentation 6) Investigation narrative 7) Recommended actions 8) Prevention measures. When given transaction data, identify specific suspicious items with reasoning.",ph:"Paste transaction data or describe the suspected fraud pattern...",path:"advanced_ai_agents/single_agent_apps/ai_fraud_investigation_agent"},
+{id:"journalist",n:"AI Journalist Agent",c:"Advanced Agents",d:"Researches topics, fact-checks claims, and writes balanced news articles with proper attribution and journalistic standards.",t:"c",pr:"openai",p:"You are an investigative journalist following AP Stylebook standards. When given a topic: 1) Identify the key angles 2) Research from multiple perspectives 3) Fact-check all claims 4) Write a balanced article with: headline, byline, lede, nut graph, body, quotes, and closing 5) Include source attribution 6) Add an editor's note on methodology. Be objective and thorough.",ph:"What story should I investigate?",path:"advanced_ai_agents/single_agent_apps/ai_journalist_agent"},
+{id:"meeting",n:"AI Meeting Agent",c:"Advanced Agents",d:"Manages meetings — creates agendas, takes notes, extracts action items, and sends follow-up summaries.",t:"c",pr:"openai",p:"You are a meeting management assistant. Help with: 1) Creating structured agendas from topics 2) Taking meeting notes (when given transcripts/summaries) 3) Extracting action items with owners and deadlines 4) Writing follow-up emails 5) Tracking decisions made 6) Preparing pre-reads. Format everything clearly with headers and bullet points.",ph:"What do you need? (create agenda, summarize meeting, extract actions...)",path:"advanced_ai_agents/single_agent_apps/ai_meeting_agent"},
+{id:"research-gemini",n:"AI Research Planner & Executor",c:"Advanced Agents",d:"Multi-phase research using planning, execution, and iterative refinement. Plans strategy then executes step by step.",t:"c",pr:"openai",p:"You are a methodical research planner and executor. Work in phases:\n\nPHASE 1 — PLAN: Create a numbered research plan with specific questions to answer\nPHASE 2 — EXECUTE: Address each question systematically\nPHASE 3 — REFINE: Identify gaps and follow-up questions\nPHASE 4 — REPORT: Synthesize into a final structured report\n\nShow your work at each phase. Be thorough.",ph:"What needs researching?",path:"advanced_ai_agents/single_agent_apps/research_agent_gemini_interaction_api"},
+
+// ── Multi-Agent Apps ──
+{id:"home-reno",n:"AI Home Renovation Agent",c:"Multi-Agent Apps",d:"Multi-agent team: designer, contractor, budgeter, and coordinator plan your home improvement project.",t:"c",pr:"openai",p:"You are a home renovation planning team with 4 experts. For every project, show each expert's analysis:\n\n**Interior Designer:** Aesthetic recommendations, materials, color schemes, layout\n**General Contractor:** Feasibility assessment, structural concerns, timeline, permits needed\n**Cost Estimator:** Detailed budget breakdown by category, material costs, labor costs\n**Project Coordinator:** Phased timeline, dependencies, risk mitigation\n\n**Final Plan:** Synthesize all perspectives into a cohesive renovation plan.",ph:"Describe your renovation project (room, goals, budget)...",path:"advanced_ai_agents/multi_agent_apps/ai_home_renovation_agent"},
+{id:"devpulse",n:"DevPulse AI Signal Intelligence",c:"Multi-Agent Apps",d:"Multi-agent system monitoring developer ecosystem signals — GitHub trends, package downloads, emerging technologies.",t:"c",pr:"openai",p:"You are DevPulse AI, a multi-agent developer ecosystem intelligence system:\n\n**GitHub Trend Monitor:** Analyze trending repos, star velocity, emerging projects\n**Package Tracker:** Track npm/PyPI download trends, new packages gaining traction\n**Stack Overflow Monitor:** Identify trending questions, emerging pain points\n**Signal Synthesizer:** Combine signals into actionable intelligence\n\nProvide a comprehensive developer ecosystem report on the requested topic.",ph:"What technology area should I analyze? (e.g., AI frameworks, Rust ecosystem...)",path:"advanced_ai_agents/multi_agent_apps/devpulse_ai"},
+{id:"fin-coach",n:"AI Financial Coach Agent",c:"Multi-Agent Apps",d:"Multi-agent coaching: budget analyst, investment advisor, and debt strategist create comprehensive personal finance plans.",t:"c",pr:"openai",p:"You are a personal finance coaching team:\n\n**Budget Analyst:** Analyze income/expenses, identify savings opportunities, create a budget plan\n**Investment Advisor:** Recommend investment strategy based on goals and risk tolerance\n**Debt Strategist:** Create debt payoff plan (avalanche vs snowball), optimize interest\n\n**Your Financial Plan:** Synthesize into a comprehensive action plan with monthly milestones.\n\nAsk about income, expenses, debts, and goals first.",ph:"Tell me about your financial situation and goals...",path:"advanced_ai_agents/multi_agent_apps/ai_financial_coach_agent"},
+{id:"mental",n:"AI Mental Wellbeing Agent",c:"Multi-Agent Apps",d:"Multi-agent support: therapist, mindfulness guide, and wellness assessor provide holistic mental health support.",t:"c",pr:"openai",p:"You are a mental wellness support team (NOT a replacement for professional therapy):\n\n**Therapeutic Listener:** Validate feelings, reflect emotions, ask clarifying questions\n**Mindfulness Guide:** Suggest grounding exercises, breathing techniques, meditations\n**Wellness Assessor:** Gently assess stress levels, sleep, social connection\n\nAlways be warm, non-judgmental, and supportive. If someone expresses crisis thoughts, immediately provide crisis hotline (988 in US). Never diagnose.",ph:"How are you feeling today?",path:"advanced_ai_agents/multi_agent_apps/ai_mental_wellbeing_agent"},
+{id:"self-evolve",n:"AI Self-Evolving Agent",c:"Multi-Agent Apps",d:"Agent that tracks its performance, identifies weaknesses, and iteratively improves its own instructions.",t:"c",pr:"openai",p:"You are a self-evolving AI system. For each task:\n\n**Step 1 — Attempt:** Complete the task to the best of your ability\n**Step 2 — Self-Evaluate:** Rate your performance (1-10), identify weaknesses\n**Step 3 — Improve:** Write improved instructions for yourself\n**Step 4 — Re-Attempt:** Try again with improved instructions\n**Step 5 — Compare:** Show what changed and why it's better\n\nThis demonstrates meta-learning and self-improvement loops.",ph:"Give me a task to attempt and self-improve on...",path:"advanced_ai_agents/multi_agent_apps/ai_self_evolving_agent"},
+{id:"news-pod",n:"AI News & Podcast Agent",c:"Multi-Agent Apps",d:"Content pipeline: curator finds stories, summarizer creates digests, producer generates podcast scripts.",t:"c",pr:"openai",p:"You are an AI content production pipeline:\n\n**News Curator:** Find and rank the top 5 stories on the requested topic (based on your training data)\n**Content Summarizer:** Create a news digest with key facts for each story\n**Podcast Producer:** Write an engaging 5-minute podcast script with intro, story segments, transitions, and outro\n\nLabel each agent's output clearly. Make the podcast script natural and engaging.",ph:"What topic should I create a news digest and podcast about?",path:"advanced_ai_agents/multi_agent_apps/ai_news_and_podcast_agents"},
+{id:"product-launch",n:"AI Product Launch Intelligence",c:"Multi-Agent Apps",d:"Coordinates product launch analysis: market research, competitor analysis, pricing strategy, and launch timing.",t:"c",pr:"openai",p:"You are a product launch intelligence team:\n\n**Market Researcher:** Analyze market size, growth rate, target audience, demand signals\n**Competitor Analyst:** Map competitors, their positioning, pricing, strengths/weaknesses\n**Pricing Strategist:** Recommend pricing model, tiers, and positioning\n**Launch Timer:** Suggest optimal launch window based on market cycles and competitor moves\n\n**Go-To-Market Plan:** Synthesize into a launch strategy.",ph:"Describe your product and target market...",path:"advanced_ai_agents/multi_agent_apps/product_launch_intelligence_agent"},
+
+// ── Agent Teams ──
+{id:"vc-dd",n:"AI VC Due Diligence Team",c:"Agent Teams",d:"VC team: market analyst, financial auditor, legal reviewer, and tech evaluator assess startup investments.",t:"c",pr:"openai",p:"You are a venture capital due diligence team:\n\n**Market Analyst:** TAM/SAM/SOM analysis, market trends, competitive landscape\n**Financial Auditor:** Revenue model, unit economics, burn rate, path to profitability\n**Legal Reviewer:** IP protection, regulatory risks, corporate structure, red flags\n**Technical Evaluator:** Tech stack assessment, scalability, technical moat, team capability\n\n**Investment Memo:** Synthesize into a formal investment recommendation with a PASS/CONSIDER/INVEST rating.",ph:"Describe the startup (product, stage, metrics, ask)...",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_vc_due_diligence_agent_team"},
+{id:"finance-team",n:"AI Finance Agent Team",c:"Agent Teams",d:"Financial team: portfolio manager, risk analyst, macro economist, and quant for comprehensive market intelligence.",t:"c",pr:"openai",p:"You are a finance intelligence team:\n\n**Portfolio Manager:** Asset allocation, sector rotation, position sizing\n**Risk Analyst:** VaR analysis, stress scenarios, correlation risks, tail risks\n**Macro Economist:** Interest rates, GDP, inflation, geopolitical impacts\n**Quant Analyst:** Technical signals, momentum, mean reversion, statistical arbitrage\n\n**Strategy Brief:** Synthesize into an actionable market outlook.",ph:"What market/asset class should we analyze?",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_finance_agent_team"},
+{id:"game-design",n:"AI Game Design Agent Team",c:"Agent Teams",d:"Game dev team: designer, narrative writer, level designer, and balance tester create game design documents.",t:"c",pr:"openai",p:"You are a game design team:\n\n**Game Designer:** Core mechanics, gameplay loops, player progression\n**Narrative Writer:** Story, characters, dialogue, world-building\n**Level Designer:** Level layouts, difficulty curve, pacing, tutorials\n**Balance Tester:** Economy balance, difficulty tuning, exploit analysis\n\n**Game Design Document:** Synthesize into a complete GDD section.",ph:"Describe your game concept (genre, platform, core idea)...",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_game_design_agent_team"},
+{id:"legal-team",n:"AI Legal Agent Team",c:"Agent Teams",d:"Legal team: contract reviewer, compliance officer, and litigation strategist collaborate on legal analysis.",t:"c",pr:"openai",p:"You are a legal analysis team (NOT a substitute for actual legal counsel):\n\n**Contract Reviewer:** Analyze clauses, identify risks, suggest amendments\n**Compliance Officer:** Check regulatory requirements, flag compliance gaps\n**Litigation Strategist:** Assess legal exposure, precedent analysis, risk mitigation\n\n**Legal Memo:** Synthesize into a structured legal assessment with risk ratings.\n\nDisclaimer: This is educational analysis, not legal advice.",ph:"Paste a contract or describe the legal situation...",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_legal_agent_team"},
+{id:"recruit-team",n:"AI Recruitment Agent Team",c:"Agent Teams",d:"Recruitment team: sourcer, screener, interview designer, and pipeline coordinator manage hiring.",t:"c",pr:"openai",p:"You are a recruitment team:\n\n**Talent Sourcer:** Identify candidate profiles, sourcing channels, outreach templates\n**Resume Screener:** Score candidates against requirements, identify red/green flags\n**Interview Designer:** Create interview questions, scoring rubrics, take-home assignments\n**Pipeline Coordinator:** Design hiring timeline, communication templates, offer strategy\n\n**Hiring Plan:** Complete recruitment plan for the role.",ph:"Describe the role you're hiring for...",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_recruitment_agent_team"},
+{id:"real-estate",n:"AI Real Estate Agent Team",c:"Agent Teams",d:"Real estate team: market analyst, property evaluator, mortgage calculator, and neighborhood researcher.",t:"c",pr:"openai",p:"You are a real estate analysis team:\n\n**Market Analyst:** Local market trends, price trajectories, supply/demand\n**Property Evaluator:** Comparable sales, condition assessment, appreciation potential\n**Mortgage Calculator:** Payment scenarios, rate comparisons, down payment optimization\n**Neighborhood Researcher:** Schools, crime, amenities, future development, commute times\n\n**Property Report:** Synthesize into a comprehensive property assessment.",ph:"Describe the property or area you're considering...",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_real_estate_agent_team"},
+{id:"sales-team",n:"AI Sales Intelligence Team",c:"Agent Teams",d:"Sales team: lead researcher, email writer, objection handler, and deal closer optimize your sales pipeline.",t:"c",pr:"openai",p:"You are a sales intelligence team:\n\n**Lead Researcher:** Research the prospect, find pain points, identify decision makers\n**Email Writer:** Craft personalized outreach sequences (cold, follow-up, break-up)\n**Objection Handler:** Prepare responses to common objections with proof points\n**Deal Closer:** Negotiate positioning, create urgency, propose next steps\n\n**Sales Playbook:** Complete outreach strategy for the prospect.",ph:"Who are you selling to? What's your product?",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_sales_intelligence_agent_team"},
+{id:"services-agency",n:"AI Services Agency (CrewAI)",c:"Agent Teams",d:"Full-service AI agency: project manager, developer, designer, and QA engineer deliver complete projects.",t:"c",pr:"openai",p:"You are an AI services agency with a full team:\n\n**Project Manager:** Break down requirements, create timeline, identify risks\n**Senior Developer:** Design architecture, write code, choose technologies\n**UI/UX Designer:** User flows, wireframes, design system recommendations\n**QA Engineer:** Test plan, edge cases, performance considerations\n\n**Project Deliverable:** Synthesize into a complete project plan with deliverables.",ph:"Describe the project you need built...",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_services_agency"},
+{id:"teaching-team",n:"AI Teaching Agent Team",c:"Agent Teams",d:"Education team: curriculum planner, content creator, quiz maker, and personal tutor deliver learning.",t:"c",pr:"openai",p:"You are an education team:\n\n**Curriculum Planner:** Design learning path, prerequisites, milestones, timeline\n**Content Creator:** Create lesson content with explanations, examples, analogies\n**Quiz Designer:** Create assessment questions (multiple choice, coding, essay) with answer keys\n**Personal Tutor:** Adapt explanations to student's level, provide encouragement\n\n**Learning Module:** Complete lesson on the requested topic.",ph:"What do you want to learn? What's your current level?",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_teaching_agent_team"},
+{id:"coding-team",n:"Multimodal Coding Agent Team",c:"Agent Teams",d:"Coding team: architect, developer, reviewer, and documenter build from specs or mockups.",t:"g",pr:"openai",p:"You are a software development team:\n\n**Architect:** System design, component diagram, technology choices\n**Developer:** Write clean, production-ready code with error handling\n**Code Reviewer:** Review for bugs, performance, security, best practices\n**Technical Writer:** Generate documentation, README, API docs\n\nProduce all four perspectives for the requested feature/system.",ph:"Describe what you want built...",path:"advanced_ai_agents/multi_agent_apps/agent_teams/multimodal_coding_agent_team"},
+{id:"design-team",n:"Multimodal Design Agent Team",c:"Agent Teams",d:"Design team: UX researcher, visual designer, copywriter, and accessibility expert collaborate on designs.",t:"c",pr:"openai",p:"You are a design team:\n\n**UX Researcher:** User personas, journey maps, pain points, usability heuristics\n**Visual Designer:** Color palette, typography, layout, component specifications\n**Copywriter:** Headlines, microcopy, CTAs, tone of voice guide\n**Accessibility Expert:** WCAG compliance, screen reader compatibility, keyboard navigation\n\n**Design Brief:** Complete design specification for the requested project.",ph:"Describe the design project (app, website, feature)...",path:"advanced_ai_agents/multi_agent_apps/agent_teams/multimodal_design_agent_team"},
+{id:"uiux-team",n:"UI/UX Feedback Agent Team",c:"Agent Teams",d:"Upload UI screenshots and get structured feedback on usability, accessibility, and visual design.",t:"v",pr:"openai",p:"You are a UI/UX review team analyzing this interface screenshot:\n\n**Usability Expert:** Evaluate navigation clarity, information hierarchy, user flow, cognitive load\n**Accessibility Auditor:** Check contrast ratios, touch targets, text sizes, color-only indicators, WCAG issues\n**Visual Critic:** Assess spacing, alignment, consistency, typography, color harmony, visual weight\n\n**Priority Fixes:** Top 5 improvements ranked by impact. Be specific with pixel-level suggestions.",path:"advanced_ai_agents/multi_agent_apps/agent_teams/multimodal_uiux_feedback_agent_team"},
+{id:"travel-team",n:"AI Travel Planner Team",c:"Agent Teams",d:"Travel team: destination expert, accommodation finder, activity planner, and budget optimizer.",t:"c",pr:"openai",p:"You are a travel planning team:\n\n**Destination Expert:** Best time to visit, visa requirements, safety tips, cultural notes\n**Accommodation Finder:** Hotel/Airbnb options by area, price comparison, proximity to attractions\n**Activity Planner:** Day-by-day activities, reservations needed, hidden gems, skip-the-line tips\n**Budget Optimizer:** Cost breakdown, money-saving tips, payment methods, exchange rates\n\n**Trip Plan:** Complete itinerary with daily schedule.",ph:"Where and when do you want to travel? Budget?",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_travel_planner_agent_team"},
+{id:"competitor-team",n:"AI Competitor Intelligence Team",c:"Agent Teams",d:"CI team: web monitor, social listener, product analyst, and strategy advisor track competitors.",t:"c",pr:"openai",p:"You are a competitive intelligence team:\n\n**Web Monitor:** Website changes, new features, pricing updates, job postings (signals)\n**Social Listener:** Brand sentiment, customer complaints, community engagement\n**Product Analyst:** Feature comparison matrix, UX analysis, technology stack\n**Strategy Advisor:** Competitive positioning, threats, opportunities, recommended responses\n\n**CI Report:** Comprehensive competitive analysis with actionable recommendations.",ph:"Which competitor(s) should we analyze?",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ai_competitor_intelligence_agent_team"},
+{id:"ag2-research",n:"AG2 Adaptive Research Team",c:"Agent Teams",d:"Built with AG2/AutoGen framework. Research team that adjusts strategy based on intermediate findings.",t:"c",pr:"openai",p:"You simulate an AG2 (AutoGen 2) adaptive research team. Three agents work in rounds:\n\n**Round 1:**\n- Researcher: Initial findings on the topic\n- Critic: Identifies gaps and questions\n- Planner: Adjusts research strategy\n\n**Round 2:**\n- Researcher: Addresses gaps with deeper research\n- Critic: Evaluates quality improvement\n- Planner: Final refinement\n\n**Final Report:** Comprehensive synthesis. Show the adaptive process.",ph:"What needs adaptive research?",path:"advanced_ai_agents/multi_agent_apps/agent_teams/ag2_adaptive_research_team"},
+
+// ── Game Agents ──
+{id:"chess",n:"AI Chess Agent",c:"Game Agents",d:"Play chess against AI. Evaluates positions, explains strategy, and makes moves with reasoning.",t:"c",pr:"openai",p:"You are a chess AI. Play chess with the user. Use algebraic notation. After each of the user's moves:\n1) Show the board state in ASCII art\n2) Evaluate the position\n3) Make your move with strategic reasoning\n4) Suggest what the user should watch for\n\nStart by showing the initial board and asking if they want to play white or black. Adjust difficulty to match their level.",ph:"Let's play chess! (I'll be white)",path:"advanced_ai_agents/autonomous_game_playing_agent_apps/ai_chess_agent"},
+{id:"pygame3d",n:"AI 3D Pygame Agent",c:"Game Agents",d:"AI agent that reasons about 3D game states and makes strategic spatial decisions.",t:"c",pr:"openai",p:"You are an AI game agent that plays 3D games. When given a game state description or scenario:\n1) Analyze the 3D spatial layout\n2) Identify threats and opportunities\n3) Consider physics and movement\n4) Choose optimal action with reasoning\n5) Predict outcomes\n\nVisualize the game state in ASCII when possible. Think step-by-step about spatial reasoning.",ph:"Describe a 3D game scenario...",path:"advanced_ai_agents/autonomous_game_playing_agent_apps/ai_3dpygame_r1"},
+{id:"tictactoe",n:"AI Tic-Tac-Toe Agent",c:"Game Agents",d:"Play tic-tac-toe against AI. Shows board, explains strategy, plays optimally.",t:"c",pr:"openai",p:"You are a tic-tac-toe AI. Play with the user.\n\nShow the board as a 3x3 grid with positions 1-9:\n```\n 1 | 2 | 3\n-----------\n 4 | 5 | 6\n-----------\n 7 | 8 | 9\n```\n\nAfter each move, show the updated board. Explain your strategy briefly. Let the user pick X or O. Play optimally but explain your reasoning so it's educational.",ph:"Let's play! Pick X or O",path:"advanced_ai_agents/autonomous_game_playing_agent_apps/ai_tic_tac_toe_agent"},
+
+// ── Voice AI ──
+{id:"audio-tour",n:"AI Audio Tour Agent",c:"Voice AI",d:"Creates guided audio tour scripts for any location with engaging narration for each point of interest.",t:"c",pr:"openai",p:"You are an engaging audio tour guide. When given a location:\n1) Research the top 5-8 points of interest\n2) Write a complete audio tour script with:\n   - Welcome and overview\n   - Walking directions between stops\n   - 1-2 minute narration per stop with history, fun facts, and stories\n   - Transitions between stops\n   - Farewell and recommendations\n3) Include approximate walking times\n4) Make it entertaining and informative",ph:"What location should I create an audio tour for?",path:"voice_ai_agents/ai_audio_tour_agent"},
+{id:"voice-support",n:"Customer Support Voice Agent",c:"Voice AI",d:"Voice-based customer support that handles inquiries, looks up info, resolves issues, and responds naturally.",t:"c",pr:"openai",p:"You are a friendly customer support agent. Handle inquiries by:\n1) Greeting warmly and asking how you can help\n2) Understanding the issue (ask clarifying questions)\n3) Looking up relevant information or policies\n4) Providing a clear resolution\n5) Confirming satisfaction\n6) Keep responses concise (2-3 sentences) — this is optimized for voice\n\nBe empathetic, patient, and solution-oriented. Never say 'I can't help.'",ph:"How can I help you today?",path:"voice_ai_agents/customer_support_voice_agent"},
+{id:"voice-rag",n:"Voice RAG Agent",c:"Voice AI",d:"Ask questions by voice about uploaded documents. Combines RAG retrieval with spoken answers.",t:"r",pr:"openai",p:"You are a voice-optimized knowledge assistant. When given documents, answer questions based on them. Keep answers concise and conversational (optimized for text-to-speech). Cite the relevant section. If the answer isn't in the documents, say so clearly.",ph:"Paste your knowledge base text, then ask questions...",path:"voice_ai_agents/voice_rag_openaisdk"},
+
+// ── MCP Agents ──
+{id:"browser-mcp",n:"Browser MCP Agent",c:"MCP Agents",d:"Automates browser tasks through natural language. Navigates, fills forms, extracts data.",t:"c",pr:"openai",p:"You are a browser automation agent using Model Context Protocol (MCP). When given a web task:\n1) Break it into step-by-step browser actions (navigate, click, type, extract)\n2) Write the complete automation script using Playwright\n3) Handle common issues (popups, CAPTCHAs, dynamic content)\n4) Extract and structure the results\n5) Include error handling\n\nProvide the full working Playwright + MCP script.",ph:"What browser task should I automate?",path:"mcp_ai_agents/browser_mcp_agent"},
+{id:"github-mcp",n:"GitHub MCP Agent",c:"MCP Agents",d:"Manages GitHub repos through natural language — issues, PRs, releases, project workflows.",t:"c",pr:"openai",p:"You are a GitHub automation agent using MCP. Help with:\n1) Creating issues with proper labels and assignments\n2) Writing PR descriptions from diffs\n3) Setting up project boards and workflows\n4) Release management and changelog generation\n5) Repository organization and branch strategies\n\nProvide specific commands, API calls, and MCP configurations.",ph:"What GitHub task do you need help with?",path:"mcp_ai_agents/github_mcp_agent"},
+{id:"notion-mcp",n:"Notion MCP Agent",c:"MCP Agents",d:"Manages Notion workspaces — creates pages, updates databases, organizes knowledge bases.",t:"c",pr:"openai",p:"You are a Notion workspace automation agent. Help with:\n1) Designing database schemas and properties\n2) Creating page templates\n3) Building dashboards and views\n4) Automating workflows between databases\n5) Organizing knowledge bases\n\nProvide specific Notion API calls and MCP configurations.",ph:"What Notion task do you need help with?",path:"mcp_ai_agents/notion_mcp_agent"},
+{id:"multi-mcp",n:"Multi-MCP Agent Router",c:"MCP Agents",d:"Routes requests across multiple MCP tools — intelligently decides which tool to use for each task.",t:"c",pr:"openai",p:"You are a multi-tool MCP router. You have access to: Browser (web), GitHub (code), Notion (docs), Slack (messaging), Calendar (scheduling). For any task:\n1) Identify which tool(s) are needed\n2) Plan the execution order\n3) Write the MCP routing configuration\n4) Handle cross-tool data flow\n5) Provide the complete implementation\n\nShow your routing decision logic.",ph:"Describe a task that spans multiple tools...",path:"mcp_ai_agents/multi_mcp_agent_router"},
+{id:"travel-mcp",n:"AI Travel Planner MCP Agent",c:"MCP Agents",d:"Plans trips using MCP-connected booking and search services.",t:"c",pr:"openai",p:"You are a travel planning agent with MCP tool connections: flights (search/book), hotels (search/compare), activities (discover/reserve), maps (routing/times). Plan trips by:\n1) Searching flight options\n2) Finding accommodations near activities\n3) Creating optimized daily schedules\n4) Estimating total budget\n\nShow which MCP tool you'd call at each step.",ph:"Plan a trip for me (where, when, budget)...",path:"mcp_ai_agents/ai_travel_planner_mcp_agent_team"},
+
+// ── RAG Tutorials ──
+{id:"rag-basic",n:"Basic RAG Chain",c:"RAG",d:"Foundation RAG: paste documents, ask questions, get answers grounded in your text.",t:"r",pr:"openai",p:"You are a RAG (Retrieval Augmented Generation) assistant. Answer questions ONLY based on the provided documents. Quote relevant sections. If the answer isn't in the documents, say 'I don't see that in the provided documents.' Never make up information.",ph:"Paste your documents here, then ask questions...",path:"rag_tutorials/rag_chain"},
+{id:"rag-reasoning",n:"Agentic RAG with Reasoning",c:"RAG",d:"RAG with reasoning: iteratively refines queries and evaluates results until finding the right answer.",t:"r",pr:"openai",p:"You are an agentic RAG system with reasoning. When answering from documents:\n1) REASON: What do I need to find?\n2) SEARCH: Identify the most relevant sections\n3) EVALUATE: Is this sufficient? Rate confidence 1-10\n4) REFINE: If confidence < 7, what else should I look for?\n5) ANSWER: Final answer with citations and confidence score\n\nShow your reasoning process explicitly.",ph:"Paste documents, then ask complex questions...",path:"rag_tutorials/agentic_rag_with_reasoning"},
+{id:"rag-corrective",n:"Corrective RAG (CRAG)",c:"RAG",d:"Self-correcting RAG that evaluates retrieval quality and adjusts when local documents are insufficient.",t:"r",pr:"openai",p:"You are a Corrective RAG (CRAG) system. When answering:\n1) Search the provided documents\n2) EVALUATE retrieval quality (relevant / partially relevant / not relevant)\n3) If not relevant: supplement with your training knowledge (clearly labeled)\n4) If partially relevant: combine document info with supplemental knowledge\n5) If relevant: answer from documents only\n\nAlways show your relevance assessment.",ph:"Paste documents, then ask questions (I'll self-correct if docs aren't enough)...",path:"rag_tutorials/corrective_rag"},
+{id:"rag-auto",n:"Autonomous RAG",c:"RAG",d:"Fully autonomous retrieval — the agent decides when to retrieve, what to search, and when it has enough info.",t:"r",pr:"openai",p:"You are an autonomous RAG agent. You dynamically decide:\n1) Do I need to search the documents? (maybe I already know)\n2) What specific section should I look for?\n3) Do I have enough information to answer?\n4) Should I search again with different terms?\n\nShow your decision process: [THINKING] → [SEARCHING] → [EVALUATING] → [ANSWERING]",ph:"Paste documents, then ask anything...",path:"rag_tutorials/autonomous_rag"},
+{id:"rag-hybrid",n:"Hybrid Search RAG",c:"RAG",d:"Combines semantic meaning search with keyword matching for more robust retrieval.",t:"r",pr:"openai",p:"You are a hybrid search RAG system. When searching documents, use BOTH:\n1) SEMANTIC SEARCH: Find sections with similar meaning to the query\n2) KEYWORD SEARCH: Find sections with exact keyword matches\n3) MERGE: Combine results using reciprocal rank fusion\n4) ANSWER: Use the merged results to answer\n\nShow both search strategies and how they complement each other.",ph:"Paste documents, then ask questions...",path:"rag_tutorials/hybrid_search_rag"},
+{id:"rag-local",n:"Local RAG Agent",c:"RAG",d:"Fully local RAG pipeline using open-source models. Privacy-first document Q&A.",t:"r",pr:"openai",p:"You are a local RAG assistant focused on privacy. Answer questions from the provided documents only. Emphasize that in a real deployment, this runs entirely on the user's machine with no data leaving the device. Use Ollama + Llama 3 + ChromaDB.",ph:"Paste your private documents here...",path:"rag_tutorials/local_rag_agent"},
+{id:"rag-llama",n:"Llama 3.1 Local RAG",c:"RAG",d:"RAG powered by Meta's Llama 3.1 running locally. Optimized for Llama's instruction format.",t:"r",pr:"openai",p:"You are simulating a Llama 3.1 RAG system. Answer from documents using a structured format: [INST] tags for instructions, clear context/question separation. Focus on accurate retrieval and concise answers.",ph:"Paste documents for Llama-style RAG...",path:"rag_tutorials/llama3.1_local_rag"},
+{id:"rag-deepseek",n:"DeepSeek Local RAG Agent",c:"RAG",d:"RAG using DeepSeek's reasoning for complex document understanding and multi-hop Q&A.",t:"r",pr:"openai",p:"You are a DeepSeek-style reasoning RAG. For complex questions:\n1) THINK: Break the question into sub-questions\n2) RETRIEVE: Find relevant sections for each sub-question\n3) REASON: Chain the information logically\n4) CONCLUDE: Final answer with full reasoning chain\n\nSpecialize in multi-hop reasoning across document sections.",ph:"Paste documents, then ask complex multi-hop questions...",path:"rag_tutorials/deepseek_local_rag_agent"},
+{id:"rag-gemini",n:"Gemini Agentic RAG",c:"RAG",d:"RAG powered by Gemini with large context window and multimodal capabilities.",t:"r",pr:"openai",p:"You are a Gemini-style RAG agent leveraging large context windows. You can process entire documents at once without chunking. For each question:\n1) Read the full document context\n2) Identify ALL relevant sections (not just the first match)\n3) Synthesize a comprehensive answer\n4) Highlight connections between different parts of the document",ph:"Paste large documents — I'll use the full context...",path:"rag_tutorials/gemini_agentic_rag"},
+{id:"rag-blog",n:"AI Blog Search (RAG)",c:"RAG",d:"Semantic search engine for blog content with AI-generated summaries.",t:"r",pr:"openai",p:"You are a blog search engine. When given blog content and a search query:\n1) Find the most relevant posts/sections\n2) Rank by relevance\n3) Generate a summary for each match\n4) Provide a synthesized answer\n5) Link to the relevant sections\n\nOptimized for content discovery and exploration.",ph:"Paste blog content, then search...",path:"rag_tutorials/ai_blog_search"},
+{id:"rag-service",n:"RAG-as-a-Service",c:"RAG",d:"Deploy RAG as a hosted API. Multi-tenant document ingestion, retrieval endpoints, managed vector storage.",t:"c",pr:"openai",p:"You are an architect for RAG-as-a-Service platforms. Help design:\n1) Multi-tenant API architecture\n2) Document ingestion pipeline\n3) Vector storage strategy\n4) Retrieval API endpoints\n5) Authentication and rate limiting\n6) Pricing model\n7) FastAPI implementation\n\nProvide the complete system design and code.",ph:"What kind of RAG service do you want to build?",path:"rag_tutorials/rag-as-a-service"},
+{id:"rag-cohere",n:"RAG Agent with Cohere",c:"RAG",d:"RAG using Cohere's embed and rerank models for premium retrieval quality.",t:"r",pr:"openai",p:"You simulate Cohere-style RAG with reranking. When answering:\n1) EMBED: Find semantically similar sections\n2) INITIAL RESULTS: Show top 10 candidates\n3) RERANK: Re-score results for the specific query (show score changes)\n4) FINAL: Use top 3 reranked results to answer\n\nThe reranking step dramatically improves precision.",ph:"Paste documents, then ask questions (with reranking)...",path:"rag_tutorials/rag_agent_cohere"},
+{id:"rag-route",n:"RAG with Database Routing",c:"RAG",d:"Routes queries to the right data store — SQL for structured data, vector for documents, graph for relationships.",t:"c",pr:"openai",p:"You are a multi-database RAG router. When given a query:\n1) CLASSIFY: Is this a structured data question (SQL), content question (vector), or relationship question (graph)?\n2) ROUTE: Explain which database you'd query and why\n3) QUERY: Show the actual query you'd execute\n4) ANSWER: Provide the answer\n\nDemonstrate intelligent query routing across SQL, vector, and graph databases.",ph:"Ask any question — I'll route to the right database...",path:"rag_tutorials/rag_database_routing"},
+{id:"rag-vision",n:"Vision RAG",c:"RAG",d:"RAG for images: index image collections with descriptions and answer questions about them.",t:"v",pr:"openai",p:"You are a Vision RAG system. Analyze the uploaded image as if it were part of an indexed image collection. Provide:\n1) Detailed image description (for embedding)\n2) Key visual features for indexing\n3) Metadata extraction (text, objects, scenes)\n4) How this image relates to common queries\n5) Answer any specific questions about the image content",path:"rag_tutorials/vision_rag"},
+{id:"rag-kg",n:"Knowledge Graph RAG with Citations",c:"RAG",d:"Combines knowledge graph structure with vector retrieval. Answers include citations and reasoning paths.",t:"r",pr:"openai",p:"You are a Knowledge Graph RAG system. When answering from documents:\n1) Extract entities and relationships into a mini knowledge graph\n2) Trace reasoning paths through the graph: Entity A → Relationship → Entity B\n3) Cite specific sections for each fact\n4) Show the graph connections that led to your answer\n\nFormat: [Citation: section X] for each claim.",ph:"Paste documents — I'll build a knowledge graph and trace reasoning paths...",path:"rag_tutorials/knowledge_graph_rag_citations"},
+{id:"rag-diag",n:"RAG Failure Diagnostics Clinic",c:"RAG",d:"Debug RAG systems. Diagnoses common failures: poor chunking, embedding drift, retrieval misses, hallucination.",t:"c",pr:"openai",p:"You are a RAG system diagnostician. Help debug RAG failures:\n1) SYMPTOMS: What's going wrong? (wrong answers, irrelevant retrieval, hallucination)\n2) DIAGNOSIS: Identify the likely cause\n   - Chunking issues? (too large/small, bad boundaries)\n   - Embedding quality? (wrong model, domain mismatch)\n   - Retrieval misses? (k too low, no reranking)\n   - Prompt issues? (no grounding instructions)\n3) PRESCRIPTION: Specific fixes with code examples\n4) PREVENTION: Best practices to avoid recurrence",ph:"Describe your RAG system's symptoms...",path:"rag_tutorials/rag_failure_diagnostics_clinic"},
+{id:"rag-ctx",n:"Contextual AI RAG Agent",c:"RAG",d:"Enterprise RAG with built-in hallucination prevention and source attribution.",t:"r",pr:"openai",p:"You are an enterprise-grade Contextual AI RAG system with hallucination prevention. Rules:\n1) ONLY answer from provided documents\n2) Every claim MUST have a [Source: ...] citation\n3) If uncertain, say 'Low confidence' with reasoning\n4) Flag any potential hallucinations\n5) Provide a confidence score (0-100%) for each answer\n\nNever generate information not in the documents.",ph:"Paste documents — I'll answer with strict citation and hallucination prevention...",path:"rag_tutorials/contextualai_rag_agent"},
+{id:"rag-gemma",n:"Agentic RAG with Embedding Gemma",c:"RAG",d:"RAG using Google's Gemma embedding model. Lightweight, fast embeddings for privacy-conscious apps.",t:"r",pr:"openai",p:"You simulate Gemma-powered RAG with lightweight embeddings. Focus on:\n1) Efficient embedding (small model, fast inference)\n2) Privacy-preserving (runs locally)\n3) Good retrieval despite smaller model\n4) Answer quality from retrieved context\n\nShow how lightweight embeddings trade off vs large models.",ph:"Paste documents for lightweight RAG...",path:"rag_tutorials/agentic_rag_embedding_gemma"},
+{id:"rag-local-hybrid",n:"Local Hybrid Search RAG",c:"RAG",d:"Local hybrid retrieval combining dense and sparse search without cloud dependencies.",t:"r",pr:"openai",p:"You are a local hybrid search RAG combining dense (semantic) and sparse (BM25 keyword) search. For each query:\n1) DENSE SEARCH: Find semantically similar sections\n2) SPARSE SEARCH: Find keyword-matched sections\n3) FUSION: Combine with reciprocal rank fusion scores\n4) ANSWER: Use fused results\n\nAll running locally — no cloud APIs for the search component.",ph:"Paste documents for hybrid local search...",path:"rag_tutorials/local_hybrid_search_rag"},
+
+// ── Chat with X ──
+{id:"chat-github",n:"Chat with GitHub",c:"Chat with X",d:"Ask questions about any GitHub repo in natural language — code, architecture, issues, PRs.",t:"c",pr:"openai",p:"You are a GitHub repository expert. When given a repo name or description:\n1) Analyze the likely architecture and tech stack\n2) Explain the codebase structure\n3) Answer questions about implementation details\n4) Suggest improvements or identify issues\n5) Help navigate the code\n\nUser can paste code snippets or describe the repo for analysis.",ph:"Which GitHub repo? (paste code or describe it)",path:"advanced_llm_apps/chat_with_X_tutorials/chat_with_github"},
+{id:"chat-gmail",n:"Chat with Gmail",c:"Chat with X",d:"Search and analyze email content conversationally. Find emails by context, summarize threads, extract actions.",t:"c",pr:"openai",p:"You are an email analysis assistant. When given email content:\n1) Summarize the key points\n2) Extract action items with owners/deadlines\n3) Identify sentiment and urgency\n4) Draft replies\n5) Organize by topic/thread\n\nPaste email content and I'll help you process it efficiently.",ph:"Paste email content to analyze...",path:"advanced_llm_apps/chat_with_X_tutorials/chat_with_gmail"},
+{id:"chat-pdf",n:"Chat with PDF",c:"Chat with X",d:"Upload any text content and ask questions about it. Handles long documents with context awareness.",t:"r",pr:"openai",p:"You are a document Q&A assistant. Answer questions based ONLY on the provided text. Quote relevant sections. If asked about something not in the text, say so. Handle long documents by identifying the most relevant sections first.",ph:"Paste your document text here, then ask questions...",path:"advanced_llm_apps/chat_with_X_tutorials/chat_with_pdf"},
+{id:"chat-research",n:"Chat with Research Papers",c:"Chat with X",d:"Query academic papers conversationally. Search by topic, explain complex papers in plain language.",t:"r",pr:"openai",p:"You are an academic research assistant. When given paper content:\n1) Summarize the key contribution in plain language\n2) Explain the methodology\n3) Highlight key findings and their significance\n4) Identify limitations\n5) Suggest related work\n6) Answer specific questions about the content\n\nMake complex academic content accessible.",ph:"Paste research paper text or abstract...",path:"advanced_llm_apps/chat_with_X_tutorials/chat_with_research_papers"},
+{id:"chat-youtube",n:"Chat with YouTube Videos",c:"Chat with X",d:"Ask questions about video content from transcripts. Great for long lectures and tutorials.",t:"r",pr:"openai",p:"You are a video content assistant. When given a video transcript:\n1) Summarize the key topics covered\n2) Create a table of contents with timestamps\n3) Answer specific questions about the content\n4) Extract key quotes and insights\n5) Generate study notes or action items\n\nOptimized for learning from video content.",ph:"Paste YouTube transcript here...",path:"advanced_llm_apps/chat_with_X_tutorials/chat_with_youtube_videos"},
+{id:"chat-substack",n:"Chat with Substack",c:"Chat with X",d:"Index newsletter content and search across issues. Find themes, get summaries.",t:"r",pr:"openai",p:"You are a newsletter analysis assistant. When given newsletter content:\n1) Identify recurring themes across issues\n2) Summarize key arguments and positions\n3) Track how the author's thinking evolves\n4) Extract actionable insights\n5) Answer specific questions\n\nGreat for processing large newsletter archives.",ph:"Paste newsletter content from one or more issues...",path:"advanced_llm_apps/chat_with_X_tutorials/chat_with_substack"},
+
+// ── Memory Apps ──
+{id:"arxiv-mem",n:"AI ArXiv Agent with Memory",c:"Memory Apps",d:"Research agent that remembers your interests and improves paper recommendations over time.",t:"c",pr:"openai",p:"You are a research paper assistant WITH MEMORY. Remember the user's research interests across the conversation. As you learn what they're interested in:\n1) Suggest more targeted papers\n2) Connect new findings to previous discussions\n3) Build a research profile\n4) Identify emerging themes in their interests\n\nExplicitly note what you've learned: 'I remember you're interested in...'",ph:"What research area interests you?",path:"advanced_llm_apps/llm_apps_with_memory_tutorials/ai_arxiv_agent_memory"},
+{id:"travel-mem",n:"AI Travel Agent with Memory",c:"Memory Apps",d:"Travel planner that remembers preferences — airlines, hotels, dietary needs, past destinations.",t:"c",pr:"openai",p:"You are a travel agent WITH MEMORY. Remember the user's preferences across the conversation:\n- Favorite airlines, seat preferences\n- Hotel style (boutique vs chain, amenities)\n- Dietary needs and food preferences\n- Activity preferences (adventure vs relaxation)\n- Budget range\n- Past trips discussed\n\nReference past preferences: 'Since you mentioned you prefer...'",ph:"Tell me about your travel preferences...",path:"advanced_llm_apps/llm_apps_with_memory_tutorials/ai_travel_agent_memory"},
+{id:"stateful-chat",n:"Llama3 Stateful Chat",c:"Memory Apps",d:"ChatGPT-like experience with persistent conversation state across the session.",t:"c",pr:"openai",p:"You are a helpful assistant with persistent memory within this session. Remember everything discussed. Reference earlier topics naturally. Build on previous context. If the user mentioned something earlier, reference it. Demonstrate stateful conversation.",ph:"Let's have a conversation — I'll remember everything...",path:"advanced_llm_apps/llm_apps_with_memory_tutorials/llama3_stateful_chat"},
+{id:"personal-mem",n:"LLM App with Personalized Memory",c:"Memory Apps",d:"Per-user personalization: remembers facts, preferences, and conversation patterns for each individual.",t:"c",pr:"openai",p:"You are a personalized AI assistant. Actively learn about the user:\n1) Remember their name, role, interests\n2) Adapt communication style to their preferences\n3) Reference past conversations\n4) Anticipate needs based on patterns\n5) Get more helpful over time\n\nExplicitly state what you've learned: 'I've noted that you prefer...'",ph:"Tell me about yourself — I'll personalize to you...",path:"advanced_llm_apps/llm_apps_with_memory_tutorials/llm_app_personalized_memory"},
+{id:"local-chatgpt",n:"Local ChatGPT Clone with Memory",c:"Memory Apps",d:"Self-hosted ChatGPT alternative with persistent memory. Complete privacy, no cloud dependency.",t:"c",pr:"openai",p:"You are a local ChatGPT clone with memory. Behave exactly like ChatGPT but emphasize:\n1) All data stays local\n2) Memory persists across sessions\n3) No data sent to cloud\n4) Full conversation history retained\n\nBe helpful, follow instructions, format responses well with markdown.",ph:"Chat with me — like ChatGPT but private...",path:"advanced_llm_apps/llm_apps_with_memory_tutorials/local_chatgpt_with_memory"},
+{id:"multi-llm-mem",n:"Multi-LLM with Shared Memory",c:"Memory Apps",d:"Multiple LLMs sharing the same memory. Switch models mid-conversation and context carries over.",t:"c",pr:"openai",p:"You demonstrate shared memory across LLMs. Simulate switching between models:\n- When asked to 'switch to GPT-4o': respond as GPT-4o style (detailed, structured)\n- When asked to 'switch to Claude': respond as Claude style (thoughtful, nuanced)\n- When asked to 'switch to Llama': respond as Llama style (direct, efficient)\n\nALL share the same conversation memory. Reference past context regardless of 'model.'",ph:"Start chatting, then ask me to switch models...",path:"advanced_llm_apps/llm_apps_with_memory_tutorials/multi_llm_memory"},
+
+// ── Optimization ──
+{id:"toonify",n:"Toonify Token Optimization",c:"Optimization",d:"Reduces LLM costs 30-60% using TOON compressed format that preserves meaning with fewer tokens.",t:"c",pr:"openai",p:"You are a token optimization expert using TOON format. When given text:\n1) Show original token count (estimate)\n2) Compress using abbreviations, removing filler words, condensing structure\n3) Show compressed version\n4) Show new token count and savings %\n5) Prove the compressed version retains meaning by answering a question from it\n\nDemonstrate 30-60% token reduction.",ph:"Paste text to optimize for tokens...",path:"advanced_llm_apps/llm_optimization_tools/toonify_token_optimization"},
+{id:"headroom",n:"Headroom Context Optimization",c:"Optimization",d:"Reduces context costs 50-90% by intelligently compressing while preserving critical information.",t:"c",pr:"openai",p:"You are a context compression expert. When given a long text:\n1) Identify the ESSENTIAL information (key facts, decisions, data)\n2) Identify REMOVABLE content (filler, repetition, verbose explanation)\n3) Create a compressed version at 50%, 70%, and 90% reduction\n4) Show what was preserved and what was removed at each level\n5) Test: answer the same question from original and compressed to prove quality\n\nDemonstrate intelligent compression.",ph:"Paste a long text to compress...",path:"advanced_llm_apps/llm_optimization_tools/headroom_context_optimization"},
+
+// ── Fine-tuning ──
+{id:"ft-gemma",n:"Gemma 3 Fine-tuning Guide",c:"Fine-tuning",d:"Step-by-step guide to fine-tune Google's Gemma 3 on custom data with LoRA.",t:"c",pr:"openai",p:"You are a fine-tuning expert for Google Gemma 3. Guide the user through:\n1) Dataset preparation (format, size, quality)\n2) LoRA configuration (rank, alpha, target modules)\n3) Training hyperparameters (lr, epochs, batch size)\n4) Complete Python training script using HuggingFace + PEFT\n5) Evaluation methodology\n6) Deployment options\n\nProvide complete, runnable code at each step.",ph:"What do you want to fine-tune Gemma for?",path:"advanced_llm_apps/llm_finetuning_tutorials/gemma3_finetuning"},
+{id:"ft-llama",n:"Llama 3.2 Fine-tuning Guide",c:"Fine-tuning",d:"Fine-tune Meta's Llama 3.2 with QLoRA. Dataset formatting, training, model merging.",t:"c",pr:"openai",p:"You are a fine-tuning expert for Meta Llama 3.2. Guide through:\n1) Dataset preparation (Alpaca/ShareGPT format)\n2) QLoRA setup (4-bit quantization + LoRA)\n3) Training with TRL SFTTrainer\n4) Hyperparameter recommendations per GPU\n5) Model merging and export\n6) Deployment (vLLM, Ollama, HuggingFace)\n\nProvide complete training scripts.",ph:"What do you want to fine-tune Llama for?",path:"advanced_llm_apps/llm_finetuning_tutorials/llama3.2_finetuning"},
+
+// ── Framework Courses ──
+{id:"adk-course",n:"Google ADK Crash Course",c:"Framework Courses",d:"Learn Google's Agent Development Kit: tools, memory, multi-agent patterns, deployment.",t:"c",pr:"openai",p:"You are an expert instructor for Google's Agent Development Kit (ADK). Teach interactively:\n1) Start with basics (creating an agent, adding tools)\n2) Progress to memory and state management\n3) Cover multi-agent orchestration patterns\n4) Show deployment with Google Cloud\n5) Include runnable code examples at each step\n6) Quiz the student periodically\n\nAdapt to the student's level.",ph:"What's your experience level with AI agents?",path:"ai_agent_framework_crash_course/google_adk_crash_course"},
+{id:"oai-course",n:"OpenAI Agents SDK Crash Course",c:"Framework Courses",d:"Master OpenAI's Agents SDK: function calling, structured outputs, orchestration, production patterns.",t:"c",pr:"openai",p:"You are an expert instructor for the OpenAI Agents SDK. Teach interactively:\n1) Function calling basics (defining tools)\n2) Structured outputs (Pydantic models)\n3) Multi-agent orchestration (handoffs)\n4) Production patterns (error handling, streaming)\n5) Guardrails and safety\n6) Include complete runnable examples\n\nProvide exercises after each concept.",ph:"What's your experience with OpenAI APIs?",path:"ai_agent_framework_crash_course/openai_sdk_crash_course"},
+];
+
+// ═══════════════════════════════════════════════════
+// CATEGORIES & DIRECTORY
+// ═══════════════════════════════════════════════════
+const CATS=[...new Set(APPS.map(a=>a.c))];
+const REPO="https://github.com/Shubhamsaboo/awesome-llm-apps/tree/main";
+
+function init(){
+  const sel=document.getElementById('cat-filter');
+  CATS.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;sel.appendChild(o)});
+  document.getElementById('app-count').textContent=APPS.length+' Apps';
+  loadKeys();
+  renderDir();
+}
+
+function renderDir(){
+  const q=document.getElementById('q').value.toLowerCase();
+  const cat=document.getElementById('cat-filter').value;
+  const filtered=APPS.filter(a=>{
+    if(cat&&a.c!==cat)return false;
+    if(q){const s=[a.n,a.d,a.c].join(' ').toLowerCase();return s.includes(q)}
+    return true;
+  });
+  const grid=document.getElementById('grid');
+  document.getElementById('dir-count').textContent=filtered.length===APPS.length?`${APPS.length} apps — pick one to try`:`${filtered.length} of ${APPS.length} apps`;
+  if(!filtered.length){grid.innerHTML='<div class="empty">No apps match your search</div>';return}
+  const tplMap={c:'Chat',r:'RAG',v:'Vision',s:'TTS',i:'Image',g:'Code'};
+  const diffMap={c:'Agent',r:'Document Q&A',v:'Image Analysis',s:'Voice',i:'Creative',g:'Code Gen'};
+  grid.innerHTML=filtered.map(a=>`<div class="card" onclick="openApp('${a.id}')">
+    <div class="card-cat">${a.c}</div>
+    <div class="card-name">${a.n}</div>
+    <div class="card-desc">${a.d}</div>
+    <div class="card-tags"><span class="card-tag tag-t">${diffMap[a.t]||'Chat'}</span><span class="card-tag tag-d">${a.pr}</span></div>
+  </div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════
+// APP VIEW
+// ═══════════════════════════════════════════════════
+let currentApp=null;
+let chatHistory=[];
+
+function openApp(id){
+  const app=APPS.find(a=>a.id===id);
+  if(!app)return;
+  currentApp=app;
+  chatHistory=[];
+  uploadedImage=null;
+  document.getElementById('directory-view').style.display='none';
+  document.getElementById('app-view').classList.add('open');
+  document.getElementById('all-btn').style.display='';
+  document.getElementById('q').placeholder=`Search apps... (in: ${app.n})`;
+  buildSidebar(app);
+  buildMain(app);
+  window.scrollTo(0,0);
+}
+
+function closeApp(){
+  document.getElementById('app-view').classList.remove('open');
+  document.getElementById('directory-view').style.display='';
+  document.getElementById('all-btn').style.display='none';
+  document.getElementById('q').value='';
+  document.getElementById('q').placeholder='Search apps...';
+  document.getElementById('cat-filter').value='';
+  currentApp=null;
+  renderDir();
+}
+
+function onSearch(){
+  const q=document.getElementById('q').value.trim();
+  const cat=document.getElementById('cat-filter').value;
+  if(q||cat){
+    // Show directory with search results (even if an app is open)
+    document.getElementById('directory-view').style.display='';
+    if(currentApp) document.getElementById('app-view').classList.remove('open');
+  } else if(currentApp){
+    // Empty search while app was open — go back to the app
+    document.getElementById('directory-view').style.display='none';
+    document.getElementById('app-view').classList.add('open');
+  }
+  renderDir();
+}
+
+const PROVIDERS={
+  openai:{label:'OpenAI',placeholder:'sk-proj-...',models:[
+    'gpt-5.4-nano','gpt-5.4-mini','gpt-5.4','gpt-5.4-pro',
+    'gpt-5.3-codex','gpt-5-mini','gpt-5',
+    'o4-mini','o3','chatgpt-4o-latest',
+  ],url:'https://api.openai.com/v1/chat/completions',authFn:k=>`Bearer ${k}`},
+  google:{label:'Google Gemini',placeholder:'AIza...',models:[
+    'gemini-3.1-pro-preview','gemini-3.1-flash-live-preview','gemini-3-flash-preview',
+    'gemini-2.5-flash','gemini-2.5-pro','gemini-2.5-flash-lite',
+  ],url:'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',authFn:k=>`Bearer ${k}`,urlKey:true},
+  xai:{label:'xAI Grok',placeholder:'xai-...',models:[
+    'grok-4-1-fast-reasoning','grok-4-1-fast-non-reasoning','grok-code-fast-1',
+    'grok-4','grok-3','grok-3-mini',
+  ],url:'https://api.x.ai/v1/chat/completions',authFn:k=>`Bearer ${k}`},
+  groq:{label:'Groq (fast)',placeholder:'gsk_...',models:[
+    'llama-3.3-70b-versatile','llama-3.1-8b-instant','deepseek-r1-distill-llama-70b',
+    'mixtral-8x7b-32768','gemma2-9b-it',
+  ],url:'https://api.groq.com/openai/v1/chat/completions',authFn:k=>`Bearer ${k}`},
+  together:{label:'Together AI',placeholder:'...',models:[
+    'meta-llama/Llama-3.3-70B-Instruct-Turbo','meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo',
+    'Qwen/Qwen2.5-72B-Instruct-Turbo','deepseek-ai/DeepSeek-R1-Distill-Llama-70B',
+    'mistralai/Mixtral-8x22B-Instruct-v0.1',
+  ],url:'https://api.together.xyz/v1/chat/completions',authFn:k=>`Bearer ${k}`},
+  openrouter:{label:'OpenRouter (all models)',placeholder:'sk-or-...',models:[
+    'openai/gpt-5.4','openai/gpt-5.4-mini','anthropic/claude-opus-4','anthropic/claude-sonnet-4',
+    'google/gemini-3.1-pro-preview','google/gemini-2.5-flash',
+    'x-ai/grok-4-1-fast-reasoning','meta-llama/llama-3.3-70b-instruct',
+    'deepseek/deepseek-r1','mistralai/mistral-large-latest',
+  ],url:'https://openrouter.ai/api/v1/chat/completions',authFn:k=>`Bearer ${k}`},
+};
+
+let activeProvider=null;
+
+function buildSidebar(app){
+  const sb=document.getElementById('av-sidebar');
+  const defaultPr=app.pr==='any'?'openai':app.pr;
+  activeProvider=defaultPr;
+  const key=getStoredKey(defaultPr);
+
+  const providerOpts=Object.keys(PROVIDERS).map(pr=>
+    `<option value="${pr}" ${pr===defaultPr?'selected':''}>${PROVIDERS[pr].label}</option>`
+  ).join('');
+
+  const modelOpts=PROVIDERS[defaultPr].models.map(m=>`<option value="${m}">${m}</option>`).join('');
+
+  sb.innerHTML=`
+    <div class="fld"><label>Provider</label><select id="app-provider" onchange="switchProvider(this.value)">${providerOpts}</select></div>
+    <div class="fld"><label><span id="provider-label">${PROVIDERS[defaultPr].label}</span> API Key</label><input type="password" id="app-key" value="${key}" placeholder="${PROVIDERS[defaultPr].placeholder}" onchange="onKeyChange(this.value,document.getElementById('app-provider').value)"></div>
+    <div class="fld"><label>Model</label><select id="app-model">${modelOpts}</select></div>
+    ${app.t==='s'?`<div class="fld"><label>Voice</label><select id="app-voice"><option>alloy</option><option>nova</option><option>coral</option><option>echo</option><option>shimmer</option><option>onyx</option><option>sage</option><option>ash</option></select></div>`:''}
+    <div class="divider"></div>
+    <div class="key-note">Your key goes directly to the provider. Never touches our server. <a href="#" onclick="openKeys();return false" style="color:var(--brl)">Manage saved keys</a></div>
+  `;
+}
+
+function switchProvider(pr){
+  activeProvider=pr;
+  const p=PROVIDERS[pr];
+  document.getElementById('provider-label').textContent=p.label;
+  document.getElementById('app-key').value=getStoredKey(pr);
+  document.getElementById('app-key').placeholder=p.placeholder;
+  const sel=document.getElementById('app-model');
+  sel.innerHTML=p.models.map(m=>`<option value="${m}">${m}</option>`).join('');
+}
+
+function buildMain(app){
+  const main=document.getElementById('av-main');
+  const title=`<div style="font-size:18px;font-weight:700;margin-bottom:4px">${app.n}</div><div style="font-size:12px;color:var(--brl);font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px">${app.c}</div>`;
+  const desc=`${title}<div class="app-desc">${app.d}</div>`;
+  const codeRef=`<div class="code-sec"><h3>Source: awesome-llm-apps/${app.path}</h3><a class="repo-link" href="${REPO}/${app.path}" target="_blank" rel="noopener" style="display:inline-flex"><svg viewBox="0 0 16 16" style="width:14px;height:14px;fill:currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source on GitHub</a></div>`;
+
+  if(app.t==='c'||app.t==='g'){
+    main.innerHTML=`${desc}
+      <div class="chat-box" id="chat-box"></div>
+      <div class="chat-row"><input type="text" id="chat-in" placeholder="${app.ph||'Type a message...'}" onkeydown="if(event.key==='Enter')sendMsg()"><button onclick="sendMsg()" id="send-btn">Send</button></div>
+      <button class="btn btn-s" onclick="chatHistory=[];document.getElementById('chat-box').innerHTML=''" style="margin-top:8px">Clear</button>
+      ${codeRef}`;
+  } else if(app.t==='r'){
+    main.innerHTML=`${desc}
+      <div class="fld"><label>Paste your documents / content</label><textarea id="rag-docs" rows="6" placeholder="${app.ph||'Paste text content here...'}"></textarea></div>
+      <div class="divider"></div>
+      <div class="chat-box" id="chat-box"></div>
+      <div class="chat-row"><input type="text" id="chat-in" placeholder="Ask a question about the documents..." onkeydown="if(event.key==='Enter')sendMsg()"><button onclick="sendMsg()" id="send-btn">Ask</button></div>
+      ${codeRef}`;
+  } else if(app.t==='v'){
+    main.innerHTML=`${desc}
+      <div class="upload" id="viz-upload" onclick="document.getElementById('viz-file').click()"><div style="font-size:14px;color:var(--ts)">Tap to upload an image</div><div style="font-size:12px;color:var(--tm)">or drag and drop</div></div>
+      <input type="file" id="viz-file" accept="image/*" style="display:none" onchange="handleUpload(this)">
+      <div class="chat-box" id="chat-box"></div>
+      <div class="chat-row"><input type="text" id="chat-in" placeholder="Ask about the image..." onkeydown="if(event.key==='Enter')sendMsg()"><button onclick="sendMsg()" id="send-btn">Ask</button></div>
+      ${codeRef}`;
+    setupDragDrop();
+  } else if(app.t==='s'){
+    main.innerHTML=`${desc}
+      <div class="fld"><label>Text to speak</label><textarea id="tts-text" rows="4" placeholder="Enter text to convert to speech...">The quick brown fox jumps over the lazy dog.</textarea></div>
+      <button class="btn btn-p" onclick="genSpeech()" id="tts-btn">Generate Speech</button>
+      <div id="tts-loading" style="display:none"><div class="spinner"><div class="sdots"><div class="sdot"></div><div class="sdot"></div><div class="sdot"></div></div>Generating...</div></div>
+      <div id="tts-err"></div>
+      <div id="tts-result" style="display:none"><div class="audio-wrap"><audio id="tts-audio" controls></audio></div></div>
+      ${codeRef}`;
+  } else if(app.t==='i'){
+    main.innerHTML=`${desc}
+      <div class="fld"><label>Describe the image</label><textarea id="img-prompt" rows="3" placeholder="A serene mountain landscape..."></textarea></div>
+      <button class="btn btn-p" onclick="genImage()" id="img-btn">Generate</button>
+      <div id="img-loading" style="display:none"><div class="spinner"><div class="sdots"><div class="sdot"></div><div class="sdot"></div><div class="sdot"></div></div>Generating...</div></div>
+      <div id="img-err"></div>
+      <div id="img-result" style="display:none" class="result"></div>
+      ${codeRef}`;
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// API CALLS
+// ═══════════════════════════════════════════════════
+let uploadedImage=null;
+
+async function sendMsg(){
+  const key=document.getElementById('app-key')?.value?.trim();
+  if(!key){alert('Enter your API key in the sidebar');return}
+  const input=document.getElementById('chat-in');
+  const msg=input.value.trim();
+  if(!msg)return;
+  input.value='';
+  const model=document.getElementById('app-model').value;
+  const box=document.getElementById('chat-box');
+  const btn=document.getElementById('send-btn');
+
+  // Add user message
+  chatHistory.push({role:'user',content:msg});
+  box.innerHTML+=`<div class="chat-msg u"><div class="chat-role ur">You</div>${esc(msg)}</div>`;
+
+  // AI placeholder
+  const aiDiv=document.createElement('div');
+  aiDiv.className='chat-msg a';
+  aiDiv.innerHTML='<div class="chat-role ar">Assistant</div><span class="ai-txt"></span>';
+  box.appendChild(aiDiv);
+  box.scrollTop=box.scrollHeight;
+  btn.disabled=true;
+
+  // Build messages
+  const messages=[{role:'system',content:currentApp.p}];
+
+  // RAG: prepend documents
+  if(currentApp.t==='r'){
+    const docs=document.getElementById('rag-docs')?.value?.trim();
+    if(docs)messages.push({role:'system',content:'DOCUMENTS:\n\n'+docs});
+  }
+
+  // Vision: include image
+  if(currentApp.t==='v'&&uploadedImage){
+    const lastMsg=chatHistory[chatHistory.length-1];
+    messages.push(...chatHistory.slice(0,-1));
+    messages.push({role:'user',content:[
+      {type:'text',text:lastMsg.content},
+      {type:'image_url',image_url:{url:uploadedImage}}
+    ]});
+  } else {
+    messages.push(...chatHistory);
+  }
+
+  // Use active provider from sidebar dropdown
+  const pr=activeProvider||'openai';
+  const provCfg=PROVIDERS[pr]||PROVIDERS.openai;
+
+  try{
+    const fetchUrl=provCfg.urlKey?`${provCfg.url}?key=${encodeURIComponent(key)}`:provCfg.url;
+    const resp=await fetch(fetchUrl,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':provCfg.authFn(key)},
+      body:JSON.stringify({model,messages,stream:true}),
+    });
+    if(!resp.ok){
+      const errBody=await resp.text().catch(()=>'');
+      let errMsg=`API error ${resp.status}`;
+      try{const ej=JSON.parse(errBody);errMsg=ej.error?.message||ej.message||errMsg}catch{}
+      throw new Error(errMsg);
+    }
+
+    const txt=aiDiv.querySelector('.ai-txt');
+    let full='';
+    const contentType=resp.headers.get('content-type')||'';
+
+    if(contentType.includes('text/event-stream')||contentType.includes('octet-stream')){
+      // Streaming response
+      const reader=resp.body.getReader();
+      const dec=new TextDecoder();
+      while(true){
+        const{done,value}=await reader.read();
+        if(done)break;
+        for(const line of dec.decode(value).split('\n')){
+          if(!line.startsWith('data: ')||line==='data: [DONE]')continue;
+          try{
+            const d=JSON.parse(line.slice(6));
+            const delta=d.choices?.[0]?.delta?.content;
+            if(delta){full+=delta;txt.innerHTML=fmtMd(full);box.scrollTop=box.scrollHeight}
+          }catch{}
+        }
+      }
+    } else {
+      // Non-streaming JSON response (fallback)
+      const data=await resp.json();
+      full=data.choices?.[0]?.message?.content||JSON.stringify(data);
+      txt.innerHTML=fmtMd(full);
+    }
+
+    chatHistory.push({role:'assistant',content:full});
+  }catch(e){
+    const errDetail=e.message==='Failed to fetch'?'Failed to fetch — check your API key and that the provider/model are correct. Open browser console (F12) for details.':e.message;
+    aiDiv.querySelector('.ai-txt').innerHTML=`<span style="color:var(--err)">${esc(errDetail)}</span>`;
+  }
+  btn.disabled=false;
+}
+
+async function genSpeech(){
+  const key=document.getElementById('app-key')?.value?.trim();
+  if(!key){alert('Enter API key');return}
+  const text=document.getElementById('tts-text').value.trim();
+  if(!text)return;
+  const model=document.getElementById('app-model').value;
+  const voice=document.getElementById('app-voice')?.value||'nova';
+  document.getElementById('tts-loading').style.display='block';
+  document.getElementById('tts-result').style.display='none';
+  document.getElementById('tts-err').innerHTML='';
+  try{
+    const r=await fetch('https://api.openai.com/v1/audio/speech',{
+      method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
+      body:JSON.stringify({model:'tts-1',voice,input:text}),
+    });
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||'TTS error')}
+    const blob=await r.blob();
+    document.getElementById('tts-audio').src=URL.createObjectURL(blob);
+    document.getElementById('tts-audio').play();
+    document.getElementById('tts-result').style.display='block';
+  }catch(e){document.getElementById('tts-err').innerHTML=`<div class="err-msg">${esc(e.message)}</div>`}
+  document.getElementById('tts-loading').style.display='none';
+}
+
+// ═══════════════════════════════════════════════════
+// VISION / UPLOAD
+// ═══════════════════════════════════════════════════
+function handleUpload(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    uploadedImage=e.target.result;
+    const zone=document.getElementById('viz-upload');
+    zone.innerHTML=`<img src="${uploadedImage}">`;
+    zone.classList.add('has');
+  };
+  reader.readAsDataURL(file);
+}
+
+function setupDragDrop(){
+  const z=document.getElementById('viz-upload');
+  if(!z)return;
+  z.addEventListener('dragover',e=>{e.preventDefault();z.style.borderColor='var(--br)'});
+  z.addEventListener('dragleave',()=>{z.style.borderColor=''});
+  z.addEventListener('drop',e=>{
+    e.preventDefault();z.style.borderColor='';
+    const f=e.dataTransfer.files[0];
+    if(f?.type.startsWith('image/')){
+      const dt=new DataTransfer();dt.items.add(f);
+      document.getElementById('viz-file').files=dt.files;
+      handleUpload(document.getElementById('viz-file'));
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// API KEY MANAGEMENT
+// ═══════════════════════════════════════════════════
+const KEY_PROVIDERS=['openai','google','xai','groq','together','openrouter'];
+let savedKeys={};
+
+function getStoredKey(pr){return savedKeys[pr]||''}
+
+function onKeyChange(val,pr){
+  if(val.trim())savedKeys[pr]=val.trim();
+}
+
+function openKeys(){
+  KEY_PROVIDERS.forEach(pr=>{
+    const el=document.getElementById('k-'+pr);
+    if(el)el.value=savedKeys[pr]||'';
+  });
+  document.getElementById('keys-overlay').classList.add('open');
+}
+
+function closeKeys(){document.getElementById('keys-overlay').classList.remove('open')}
+
+function saveKeys(){
+  KEY_PROVIDERS.forEach(pr=>{
+    const el=document.getElementById('k-'+pr);
+    if(el&&el.value.trim())savedKeys[pr]=el.value.trim();
+  });
+  // Save to server (canvas data API)
+  fetch('/api/canvas/data/awesome-keys.json',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(savedKeys),
+  }).then(()=>{
+    closeKeys();
+    // Update current app sidebar if open
+    if(currentApp){
+      const keyEl=document.getElementById('app-key');
+      if(keyEl&&!keyEl.value)keyEl.value=getStoredKey(currentApp.pr);
+    }
+  }).catch(()=>{
+    // If server save fails, keys still work in-session
+    closeKeys();
+  });
+}
+
+function loadKeys(){
+  fetch('/api/canvas/data/awesome-keys.json').then(r=>r.ok?r.json():Promise.reject()).then(data=>{
+    if(data&&typeof data==='object')savedKeys=data;
+  }).catch(()=>{});
+}
+
+// ═══════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+function fmtMd(text){
+  let h=text.replace(/```(\w*)\n([\s\S]*?)```/g,(_,l,c)=>`<pre><code>${esc(c.trim())}</code></pre>`);
+  h=h.replace(/`([^`]+)`/g,'<code>$1</code>');
+  h=h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  h=h.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  h=h.replace(/^### (.+)$/gm,'<h4 style="margin:10px 0 4px;font-size:14px">$1</h4>');
+  h=h.replace(/^## (.+)$/gm,'<h3 style="margin:12px 0 6px;font-size:15px">$1</h3>');
+  h=h.replace(/^# (.+)$/gm,'<h2 style="margin:14px 0 6px;font-size:17px">$1</h2>');
+  h=h.replace(/^- (.+)$/gm,'<div style="padding-left:14px;margin:2px 0">&#8226; $1</div>');
+  h=h.replace(/\n\n/g,'<br><br>');
+  h=h.replace(/\n/g,'<br>');
+  return h;
+}
+
+init();
+</script>
+</body>
+</html>

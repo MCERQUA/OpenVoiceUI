@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="20" y1="20" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#60a5fa"/>
+    </linearGradient>
+    <linearGradient id="grid1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#2563eb" stop-opacity="0.9"/>
+    </linearGradient>
+    <linearGradient id="grid2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.8"/>
+    </linearGradient>
+    <linearGradient id="grid3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#10b981" stop-opacity="0.8"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="120" height="120" rx="22" fill="url(#bg)"/>
+  <rect width="120" height="120" rx="22" stroke="#334155" stroke-width="1"/>
+
+  <!-- Grid of app cards (3x3) representing the library -->
+  <!-- Row 1 -->
+  <rect x="16" y="18" width="24" height="18" rx="4" fill="url(#grid1)"/>
+  <rect x="48" y="18" width="24" height="18" rx="4" fill="url(#grid2)"/>
+  <rect x="80" y="18" width="24" height="18" rx="4" fill="url(#grid3)"/>
+
+  <!-- Row 2 -->
+  <rect x="16" y="42" width="24" height="18" rx="4" fill="url(#grid2)"/>
+  <rect x="48" y="42" width="24" height="18" rx="4" fill="url(#grid3)"/>
+  <rect x="80" y="42" width="24" height="18" rx="4" fill="url(#grid1)"/>
+
+  <!-- Row 3 -->
+  <rect x="16" y="66" width="24" height="18" rx="4" fill="url(#grid3)"/>
+  <rect x="48" y="66" width="24" height="18" rx="4" fill="url(#grid1)"/>
+  <rect x="80" y="66" width="24" height="18" rx="4" fill="url(#grid2)"/>
+
+  <!-- Small lines on cards to represent text -->
+  <line x1="20" y1="24" x2="32" y2="24" stroke="white" stroke-opacity="0.5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="20" y1="28" x2="28" y2="28" stroke="white" stroke-opacity="0.3" stroke-width="1" stroke-linecap="round"/>
+
+  <line x1="52" y1="24" x2="64" y2="24" stroke="white" stroke-opacity="0.5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="52" y1="28" x2="60" y2="28" stroke="white" stroke-opacity="0.3" stroke-width="1" stroke-linecap="round"/>
+
+  <line x1="84" y1="24" x2="96" y2="24" stroke="white" stroke-opacity="0.5" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="84" y1="28" x2="92" y2="28" stroke="white" stroke-opacity="0.3" stroke-width="1" stroke-linecap="round"/>
+
+  <!-- Search bar at bottom -->
+  <rect x="16" y="92" width="88" height="14" rx="7" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <circle cx="26" cy="99" r="3.5" stroke="#60a5fa" stroke-width="1.2" fill="none"/>
+  <line x1="28.5" y1="101.5" x2="31" y2="104" stroke="#60a5fa" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="34" y1="99" x2="56" y2="99" stroke="#475569" stroke-width="1" stroke-linecap="round"/>
+
+  <!-- Star accent in corner -->
+  <path d="M98 90l2 4 4.5.7-3.2 3.2.8 4.4L98 100l-4 2.2.8-4.4-3.3-3.2 4.6-.7z" fill="#fbbf24" fill-opacity="0.8"/>
+</svg>

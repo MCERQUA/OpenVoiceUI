@@ -593,3 +593,248 @@ def list_clients():
         clients.append(client)
 
     return jsonify({"clients": clients})
+
+
+# ---------------------------------------------------------------------------
+# AI Config — model selection + API keys (writes openclaw.json)
+# ---------------------------------------------------------------------------
+
+_OPENCLAW_CONFIG_PATH = Path('/app/runtime/openclaw.json')
+
+# Known providers and their config shape
+_AI_PROVIDERS = {
+    'mx': {
+        'name': 'MiniMax',
+        'envKey': 'MINIMAX_API_KEY',
+        'baseUrl': 'https://api.minimax.io/anthropic',
+        'api': 'anthropic-messages',
+        'models': [
+            {'id': 'MiniMax-M2.7-highspeed', 'name': 'M2.7 Highspeed', 'contextWindow': 204800},
+            {'id': 'MiniMax-M2.7', 'name': 'M2.7', 'contextWindow': 204800},
+        ],
+    },
+    'glm': {
+        'name': 'GLM / ZhipuAI',
+        'envKey': 'GLM_API_KEY',
+        'baseUrl': 'https://open.bigmodel.cn/api/paas/v4',
+        'api': 'openai-completions',
+        'models': [
+            {'id': 'glm-5-turbo', 'name': 'GLM-5 Turbo', 'contextWindow': 128000},
+            {'id': 'glm-4-plus', 'name': 'GLM-4 Plus', 'contextWindow': 128000},
+        ],
+    },
+    'zai': {
+        'name': 'Z.AI',
+        'envKey': 'ZAI_API_KEY',
+        'baseUrl': 'https://api.z.ai/api/anthropic/v1/messages',
+        'api': 'anthropic-messages',
+        'models': [
+            {'id': 'glm-5-turbo', 'name': 'GLM-5 Turbo (Z.AI)', 'contextWindow': 204000},
+            {'id': 'glm-4.7', 'name': 'GLM-4.7 (Z.AI)', 'contextWindow': 204000},
+        ],
+    },
+    'openai': {
+        'name': 'OpenAI',
+        'envKey': 'OPENAI_API_KEY',
+        'baseUrl': 'https://api.openai.com/v1',
+        'api': 'openai-responses',
+        'models': [
+            {'id': 'gpt-4.1', 'name': 'GPT-4.1', 'contextWindow': 1047576},
+            {'id': 'gpt-4o', 'name': 'GPT-4o', 'contextWindow': 128000},
+            {'id': 'gpt-4o-mini', 'name': 'GPT-4o Mini', 'contextWindow': 128000},
+        ],
+    },
+    'anthropic': {
+        'name': 'Anthropic',
+        'envKey': 'ANTHROPIC_API_KEY',
+        'baseUrl': 'https://api.anthropic.com',
+        'api': 'anthropic-messages',
+        'models': [
+            {'id': 'claude-sonnet-4-5-20250514', 'name': 'Claude Sonnet 4.5', 'contextWindow': 200000},
+            {'id': 'claude-haiku-4-5-20251001', 'name': 'Claude Haiku 4.5', 'contextWindow': 200000},
+        ],
+    },
+    'groqcloud': {
+        'name': 'Groq',
+        'envKey': 'GROQ_API_KEY',
+        'baseUrl': 'https://api.groq.com/openai/v1',
+        'api': 'openai-completions',
+        'models': [
+            {'id': 'llama-4-scout-17b-16e-instruct', 'name': 'Llama 4 Scout', 'contextWindow': 131072},
+            {'id': 'llama-4-maverick-17b-128e-instruct', 'name': 'Llama 4 Maverick', 'contextWindow': 131072},
+        ],
+    },
+    'google': {
+        'name': 'Google Gemini',
+        'envKey': 'GEMINI_API_KEY',
+        'baseUrl': 'https://generativelanguage.googleapis.com/v1beta',
+        'api': 'google-generative-ai',
+        'models': [
+            {'id': 'gemini-2.5-flash', 'name': 'Gemini 2.5 Flash', 'contextWindow': 1048576},
+            {'id': 'gemini-2.5-pro', 'name': 'Gemini 2.5 Pro', 'contextWindow': 1048576},
+        ],
+    },
+}
+
+
+def _parse_jsonc(text: str) -> dict:
+    """Parse JSONC (JSON with comments and trailing commas) into a dict."""
+    import re
+    # Strip single-line comments (// ...)
+    text = re.sub(r'//[^\n]*', '', text)
+    # Strip multi-line comments (/* ... */)
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    # Remove trailing commas before } or ]
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    return json.loads(text)
+
+
+def _read_oc_config() -> dict:
+    """Read the openclaw.json config file."""
+    if not _OPENCLAW_CONFIG_PATH.exists():
+        return {}
+    try:
+        return _parse_jsonc(_OPENCLAW_CONFIG_PATH.read_text())
+    except Exception as exc:
+        logger.error(f"Failed to parse openclaw.json: {exc}")
+        return {}
+
+
+def _write_oc_config(config: dict):
+    """Write openclaw.json (clean JSON). OpenClaw hot-reloads on change."""
+    tmp = _OPENCLAW_CONFIG_PATH.with_suffix('.tmp')
+    tmp.write_text(json.dumps(config, indent=2))
+    tmp.replace(_OPENCLAW_CONFIG_PATH)
+
+
+def _mask_key(key: str) -> str:
+    """Mask an API key for display: show first 6 and last 4 chars."""
+    if not key or len(key) < 12:
+        return '***' if key else ''
+    return key[:6] + '...' + key[-4:]
+
+
+@admin_bp.route('/api/admin/ai-config', methods=['GET'])
+def get_ai_config():
+    """
+    Return the current AI model configuration + which API keys are set.
+    """
+    config = _read_oc_config()
+    defaults = config.get('agents', {}).get('defaults', {})
+    model_cfg = defaults.get('model', {})
+    providers_cfg = config.get('models', {}).get('providers', {})
+
+    primary = model_cfg.get('primary', '')
+    fallbacks = model_cfg.get('fallbacks', [])
+    fallback = fallbacks[0] if fallbacks else ''
+
+    # Build provider status
+    providers = {}
+    for pid, pinfo in _AI_PROVIDERS.items():
+        # Check if key is configured (in openclaw.json providers section)
+        oc_prov = providers_cfg.get(pid, {})
+        raw_key = oc_prov.get('apiKey', '')
+        # If it's an env var reference like ${FOO}, check if env var is set
+        if raw_key.startswith('${') and raw_key.endswith('}'):
+            env_name = raw_key[2:-1]
+            actual_key = os.environ.get(env_name, '')
+        else:
+            actual_key = raw_key
+
+        providers[pid] = {
+            'name': pinfo['name'],
+            'hasKey': bool(actual_key),
+            'maskedKey': _mask_key(actual_key),
+            'models': pinfo['models'],
+            'configured': pid in providers_cfg,
+        }
+
+    return jsonify({
+        'primary': primary,
+        'fallback': fallback,
+        'providers': providers,
+        'subagentModel': defaults.get('subagents', {}).get('model', primary),
+    })
+
+
+@admin_bp.route('/api/admin/ai-config', methods=['PUT'])
+def update_ai_config():
+    """
+    Update AI model configuration and/or API keys.
+
+    Request body (all fields optional):
+    {
+        "primary": "mx/MiniMax-M2.7-highspeed",
+        "fallback": "glm/glm-5-turbo",
+        "keys": {
+            "mx": "sk-...",
+            "openai": "sk-..."
+        }
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    config = _read_oc_config()
+
+    if not config:
+        return jsonify({'error': 'Cannot read openclaw.json — config mount missing'}), 500
+
+    defaults = config.setdefault('agents', {}).setdefault('defaults', {})
+    model_cfg = defaults.setdefault('model', {})
+    models_section = config.setdefault('models', {'mode': 'merge', 'providers': {}})
+    providers_cfg = models_section.setdefault('providers', {})
+
+    changed = False
+
+    # Update API keys
+    keys = data.get('keys', {})
+    for pid, key_value in keys.items():
+        if pid not in _AI_PROVIDERS or not key_value:
+            continue
+        pinfo = _AI_PROVIDERS[pid]
+        # Ensure provider section exists in config
+        if pid not in providers_cfg:
+            providers_cfg[pid] = {
+                'baseUrl': pinfo['baseUrl'],
+                'api': pinfo['api'],
+                'apiKey': key_value,
+                'models': [
+                    {k: v for k, v in m.items()}
+                    for m in pinfo['models']
+                ],
+            }
+        else:
+            providers_cfg[pid]['apiKey'] = key_value
+        changed = True
+        logger.info(f"AI Config: updated API key for {pid}")
+
+    # Update model selection
+    new_primary = data.get('primary')
+    if new_primary and new_primary != model_cfg.get('primary'):
+        model_cfg['primary'] = new_primary
+        # Also update the models dict
+        defaults.setdefault('models', {})[new_primary] = {}
+        # Subagent model follows primary
+        defaults.setdefault('subagents', {})['model'] = new_primary
+        changed = True
+        logger.info(f"AI Config: primary model → {new_primary}")
+
+    new_fallback = data.get('fallback')
+    if new_fallback is not None:
+        current_fallbacks = model_cfg.get('fallbacks', [])
+        new_fallbacks = [new_fallback] if new_fallback else []
+        if new_fallbacks != current_fallbacks:
+            model_cfg['fallbacks'] = new_fallbacks
+            if new_fallback:
+                defaults.setdefault('models', {})[new_fallback] = {}
+            changed = True
+            logger.info(f"AI Config: fallback model → {new_fallback or 'none'}")
+
+    if changed:
+        try:
+            _write_oc_config(config)
+            return jsonify({'ok': True, 'message': 'Config saved — OpenClaw will hot-reload'})
+        except Exception as exc:
+            logger.error(f"Failed to write openclaw.json: {exc}")
+            return jsonify({'error': f'Write failed: {exc}'}), 500
+    else:
+        return jsonify({'ok': True, 'message': 'No changes'})

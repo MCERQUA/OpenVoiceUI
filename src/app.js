@@ -2331,6 +2331,8 @@ initUpdateChecker();
                 }
 
                 if (type === 'tool' && phase === 'start') {
+                    const sk = action?.sessionKey || '';
+                    const isSub = sk.includes('subagent:') || sk.includes('sub:') || sk.includes('child:');
                     const n = (name || '').toLowerCase().replace(/[_-]/g, '');
                     const toolMap = {
                         read:            ['RD',   () => sp(inp.file_path || inp.path)],
@@ -2351,7 +2353,7 @@ initUpdateChecker();
                     const lookup = Object.keys(toolMap).find(k => n.includes(k));
                     const [tag, getText] = toolMap[lookup] || ['TOOL', () => name || '?'];
                     const detail = getText();
-                    this._push(tag, detail || name || '?');
+                    this._push(isSub ? `SUB:${tag}` : tag, detail || name || '?');
                 }
             },
 
@@ -6649,7 +6651,7 @@ initUpdateChecker();
                 if (this.iframe) {
                     this.iframe.src = `/pages/${page}?t=${Date.now()}`;
                     localStorage.setItem('canvas_last_page', page);
-                    this._lastMtime = null;  // reset mtime tracking on manual navigation
+                    this._lastMtime = null;
                 }
                 console.log('Canvas opening:', page);
                 this.show();
@@ -6665,31 +6667,22 @@ initUpdateChecker();
                 if (!pageName) return;
                 const menu = window.CanvasMenu;
                 if (!menu?.manifest) {
-                    // Manifest not loaded yet — try direct filename
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
                     console.log('[Canvas] showPage direct:', filename);
-                    if (this.iframe) {
-                        this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
-                        localStorage.setItem('canvas_last_page', filename);
-                        this._lastMtime = null;
-                        this.show();
-                    }
+                    this.openPage(filename);
+                    this.show();
                     return;
                 }
                 const match = menu.findPageByName(pageName);
                 if (match) {
                     console.log('[Canvas] showPage matched:', match.page.display_name);
-                    menu.showPage(match.page.filename);
+                    this.openPage(match.page.filename);
+                    this.show();
                 } else {
-                    // Fallback: try as-is with .html
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
                     console.log('[Canvas] showPage fallback:', filename);
-                    if (this.iframe) {
-                        this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
-                        localStorage.setItem('canvas_last_page', filename);
-                        this._lastMtime = null;
-                        this.show();
-                    }
+                    this.openPage(filename);
+                    this.show();
                 }
             },
 
@@ -7997,6 +7990,12 @@ initUpdateChecker();
                 for (const action of actions) {
                     if (action.type === 'tool') {
                         const phase = action.phase === 'result' ? '✓' : '→';
+                        const isSub = action.sessionKey && (
+                            action.sessionKey.includes('subagent:') ||
+                            action.sessionKey.includes('sub:') ||
+                            action.sessionKey.includes('child:')
+                        );
+                        const prefix = isSub ? '[sub] ' : '';
                         // Build a readable detail line from the input parameters
                         let detail = '';
                         if (action.phase === 'result') {
@@ -8012,7 +8011,7 @@ initUpdateChecker();
                                      inp.content?.slice?.(0, 60) ||
                                      Object.values(inp)[0]?.toString?.()?.slice(0, 120) || '';
                         }
-                        this.addEntry('tool', `${phase} Tool: ${action.name}`, detail, action.ts);
+                        this.addEntry(isSub ? 'subagent-tool' : 'tool', `${phase} ${prefix}Tool: ${action.name}`, detail, action.ts);
                     } else if (action.type === 'lifecycle') {
                         const label = action.phase === 'start' ? 'Agent started processing' :
                                       action.phase === 'end' ? 'Agent finished' : `Lifecycle: ${action.phase}`;

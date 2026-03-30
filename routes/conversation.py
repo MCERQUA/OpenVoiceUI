@@ -1190,10 +1190,11 @@ def _conversation_inner():
                                         fallback_state=_tts_fallback_state
                                     )
                                 t_done = time.time()
+                                result['tts_ms'] = int((t_done - t0) * 1000)
                                 logger.info(
                                     f"### TTS TIMING: clean={int((t_clean-t0)*1000)}ms "
                                     f"generate={int((t_done-t_clean)*1000)}ms "
-                                    f"total={int((t_done-t0)*1000)}ms "
+                                    f"total={result['tts_ms']}ms "
                                     f"text={len(cleaned or '')} chars"
                                 )
                             except Exception as e:
@@ -1230,16 +1231,50 @@ def _conversation_inner():
 
                     # ── Spoken status updates during long tool execution ──
                     # Prevents dead silence when agent runs tools for 30-90+ seconds.
+                    # Status is built from REAL captured_actions, not canned messages.
                     _last_audio_time = time.time()   # last time we sent audio to browser
-                    _status_tts_count = 0            # how many "still working" messages sent
+                    _status_tts_count = 0            # how many status messages sent
                     _tools_seen = 0                  # count of tool starts seen
                     _STATUS_SILENCE_THRESHOLD = 15   # seconds of no audio before first status
                     _STATUS_REPEAT_INTERVAL = 30     # seconds between subsequent status msgs
-                    _STATUS_MESSAGES = [
-                        "Working on that.",
-                        "Still working, one moment.",
-                        "Almost there, still on it.",
-                    ]
+
+                    def _build_live_status():
+                        """Build a spoken status from the most recent captured_actions."""
+                        # Walk backwards to find the last meaningful tool
+                        for _sa in reversed(captured_actions):
+                            if _sa.get('type') != 'tool':
+                                continue
+                            _sn = (_sa.get('name') or '').lower().replace('_', '')
+                            _si = _sa.get('input', {})
+                            _fp = (_si.get('file_path') or _si.get('path') or '').split('/')[-1]
+                            _is_sub = (
+                                _sa.get('sessionKey', '')
+                                and ('subagent:' in _sa['sessionKey']
+                                     or 'sub:' in _sa['sessionKey']
+                                     or 'child:' in _sa['sessionKey'])
+                            )
+                            _sub_pre = 'The background task is ' if _is_sub else ''
+                            if _sn in ('read', 'fileread') and _fp:
+                                return f"{_sub_pre}Reading {_fp}."
+                            if _sn in ('write', 'filewrite') and _fp:
+                                return f"{_sub_pre}Writing {_fp}."
+                            if _sn in ('edit', 'fileedit') and _fp:
+                                return f"{_sub_pre}Editing {_fp}."
+                            if _sn in ('exec', 'bash', 'shell'):
+                                _cmd = _si.get('command', '')
+                                # Extract the base command name
+                                _base = _cmd.split()[0].split('/')[-1] if _cmd else ''
+                                if _base:
+                                    return f"{_sub_pre}Running {_base}."
+                            if _sn in ('websearch', 'search'):
+                                _q = _si.get('query', '')
+                                if _q:
+                                    return f"{_sub_pre}Searching for {_q[:40]}."
+                            if _sn in ('webfetch', 'fetch'):
+                                return f"{_sub_pre}Fetching a web page."
+                            # Generic tool fallback — still real, just less specific
+                            return f"{_sub_pre}Running {_sa.get('name', 'a tool')}."
+                        return None
 
                     full_response = None
                     _stream_start = time.time()
@@ -1275,13 +1310,12 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield _audio_event(_res['audio'], _chunks_sent)
+                                    yield _audio_event(_res['audio'], _chunks_sent, tts_ms=_res.get('tts_ms', 0))
                                     _chunks_sent += 1
                                     _last_audio_time = time.time()
                                     _flushed_audio = True
                             # ── Spoken status: break silence during long tool execution ──
-                            # If tools are running and user has heard nothing for too long,
-                            # speak a brief status so they know the agent is alive.
+                            # Build a REAL status from captured_actions instead of canned messages.
                             if not _flushed_audio and _tools_seen > 0 and not skip_tts:
                                 _silence_secs = time.time() - _last_audio_time
                                 _threshold = (
@@ -1289,16 +1323,16 @@ def _conversation_inner():
                                     else _STATUS_REPEAT_INTERVAL
                                 )
                                 if _silence_secs >= _threshold:
-                                    _msg_idx = min(_status_tts_count, len(_STATUS_MESSAGES) - 1)
-                                    _status_text = _STATUS_MESSAGES[_msg_idx]
-                                    logger.info(f"### STATUS TTS ({_status_tts_count}): '{_status_text}' (silence={_silence_secs:.0f}s)")
-                                    _status_done, _status_res = _fire_tts(_status_text)
-                                    _status_done.wait(timeout=10)
-                                    if _status_res.get('audio'):
-                                        yield _audio_event(_status_res['audio'], _chunks_sent)
-                                        _chunks_sent += 1
-                                        _last_audio_time = time.time()
-                                    _status_tts_count += 1
+                                    _live_status = _build_live_status()
+                                    if _live_status:
+                                        logger.info(f"### STATUS TTS ({_status_tts_count}): '{_live_status}' (silence={_silence_secs:.0f}s)")
+                                        _status_done, _status_res = _fire_tts(_live_status)
+                                        _status_done.wait(timeout=10)
+                                        if _status_res.get('audio'):
+                                            yield _audio_event(_status_res['audio'], _chunks_sent, tts_ms=_status_res.get('tts_ms', 0))
+                                            _chunks_sent += 1
+                                            _last_audio_time = time.time()
+                                        _status_tts_count += 1
                             continue
 
                         if evt['type'] == 'delta':
@@ -1327,7 +1361,7 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield _audio_event(_res['audio'], _chunks_sent)
+                                    yield _audio_event(_res['audio'], _chunks_sent, tts_ms=_res.get('tts_ms', 0))
                                     _chunks_sent += 1
                                     _last_audio_time = time.time()
                             continue
@@ -1345,7 +1379,7 @@ def _conversation_inner():
                                 if _res.get('error'):
                                     yield _tts_error_event(_res['error'])
                                 elif _res.get('audio'):
-                                    yield _audio_event(_res['audio'], _chunks_sent)
+                                    yield _audio_event(_res['audio'], _chunks_sent, tts_ms=_res.get('tts_ms', 0))
                                     _chunks_sent += 1
                                     _last_audio_time = time.time()
                             yield json.dumps({'type': 'action', 'action': evt['action']}) + '\n'
@@ -1391,7 +1425,7 @@ def _conversation_inner():
                                 if _res_i.get('error'):
                                     yield _tts_error_event(_res_i['error'])
                                 elif _res_i.get('audio'):
-                                    yield _audio_event(_res_i['audio'], _chunks_sent)
+                                    yield _audio_event(_res_i['audio'], _chunks_sent, tts_ms=_res_i.get('tts_ms', 0))
                                     _chunks_sent += 1
                             _tts_pending = []
                             _tts_buf = ''
@@ -1605,24 +1639,134 @@ def _conversation_inner():
                                 if not full_response or not full_response.strip():
                                     full_response = "I missed that — my brain glitched for a second. Could you say that again?"
 
-                            # ── Timeout empty: agent ran but produced nothing in 300s ──
-                            # This is NOT session poisoning — the session is healthy but the
-                            # agent ran out of time (long tool chain, image gen, website build).
-                            # Return a graceful spoken message; do NOT enter recovery.
+                            # ── Timeout empty: fast lane status check ──
+                            # Agent ran 30s+ but produced no text. Instead of a
+                            # canned message, build a real context summary from
+                            # captured_actions and ask Groq to produce a genuine
+                            # spoken status update based on what's actually happening.
                             if _is_empty and not getattr(stream_response, '_retried', False) \
                                     and metrics.get('llm_inference_ms', 0) >= 30000:
-                                if user_message == '__session_start__':
-                                    full_response = "Hey, give me just a moment — I'm getting started."
-                                else:
-                                    full_response = (
-                                        "That took a bit longer than expected on my end. "
-                                        "I'm still here — try again and I'll get right to it."
-                                    )
                                 metrics['fallback_used'] = 1
+                                _elapsed_s = metrics['llm_inference_ms'] // 1000
                                 logger.warning(
-                                    f"### TIMEOUT EMPTY ({metrics['llm_inference_ms']}ms) — "
-                                    f"graceful fallback, no session recovery"
+                                    f"### TIMEOUT EMPTY ({_elapsed_s}s) — "
+                                    f"dispatching fast lane status check"
                                 )
+
+                                # Build real context from captured_actions
+                                _action_lines = []
+                                _has_subagents = False
+                                _last_tool = None
+                                for _a in captured_actions[-15:]:
+                                    if _a.get('type') == 'subagent':
+                                        _has_subagents = True
+                                        _action_lines.append(
+                                            f"subagent {_a.get('phase', '?')}"
+                                        )
+                                    elif _a.get('type') == 'tool':
+                                        _tname = _a.get('name', '?')
+                                        _tinp = _a.get('input', {})
+                                        _detail = ''
+                                        if _tname.lower() in ('read', 'file_read'):
+                                            _fp = _tinp.get('file_path') or _tinp.get('path', '')
+                                            if _fp:
+                                                _detail = f" {_fp.split('/')[-1]}"
+                                        elif _tname.lower() in ('write', 'file_write', 'edit', 'file_edit'):
+                                            _fp = _tinp.get('file_path') or _tinp.get('path', '')
+                                            if _fp:
+                                                _detail = f" {_fp.split('/')[-1]}"
+                                        elif _tname.lower() in ('exec', 'bash', 'shell'):
+                                            _cmd = _tinp.get('command', '')
+                                            if _cmd:
+                                                _detail = f" `{_cmd[:60]}`"
+                                        elif _tname.lower() in ('web_search', 'search'):
+                                            _q = _tinp.get('query', '')
+                                            if _q:
+                                                _detail = f" \"{_q[:60]}\""
+                                        elif _tname.lower() in ('web_fetch', 'fetch'):
+                                            _url = _tinp.get('url', '')
+                                            if _url:
+                                                _detail = f" {_url[:60]}"
+                                        _is_sub = (
+                                            _a.get('sessionKey', '')
+                                            and ('subagent:' in _a['sessionKey']
+                                                 or 'sub:' in _a['sessionKey']
+                                                 or 'child:' in _a['sessionKey'])
+                                        )
+                                        _prefix = '[sub-agent] ' if _is_sub else ''
+                                        _phase_mark = 'started' if _a.get('phase') == 'start' else 'completed'
+                                        _action_lines.append(
+                                            f"{_prefix}{_tname}{_detail} ({_phase_mark})"
+                                        )
+                                        _last_tool = f"{_prefix}{_tname}{_detail}"
+
+                                # Only do fast lane if there's real activity to report
+                                if _action_lines:
+                                    _actions_text = '\n'.join(
+                                        f"  - {l}" for l in _action_lines
+                                    )
+                                    try:
+                                        import requests as _fl_req
+                                        _groq_key = os.environ.get('GROQ_API_KEY', '')
+                                        if _groq_key:
+                                            _status_prompt = (
+                                                f"User asked: \"{user_message}\"\n"
+                                                f"The AI agent has been working for {_elapsed_s} seconds.\n"
+                                                f"{'A background sub-agent is running.' if _has_subagents else ''}\n"
+                                                f"Recent activity:\n{_actions_text}\n\n"
+                                                f"Give a 1-sentence spoken status update about what "
+                                                f"the agent is doing RIGHT NOW. Be specific — name "
+                                                f"the file or task. Do NOT apologize or say 'please wait'."
+                                            )
+                                            _fl_resp = _fl_req.post(
+                                                'https://api.groq.com/openai/v1/chat/completions',
+                                                headers={
+                                                    'Authorization': f'Bearer {_groq_key}',
+                                                    'Content-Type': 'application/json',
+                                                },
+                                                json={
+                                                    'model': 'llama-3.3-70b-versatile',
+                                                    'max_tokens': 100,
+                                                    'temperature': 0.3,
+                                                    'messages': [
+                                                        {
+                                                            'role': 'system',
+                                                            'content': (
+                                                                'You generate brief spoken status updates. '
+                                                                'State what is happening factually in one sentence. '
+                                                                'Never apologize. Never say please wait or be patient. '
+                                                                'Example: "Still building the contact page section of your website."'
+                                                            ),
+                                                        },
+                                                        {'role': 'user', 'content': _status_prompt},
+                                                    ],
+                                                },
+                                                timeout=5,
+                                            )
+                                            if _fl_resp.status_code == 200:
+                                                _fl_text = (
+                                                    _fl_resp.json()
+                                                    .get('choices', [{}])[0]
+                                                    .get('message', {})
+                                                    .get('content', '')
+                                                )
+                                                if _fl_text and _fl_text.strip():
+                                                    full_response = _fl_text.strip()
+                                                    metrics['profile'] = 'fast-lane-status'
+                                                    logger.info(
+                                                        f"### FAST LANE STATUS: {full_response}"
+                                                    )
+                                            else:
+                                                logger.warning(
+                                                    f"### Fast lane Groq returned {_fl_resp.status_code}"
+                                                )
+                                    except Exception as _fle:
+                                        logger.error(f'### Fast lane status failed: {_fle}')
+                                else:
+                                    logger.warning(
+                                        f"### TIMEOUT EMPTY ({_elapsed_s}s) — "
+                                        f"no captured actions, nothing to report"
+                                    )
 
                             yield json.dumps({
                                 'type': 'text_done',

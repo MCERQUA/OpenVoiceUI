@@ -14,6 +14,25 @@ export function inject() {
     const chipStyle = document.createElement('style');
     chipStyle.textContent = `.agent-activity-chip{background:var(--bg-elevated)!important;border:1px solid rgba(180,190,210,0.3)!important;color:var(--text-primary)!important;backdrop-filter:none!important;box-shadow:0 2px 12px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.07)!important;overflow:hidden!important;}`;
     document.head.appendChild(chipStyle);
+
+    // Wire up the globe (desktop) button immediately — before auth, before manifest.
+    // CanvasMenu.setupEvents() also registers this, but that runs after auth + manifest
+    // which can be delayed. This ensures the button is always responsive.
+    const menuBtn = document.getElementById('canvas-menu-button');
+    if (menuBtn) {
+        menuBtn.addEventListener('click', () => {
+            const container = document.getElementById('canvas-container');
+            const iframe = document.getElementById('canvas-iframe');
+            if (iframe) {
+                iframe.src = `/pages/desktop.html?t=${Date.now()}`;
+            }
+            if (container) {
+                container.style.display = 'block';
+                document.body.classList.add('canvas-active');
+                menuBtn.classList.add('active');
+            }
+        });
+    }
 }
 
 const SHELL_HTML = `
@@ -63,9 +82,9 @@ const SHELL_HTML = `
             id="canvas-iframe"
             src="about:blank"
             data-canvas-src=""
-            sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-top-navigation-by-user-activation allow-downloads"
+            sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-top-navigation-by-user-activation allow-downloads allow-pointer-lock"
             style="width: 100vw; height: 100vh; border: none; display: block; touch-action: manipulation;"
-            allow="autoplay; fullscreen">
+            allow="autoplay; fullscreen; pointer-lock; gamepad; microphone; camera; xr-spatial-tracking">
         </iframe>
     </div>
 
@@ -270,6 +289,28 @@ const SHELL_HTML = `
 
     <!-- Error message -->
     <div class="error-message" id="error-message"></div>
+
+    <!-- PWA standalone safe area fix -->
+    <style>
+        body.pwa-standalone .controls-left,
+        body.pwa-standalone .controls-right {
+            top: 50% !important;
+            transform: translateY(calc(-50% + 22px)) !important;
+            max-height: calc(100vh - 100px) !important;
+            overflow: hidden;
+        }
+        body.pwa-standalone .edge-tab {
+            height: 44px !important;
+            width: 40px !important;
+            font-size: 17px !important;
+        }
+    </style>
+    <script>
+        // Detect installed PWA (standalone) on iOS and Android
+        if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
+            document.body.classList.add('pwa-standalone');
+        }
+    </script>
 
     <!-- Control buttons — Edge Tabs -->
     <div class="controls-left">
