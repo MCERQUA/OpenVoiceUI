@@ -664,8 +664,12 @@ def canvas_pages_proxy(path):
     try:
         # Auth check — only when explicitly enabled (opt-in for self-hosted deployments)
         # Skip auth for non-HTML assets (images, icons, CSS) — they're embedded resources
+        # Skip auth for OS infrastructure pages (desktop, file-explorer) — they are loaded
+        # inside the app's own iframe and the parent page already handled authentication.
+        # The iframe may not have the Clerk __session cookie on cross-subdomain visits.
         _is_html = path.endswith('.html')
-        if CANVAS_REQUIRE_AUTH and _is_html:
+        _OS_PAGES = {'desktop.html', 'file-explorer.html'}
+        if CANVAS_REQUIRE_AUTH and _is_html and path not in _OS_PAGES:
             page_id = Path(path).stem
             manifest = load_canvas_manifest()
             page_meta = manifest.get('pages', {}).get(page_id, {})
@@ -779,19 +783,24 @@ def canvas_pages_proxy(path):
                 resp.headers['Pragma'] = 'no-cache'
                 resp.headers['Expires'] = '0'
                 # Canvas-specific CSP: allow inline scripts (interactive pages)
-                # but block ALL outbound connections to prevent data exfiltration
-                # from prompt-injected scripts. postMessage to parent is still
-                # allowed (canvas-action bridge uses it).
+                # Canvas CSP: allow scripts and styles inline, allow API connections
+                # for interactive apps (Awesome App Library etc.) that call AI APIs
+                # directly from the browser with user's own API keys.
                 resp.headers['Content-Security-Policy'] = (
                     "default-src 'none'; "
                     "script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://games.jam-bot.com blob:; "
-                    "style-src 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://games.jam-bot.com; "
+                    "style-src 'unsafe-inline' https://games.jam-bot.com https://fonts.googleapis.com; "
                     "img-src 'self' data: blob: https:; "
-                    "media-src 'self' blob:; "
-                    "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; "
-                    "connect-src 'self' https://cdn.jsdelivr.net https://files.pythonhosted.org https://pypi.org https://games.jam-bot.com https://*.infura.io https://*.alchemy.com https://*.publicnode.com https://*.drpc.org; "
+                    "media-src 'self' blob: https:; "
+                    "font-src 'self' https://fonts.gstatic.com; "
+                    "connect-src 'self' https://games.jam-bot.com "
+                        "https://*.jam-bot.com wss://*.jam-bot.com "
+                        "https://api.openai.com https://generativelanguage.googleapis.com "
+                        "https://api.x.ai https://api.groq.com "
+                        "https://api.together.xyz https://openrouter.ai "
+                        "https://api.anthropic.com https://api.cohere.ai; "
                     "worker-src blob:; "
-                    "frame-src 'self' blob: https://*.jam-bot.com https://*.netlify.app"
+                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app"
                 )
                 return resp
             else:
@@ -998,20 +1007,19 @@ def sync_manifest():
 
 @canvas_bp.route('/api/canvas/manifest/page/<page_id>', methods=['GET', 'PATCH', 'DELETE'])
 def handle_page_metadata(page_id):
-    """Get, update, or delete page metadata.
+    """Get, update, or delete page metadata."""
+    if request.method == 'GET':
+        manifest = load_canvas_manifest()
+        if page_id not in manifest['pages']:
+            return jsonify({'error': 'Page not found'}), 404
+        return jsonify(manifest['pages'][page_id])
 
-    All reads and writes are serialised via _manifest_lock to prevent
-    concurrent threads from overwriting each other's changes (the Flask
-    server runs with ``threaded=True``).
-    """
+    # PATCH/DELETE — hold lock to prevent concurrent manifest clobbering
     with _manifest_lock:
         manifest = load_canvas_manifest()
 
         if page_id not in manifest['pages']:
             return jsonify({'error': 'Page not found'}), 404
-
-        if request.method == 'GET':
-            return jsonify(manifest['pages'][page_id])
 
         if request.method == 'DELETE':
             page = manifest['pages'][page_id]
@@ -1066,34 +1074,29 @@ def handle_page_metadata(page_id):
                     logger.warning(f'Failed to archive file {filename}: {exc}')
 
             save_canvas_manifest(manifest)
+            _notify_brain('canvas_page_deleted', page_id=page_id, title=page_title, filename=filename)
 
-    # Notifications outside the lock (they do network I/O and shouldn't hold the lock)
-    if request.method == 'DELETE':
-        _notify_brain('canvas_page_deleted', page_id=page_id, title=page_title, filename=filename)
-        try:
-            http_requests.post(
-                f'http://localhost:{CANVAS_SSE_PORT}/clear-display',
-                json={'path': f'/pages/{filename}'},
-                timeout=2,
-            )
-        except Exception as exc:
-            logger.debug(f'Could not clear canvas display: {exc}')
-        return jsonify({'status': 'ok', 'message': 'Page archived', 'page_id': page_id, 'title': page_title})
+            try:
+                http_requests.post(
+                    f'http://localhost:{CANVAS_SSE_PORT}/clear-display',
+                    json={'path': f'/pages/{filename}'},
+                    timeout=2,
+                )
+            except Exception as exc:
+                logger.debug(f'Could not clear canvas display: {exc}')
 
-    # PATCH — update metadata (lock is re-acquired to read fresh state)
-    data = request.get_json() or {}
+            return jsonify({'status': 'ok', 'message': 'Page archived', 'page_id': page_id, 'title': page_title})
 
-    # Detect agent requests (X-Agent-Key header) vs admin requests (Clerk JWT)
-    _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
-    is_agent_request = bool(_agent_api_key and request.headers.get('X-Agent-Key') == _agent_api_key)
-
-    with _manifest_lock:
-        manifest = load_canvas_manifest()
-        if page_id not in manifest['pages']:
-            return jsonify({'error': 'Page not found'}), 404
+        # PATCH — update metadata
+        data = request.get_json() or {}
         page = manifest['pages'][page_id]
 
+        # Detect agent requests (X-Agent-Key header) vs admin requests (Clerk JWT)
+        _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
+        is_agent_request = bool(_agent_api_key and request.headers.get('X-Agent-Key') == _agent_api_key)
+
         # Guard: locked pages — agent cannot change is_public on locked pages.
+        # Admin (Clerk-authenticated) can still change anything, including unlocking.
         if 'is_public' in data and page.get('is_locked', False) and is_agent_request:
             return jsonify({
                 'error': 'This page is locked. Visibility can only be changed from the admin dashboard.',
@@ -1107,6 +1110,7 @@ def handle_page_metadata(page_id):
             }), 403
 
         # Guard: reject is_public=True if page was created less than 30 seconds ago.
+        # Prevents agents from making pages public immediately on creation.
         if data.get('is_public') is True:
             created_str = page.get('created', '')
             if created_str:
@@ -1152,40 +1156,38 @@ def handle_page_metadata(page_id):
 @canvas_bp.route('/api/canvas/manifest/category', methods=['GET', 'POST', 'PATCH'])
 def handle_category():
     """List, create, or update categories."""
-    with _manifest_lock:
-        return _handle_category_locked()
-
-
-def _handle_category_locked():
-    manifest = load_canvas_manifest()
-
     if request.method == 'GET':
+        manifest = load_canvas_manifest()
         return jsonify(manifest.get('categories', {}))
 
-    if request.method == 'POST':
+    # POST/PATCH — hold lock to prevent concurrent manifest clobbering
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
+
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            cat_id = data.get('id', '').lower().replace(' ', '-')
+            if not cat_id:
+                return jsonify({'error': 'Category ID required'}), 400
+            manifest['categories'][cat_id] = {
+                'name': data.get('name', cat_id.title()),
+                'icon': data.get('icon', '📄'),
+                'color': data.get('color', '#4a9eff'),
+                'pages': [],
+            }
+            save_canvas_manifest(manifest)
+            return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
+
+        # PATCH
         data = request.get_json() or {}
-        cat_id = data.get('id', '').lower().replace(' ', '-')
-        if not cat_id:
-            return jsonify({'error': 'Category ID required'}), 400
-        manifest['categories'][cat_id] = {
-            'name': data.get('name', cat_id.title()),
-            'icon': data.get('icon', '📄'),
-            'color': data.get('color', '#4a9eff'),
-            'pages': [],
-        }
+        cat_id = data.get('id')
+        if not cat_id or cat_id not in manifest['categories']:
+            return jsonify({'error': 'Category not found'}), 404
+        for field in ['name', 'icon', 'color']:
+            if field in data:
+                manifest['categories'][cat_id][field] = data[field]
         save_canvas_manifest(manifest)
         return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
-
-    # PATCH
-    data = request.get_json() or {}
-    cat_id = data.get('id')
-    if not cat_id or cat_id not in manifest['categories']:
-        return jsonify({'error': 'Category not found'}), 404
-    for field in ['name', 'icon', 'color']:
-        if field in data:
-            manifest['categories'][cat_id][field] = data[field]
-    save_canvas_manifest(manifest)
-    return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
 
 
 @canvas_bp.route('/api/canvas/manifest/access/<page_id>', methods=['POST'])

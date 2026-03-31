@@ -338,6 +338,16 @@ class EventDispatcher:
                                 f"vs sub sk={chosen.session_key}"
                             )
 
+                # Subagent events: deliver to any active subscription.
+                # Subagent tool/lifecycle events carry the subagent's own
+                # runId and sessionKey which won't match the main subscription.
+                # Route them to the active main sub so the UI can display them.
+                if event_session_key and is_subagent_session_key(event_session_key):
+                    for sub in self._subscriptions.values():
+                        if sub.state == Subscription.ACTIVE:
+                            await sub.event_queue.put(data)
+                            return
+
                 # Fallback: deliver to single active sub WITH session key match
                 if event_session_key:
                     for sub in self._subscriptions.values():
@@ -671,12 +681,16 @@ class GatewayConnection:
             return False
 
     async def _stream_events(self, sub, event_queue, session_key,
-                             captured_actions, agent_id=None):
+                             captured_actions, agent_id=None,
+                             _cleanup_ids=None):
         """Process events from a Subscription queue and emit to the HTTP event_queue.
 
         Reads from sub.event_queue (populated by EventDispatcher) instead of
         ws.recv() directly. All event processing logic (deltas, tools,
         lifecycle, chat.final, subagents) is preserved from the original.
+
+        _cleanup_ids: mutable list — continuation subscription chat_ids are
+        appended here so the caller can unsubscribe them.
         """
         prev_text_len = 0
         chat_id = sub.chat_id
@@ -689,6 +703,10 @@ class GatewayConnection:
         subagent_active = False
         main_lifecycle_ended = False
         run_was_aborted = False  # Set when we see chat state=aborted
+        subagent_starts = 0       # Count subagent lifecycle.start events
+        subagent_ends = 0         # Count subagent lifecycle.end events
+        continuation_sent = False  # True after we send a continuation nudge
+        continuation_sub = None    # Subscription for continuation chat.send
 
         while time.time() - start_time < timeout:
             try:
@@ -756,11 +774,13 @@ class GatewayConnection:
                     tool_data = payload.get('data', {})
                     phase = tool_data.get('phase', '')
                     args = tool_data.get('args', {})
+                    event_sk = payload.get('sessionKey', '')
                     action = {
                         'type': 'tool',
                         'phase': phase,
                         'name': tool_data.get('name', 'unknown'),
                         'toolCallId': tool_data.get('toolCallId', ''),
+                        'sessionKey': event_sk,
                         'input': args,
                         'ts': time.time()
                     }
@@ -793,18 +813,70 @@ class GatewayConnection:
 
                     if phase == 'start' and is_subagent:
                         subagent_active = True
-                        logger.info(f"### SUBAGENT DETECTED: {sk}")
+                        subagent_starts += 1
+                        logger.info(f"### SUBAGENT DETECTED: {sk} (starts={subagent_starts})")
                         event_queue.put({'type': 'action', 'action': {
                             'type': 'subagent', 'phase': 'start',
                             'sessionKey': sk, 'ts': time.time()
                         }})
 
                     if phase == 'end' and is_subagent:
-                        logger.info(f"### SUBAGENT ENDED: {sk}")
+                        subagent_ends += 1
+                        logger.info(f"### SUBAGENT ENDED: {sk} (ends={subagent_ends}/{subagent_starts})")
                         event_queue.put({'type': 'action', 'action': {
                             'type': 'subagent', 'phase': 'end',
                             'sessionKey': sk, 'ts': time.time()
                         }})
+
+                        # ── Subagent continuation nudge ──────────────────
+                        # When all subagents have finished AND the main agent
+                        # already ended, the announce-back result sits in chat
+                        # history but nothing triggers the main agent to read
+                        # it and respond. Send a continuation chat.send to nudge
+                        # the agent to process the subagent results.
+                        all_subagents_done = subagent_ends >= subagent_starts
+                        if all_subagents_done and main_lifecycle_ended and not continuation_sent:
+                            continuation_sent = True
+                            await asyncio.sleep(3)  # Let announce-back settle in session
+                            cont_chat_id = str(uuid.uuid4())
+                            continuation_sub = self._dispatcher.subscribe(cont_chat_id, session_key)
+                            if _cleanup_ids is not None:
+                                _cleanup_ids.append(cont_chat_id)
+                            cont_msg = (
+                                _PROMPT_ARMOR +
+                                "[SUBAGENT_COMPLETE] The background task just finished. "
+                                "Check the result and give a brief update on what was done."
+                            )
+                            cont_request = {
+                                "type": "req",
+                                "id": f"chat-{cont_chat_id}",
+                                "method": "chat.send",
+                                "params": {
+                                    "message": cont_msg,
+                                    "sessionKey": session_key,
+                                    "idempotencyKey": cont_chat_id,
+                                }
+                            }
+                            await self._dispatcher.send(self._ws, cont_request)
+                            logger.info(
+                                f"### SUBAGENT CONTINUATION: sent nudge to main agent "
+                                f"(cont_chat_id={cont_chat_id[:8]})"
+                            )
+                            # Switch to reading from the continuation subscription
+                            # so we capture the agent's new response
+                            self._dispatcher.unsubscribe(chat_id)
+                            sub = continuation_sub
+                            chat_id = cont_chat_id
+                            # Reset state for the new response
+                            subagent_active = False
+                            main_lifecycle_ended = False
+                            lifecycle_ended = False
+                            chat_final_seen = False
+                            collected_text = ''
+                            prev_text_len = 0
+                            start_time = time.time()  # Reset timeout for continuation
+                            logger.info("### SUBAGENT CONTINUATION: switched to continuation subscription")
+                            continue
 
                     if phase == 'error' and not is_subagent:
                         error_msg = payload.get('data', {}).get('error', 'Unknown LLM error')
@@ -820,6 +892,47 @@ class GatewayConnection:
                             logger.info("### Main lifecycle.end with subagent active — NOT returning.")
                             prev_text_len = 0
                             collected_text = ''
+                            # Check if all subagents already finished (end arrived
+                            # before main lifecycle.end)
+                            all_done = subagent_ends >= subagent_starts and subagent_starts > 0
+                            if all_done and not continuation_sent:
+                                continuation_sent = True
+                                await asyncio.sleep(3)
+                                cont_chat_id = str(uuid.uuid4())
+                                continuation_sub = self._dispatcher.subscribe(cont_chat_id, session_key)
+                                if _cleanup_ids is not None:
+                                    _cleanup_ids.append(cont_chat_id)
+                                cont_msg = (
+                                    _PROMPT_ARMOR +
+                                    "[SUBAGENT_COMPLETE] The background task just finished. "
+                                    "Check the result and give a brief update on what was done."
+                                )
+                                cont_request = {
+                                    "type": "req",
+                                    "id": f"chat-{cont_chat_id}",
+                                    "method": "chat.send",
+                                    "params": {
+                                        "message": cont_msg,
+                                        "sessionKey": session_key,
+                                        "idempotencyKey": cont_chat_id,
+                                    }
+                                }
+                                await self._dispatcher.send(self._ws, cont_request)
+                                logger.info(
+                                    f"### SUBAGENT CONTINUATION (from main end): "
+                                    f"sent nudge (cont_chat_id={cont_chat_id[:8]})"
+                                )
+                                self._dispatcher.unsubscribe(chat_id)
+                                sub = continuation_sub
+                                chat_id = cont_chat_id
+                                subagent_active = False
+                                main_lifecycle_ended = False
+                                lifecycle_ended = False
+                                chat_final_seen = False
+                                collected_text = ''
+                                prev_text_len = 0
+                                start_time = time.time()
+                                continue
                         elif collected_text:
                             if is_system_response(collected_text):
                                 logger.info(f"### Suppressing system response (lifecycle end): {collected_text!r}")
@@ -985,10 +1098,15 @@ class GatewayConnection:
             }
             logger.info(f"### Sending chat message (agent={agent_id or 'main'}): {message[:100]}")
             await self._dispatcher.send(ws, chat_request)
-            await self._stream_events(sub, event_queue, session_key,
-                                      captured_actions, agent_id=agent_id)
+            _cleanup_ids = []
+            await self._stream_events(
+                sub, event_queue, session_key,
+                captured_actions, agent_id=agent_id,
+                _cleanup_ids=_cleanup_ids)
         finally:
             self._dispatcher.unsubscribe(chat_id)
+            for _cid in _cleanup_ids:
+                self._dispatcher.unsubscribe(_cid)
 
     async def _do_stream(self, event_queue, message, session_key, captured_actions, agent_id=None):
         try:

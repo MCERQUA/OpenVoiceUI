@@ -813,6 +813,43 @@
             letter-spacing: 1px;
             text-transform: uppercase;
         }
+        #transcript-panel .tp-header-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #transcript-panel .tp-mode-toggle {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            transition: all 0.2s ease;
+            min-width: 80px;
+            justify-content: center;
+        }
+        #transcript-panel .tp-mode-toggle:hover {
+            background: rgba(34, 197, 94, 0.2);
+        }
+        #transcript-panel .tp-mode-toggle.text-mode {
+            border-color: rgba(59, 130, 246, 0.4);
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+        }
+        #transcript-panel .tp-mode-toggle.text-mode:hover {
+            background: rgba(59, 130, 246, 0.2);
+        }
+        #transcript-panel .tp-mode-icon {
+            font-size: 12px;
+        }
         #transcript-panel .tp-close {
             background: none; border: none; color: var(--text-dim);
             cursor: pointer; font-size: 18px; padding: 0 4px;
@@ -1730,6 +1767,35 @@
 
         .settings-divider {
             border-top: 1px solid var(--neutral-700);
+        }
+
+        .settings-version {
+            font-size: 10px;
+            color: var(--text-dim);
+            text-align: center;
+            padding: 4px 0 0;
+            letter-spacing: 0.5px;
+            opacity: 0.6;
+        }
+        .settings-version a {
+            color: var(--cyan);
+            text-decoration: none;
+        }
+        .settings-version a:hover {
+            text-decoration: underline;
+        }
+        .settings-version .update-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background: #22c55e;
+            border-radius: 50%;
+            margin-left: 4px;
+            animation: pulse-dot 2s infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
         }
 
         /* PTT Hotkey row */

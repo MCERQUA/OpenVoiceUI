@@ -439,6 +439,7 @@ export class VoiceSession {
             .replace(/\[SLEEP\]/gi, '')
             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
             .replace(/\[SOUND:[^\]]*\]/gi, '')
+            .replace(/\[CANVAS_SCREENSHOT\]/gi, '')
             .trim();
     }
 
@@ -504,6 +505,11 @@ export class VoiceSession {
         if (faceMatch && !seen.has('REGISTER_FACE')) {
             seen.add('REGISTER_FACE');
             eventBus.emit('cmd:register_face', { name: faceMatch[1].trim() });
+        }
+
+        if (/\[CANVAS_SCREENSHOT\]/i.test(text) && !seen.has('CANVAS_SCREENSHOT')) {
+            seen.add('CANVAS_SCREENSHOT');
+            eventBus.emit('cmd:canvas_screenshot', {});
         }
 
         if (/\[SLEEP\]/i.test(text) && !seen.has('SLEEP')) {

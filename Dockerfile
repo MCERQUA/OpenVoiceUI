@@ -16,11 +16,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Version stamp — baked at build time by jambot-build-images.sh
-ARG BUILD_COMMIT=unknown
-ARG BUILD_BRANCH=unknown
-ARG BUILD_DATE=unknown
-RUN echo "{\"commit\":\"${BUILD_COMMIT}\",\"branch\":\"${BUILD_BRANCH}\",\"date\":\"${BUILD_DATE}\"}" > /app/version.json
+# Version stamp — auto-detect from git, with build-arg override for CI
+ARG BUILD_COMMIT=""
+ARG BUILD_BRANCH=""
+ARG BUILD_DATE=""
+RUN COMMIT="${BUILD_COMMIT:-$(git -C /app rev-parse --short HEAD 2>/dev/null || echo unknown)}" && \
+    BRANCH="${BUILD_BRANCH:-$(git -C /app rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)}" && \
+    DATE="${BUILD_DATE:-$(git -C /app log -1 --format=%cI 2>/dev/null || echo unknown)}" && \
+    echo "{\"commit\":\"${COMMIT}\",\"branch\":\"${BRANCH}\",\"date\":\"${DATE}\"}" > /app/version.json
 
 # Writable dirs for runtime data
 RUN mkdir -p runtime/uploads runtime/canvas-pages runtime/known_faces runtime/music runtime/generated_music runtime/faces runtime/transcripts

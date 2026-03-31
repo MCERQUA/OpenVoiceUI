@@ -95,7 +95,13 @@ const SHELL_HTML = `
     <div id="transcript-panel">
         <div class="tp-header">
             <span>Transcript</span>
-            <button class="tp-close" onclick="TranscriptPanel.hide()" title="Close transcript">&times;</button>
+            <div class="tp-header-controls">
+                <button class="tp-mode-toggle" id="tp-mode-toggle" onclick="TranscriptPanel.toggleMode()" title="Switch between voice and text mode">
+                    <span class="tp-mode-icon" id="tp-mode-icon"></span>
+                    <span class="tp-mode-label" id="tp-mode-label">Voice</span>
+                </button>
+                <button class="tp-close" onclick="TranscriptPanel.hide()" title="Close transcript">&times;</button>
+            </div>
         </div>
         <div class="tp-messages" id="transcript-messages"></div>
         <div class="tp-input-bar">
@@ -165,6 +171,8 @@ const SHELL_HTML = `
                 </div>
                 <div class="provider-status" id="ptt-hotkey-status">Hold hotkey = hold PTT button</div>
             </div>
+            <div class="settings-divider"></div>
+            <div class="settings-version" id="settings-version"></div>
         </div>
     </div>
 
