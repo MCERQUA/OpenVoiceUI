@@ -1,3 +1,8 @@
+---
+sidebar_position: 2
+title: Architecture
+---
+
 # OpenVoiceUI Architecture Reference
 
 > Single source of truth for how every system works. Reference this document on every PR review.

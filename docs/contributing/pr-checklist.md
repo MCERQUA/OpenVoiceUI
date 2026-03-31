@@ -1,7 +1,12 @@
+---
+sidebar_position: 2
+title: PR Review Checklist
+---
+
 # PR Review Checklist
 
 > Use this checklist for EVERY pull request — internal or external.
-> See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for system details.
+> See [Architecture Reference](/reference/architecture) for system details.
 
 ---
 

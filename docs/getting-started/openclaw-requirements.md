@@ -1,10 +1,15 @@
-# OpenClaw Requirements for OpenVoiceUI
+---
+sidebar_position: 3
+title: OpenClaw Requirements
+---
+
+# OpenClaw Requirements
 
 OpenVoiceUI uses [OpenClaw](https://openclaw.ai) as its AI gateway. This document
 lists the version and configuration requirements for voice conversations to work
 correctly.
 
-**If you're using Docker (`docker compose up`), you don't need this doc** — the
+**If you're using Docker (`docker compose up`), you don't need this doc** -- the
 included Docker image is pre-configured with the correct version and settings.
 
 This doc is for users who want to connect OpenVoiceUI to an **existing** OpenClaw
@@ -31,8 +36,8 @@ npm i -g openclaw@2026.3.13
 
 > **Version compatibility:** OpenVoiceUI includes a protocol compatibility layer
 > (`services/gateways/compat.py`) that handles differences between OpenClaw versions
-> automatically. Earlier versions (2026.3.1–2026.3.6) and newer versions (2026.3.7+)
-> have different config key names and authentication requirements — the compat layer
+> automatically. Earlier versions (2026.3.1-2026.3.6) and newer versions (2026.3.7+)
+> have different config key names and authentication requirements -- the compat layer
 > translates between them so you don't have to worry about it.
 
 ---
@@ -40,20 +45,18 @@ npm i -g openclaw@2026.3.13
 ## Required Gateway Settings
 
 These are **global settings** in `openclaw.json` that affect ALL agents on this
-OpenClaw instance. Review carefully before applying — they may impact other agents
+OpenClaw instance. Review carefully before applying -- they may impact other agents
 you're running.
 
-```jsonc
+```json
 {
   "gateway": {
     "auth": {
-      "mode": "token",                    // REQUIRED — explicit auth mode
-      "token": "your-gateway-token"       // REQUIRED — set your own token
+      "mode": "token",
+      "token": "your-gateway-token"
     },
     "controlUi": {
-      "dangerouslyDisableDeviceAuth": true // REQUIRED — disables device pairing
-                                           // (voice users connect from many devices;
-                                           //  manual device approval isn't practical)
+      "dangerouslyDisableDeviceAuth": true
     }
   }
 }
@@ -63,7 +66,7 @@ you're running.
 
 Without this, every new browser/device that connects gets added to a
 `devices/pending.json` queue and the session receives `NOT_PAIRED` status forever.
-Voice users connect from phones, laptops, different browsers — requiring manual
+Voice users connect from phones, laptops, different browsers -- requiring manual
 device approval for each one makes voice conversations unusable.
 
 If you're uncomfortable with this setting, you can instead manually approve
@@ -78,31 +81,28 @@ These can be scoped to the OpenVoiceUI agent specifically (in `agents.list[]`) s
 they don't affect your other agents. Or set them in `agents.defaults` to apply
 globally.
 
-```jsonc
+```json
 {
   "agents": {
     "defaults": {
-      "thinkingDefault": "off",           // REQUIRED — without this, some models
-                                           // return thinking-only blocks with no
-                                           // visible text for the user
+      "thinkingDefault": "off",
 
-      "blockStreamingDefault": "on",       // REQUIRED — voice needs complete
-      "blockStreamingBreak": "text_end",   // responses, not streaming chunks
+      "blockStreamingDefault": "on",
+      "blockStreamingBreak": "text_end",
 
-      "timeoutSeconds": 300,               // RECOMMENDED — 5 min timeout for
-                                           // large file generation / cold cache
+      "timeoutSeconds": 300,
 
-      "compaction": {                      // RECOMMENDED — prevents session bloat
+      "compaction": {
         "reserveTokens": 120000,
         "keepRecentTokens": 8000,
-        "reserveTokensFloor": 120000,      // compacts at ~85K tokens
+        "reserveTokensFloor": 120000,
         "memoryFlush": {
           "enabled": true,
           "softThresholdTokens": 6000
         }
       },
 
-      "contextPruning": {                  // RECOMMENDED — trims old tool results
+      "contextPruning": {
         "mode": "cache-ttl",
         "ttl": "30m",
         "keepLastAssistants": 3,
@@ -114,7 +114,7 @@ globally.
 }
 ```
 
-### Settings explained
+### Settings Explained
 
 | Setting | Why |
 |---|---|
@@ -145,7 +145,7 @@ cp -r setup/openvoiceui-agent/* ~/.openclaw/agents/openvoiceui/
 ```
 
 Then register the agent in your `openclaw.json`:
-```jsonc
+```json
 {
   "agents": {
     "list": [

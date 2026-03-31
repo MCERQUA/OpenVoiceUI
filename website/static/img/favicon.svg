@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <radialGradient id="eyeL" cx="45%" cy="38%" r="55%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="65%" stop-color="#e0e0e0"/>
+      <stop offset="100%" stop-color="#c0c0c0"/>
+    </radialGradient>
+    <radialGradient id="eyeR" cx="45%" cy="38%" r="55%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="65%" stop-color="#e0e0e0"/>
+      <stop offset="100%" stop-color="#c0c0c0"/>
+    </radialGradient>
+    <radialGradient id="pupilL" cx="35%" cy="32%" r="55%">
+      <stop offset="0%" stop-color="#2a2a2a"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+    <radialGradient id="pupilR" cx="35%" cy="32%" r="55%">
+      <stop offset="0%" stop-color="#2a2a2a"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+    <filter id="blueGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="1.8" result="blur"/>
+      <feFlood flood-color="#0088ff" flood-opacity="0.5" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- App icon background -->
+  <rect width="32" height="32" rx="7" fill="#050508"/>
+
+  <!-- Left eye glow -->
+  <ellipse cx="10" cy="17" rx="7" ry="8.5" fill="rgba(0,136,255,0.12)" filter="url(#blueGlow)"/>
+  <!-- Left eye white -->
+  <ellipse cx="10" cy="17" rx="5.5" ry="7" fill="url(#eyeL)"/>
+  <!-- Left eyelid cap (top arc) -->
+  <path d="M 4.5 13 Q 10 10.5 15.5 13" stroke="#050508" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- Left pupil -->
+  <circle cx="10" cy="18" r="2.8" fill="url(#pupilL)"/>
+  <!-- Left pupil highlight -->
+  <circle cx="8.8" cy="16.5" r="1.1" fill="rgba(255,255,255,0.85)"/>
+  <circle cx="11.5" cy="19.2" r="0.6" fill="rgba(255,255,255,0.35)"/>
+
+  <!-- Right eye glow -->
+  <ellipse cx="22" cy="17" rx="7" ry="8.5" fill="rgba(0,136,255,0.12)" filter="url(#blueGlow)"/>
+  <!-- Right eye white -->
+  <ellipse cx="22" cy="17" rx="5.5" ry="7" fill="url(#eyeR)"/>
+  <!-- Right eyelid cap (top arc) -->
+  <path d="M 16.5 13 Q 22 10.5 27.5 13" stroke="#050508" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <!-- Right pupil -->
+  <circle cx="22" cy="18" r="2.8" fill="url(#pupilR)"/>
+  <!-- Right pupil highlight -->
+  <circle cx="20.8" cy="16.5" r="1.1" fill="rgba(255,255,255,0.85)"/>
+  <circle cx="23.5" cy="19.2" r="0.6" fill="rgba(255,255,255,0.35)"/>
+</svg>
