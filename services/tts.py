@@ -184,13 +184,13 @@ def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) 
 # Fallback order when a provider fails (provider_id → fallback_id)
 _FALLBACK_CHAIN = {
     'groq': 'supertonic',
-    'qwen3': 'supertonic',
-    'resemble': 'supertonic',
-    'elevenlabs': 'supertonic',
+    'qwen3': 'groq',
+    'resemble': 'groq',
+    'elevenlabs': 'groq',
 }
 
 _MAX_RETRIES = 2
-_RETRY_DELAYS = (0.5, 1.5)  # seconds between retries
+_RETRY_DELAYS = (0.5, 1.0, 1.5, 2.0)  # seconds between retries
 
 # Voice gender/character mapping across providers — keeps voice consistent on fallback.
 # Maps (source_provider, voice) → (fallback_provider) → fallback_voice.
@@ -274,14 +274,13 @@ def generate_tts_b64(
 
     # ── Try primary provider (single attempt for cloud, retries for local) ──
     last_err = None
-    # Cloud providers: groq/qwen3 get 1 attempt (their own timeout handling).
-    # Resemble gets 3 attempts — their cluster throws transient 500s.
-    # Falling back to supertonic kills the custom voice which is much worse
-    # than a brief retry delay. 3 attempts covers most transient failures.
+    # Resemble gets 5 attempts — their cluster throws transient 500s frequently.
+    # Losing the custom character voice to a fallback is far worse than retry delay.
+    # Cloud providers (groq/elevenlabs) get 2 attempts.
     if tts_provider == 'resemble':
-        max_attempts = 3
+        max_attempts = 5
     elif tts_provider in ('groq', 'qwen3', 'elevenlabs'):
-        max_attempts = 1
+        max_attempts = 2
     else:
         max_attempts = _MAX_RETRIES + 1
     for attempt in range(max_attempts):
@@ -292,7 +291,7 @@ def generate_tts_b64(
         except Exception as e:
             last_err = e
             if attempt < max_attempts - 1:
-                delay = _RETRY_DELAYS[attempt]
+                delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
                 logger.warning(f"TTS attempt {attempt + 1} failed (provider={tts_provider}): {e} — retrying in {delay}s")
                 time.sleep(delay)
             else:

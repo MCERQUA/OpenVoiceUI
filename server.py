@@ -430,6 +430,16 @@ if _version_file.exists():
     except Exception:
         pass
 
+# Read package.json version as authoritative version string
+_PACKAGE_VERSION = "unknown"
+_package_file = Path(__file__).parent / "package.json"
+if _package_file.exists():
+    try:
+        _PACKAGE_VERSION = json.loads(_package_file.read_text()).get("version", "unknown")
+    except Exception:
+        pass
+_VERSION_INFO["version"] = _PACKAGE_VERSION
+
 
 @app.route("/api/version", methods=["GET"])
 def get_version():
@@ -442,9 +452,10 @@ def get_version():
         data["latest_date"] = latest["date"]
         data["latest_message"] = latest["message"]
         data["latest_version"] = latest.get("latest_version", "")
-        # Check if we need an update. If .git exists, use git to check
-        # whether the release tag is already in our history (handles being
-        # ahead of the release). Otherwise fall back to commit comparison.
+        # Check if we need an update. Three strategies:
+        # 1. git merge-base (if .git exists) — handles being ahead of release
+        # 2. Commit SHA comparison — direct match
+        # 3. package.json version vs release tag — fallback when commit unknown
         current = _VERSION_INFO.get("commit", "unknown")
         data["update_available"] = False
         if current != "unknown" and latest.get("sha"):
@@ -463,6 +474,14 @@ def get_version():
                     data["update_available"] = not latest["sha"].startswith(current)
             else:
                 data["update_available"] = not latest["sha"].startswith(current)
+        elif current == "unknown" and latest.get("latest_version"):
+            # Commit unknown (Docker build without args, etc.)
+            # Fall back to comparing package.json version against release tag.
+            pkg_ver = _PACKAGE_VERSION
+            rel_tag = latest["latest_version"]
+            if pkg_ver != "unknown" and rel_tag:
+                rel_ver = rel_tag.lstrip("v")
+                data["update_available"] = rel_ver.split("-")[0] != pkg_ver.split("-")[0] or rel_ver > pkg_ver
     return jsonify(data)
 
 

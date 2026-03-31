@@ -2331,8 +2331,6 @@ initUpdateChecker();
                 }
 
                 if (type === 'tool' && phase === 'start') {
-                    const sk = action?.sessionKey || '';
-                    const isSub = sk.includes('subagent:') || sk.includes('sub:') || sk.includes('child:');
                     const n = (name || '').toLowerCase().replace(/[_-]/g, '');
                     const toolMap = {
                         read:            ['RD',   () => sp(inp.file_path || inp.path)],
@@ -2353,7 +2351,7 @@ initUpdateChecker();
                     const lookup = Object.keys(toolMap).find(k => n.includes(k));
                     const [tag, getText] = toolMap[lookup] || ['TOOL', () => name || '?'];
                     const detail = getText();
-                    this._push(isSub ? `SUB:${tag}` : tag, detail || name || '?');
+                    this._push(tag, detail || name || '?');
                 }
             },
 
@@ -3643,7 +3641,8 @@ initUpdateChecker();
                             identified_person: window.cameraModule?.currentIdentity || null,
                             ...(gatewayAgentId ? { agent_id: gatewayAgentId } : {}),
                             ...(window._maxResponseChars ? { max_response_chars: window._maxResponseChars } : {}),
-                            ...(opts.image_path ? { image_path: opts.image_path } : {})
+                            ...(opts.image_path ? { image_path: opts.image_path } : {}),
+                            ...(window.TranscriptPanel?.textMode ? { skip_tts: true } : {})
                         })
                     });
 
@@ -5211,7 +5210,8 @@ initUpdateChecker();
                             ui_context: uiContext,
                             identified_person: window.cameraModule?.currentIdentity || null,
                             ...(gatewayAgentId ? { agent_id: gatewayAgentId } : {}),
-                            ...(window._maxResponseChars ? { max_response_chars: window._maxResponseChars } : {})
+                            ...(window._maxResponseChars ? { max_response_chars: window._maxResponseChars } : {}),
+                            ...(window.TranscriptPanel?.textMode ? { skip_tts: true } : {})
                         })
                     });
 
@@ -6214,6 +6214,18 @@ initUpdateChecker();
             window.SettingsPanel?.init();
             window.QuickSettings?.init();
 
+            // Fetch and display version in settings drawer
+            fetch('/api/version').then(r => r.ok ? r.json() : null).then(v => {
+                const el = document.getElementById('settings-version');
+                if (!el || !v) return;
+                const ver = v.version || v.commit || 'unknown';
+                let html = `v${ver}`;
+                if (v.update_available && v.latest_version) {
+                    html += ` <a href="#" onclick="event.preventDefault();document.getElementById('update-apply-btn')?.click()" title="Update to ${v.latest_version}">${v.latest_version} available<span class="update-dot"></span></a>`;
+                }
+                el.innerHTML = html;
+            }).catch(() => {});
+
             // Initialize Voice Conversation system (Web Speech STT + TTS)
             console.log('Initializing VoiceConversation system...');
             const voiceConversation = new VoiceConversation(CONFIG);
@@ -6651,7 +6663,7 @@ initUpdateChecker();
                 if (this.iframe) {
                     this.iframe.src = `/pages/${page}?t=${Date.now()}`;
                     localStorage.setItem('canvas_last_page', page);
-                    this._lastMtime = null;
+                    this._lastMtime = null;  // reset mtime tracking on manual navigation
                 }
                 console.log('Canvas opening:', page);
                 this.show();
@@ -6667,22 +6679,31 @@ initUpdateChecker();
                 if (!pageName) return;
                 const menu = window.CanvasMenu;
                 if (!menu?.manifest) {
+                    // Manifest not loaded yet — try direct filename
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
                     console.log('[Canvas] showPage direct:', filename);
-                    this.openPage(filename);
-                    this.show();
+                    if (this.iframe) {
+                        this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
+                        localStorage.setItem('canvas_last_page', filename);
+                        this._lastMtime = null;
+                        this.show();
+                    }
                     return;
                 }
                 const match = menu.findPageByName(pageName);
                 if (match) {
                     console.log('[Canvas] showPage matched:', match.page.display_name);
-                    this.openPage(match.page.filename);
-                    this.show();
+                    menu.showPage(match.page.filename);
                 } else {
+                    // Fallback: try as-is with .html
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
                     console.log('[Canvas] showPage fallback:', filename);
-                    this.openPage(filename);
-                    this.show();
+                    if (this.iframe) {
+                        this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
+                        localStorage.setItem('canvas_last_page', filename);
+                        this._lastMtime = null;
+                        this.show();
+                    }
                 }
             },
 
@@ -7520,6 +7541,7 @@ initUpdateChecker();
             isVisible: false,
             agentName: 'Agent',
             userName: 'User',
+            textMode: false,  // false = voice mode (TTS on), true = text mode (TTS off)
 
             init() {
                 this.panel = document.getElementById('transcript-panel');
@@ -7566,7 +7588,33 @@ initUpdateChecker();
                     });
                 }
 
+                // Init voice/text mode toggle
+                this._updateModeUI();
                 console.log('Transcript Panel initialized');
+            },
+
+            toggleMode() {
+                this.textMode = !this.textMode;
+                this._updateModeUI();
+                console.log(`[TranscriptPanel] Mode: ${this.textMode ? 'TEXT' : 'VOICE'}`);
+            },
+
+            _updateModeUI() {
+                const btn = document.getElementById('tp-mode-toggle');
+                const icon = document.getElementById('tp-mode-icon');
+                const label = document.getElementById('tp-mode-label');
+                if (!btn || !icon || !label) return;
+                if (this.textMode) {
+                    btn.classList.add('text-mode');
+                    icon.textContent = '\u2328';  // keyboard icon
+                    label.textContent = 'Text';
+                    btn.title = 'Text mode — TTS off. Click for voice mode.';
+                } else {
+                    btn.classList.remove('text-mode');
+                    icon.textContent = '\uD83D\uDD0A';  // speaker icon
+                    label.textContent = 'Voice';
+                    btn.title = 'Voice mode — TTS on. Click for text mode.';
+                }
             },
 
             _stageFile(file) {
@@ -7823,7 +7871,7 @@ initUpdateChecker();
                         const resp = await fetch(`${CONFIG.serverUrl}/api/conversation`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ message: messageToSend, tts_provider: 'groq', voice: 'autumn' })
+                            body: JSON.stringify({ message: messageToSend, tts_provider: 'groq', voice: 'autumn', ...(this.textMode ? { skip_tts: true } : {}) })
                         });
                         if (!resp.ok) throw new Error(`API error: ${resp.status}`);
                         const data = await resp.json();
@@ -7990,12 +8038,6 @@ initUpdateChecker();
                 for (const action of actions) {
                     if (action.type === 'tool') {
                         const phase = action.phase === 'result' ? '✓' : '→';
-                        const isSub = action.sessionKey && (
-                            action.sessionKey.includes('subagent:') ||
-                            action.sessionKey.includes('sub:') ||
-                            action.sessionKey.includes('child:')
-                        );
-                        const prefix = isSub ? '[sub] ' : '';
                         // Build a readable detail line from the input parameters
                         let detail = '';
                         if (action.phase === 'result') {
@@ -8011,7 +8053,7 @@ initUpdateChecker();
                                      inp.content?.slice?.(0, 60) ||
                                      Object.values(inp)[0]?.toString?.()?.slice(0, 120) || '';
                         }
-                        this.addEntry(isSub ? 'subagent-tool' : 'tool', `${phase} ${prefix}Tool: ${action.name}`, detail, action.ts);
+                        this.addEntry('tool', `${phase} Tool: ${action.name}`, detail, action.ts);
                     } else if (action.type === 'lifecycle') {
                         const label = action.phase === 'start' ? 'Agent started processing' :
                                       action.phase === 'end' ? 'Agent finished' : `Lifecycle: ${action.phase}`;
