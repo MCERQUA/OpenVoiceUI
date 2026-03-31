@@ -39,7 +39,7 @@ class DeepgramStreamingSTT {
 
         // Profile-overridable settings (same interface as DeepgramSTT)
         this.silenceDelayMs = 800;       // Not used for VAD (Deepgram handles it), but kept for profile compat
-        this.accumulationDelayMs = config.accumulationDelayMs || 0;
+        this.accumulationDelayMs = config.accumulationDelayMs || 1500;
         this.vadThreshold = 25;          // Not used (Deepgram server-side VAD), kept for profile compat
         this.minSpeechMs = 300;          // Not used (Deepgram server-side VAD), kept for profile compat
         this.maxRecordingMs = 45000;     // Not used (streaming is continuous), kept for profile compat
@@ -574,8 +574,15 @@ class DeepgramStreamingSTT {
         }
 
         // UtteranceEnd — Deepgram detected end of utterance (silence after speech)
+        // Use same accumulation window as speech_final so pauses don't split mid-sentence
         if (data.type === 'UtteranceEnd') {
-            this._flushAccumulated();
+            if (this.accumulatedText.trim()) {
+                if (this._accumulationTimer) clearTimeout(this._accumulationTimer);
+                this._accumulationTimer = setTimeout(() => {
+                    this._accumulationTimer = null;
+                    this._flushAccumulated();
+                }, this.accumulationDelayMs);
+            }
             return;
         }
 
