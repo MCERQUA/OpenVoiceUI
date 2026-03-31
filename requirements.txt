@@ -29,7 +29,7 @@ groq==1.1.2                 # Groq Orpheus TTS (required if using groq provider)
 
 # Auth (Clerk JWT — optional, only if CANVAS_REQUIRE_AUTH=true)
 PyJWT==2.12.1
-cryptography==46.0.5
+cryptography==46.0.6
 
 # Face recognition (optional — adds ~700MB for TensorFlow)
 # Installs on first use if not present. To pre-install:
