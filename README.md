@@ -67,7 +67,7 @@ Self-hosted. Your hardware, your data. MIT licensed, forever free.
 - **AI Music Generation** — Generate songs on the fly with your voice using Suno. Full music player with playlist management built in.
 - **Custom Animated Interface** — Choose from animated face modes (eye-face avatar, reactive halo-smoke orb) or install community-built faces through plugins. Build your own — the face system is fully extensible.
 - **Sub-Agents** — Delegate multiple tasks to parallel AI workers simultaneously and get results back.
-- **Long-Term Memory** — ByteRover context engine curates knowledge every turn. Persists across sessions in human-readable markdown.
+- **Long-Term Memory** — Optional context engine plugin curates knowledge every turn. Persists across sessions in human-readable markdown.
 - **Desktop OS Interface** — Themed desktop environment with window management (Windows XP, macOS, Ubuntu, Win95, Win 3.1).
 - **Admin Dashboard** — Mobile-responsive. Agent profiles, provider config, workspace file browser, plugin management, system health. Everything editable live.
 - **Self-Hosted** — Your hardware, your data. No vendor lock-in, no monthly fees.
@@ -252,7 +252,7 @@ Access at **localhost:5001/admin**. Mobile-responsive.
 | **Canvas UI** | Live HTML rendering | Text/audio only |
 | **Skills** | Any Claude Code or OpenClaw skill | API endpoints |
 | **Music** | AI music generation (Suno) | None |
-| **Memory** | ByteRover long-term context | Session only |
+| **Memory** | Plugin-based long-term context | Session only |
 | **Admin** | Full dashboard, mobile-ready | Config files |
 | **Plugins** | Community face packs, pages, workflows | None |
 | **Hosting** | Self-hosted, your data | Vendor cloud only |
@@ -278,7 +278,7 @@ Access at **localhost:5001/admin**. Mobile-responsive.
 | STT | Web Speech API, Deepgram, Groq Whisper |
 | TTS | Supertonic, Groq Orpheus, Resemble, Qwen3-TTS |
 | LLM | Any provider via OpenClaw gateway |
-| Memory | ByteRover context engine (markdown knowledge base) |
+| Memory | Context engine plugin (markdown knowledge base) |
 | Auth | Clerk (optional) |
 | Deploy | npm, Docker, Pinokio, VPS/systemd |
 

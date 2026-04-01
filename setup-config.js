@@ -71,20 +71,7 @@ const openclawConfig = {
     },
     list: [{ id: "main", default: true, workspace: "/root/.openclaw/workspace" }],
   },
-  plugins: {
-    slots: {
-      contextEngine: "byterover",
-    },
-    entries: {
-      byterover: {
-        enabled: true,
-        config: {
-          brvPath: "/usr/local/bin/brv-direct",
-          cwd: "/root/.openclaw/workspace",
-        },
-      },
-    },
-  },
+  // Plugins configured by individual plugin installers (e.g., ByteRover memory)
 };
 
 fs.mkdirSync("openclaw-data/workspace", { recursive: true });
