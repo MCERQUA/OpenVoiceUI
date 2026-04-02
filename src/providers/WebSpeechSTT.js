@@ -38,7 +38,7 @@ class WebSpeechSTT {
 
         // Silence detection for continuous listening
         this.silenceTimer = null;
-        this.silenceDelayMs = 3500; // 3.5s — 3s was cutting people off mid-sentence
+        this.silenceDelayMs = 1500; // 1.5s — balanced: 3.5s was too sluggish, 0ms cut off mid-sentence
         this.accumulatedText = '';
         this.isProcessing = false;
 

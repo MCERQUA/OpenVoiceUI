@@ -45,7 +45,29 @@ function writePairedJson(deviceId, publicKeyPem) {
 
   var nowMs = Date.now();
   var pairingToken = crypto.randomBytes(32).toString("hex");
+
+  // Read existing paired.json so we don't clobber other paired devices
   var paired = {};
+  try {
+    var existingPaired = fs.readFileSync(PAIRED_FILE, "utf8");
+    paired = JSON.parse(existingPaired);
+  } catch (e) { /* no existing file, start fresh */ }
+
+  // Fix scopes on ALL existing paired devices (repairs installs from before this fix)
+  for (var did in paired) {
+    var dev = paired[did];
+    if (dev.clientId === "openclaw-probe") continue;
+    var scopes = dev.scopes || [];
+    if (scopes.indexOf("operator.admin") === -1) {
+      var fullScopes = ["operator.admin", "operator.read", "operator.write"];
+      dev.scopes = fullScopes;
+      dev.approvedScopes = fullScopes;
+      if (dev.tokens && dev.tokens.operator) {
+        dev.tokens.operator.scopes = fullScopes;
+      }
+    }
+  }
+
   paired[deviceId] = {
     deviceId: deviceId,
     publicKey: pubB64url,
@@ -55,13 +77,13 @@ function writePairedJson(deviceId, publicKeyPem) {
     clientMode: "cli",
     role: "operator",
     roles: ["operator"],
-    scopes: ["operator.read", "operator.write"],
-    approvedScopes: ["operator.read", "operator.write"],
+    scopes: ["operator.admin", "operator.read", "operator.write"],
+    approvedScopes: ["operator.admin", "operator.read", "operator.write"],
     tokens: {
       operator: {
         token: pairingToken,
         role: "operator",
-        scopes: ["operator.read", "operator.write"],
+        scopes: ["operator.admin", "operator.read", "operator.write"],
         createdAtMs: nowMs,
       },
     },

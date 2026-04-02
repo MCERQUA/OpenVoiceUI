@@ -52,7 +52,7 @@ The wizard generates a `.env` file and builds the Docker images.
 npx openvoiceui start
 ```
 
-This starts all three containers, injects device identity if available, and connects the ByteRover memory provider. Open **http://localhost:5001** and start talking.
+This starts all three containers and injects device identity if available. Open **http://localhost:5001** and start talking.
 
 ### Other Commands
 
@@ -239,7 +239,7 @@ All commands are available via `npx openvoiceui <command>` or, if installed glob
 | Command | Description |
 |---------|-------------|
 | `setup` | Interactive wizard. Configures API keys, generates `.env`, builds Docker images. |
-| `start` | Start all containers (`docker compose up -d`). Injects device identity and connects ByteRover memory. |
+| `start` | Start all containers (`docker compose up -d`). Injects device identity. |
 | `stop` | Stop all containers (`docker compose down`). |
 | `restart` | Stop and start all containers. |
 | `status` | Show container status (`docker compose ps`). |

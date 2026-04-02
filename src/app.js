@@ -18,6 +18,7 @@ initUpdateChecker();
         import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js?v=3';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
         import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js?v=3';
+        import { ExternalSTT, ExternalWakeWordDetector } from '/src/providers/ExternalSTT.js';
         import { DeepgramStreamingSTT, DeepgramStreamingWakeWordDetector } from '/src/providers/DeepgramStreamingSTT.js?v=3';
 
         // ===== CONFIGURATION =====
@@ -4941,6 +4942,9 @@ initUpdateChecker();
                 } else if (sttProvider === 'groq') {
                     this.stt = new GroqSTT();
                     console.log('STT provider: Groq Whisper');
+                } else if (sttProvider === 'external') {
+                    this.stt = new ExternalSTT();
+                    console.log('STT provider: External (user-provided API)');
                 } else {
                     this.stt = new WebSpeechSTT();
                     console.log('STT provider: Chrome Web Speech');
@@ -6253,6 +6257,7 @@ initUpdateChecker();
             const _sttProv = window._serverProfile?.stt?.provider || 'webspeech';
             const wakeDetector = _sttProv === 'deepgram' ? new DeepgramWakeWordDetector()
                                : _sttProv === 'groq' ? new GroqWakeWordDetector()
+                               : _sttProv === 'external' ? new ExternalWakeWordDetector()
                                : new WakeWordDetector();
             window.wakeDetector = wakeDetector;
 

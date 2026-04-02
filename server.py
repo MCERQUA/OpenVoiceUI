@@ -1102,6 +1102,39 @@ def local_stt():
                 pass
 
 
+@app.route("/api/stt/external", methods=["POST"])
+def external_stt():
+    """Transcribe audio using an external STT service (bring your own).
+
+    Sends audio to the URL configured in STT_API_URL. Supports OpenAI-compatible
+    and generic Whisper ASR formats. Configure via .env or admin panel.
+    """
+    if "audio" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    audio_file = request.files["audio"]
+    audio_bytes = audio_file.read()
+    language = request.form.get("language", "en")
+
+    try:
+        from providers.stt.external_provider import ExternalSTTProvider
+        provider = ExternalSTTProvider()
+        result = provider.transcribe(audio_bytes, language=language)
+
+        if not result.text:
+            return jsonify({"transcript": "", "success": True, "filtered": True})
+
+        return jsonify({
+            "transcript": result.text,
+            "success": True,
+            "confidence": result.confidence,
+            "duration_ms": result.duration_ms,
+        })
+    except Exception as e:
+        logger.error(f"External STT error: {e}")
+        return jsonify({"error": f"External STT failed: {e}"}), 500
+
+
 # ---------------------------------------------------------------------------
 # Routes — web search
 # ---------------------------------------------------------------------------
@@ -1739,6 +1772,7 @@ if _limiter:
         'upload_file':               '5/minute',
         'groq_stt':                  '60/minute',
         'local_stt':                 '60/minute',
+        'external_stt':              '60/minute',
     }.items():
         _view_fn = app.view_functions.get(_endpoint)
         if _view_fn:
