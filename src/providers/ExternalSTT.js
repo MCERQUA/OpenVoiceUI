@@ -39,7 +39,7 @@ class ExternalSTT {
 
         // VAD settings
         this.silenceTimer = null;
-        this.silenceDelayMs = 800;
+        this.silenceDelayMs = 1500;      // 1.5s silence — gives users time to pause/think
         this.accumulationDelayMs = config.accumulationDelayMs || 0;
         this.vadThreshold = 25;
         this.minSpeechMs = 300;
