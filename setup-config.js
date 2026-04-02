@@ -27,7 +27,7 @@ const secret = crypto.randomBytes(32).toString("hex");
 // ---------------------------------------------------------------------------
 
 // Pick default model based on which keys the user provided
-let defaultModel = "groq/llama-3.3-70b-versatile"; // fallback — Groq is required
+let defaultModel = "zai/glm-5-turbo"; // fallback — Z.AI only, NEVER Groq for LLM
 if (getKey("ZAI_API_KEY"))       defaultModel = "zai/glm-5-turbo";
 if (getKey("ANTHROPIC_API_KEY")) defaultModel = "anthropic/claude-sonnet-4-5";
 if (getKey("OPENAI_API_KEY"))    defaultModel = "openai/gpt-4o";
@@ -252,13 +252,13 @@ pairedDevices[deviceId] = {
   clientMode: "cli",
   role: "operator",
   roles: ["operator"],
-  scopes: ["operator.read", "operator.write"],
-  approvedScopes: ["operator.read", "operator.write"],
+  scopes: ["operator.admin", "operator.read", "operator.write"],
+  approvedScopes: ["operator.admin", "operator.read", "operator.write"],
   tokens: {
     operator: {
       token: pairingToken,
       role: "operator",
-      scopes: ["operator.read", "operator.write"],
+      scopes: ["operator.admin", "operator.read", "operator.write"],
       createdAtMs: nowMs,
     },
   },

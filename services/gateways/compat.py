@@ -229,7 +229,7 @@ def build_connect_params(
     Centralizes the handshake params shape so all callers stay in sync.
     """
     if scopes is None:
-        scopes = ["operator.read", "operator.write"]
+        scopes = ["operator.admin", "operator.read", "operator.write"]
     if caps is None:
         caps = ["tool-events"]
 
