@@ -780,6 +780,20 @@ const Builder = {
       '<div class="fg"><label class="fl">Description</label><textarea id="be-desc" style="min-height:52px">'+esc(p.description||'')+'</textarea></div>'+
       '<div class="sect-label">Framework</div>'+
       '<div class="g2" style="margin-bottom:14px">'+
+        '<div class="fg"><label class="fl">Primary Gateway</label><select id="be-gateway" onchange="Builder._gatewayChanged()">'+
+          '<option value="openclaw"'+((p.adapter_config?.gateway_id||'openclaw')==='openclaw'?' selected':'')+'>OpenClaw (default)</option>'+
+          '<option value="hermes"'+((p.adapter_config?.gateway_id)==='hermes'?' selected':'')+'>Hermes Agent (standalone)</option>'+
+          '<option value="openclaw+hermes"'+((p.adapter_config?.gateway_id)==='openclaw+hermes'?' selected':'')+'>OpenClaw + Hermes (hybrid)</option>'+
+        '</select>'+
+        '<div style="font-size:10px;color:var(--dim);margin-top:3px" id="be-gateway-desc"></div>'+
+        '</div>'+
+        '<div class="fg"><label class="fl">Additional Frameworks <span style="font-size:10px;color:var(--dim)">(stacked)</span></label>'+
+          '<div id="be-stack-list" style="margin-bottom:6px"></div>'+
+          '<button class="btn btn-o btn-sm" onclick="Builder._addFramework()" style="font-size:11px">+ Add Framework</button>'+
+          '<div style="font-size:10px;color:var(--dim);margin-top:3px">Stacked frameworks add capabilities to the primary gateway</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="g2" style="margin-bottom:14px">'+
         '<div class="fg"><label class="fl">LLM / Agent System</label><select id="be-llm">'+
           '<option value="gateway"'+(llmProv==='gateway'?' selected':'')+'>OpenClaw Gateway (default)</option>'+
           '<option value="zai"'+(llmProv==='zai'?' selected':'')+'>Z.AI GLM-5-turbo</option>'+
@@ -889,6 +903,79 @@ const Builder = {
     this._loadProviderVoices().then(()=>this._renderVoiceGrid(ttsProv,selVoice));
     // Load agent files if on that tab
     if(this.activeTab==='agentfiles') this._loadAgentFiles();
+    // Render framework stack and gateway description
+    this._frameworkStack=Array.isArray(p.adapter_config?.additional_gateways)?[...p.adapter_config.additional_gateways]:[];
+    this._renderFrameworkStack();
+    this._loadAvailableGateways();
+    this._gatewayChanged();
+  },
+
+  _availableGateways:[],
+  _frameworkStack:[],
+
+  async _loadAvailableGateways(){
+    try{
+      const r=await fetch('/api/plugins');
+      const d=await r.json();
+      this._availableGateways=(d.plugins||[]).filter(p=>p.type==='gateway');
+    }catch(e){}
+  },
+
+  _gatewayChanged(){
+    const sel=$('be-gateway');
+    if(!sel)return;
+    const descs={
+      openclaw:'Real-time voice with tuned WebSocket pipeline',
+      hermes:'Self-improving skills, deep memory, full voice via REST API',
+      'openclaw+hermes':'Voice via OpenClaw, long tasks + skills delegated to Hermes',
+    };
+    const descEl=$('be-gateway-desc');
+    if(descEl)descEl.textContent=descs[sel.value]||'Plugin gateway';
+  },
+
+  _renderFrameworkStack(){
+    const el=$('be-stack-list');
+    if(!el)return;
+    if(!this._frameworkStack.length){
+      el.innerHTML='<div style="font-size:11px;color:var(--dim);padding:4px 0">No additional frameworks</div>';
+      return;
+    }
+    const names={'hermes-bridge':'Hermes Agent (delegation)','hermes':'Hermes Agent'};
+    el.innerHTML=this._frameworkStack.map((fw,i)=>
+      '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border)">'+
+        '<span style="font-size:12px;color:var(--bright);flex:1">'+esc(names[fw]||fw)+'</span>'+
+        '<button class="btn btn-d btn-sm" style="padding:2px 6px;font-size:10px" onclick="Builder._removeFramework('+i+')">x</button>'+
+      '</div>'
+    ).join('');
+  },
+
+  _addFramework(){
+    const primary=($('be-gateway')?.value)||'openclaw';
+    const used=new Set([primary,...this._frameworkStack]);
+    const available=[
+      {id:'hermes-bridge',name:'Hermes Agent (delegation — skills, memory, tasks)'},
+    ];
+    (this._availableGateways||[]).forEach(gw=>{
+      const gwId=gw.id.replace('-agent','').replace('-gateway','');
+      if(!used.has(gwId)&&!used.has(gwId+'-bridge')){
+        available.push({id:gwId+'-bridge',name:esc(gw.name)+' (delegation)'});
+      }
+    });
+    const filtered=available.filter(a=>!used.has(a.id));
+    if(!filtered.length){toast('No additional frameworks available to add','gray');return;}
+    const opts=filtered.map((a,i)=>(i+1)+'. '+a.name).join('\n');
+    const choice=prompt('Add framework:\n'+opts+'\n\nEnter number:');
+    if(!choice)return;
+    const idx=parseInt(choice)-1;
+    if(idx>=0&&idx<filtered.length){
+      this._frameworkStack.push(filtered[idx].id);
+      this._renderFrameworkStack();
+    }
+  },
+
+  _removeFramework(idx){
+    this._frameworkStack.splice(idx,1);
+    this._renderFrameworkStack();
   },
 
   switchTab(tab){
@@ -915,6 +1002,8 @@ const Builder = {
     ['canvas','music','tools','vision','memory','caller','sounds','commercial'].forEach(f=>{
       const el=$('feat-'+f); if(el) featObj[f]=el.checked;
     });
+    const gatewayId=$('be-gateway')?.value||'openclaw';
+    const additionalGateways=this._frameworkStack?.length?[...this._frameworkStack]:undefined;
     const payload={
       name:$('be-name')?.value||undefined,
       description:$('be-desc')?.value||undefined,
@@ -922,6 +1011,11 @@ const Builder = {
       system_prompt:$('be-prompt')?.value||undefined,
       llm:{provider:$('be-llm')?.value, parameters:{max_tokens:parseInt($('be-maxtok')?.value)||512}},
       voice:{tts_provider:$('be-tts')?.value, voice_id:this._voice||undefined},
+      adapter_config:{
+        gateway_id:gatewayId,
+        ...(additionalGateways?{additional_gateways:additionalGateways}:{}),
+        sessionKey:gatewayId==='hermes'?'hermes-main':'main',
+      },
       stt:{
         wake_words:(()=>{const raw=($('be-wake-words')?.value||'').trim();return raw?raw.split(',').map(w=>w.trim()).filter(Boolean):['wake up'];})(),
         identify_on_wake:$('be-identify-on-wake')?.checked!==false,
@@ -1361,6 +1455,7 @@ const Providers={
       {id:'webspeech',name:'Web Speech API',detail:'Browser-native. Chrome/Edge. Free.'},
       {id:'deepgram',name:'Deepgram',detail:'Cloud. Accurate. Streaming.'},
       {id:'groq_whisper',name:'Groq Whisper',detail:'Cloud. Fast. Accurate.'},
+      {id:'external',name:'External STT',detail:'Bring your own. Any Whisper-compatible API.'},
     ]
   },
   async load(){
