@@ -1,0 +1,72 @@
+{
+  "id": "bhb-animated-characters",
+  "name": "BHB Animated Characters",
+  "version": "1.0.0",
+  "description": "Animated BigHead Billionaires character avatars with lip-sync, mood expressions, character builder, and show lore for Kyle, Bryce, and the BigHeads universe",
+  "author": "bhaleyart",
+  "type": "face",
+  "license": "MIT",
+  "requires": "openvoiceui >= 1.0",
+  "repository": "https://github.com/MCERQUA/openvoiceui-plugins",
+  "install": {
+    "method": "git",
+    "repo": "MCERQUA/openvoiceui-plugins",
+    "path": "plugins/bhb-animated-characters",
+    "branch": "main"
+  },
+
+  "faces": [{
+    "id": "bighead",
+    "name": "BigHead Avatar",
+    "script": "faces/BigHeadFace.js",
+    "css": "faces/bighead.css",
+    "preview": "faces/previews/bighead.svg",
+    "moods": ["neutral", "happy", "sad", "angry", "thinking", "surprised", "listening"],
+    "features": ["lip-sync", "mood-eyes", "blink", "customizable", "audio-reactive"],
+    "configurable": true,
+    "config_page": "bighead-builder.html"
+  }],
+
+  "pages": [{
+    "file": "pages/bighead-builder.html",
+    "name": "Character Builder",
+    "icon": "🎭"
+  }],
+
+  "routes": [{
+    "module": "routes/bighead.py",
+    "blueprint": "bighead_bp",
+    "prefix": "/api/bighead"
+  }],
+
+  "profiles": [
+    "profiles/kyle-valhalla.json",
+    "profiles/bryce-bighead.json"
+  ],
+
+  "lore": {
+    "description": "Show transcripts, character profiles, episode memories, and world-building from the BigHeads animated series. Agents can access these for character knowledge.",
+    "transcripts": [
+      "lore/transcripts/BigHeads-Ep1.txt",
+      "lore/transcripts/BigHeads-Ep2.txt",
+      "lore/transcripts/BigHeads-Ep3.txt",
+      "lore/transcripts/BigHeads-Ep4.txt"
+    ],
+    "characters": [
+      "lore/characters/kyle.md",
+      "lore/characters/partner.md",
+      "lore/characters/axel.md",
+      "lore/characters/barry-g.md",
+      "lore/characters/reggie.md",
+      "lore/characters/agent-chill.md",
+      "lore/characters/tate-parody.md"
+    ],
+    "memories": [
+      "lore/memories/ep1-the-mint-disaster.md",
+      "lore/memories/ep2-radio-war-explosion.md",
+      "lore/memories/ep3-utopia-and-arrest.md",
+      "lore/memories/ep4-trial-prison-matrix.md",
+      "lore/memories/world-building.md"
+    ]
+  }
+}

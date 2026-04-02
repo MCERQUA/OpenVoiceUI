@@ -85,13 +85,18 @@ runtime/transcripts/*
 runtime/canvas-manifest.json
 runtime/canvas-manifest.bak
 
-# Plugins — installed locally, not committed to the base repo.
-# Each plugin is its own repo: git clone <url> plugins/<id>
-# The example-gateway reference and README are tracked.
+# Plugins — catalog stubs (plugin.json + README.md) are tracked so they
+# show up in the repo and admin panel.  Installed code is NOT tracked —
+# "install" pulls it from the plugin's repo into the same folder.
 plugins/*/
 !plugins/example-gateway/
 !plugins/README.md
 !plugins/.gitkeep
+# Approved plugin catalog stubs (manifest + readme only)
+!plugins/bhb-animated-characters/
+plugins/bhb-animated-characters/*
+!plugins/bhb-animated-characters/plugin.json
+!plugins/bhb-animated-characters/README.md
 .coverage
 .pytest_cache/
 backups/
