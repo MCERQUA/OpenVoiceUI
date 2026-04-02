@@ -457,7 +457,7 @@ class GatewayConnection:
             raise RuntimeError(f"Expected connect.challenge, got: {challenge_data}")
 
         nonce = challenge_data.get('payload', {}).get('nonce', '')
-        scopes = ["operator.read", "operator.write"]
+        scopes = ["operator.admin", "operator.read", "operator.write"]
         identity = _load_device_identity()
         device_block = _sign_device_connect(
             identity, "cli", "cli", "operator", scopes, self.auth_token, nonce
