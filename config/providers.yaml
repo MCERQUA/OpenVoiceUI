@@ -58,6 +58,7 @@ stt:
   modules:
     - providers.stt.webspeech_provider
     - providers.stt.whisper_provider
+    - providers.stt.external_provider
 
   providers:
     webspeech:
@@ -69,3 +70,12 @@ stt:
       model: base
       device: cpu
       priority: 20
+
+    external:
+      name: "External STT"
+      api_url: ${STT_API_URL}
+      api_key: ${STT_API_KEY}
+      api_format: auto
+      model: whisper-1
+      language: en
+      priority: 15
