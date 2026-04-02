@@ -1117,8 +1117,8 @@ def external_stt():
     language = request.form.get("language", "en")
 
     try:
-        from providers.registry import registry, ProviderType
-        provider = registry.get_provider(ProviderType.STT, "external")
+        from providers.stt.external_provider import ExternalSTTProvider
+        provider = ExternalSTTProvider()
         result = provider.transcribe(audio_bytes, language=language)
 
         if not result.text:
