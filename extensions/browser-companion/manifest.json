@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "JamBot Browser Companion",
+  "version": "2.0.0",
+  "description": "Your JamBot AI agent — voice-chat, semantic page reading, and reliable browser automation from the sidebar.",
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "alarms",
+    "cookies",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "https://*.jam-bot.com/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "JamBot",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "32":  "icons/icon32.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16":  "icons/icon16.png",
+    "32":  "icons/icon32.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "options_page": "popup.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "lib/semantic-tree.js",
+        "lib/action-executor.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

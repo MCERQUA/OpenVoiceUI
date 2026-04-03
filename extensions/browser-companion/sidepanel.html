@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JamBot</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+
+  <!-- Setup screen: shown when no domain is configured -->
+  <div id="setup-screen" class="setup-screen">
+    <div class="setup-logo">🤖</div>
+    <h2 class="setup-title">JamBot Companion</h2>
+    <p class="setup-text">Connect to your JamBot instance to get started.</p>
+    <button class="setup-btn" id="setup-open-btn">
+      Open Settings
+    </button>
+  </div>
+
+  <!-- Main panel: shown when domain is configured -->
+  <div id="main-screen" class="main-screen" style="display:none">
+
+    <!-- Header bar -->
+    <div class="header">
+      <div class="header-left">
+        <span class="status-dot" id="status-dot" title="Connection status"></span>
+        <span class="domain-display" id="domain-display">jam-bot.com</span>
+      </div>
+      <div class="header-right">
+        <button class="icon-btn" id="settings-btn" title="Settings">⚙️</button>
+      </div>
+    </div>
+
+    <!-- Settings Drawer (toggled by ⚙️ button) -->
+    <div class="settings-drawer" id="settings-drawer" style="display:none">
+      <div class="settings-row">
+        <label class="settings-label">TTS</label>
+        <select id="panel-tts-provider" class="settings-select">
+          <option value="groq">Groq — Orpheus</option>
+          <option value="supertonic">Supertonic</option>
+          <option value="browser">Browser</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <label class="settings-label">Voice</label>
+        <select id="panel-voice" class="settings-select">
+          <option value="autumn">Autumn</option>
+          <option value="troy">Troy</option>
+          <option value="austin">Austin</option>
+          <option value="daniel">Daniel</option>
+          <option value="diana">Diana</option>
+          <option value="hannah">Hannah</option>
+        </select>
+      </div>
+      <div class="settings-row settings-row--link">
+        <a class="settings-link" id="full-settings-link">Full settings ↗</a>
+      </div>
+    </div>
+
+    <!-- Page context pill -->
+    <div class="context-pill" id="context-pill" style="display:none">
+      <img class="pill-thumb" id="pill-thumb" alt="" style="display:none">
+      <span class="pill-icon">📄</span>
+      <span class="pill-text" id="pill-text">Page title</span>
+    </div>
+
+    <!-- Waveform visualizer -->
+    <div class="wave-container">
+      <canvas id="wave-canvas" width="280" height="48"></canvas>
+    </div>
+
+    <!-- Mic + mute row -->
+    <div class="mic-area">
+      <div class="mic-row">
+        <button class="mic-btn mic-btn--idle" id="mic-btn" title="Click to start/stop voice">
+          <svg class="mic-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          </svg>
+        </button>
+        <button class="mute-fab" id="mute-btn" title="Toggle voice on/off">🔊</button>
+      </div>
+      <div class="mic-label" id="mic-label">Tap to speak</div>
+    </div>
+
+    <!-- Message history -->
+    <div class="messages-container">
+      <div class="messages" id="messages"></div>
+    </div>
+
+    <!-- Error banner -->
+    <div class="error-banner" id="error-banner" style="display:none"></div>
+
+    <!-- Text input -->
+    <div class="input-area">
+      <textarea
+        id="text-input"
+        class="text-input"
+        placeholder="Or type a message…"
+        rows="2"
+      ></textarea>
+      <button class="send-btn" id="send-btn" title="Send">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+        </svg>
+      </button>
+    </div>
+
+  </div>
+
+  <script src="lib/command-parser.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

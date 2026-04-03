@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JamBot Settings</title>
+  <style>
+    :root {
+      --bg:     #0d0d0f;
+      --bg2:    #13131a;
+      --border: #2a2a3a;
+      --text:   #e2e8f0;
+      --muted:  #64748b;
+      --accent: #00d2ff;
+      --error:  #ef4444;
+      --ok:     #22c55e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 300px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h1 span { color: var(--accent); }
+    .field { margin-bottom: 12px; }
+    label {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    input[type="text"], select {
+      width: 100%;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+    input[type="text"]:focus, select:focus {
+      border-color: var(--accent);
+    }
+    input::placeholder { color: var(--muted); }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .toggle-label { color: var(--text); font-size: 12.5px; }
+    .toggle-sub   { color: var(--muted); font-size: 11px; margin-top: 1px; }
+
+    input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      accent-color: var(--accent);
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 14px;
+      padding: 8px 10px;
+      background: var(--bg2);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .dot-ok    { background: var(--ok);    box-shadow: 0 0 6px var(--ok); }
+    .dot-error { background: var(--error); box-shadow: 0 0 6px var(--error); }
+    .dot-idle  { background: var(--muted); }
+    .status-text { font-size: 12px; color: var(--muted); }
+
+    .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+    button {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: opacity 0.15s;
+    }
+    .btn-save  { background: var(--accent); color: #000; }
+    .btn-test  { background: var(--bg2);    color: var(--text); border: 1px solid var(--border); }
+    button:hover { opacity: 0.85; }
+
+    .msg {
+      font-size: 11.5px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      margin-top: 10px;
+      display: none;
+    }
+    .msg-ok    { background: rgba(34,197,94,0.12); color: var(--ok);    border: 1px solid rgba(34,197,94,0.3); }
+    .msg-error { background: rgba(239,68,68,0.12); color: var(--error); border: 1px solid rgba(239,68,68,0.3); }
+
+    hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+    .footnote { font-size: 10.5px; color: var(--muted); text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>🤖 JamBot <span>Companion</span></h1>
+
+  <div class="status-row">
+    <div class="status-dot dot-idle" id="status-dot"></div>
+    <span class="status-text" id="status-text">Not connected</span>
+  </div>
+
+  <div class="field">
+    <label>Your JamBot Domain</label>
+    <input type="text" id="domain" placeholder="yourname.jam-bot.com" spellcheck="false" autocomplete="off">
+  </div>
+
+  <div class="field">
+    <label>TTS Provider</label>
+    <select id="tts-provider">
+      <option value="groq">Groq — Orpheus (fast, free)</option>
+      <option value="supertonic">Supertonic (server TTS)</option>
+      <option value="browser">Browser Speech (no server cost)</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>Voice</label>
+    <select id="voice">
+      <option value="autumn">Autumn (default)</option>
+      <option value="troy">Troy</option>
+      <option value="austin">Austin</option>
+      <option value="daniel">Daniel</option>
+      <option value="diana">Diana</option>
+      <option value="hannah">Hannah</option>
+    </select>
+  </div>
+
+  <hr>
+
+  <div class="toggle-row">
+    <div>
+      <div class="toggle-label">Voice responses (TTS)</div>
+      <div class="toggle-sub">Play audio — disable for text-only mode</div>
+    </div>
+    <input type="checkbox" id="tts-enabled" checked>
+  </div>
+
+  <div class="toggle-row">
+    <div>
+      <div class="toggle-label">Record page actions</div>
+      <div class="toggle-sub">Agent sees your clicks/navigation as context</div>
+    </div>
+    <input type="checkbox" id="recording" checked>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn-save" id="save-btn">Save</button>
+    <button class="btn-test" id="test-btn">Test</button>
+  </div>
+
+  <div class="msg msg-ok"    id="msg-ok"></div>
+  <div class="msg msg-error" id="msg-error"></div>
+
+  <hr>
+  <div class="footnote">
+    After saving, open the sidebar by clicking the extension icon.<br>
+    Make sure you're logged in to your JamBot domain first.
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
