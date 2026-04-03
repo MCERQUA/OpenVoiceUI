@@ -661,7 +661,29 @@ class JamBotPanel {
         // Content script not available -- fall through to executeScript
       }
 
-      // Fallback: minimal executeScript (works on any tab)
+      // Fallback: inject content scripts then use executeScript
+      // This also makes subsequent execute_action calls work via messaging
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['lib/semantic-tree.js', 'lib/action-executor.js', 'content.js'],
+        });
+        // Try semantic snapshot again now that scripts are injected
+        const retryResponse = await chrome.tabs.sendMessage(tabId, { type: 'get_snapshot' });
+        if (retryResponse && retryResponse.snapshot) {
+          this.currentSnapshot = retryResponse.snapshot;
+          if (retryResponse.structured) {
+            this.currentUrl = retryResponse.structured.url || this.currentUrl;
+            this.currentTitle = retryResponse.structured.title || this.currentTitle;
+          }
+          this.updateContextPill(false, true);
+          return;
+        }
+      } catch (_) {
+        // Injection failed (restricted page) -- fall through to basic executeScript
+      }
+
+      // Last resort: basic executeScript without lib injection
       const results = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
@@ -1116,9 +1138,13 @@ class JamBotPanel {
     // Bug #3: After step 5, send ONLY the snapshot (not full page text)
     // The snapshot is compact (~500 tokens) and already has interactive elements with refs
     let instruction;
-    const snapshotText = typeof this.currentSnapshot === 'string'
-      ? this.currentSnapshot
-      : '';
+    let snapshotText = '';
+    if (typeof this.currentSnapshot === 'string') {
+      snapshotText = this.currentSnapshot;
+    } else if (this.currentSnapshot && typeof this.currentSnapshot === 'object') {
+      // Fallback object from executeScript — use bodyText
+      snapshotText = this.currentSnapshot.bodyText || '';
+    }
 
     if (snapshotText) {
       // Check for lead signals in the snapshot

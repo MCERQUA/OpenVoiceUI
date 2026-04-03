@@ -343,29 +343,56 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
+      // Try content script first, fall back to programmatic injection
+      let result = null;
       try {
-        const result = await chrome.tabs.sendMessage(tabId, {
+        result = await chrome.tabs.sendMessage(tabId, {
           type: 'execute_action',
           action: msg.action,
         });
-        pushToPanel({
-          type: 'command_result',
-          ok: result ? result.ok : false,
-          detail: result ? result.detail : 'No response from content script',
-          snapshot: result ? result.snapshot : null,
-          changes: result ? result.changes : [],
-          action: msg.action.type,
-          ref: msg.action.ref || msg.action.selector,
-        });
-      } catch (e) {
-        pushToPanel({
-          type: 'command_result',
-          ok: false,
-          detail: 'Content script not available: ' + (e.message || ''),
-          action: msg.action.type,
-          ref: msg.action.ref || msg.action.selector,
-        });
+      } catch (_e) {
+        // Content script not loaded (tab was open before extension install/reload).
+        // Inject the lib files + execute the action via executeScript.
+        console.log('[JamBot BG] Content script unavailable, injecting via executeScript');
+        try {
+          // First inject the lib scripts so _JamBot is available
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['lib/semantic-tree.js', 'lib/action-executor.js'],
+          });
+          // Now execute the action
+          const injected = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: (action) => {
+              if (window._JamBot && window._JamBot.executeAction) {
+                return window._JamBot.executeAction(action);
+              }
+              return { ok: false, detail: 'JamBot libs failed to initialize' };
+            },
+            args: [msg.action],
+          });
+          result = injected?.[0]?.result;
+        } catch (e2) {
+          pushToPanel({
+            type: 'command_result',
+            ok: false,
+            detail: 'Could not execute action: ' + (e2.message || ''),
+            action: msg.action.type,
+            ref: msg.action.ref || msg.action.selector,
+          });
+          return;
+        }
       }
+
+      pushToPanel({
+        type: 'command_result',
+        ok: result ? result.ok : false,
+        detail: result ? result.detail : 'No response',
+        snapshot: result ? result.snapshot : null,
+        changes: result ? result.changes : [],
+        action: msg.action.type,
+        ref: msg.action.ref || msg.action.selector,
+      });
     })();
     return false;
   }
