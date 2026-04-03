@@ -3,7 +3,8 @@ routes/chat.py — Lightweight text completion for canvas pages.
 
 POST /api/chat  { message: "..." }  →  { response: "..." }
 
-Uses Groq (fast, free) for simple text rewriting / enhancement.
+Uses Z.AI (glm-5-turbo) for text rewriting / enhancement.
+NEVER Groq — Groq is TTS only, never for LLM.
 """
 
 import logging
@@ -24,27 +25,27 @@ def chat_complete():
     if not message:
         return jsonify({'error': 'No message provided'}), 400
 
-    api_key = os.environ.get('GROQ_API_KEY', '')
+    api_key = os.environ.get('ZAI_API_KEY', '')
     if not api_key:
-        return jsonify({'error': 'GROQ_API_KEY not configured'}), 500
+        return jsonify({'error': 'ZAI_API_KEY not configured'}), 500
 
     try:
         r = requests.post(
-            'https://api.groq.com/openai/v1/chat/completions',
+            'https://api.z.ai/api/anthropic/v1/messages',
             headers={
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json',
+                'x-api-key': api_key,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json',
             },
             json={
-                'model': 'llama-3.3-70b-versatile',
+                'model': 'glm-5-turbo',
                 'messages': [{'role': 'user', 'content': message}],
                 'max_tokens': 1024,
-                'temperature': 0.7,
             },
             timeout=30,
         )
         r.raise_for_status()
-        text = r.json()['choices'][0]['message']['content'].strip()
+        text = r.json()['content'][0]['text'].strip()
         return jsonify({'response': text})
     except Exception as exc:
         logger.exception('chat completion error')

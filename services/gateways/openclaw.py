@@ -970,6 +970,14 @@ class GatewayConnection:
                 if chat_state == 'final':
                     logger.info(f"### CHAT FINAL payload: {json.dumps(payload)[:1500]}")
 
+                    # Ignore subagent chat.final — only process main session finals.
+                    # Without this, the subagent's chat.final resets main_lifecycle_ended
+                    # and deadlocks the announce-back loop.
+                    chat_sk = payload.get('sessionKey', '')
+                    if chat_sk and is_subagent_session_key(chat_sk):
+                        logger.info(f"### Ignoring subagent chat.final (sk={chat_sk[:60]})")
+                        continue
+
                     # Detect gateway-injected stale replays from aborted runs.
                     usage = payload.get('usage', {})
                     model = payload.get('model', '')

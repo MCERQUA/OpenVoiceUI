@@ -5,8 +5,9 @@ Endpoints:
   GET    /api/plugins              — list installed plugins
   GET    /api/plugins/available    — list catalog plugins not yet installed
   GET    /api/plugins/assets       — get script/CSS URLs for installed face plugins
-  POST   /api/plugins/<id>/install — install from catalog
-  DELETE /api/plugins/<id>         — uninstall a plugin
+  POST   /api/plugins/<id>/install — install from catalog (triggers container provisioning)
+  DELETE /api/plugins/<id>         — uninstall a plugin (triggers container deprovisioning)
+  GET    /api/plugins/<id>/container — check container status for gateway plugins
 """
 
 import logging
@@ -18,6 +19,7 @@ from services.plugins import (
     get_plugin,
     install_plugin,
     uninstall_plugin,
+    get_container_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,27 +90,48 @@ def plugin_assets():
 
 @plugins_bp.route("/api/plugins/<plugin_id>/install", methods=["POST"])
 def install(plugin_id):
-    """Install a plugin from the catalog."""
+    """Install a plugin from the catalog. Handles container provisioning if needed."""
     result = install_plugin(plugin_id)
     if result is None:
         existing = get_plugin(plugin_id)
         if existing:
             return jsonify({"error": f"Plugin '{plugin_id}' is already installed"}), 409
         return jsonify({"error": f"Plugin '{plugin_id}' not found in catalog"}), 404
-    return jsonify({
+
+    # Check if install_plugin returned an error (provisioning failed)
+    if result.get("_error"):
+        return jsonify({"error": result["_error"]}), 500
+
+    response = {
         "ok": True,
         "plugin": result.get("name"),
         "status": result.get("_status"),
-        "note": "Restart the container to activate routes and face scripts"
-    }), 201
+        "note": "Restart the container to activate routes and face scripts",
+    }
+    if result.get("_container"):
+        response["container"] = result["_container"]
+        response["container_status"] = result.get("_container_status", "unknown")
+    if result.get("_warning"):
+        response["warning"] = result["_warning"]
+
+    return jsonify(response), 201
 
 
 @plugins_bp.route("/api/plugins/<plugin_id>", methods=["DELETE"])
 def uninstall(plugin_id):
-    """Uninstall a plugin."""
+    """Uninstall a plugin. Handles container deprovisioning if needed."""
     if not uninstall_plugin(plugin_id):
         return jsonify({"error": f"Plugin '{plugin_id}' not installed"}), 404
     return jsonify({
         "ok": True,
         "note": "Restart the container to fully deactivate"
     })
+
+
+@plugins_bp.route("/api/plugins/<plugin_id>/container", methods=["GET"])
+def plugin_container_status(plugin_id):
+    """Check container status for a plugin that requires infrastructure."""
+    status = get_container_status(plugin_id)
+    if status is None:
+        return jsonify({"error": "Plugin not found or doesn't use containers"}), 404
+    return jsonify(status)

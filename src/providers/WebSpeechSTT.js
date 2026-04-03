@@ -45,6 +45,7 @@ class WebSpeechSTT {
         // PTT support
         this._micMuted = false;
         this._pttHolding = false;
+        this._pttReleaseTimer = null;
 
         // Keep mic stream alive during active listening (critical on iOS —
         // releasing and re-acquiring the stream can re-trigger permission prompts)
@@ -99,6 +100,9 @@ class WebSpeechSTT {
                 // Listen panel hook
                 if (this.onListenFinal) this.onListenFinal(finalTranscript.trim());
             }
+
+            // During PTT hold, just accumulate — pttRelease() will flush
+            if (this._pttHolding) return;
 
             // Start/restart silence timer — only fires when Chrome stops sending ANY results
             if (this.accumulatedText) {
@@ -297,6 +301,7 @@ class WebSpeechSTT {
         this._pttHolding = false;
         this._micMuted = true;
         if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+        if (this._pttReleaseTimer) { clearTimeout(this._pttReleaseTimer); this._pttReleaseTimer = null; }
 
         // Check if Chrome already finalized text during the hold
         const immediate = this.accumulatedText.trim();
@@ -317,8 +322,11 @@ class WebSpeechSTT {
         // Chrome fires onresult with isFinal=true when recognition.stop() is called,
         // but the event is async. Give it time to arrive, then send.
         if (!immediate) {
-            setTimeout(() => {
+            this._pttReleaseTimer = setTimeout(() => {
+                this._pttReleaseTimer = null;
                 if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+                // Guard: if pttUnmute() already ran, don't poison isProcessing
+                if (!this._micMuted) return;
                 const text = this.accumulatedText.trim();
                 if (text && this.onResult) {
                     console.log('PTT release (delayed) — sending:', text);
@@ -356,10 +364,24 @@ class WebSpeechSTT {
         this.isProcessing = false;
         this.accumulatedText = '';
 
+        // Cancel any pending pttRelease delayed callback — it would re-set isProcessing
+        if (this._pttReleaseTimer) { clearTimeout(this._pttReleaseTimer); this._pttReleaseTimer = null; }
+        if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+
         // Restore listening state — stop()/pttRelease() may have set isListening=false
         this.isListening = true;
         if (this.recognition) {
-            try { this.recognition.start(); } catch (e) {}
+            // Defer start — a prior stop() may still be in-flight (async onend).
+            // Immediate start() throws InvalidStateError which the catch swallows,
+            // then the onend restart also fails if isProcessing got re-poisoned.
+            try { this.recognition.start(); } catch (e) {
+                // Recognition still stopping — retry after onend fires
+                setTimeout(() => {
+                    if (this.isListening && !this.isProcessing && !this._micMuted && this.recognition) {
+                        try { this.recognition.start(); } catch (e2) {}
+                    }
+                }, 350);
+            }
         }
     }
 }

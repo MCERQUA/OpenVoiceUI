@@ -682,3 +682,54 @@
 }
 
 .pe-error { color: var(--red); }
+
+/* ── STT Silence Slider ─────────────────────────────────── */
+.stt-silence-setting label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+.stt-silence-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.stt-silence-row input[type="range"] {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    background: var(--blue-dim);
+    border-radius: 2px;
+    cursor: pointer;
+}
+.stt-silence-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-full);
+    background: var(--cyan);
+    cursor: pointer;
+}
+.stt-silence-row input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-full);
+    background: var(--cyan);
+    border: none;
+    cursor: pointer;
+}
+#stt-silence-value {
+    min-width: 36px;
+    text-align: right;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--cyan);
+    font-family: var(--font-mono);
+}
+.stt-silence-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    line-height: 1.4;
+}

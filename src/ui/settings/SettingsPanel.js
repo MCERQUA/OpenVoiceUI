@@ -94,6 +94,7 @@ window.SettingsPanel = {
             case 'voice':
                 content.innerHTML = this.renderVoicePanel();
                 this.mountVoicePreview();
+                this.attachSilenceSlider();
                 break;
             case 'playlist':
                 content.innerHTML = this.renderPlaylistPanel();
@@ -135,6 +136,14 @@ window.SettingsPanel = {
                 </h3>
                 <div class="section-content">
                     <div id="voice-preview-root"><div class="tts-preview-loading">Loading voices\u2026</div></div>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h3 onclick="SettingsPanel.toggleSection(this)">
+                    <span class="section-arrow">&#9660;</span> Speech Detection
+                </h3>
+                <div class="section-content">
+                    ${this._renderSilenceSlider()}
                 </div>
             </div>
             <div class="settings-section">
@@ -231,12 +240,29 @@ window.SettingsPanel = {
     },
 
     renderVoicePanel() {
+        const currentMs = window._sttInstance?.silenceDelayMs
+            ?? window._activeProfileData?.stt?.silence_timeout_ms
+            ?? 1500;
+        const currentSec = (currentMs / 1000).toFixed(1);
         return `
             <div class="settings-section open">
                 <h3>Voice Preview</h3>
                 <div class="section-content">
                     <p class="tts-preview-hint">Click a voice to hear a sample.</p>
                     <div id="voice-preview-root"><div class="tts-preview-loading">Loading voices\u2026</div></div>
+                </div>
+            </div>
+            <div class="settings-section open">
+                <h3>Speech Detection</h3>
+                <div class="section-content">
+                    <div class="stt-silence-setting">
+                        <label for="stt-silence-slider">Silence before sending</label>
+                        <div class="stt-silence-row">
+                            <input type="range" id="stt-silence-slider" min="500" max="8000" step="250" value="${currentMs}">
+                            <span id="stt-silence-value">${currentSec}s</span>
+                        </div>
+                        <p class="stt-silence-hint">How long to wait after you stop speaking before sending to AI. Increase if you need time to think.</p>
+                    </div>
                 </div>
             </div>
         `;
@@ -330,6 +356,7 @@ window.SettingsPanel = {
     attachAllListeners() {
         this.attachThemeListeners();
         this.attachFaceListeners();
+        this.attachSilenceSlider();
         // Voice preview mounts async after render — trigger it now if the root exists
         const voiceRoot = document.getElementById('voice-preview-root');
         if (voiceRoot) {
@@ -345,6 +372,53 @@ window.SettingsPanel = {
         if (profileRoot) {
             this.mountProfileSwitcher();
         }
+    },
+
+    _renderSilenceSlider() {
+        const currentMs = window._sttInstance?.silenceDelayMs
+            ?? window._activeProfileData?.stt?.silence_timeout_ms
+            ?? 1500;
+        const currentSec = (currentMs / 1000).toFixed(1);
+        return `
+            <div class="stt-silence-setting">
+                <label for="stt-silence-slider">Silence before sending</label>
+                <div class="stt-silence-row">
+                    <input type="range" id="stt-silence-slider" min="500" max="8000" step="250" value="${currentMs}">
+                    <span id="stt-silence-value">${currentSec}s</span>
+                </div>
+                <p class="stt-silence-hint">How long to wait after you stop speaking before sending to AI. Increase if you need time to think.</p>
+            </div>
+        `;
+    },
+
+    attachSilenceSlider() {
+        const slider = document.getElementById('stt-silence-slider');
+        if (!slider) return;
+
+        let saveTimer = null;
+        slider.addEventListener('input', () => {
+            const ms = parseInt(slider.value, 10);
+            const label = document.getElementById('stt-silence-value');
+            if (label) label.textContent = (ms / 1000).toFixed(1) + 's';
+
+            // Apply immediately to the live STT instance
+            if (window._sttInstance) window._sttInstance.silenceDelayMs = ms;
+            // Also update the legacy inline STT if present
+            const legacyStt = window.ModeManager?.clawdbotMode?.stt;
+            if (legacyStt && legacyStt !== window._sttInstance) legacyStt.silenceDelayMs = ms;
+
+            // Debounce save to profile
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => {
+                const profileId = window._activeProfileData?.id || localStorage.getItem('active_profile_id') || 'default';
+                fetch('/api/profiles/' + profileId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stt: { silence_timeout_ms: ms } }),
+                }).catch(() => {});
+                console.log(`[Settings] silence_timeout_ms = ${ms}`);
+            }, 600);
+        });
     },
 
     attachThemeListeners() {

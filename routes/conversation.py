@@ -736,6 +736,17 @@ def _conversation_inner():
     identified_person = data.get('identified_person') or None
     agent_id = data.get('agent_id') or None  # e.g. 'default'; None = default 'main'
     gateway_id = data.get('gateway_id') or None  # plugin gateway id; None = 'openclaw'
+    # Fall back to active profile's adapter_config.gateway_id
+    if not gateway_id:
+        try:
+            from profiles.manager import get_profile_manager
+            import routes.profiles as _profiles_mod
+            _pm = get_profile_manager()
+            _ap = _pm.get_profile(_profiles_mod._active_profile_id)
+            if _ap and _ap.adapter_config:
+                gateway_id = _ap.adapter_config.get('gateway_id') or None
+        except Exception:
+            pass
     max_response_chars = data.get('max_response_chars') or None  # profile cap, truncates at sentence boundary
     image_path = data.get('image_path') or None  # uploaded image for vision analysis
     skip_tts = data.get('skip_tts', False)  # browser extension skips TTS during task steps
@@ -759,7 +770,8 @@ def _conversation_inner():
 
     # Input length guard (P7-T3 security audit)
     # Browser companion task loop sends page context (~5K) + prompt — allow 8K for those
-    _max_msg_len = 8000 if ui_context and ui_context.get('source') == 'jambot_extension' else 4000
+    # CSV/text file attachments can push messages over 4K — allow 15K for jambot sessions
+    _max_msg_len = 8000 if ui_context and ui_context.get('source') == 'jambot_extension' else 15000
     if len(user_message) > _max_msg_len:
         return jsonify({'error': f'Message too long (max {_max_msg_len} characters)'}), 400
 
@@ -1492,18 +1504,23 @@ def _conversation_inner():
                                 # Tell the client to wait — don't show fallback
                                 yield json.dumps({'type': 'retrying'}) + '\n'
                                 time.sleep(2)
-                                # Re-send the same message through the gateway on the same key.
-                                # Openclaw removed the orphaned message on the first attempt.
-                                # If this is session_start, also clear the session file to eliminate
-                                # any further stale state before the retry.
-                                # Note: session file clearing moved to host watchdog
-                                # (session files are inside openclaw container, not accessible from here)
+                                # Re-send the message through the gateway.
+                                # If the first empty was suspiciously fast (< 500ms), the session
+                                # is likely dead (openclaw restarted, no state). Use a fresh
+                                # session key so the retry doesn't hit the same dead session.
+                                _retry_key = _session_key
+                                if metrics.get('llm_inference_ms', 9999) < 500:
+                                    _retry_key = f"recovery-{int(time.time())}"
+                                    logger.warning(
+                                        f"### Fast empty ({metrics['llm_inference_ms']}ms) — "
+                                        f"session likely dead, retrying on key '{_retry_key}'"
+                                    )
                                 retry_queue = queue.Queue()
                                 captured_actions.clear()
                                 def _retry_gateway():
                                     gateway_manager.stream_to_queue(
                                         retry_queue, message_with_context,
-                                        _session_key, captured_actions,
+                                        _retry_key, captured_actions,
                                         gateway_id=gateway_id,
                                         agent_id=agent_id,
                                     )
@@ -1543,40 +1560,14 @@ def _conversation_inner():
                                 except Exception as _rfe:
                                     logger.error(f'### Failed to write restart flag: {_rfe}')
 
-                                # 4. Try Groq fallback for THIS message (available on all clients)
-                                #    Falls back to Z.AI direct if Groq unavailable.
+                                # 4. Z.AI direct fallback for this message (NEVER Groq — Groq is TTS only)
                                 try:
                                     import requests as _req
-                                    _groq_key = os.environ.get('GROQ_API_KEY', '')
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
-                                    # Strip context to just the user message for fallback
-                                    _fallback_msg = user_message if user_message else message_with_context
-                                    if _groq_key:
-                                        _groq_resp = _req.post(
-                                            'https://api.groq.com/openai/v1/chat/completions',
-                                            headers={
-                                                'Authorization': f'Bearer {_groq_key}',
-                                                'Content-Type': 'application/json',
-                                            },
-                                            json={
-                                                'model': 'llama-3.3-70b-versatile',
-                                                'max_tokens': 1500,
-                                                'messages': [
-                                                    {'role': 'system', 'content': 'You are a helpful AI assistant. Respond conversationally and concisely.'},
-                                                    {'role': 'user', 'content': _fallback_msg},
-                                                ],
-                                            },
-                                            timeout=15,
-                                        )
-                                        if _groq_resp.status_code == 200:
-                                            _groq_data = _groq_resp.json()
-                                            _groq_text = _groq_data.get('choices', [{}])[0].get('message', {}).get('content', '')
-                                            if _groq_text:
-                                                full_response = _groq_text
-                                                metrics['fallback_used'] = 1
-                                                metrics['profile'] = 'groq-fallback'
-                                                logger.info(f'### Groq fallback succeeded: {len(_groq_text)} chars')
-                                    elif _zai_key:
+                                    # Use full context so the fallback LLM has agent personality
+                                    _fallback_msg = message_with_context if message_with_context else user_message
+                                    _fallback_system = _load_voice_system_prompt()
+                                    if _zai_key:
                                         _zai_resp = _req.post(
                                             'https://api.z.ai/api/anthropic/v1/messages',
                                             headers={
@@ -1587,6 +1578,7 @@ def _conversation_inner():
                                             json={
                                                 'model': 'glm-5-turbo',
                                                 'max_tokens': 1500,
+                                                'system': _fallback_system,
                                                 'messages': [{'role': 'user', 'content': _fallback_msg}],
                                             },
                                             timeout=30,
