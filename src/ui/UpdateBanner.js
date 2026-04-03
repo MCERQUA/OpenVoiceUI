@@ -257,6 +257,11 @@ docker compose up -d</code></pre>
  * Initialize update checker. Call once on app startup.
  */
 export function initUpdateChecker() {
+    // Multi-tenant deployments manage updates by rebuilding the Docker image.
+    // In-container git pull overwrites custom code with the public repo version,
+    // silently breaking features. Disable entirely for managed containers.
+    if (window.AGENT_CONFIG?.managedUpdates) return;
+
     setTimeout(checkForUpdate, 3000);
     setInterval(() => {
         if (!_dismissed && !_updating) checkForUpdate();

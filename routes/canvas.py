@@ -798,7 +798,8 @@ def canvas_pages_proxy(path):
                         "https://api.openai.com https://generativelanguage.googleapis.com "
                         "https://api.x.ai https://api.groq.com "
                         "https://api.together.xyz https://openrouter.ai "
-                        "https://api.anthropic.com https://api.cohere.ai; "
+                        "https://api.anthropic.com https://api.cohere.ai "
+                        "https://api.dataforseo.com https://sandbox.dataforseo.com; "
                     "worker-src blob:; "
                     "frame-src 'self' https://*.jam-bot.com https://*.netlify.app"
                 )

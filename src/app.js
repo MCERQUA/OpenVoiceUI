@@ -6546,7 +6546,7 @@ initUpdateChecker();
                             break;
                         case 'request-auth-token':
                             // Canvas page requesting a fresh Clerk JWT for API calls
-                            Auth._pushAuthTokenToCanvas();
+                            AuthModule._pushAuthTokenToCanvas();
                             break;
                         case 'menu':
                             CanvasControl.showMenu();

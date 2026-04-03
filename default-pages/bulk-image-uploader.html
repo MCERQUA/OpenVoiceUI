@@ -349,14 +349,34 @@ function urlImport(){
   .catch(e=>setQI(id,0,'err',e.message));
 }
 
-function handle(fl){Array.from(fl).forEach(f=>{const id=++qid;addQI(id,f.name,f.size,cat(ext(f.name)),f);upload(f,id)})}
+// ── Concurrency-limited upload queue (max 3 simultaneous) ──
+const MAX_CONCURRENT=3;
+let activeUploads=0;
+const pendingQueue=[];
+
+function handle(fl){Array.from(fl).forEach(f=>{const id=++qid;addQI(id,f.name,f.size,cat(ext(f.name)),f);enqueue(f,id)})}
+
+function enqueue(file,id,retries){
+  pendingQueue.push({file,id,retries:retries||0});
+  drainQueue();
+}
+
+function drainQueue(){
+  while(activeUploads<MAX_CONCURRENT&&pendingQueue.length>0){
+    const job=pendingQueue.shift();
+    activeUploads++;
+    upload(job.file,job.id,job.retries);
+  }
+}
 
 // ── Upload ──
-function upload(file,id){
+function upload(file,id,retries){
+  retries=retries||0;
   const xhr=new XMLHttpRequest();ups.push({id,xhr});
   xhr.upload.onprogress=e=>{if(e.lengthComputable)setQI(id,Math.round(e.loaded/e.total*100),'up')};
   xhr.onload=()=>{
     ups=ups.filter(u=>u.id!==id);
+    activeUploads--;
     if(xhr.status>=200&&xhr.status<300){
       try{
         const r=JSON.parse(xhr.responseText);
@@ -365,12 +385,27 @@ function upload(file,id){
         files.unshift({name:r.original_name||file.name,url:r.url,size:file.size,ext:e,cat:cat(e),modified:Date.now()/1000});
         render();updateStor();
       }catch(e){setQI(id,0,'err','Parse error')}
+    }else if(retries<2){
+      setQI(id,-1,'up');
+      setTimeout(()=>{enqueue(file,id,retries+1)},1000*(retries+1));
+      return;
     }else{
       let m='Error '+xhr.status;try{m=JSON.parse(xhr.responseText).error||m}catch(e){}
       setQI(id,0,'err',m);
     }
+    drainQueue();
   };
-  xhr.onerror=()=>{setQI(id,0,'err','Network error');ups=ups.filter(u=>u.id!==id)};
+  xhr.onerror=()=>{
+    ups=ups.filter(u=>u.id!==id);
+    activeUploads--;
+    if(retries<2){
+      setQI(id,-1,'up');
+      setTimeout(()=>{enqueue(file,id,retries+1)},1000*(retries+1));
+    }else{
+      setQI(id,0,'err','Network error');
+    }
+    drainQueue();
+  };
   const fd=new FormData();fd.append('file',file);xhr.open('POST','/api/upload');
   if(window._canvasAuthToken)xhr.setRequestHeader('Authorization','Bearer '+window._canvasAuthToken);
   xhr.send(fd);

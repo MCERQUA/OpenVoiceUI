@@ -407,6 +407,7 @@ def serve_index():
         config_parts.append(f'devsiteMap:{_json.dumps(devsite_map)}')
     if client_name:
         config_parts.append(f'clientName:{_json.dumps(client_name)}')
+        config_parts.append('managedUpdates:true')
     config_block = f'<script>window.AGENT_CONFIG={{{",".join(config_parts)}}};</script>'
     html = html.replace("<head>", f"<head>\n  {config_block}", 1)
     # Replace PWA title and apple-mobile-web-app-title with client name
