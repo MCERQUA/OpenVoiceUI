@@ -915,6 +915,18 @@ class JamBotPanel {
         const textWithoutStartTask = streamText.replace(/\[START_TASK:[^\]]*\]/gi, '').trim();
         const reallyHadCommands = hadCommands && textWithoutStartTask.length > 0;
 
+        // Auto-activate task when agent emits action commands without explicit [START_TASK:]
+        // The agent clearly intends to keep working — don't make the user follow up
+        if (!this._taskActive && reallyHadCommands) {
+          const cmds = JamBotCommandParser.parseCommands(streamText);
+          const hasActionCmd = cmds.some(c =>
+            ['click', 'fill', 'scroll', 'read_page', 'navigate', 'select', 'open_tab'].includes(c.type)
+          );
+          if (hasActionCmd) {
+            this._activateTask(this._lastUserMessage || 'Browser action');
+          }
+        }
+
         if (this._taskActive && !this._taskStopped) {
           if (reallyHadCommands) {
             this._taskNoCommandCount = 0;
