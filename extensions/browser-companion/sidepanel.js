@@ -344,6 +344,18 @@ class JamBotPanel {
             }
           }
         }
+        // READ_PAGE result: store the full text and auto-feed it back to the agent
+        if (msg.action === 'read_page' && msg.ok && msg.text) {
+          this._lastReadPageText = msg.text;
+          console.log('[JamBot] read_page captured ' + msg.text.length + ' chars, auto-feeding to agent');
+          // If task is active, the loop will pick it up. If not, send it now.
+          if (!this._taskActive) {
+            this.sendMessage(
+              '[Page content read (' + msg.text.length + ' chars)]\n\n' +
+              msg.text.slice(0, 12000)
+            );
+          }
+        }
       }
 
       // Legacy batch command results
@@ -692,7 +704,7 @@ class JamBotPanel {
             ['script', 'style', 'noscript', 'nav', 'footer', 'aside', 'iframe']
               .forEach(t => clone.querySelectorAll(t).forEach(el => el.remove()));
             const bodyText = (clone.innerText || '')
-              .replace(/\s{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim().slice(0, 5000);
+              .replace(/\s{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim().slice(0, 15000);
 
             // Build basic interactive element list
             const interactive = [];
@@ -1008,7 +1020,7 @@ class JamBotPanel {
         // New semantic tree format -- single compact string with @e refs
         ctx.page_snapshot = this.currentSnapshot;
       } else if (typeof this.currentSnapshot === 'object') {
-        // Legacy fallback format -- send bodyText + interactive if present
+        // Fallback format -- send bodyText + interactive
         if (this.currentSnapshot.bodyText) ctx.page_text = this.currentSnapshot.bodyText;
         if (this.currentSnapshot.selectedText) ctx.selected_text = this.currentSnapshot.selectedText;
         if (this.currentSnapshot.description) ctx.description = this.currentSnapshot.description;
@@ -1018,6 +1030,12 @@ class JamBotPanel {
       }
     } else if (this._lastKnownUrl) {
       ctx.page_url = this._lastKnownUrl;
+    }
+
+    // Include full page text from last read_page if available
+    if (this._lastReadPageText) {
+      ctx.page_text = this._lastReadPageText;
+      this._lastReadPageText = null;  // consume once
     }
 
     if (this.recordingEnabled && this.localActionHistory.length > 0) {

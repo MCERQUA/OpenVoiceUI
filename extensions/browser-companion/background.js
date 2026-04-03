@@ -450,6 +450,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         detail: result ? result.detail : 'No response',
         snapshot: result ? result.snapshot : null,
         changes: result ? result.changes : [],
+        text: result ? result.text : null,
         action: msg.action.type,
         ref: msg.action.ref || msg.action.selector,
       });
