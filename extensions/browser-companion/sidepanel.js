@@ -632,6 +632,80 @@ class JamBotPanel {
     this.setMicState(this.stt.isListening ? 'listening' : 'idle');
   }
 
+  // -- Direct Snapshot Fetch ----------------------------------------------------
+  // Fetches a fresh page snapshot synchronously by injecting executeScript into
+  // the active tab. This is critical: the port-based push (request_page_snapshot)
+  // is async and may not arrive in time. This method AWAITS the result.
+
+  async _fetchSnapshotNow() {
+    try {
+      const { tabId } = await chrome.runtime.sendMessage({ type: 'get_active_tab_id' });
+      if (!tabId) {
+        console.warn('[JamBot] No tracked web tab -- cannot fetch snapshot');
+        return;
+      }
+
+      // Try content script first (has semantic tree)
+      try {
+        const response = await chrome.tabs.sendMessage(tabId, { type: 'get_snapshot' });
+        if (response && response.snapshot) {
+          this.currentSnapshot = response.snapshot;
+          if (response.structured) {
+            this.currentUrl = response.structured.url || this.currentUrl;
+            this.currentTitle = response.structured.title || this.currentTitle;
+          }
+          this.updateContextPill(false, true);
+          return;
+        }
+      } catch (_) {
+        // Content script not available -- fall through to executeScript
+      }
+
+      // Fallback: minimal executeScript (works on any tab)
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          try {
+            const clone = document.body.cloneNode(true);
+            ['script', 'style', 'noscript', 'nav', 'footer', 'aside', 'iframe']
+              .forEach(t => clone.querySelectorAll(t).forEach(el => el.remove()));
+            const bodyText = (clone.innerText || '')
+              .replace(/\s{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim().slice(0, 5000);
+
+            // Build basic interactive element list
+            const interactive = [];
+            const btns = Array.from(document.querySelectorAll('button,[role="button"]'))
+              .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+              .slice(0, 20);
+            for (const el of btns) {
+              const text = (el.getAttribute('aria-label') || el.textContent?.trim() || '').slice(0, 50);
+              if (text && text.length > 1) interactive.push({ t: 'button', text });
+            }
+
+            return {
+              url: window.location.href,
+              title: document.title || '',
+              bodyText,
+              interactive,
+            };
+          } catch (e) {
+            return { url: window.location.href, title: document.title || '' };
+          }
+        },
+      });
+
+      const ctx = results?.[0]?.result;
+      if (ctx) {
+        this.currentSnapshot = ctx;
+        this.currentUrl = ctx.url || this.currentUrl;
+        this.currentTitle = ctx.title || this.currentTitle;
+        this.updateContextPill(false, true);
+      }
+    } catch (e) {
+      console.warn('[JamBot] Could not fetch snapshot:', e.message);
+    }
+  }
+
   // -- Conversation -------------------------------------------------------------
 
   sendTextMessage() {
@@ -653,6 +727,9 @@ class JamBotPanel {
       this.abortController.abort();
     }
     this.abortController = new AbortController();
+
+    // Always fetch fresh page context before sending -- critical for tab switches
+    await this._fetchSnapshotNow();
 
     this.addMessage('user', text);
     // Track last user message for auto-task labeling (skip internal step/reminder messages)
@@ -1025,11 +1102,8 @@ class JamBotPanel {
     this._taskStep++;
     this._updateTaskBar();
 
-    // Request a fresh snapshot from background
-    chrome.runtime.sendMessage({ type: 'request_page_snapshot' }).catch(() => {});
-
-    // Small delay to let the snapshot arrive via the port
-    await new Promise(r => setTimeout(r, 300));
+    // Fetch fresh snapshot directly (awaited, not fire-and-forget)
+    await this._fetchSnapshotNow();
 
     // Collect snapshot for canvas creation
     if (this.currentSnapshot && this._taskPageSnapshots) {
@@ -1103,9 +1177,8 @@ class JamBotPanel {
     setTimeout(async () => {
       if (!this._taskActive || this._taskStopped) return;
 
-      // Request fresh snapshot
-      chrome.runtime.sendMessage({ type: 'request_page_snapshot' }).catch(() => {});
-      await new Promise(r => setTimeout(r, 500));
+      // Fetch fresh snapshot directly (awaited)
+      await this._fetchSnapshotNow();
 
       if (this.currentSnapshot && this._taskPageSnapshots) {
         const snapText = typeof this.currentSnapshot === 'string'
@@ -1127,8 +1200,7 @@ class JamBotPanel {
     this._showTaskBar(this._lastUserMessage || 'Scrolling...', 10);
 
     // Capture initial page state
-    chrome.runtime.sendMessage({ type: 'request_page_snapshot' }).catch(() => {});
-    await new Promise(r => setTimeout(r, 500));
+    await this._fetchSnapshotNow();
     if (this.currentSnapshot) {
       const snapText = typeof this.currentSnapshot === 'string'
         ? this.currentSnapshot
@@ -1150,8 +1222,7 @@ class JamBotPanel {
       await new Promise(r => setTimeout(r, 2000));
 
       // Read and save snapshot
-      chrome.runtime.sendMessage({ type: 'request_page_snapshot' }).catch(() => {});
-      await new Promise(r => setTimeout(r, 500));
+      await this._fetchSnapshotNow();
       if (this.currentSnapshot) {
         const snapText = typeof this.currentSnapshot === 'string'
           ? this.currentSnapshot
