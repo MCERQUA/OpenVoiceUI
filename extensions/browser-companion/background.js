@@ -351,23 +351,83 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           action: msg.action,
         });
       } catch (_e) {
-        // Content script not loaded (tab was open before extension install/reload).
-        // Inject the lib files + execute the action via executeScript.
-        console.log('[JamBot BG] Content script unavailable, injecting via executeScript');
+        // Content script not loaded. Execute action directly via inline executeScript.
+        // This handles click, fill, scroll, read_page without needing lib files.
+        console.log('[JamBot BG] Content script unavailable, executing inline for:', msg.action.type);
         try {
-          // First inject the lib scripts so _JamBot is available
-          await chrome.scripting.executeScript({
-            target: { tabId },
-            files: ['lib/semantic-tree.js', 'lib/action-executor.js'],
-          });
-          // Now execute the action
           const injected = await chrome.scripting.executeScript({
             target: { tabId },
             func: (action) => {
-              if (window._JamBot && window._JamBot.executeAction) {
-                return window._JamBot.executeAction(action);
+              try {
+                const $ = (sel) => { try { return document.querySelector(sel); } catch { return null; } };
+
+                // Resolve target: @e refs won't work without semantic tree, use CSS selectors
+                const target = action.ref || action.selector || action.target;
+
+                if (action.type === 'click') {
+                  const el = $(target);
+                  if (!el) return { ok: false, detail: 'Element not found: ' + target };
+                  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  const rect = el.getBoundingClientRect();
+                  const opts = { bubbles: true, cancelable: true, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, view: window };
+                  setTimeout(() => {
+                    el.dispatchEvent(new MouseEvent('mousedown', opts));
+                    el.dispatchEvent(new MouseEvent('mouseup', opts));
+                    el.dispatchEvent(new MouseEvent('click', opts));
+                  }, 300);
+                  const label = (el.getAttribute('aria-label') || el.textContent?.trim() || '').slice(0, 40);
+                  return { ok: true, detail: 'Clicked "' + label + '"' };
+                }
+
+                if (action.type === 'fill') {
+                  const el = $(target);
+                  if (!el) return { ok: false, detail: 'Element not found: ' + target };
+                  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+                    || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                  if (setter) setter.call(el, action.value); else el.value = action.value;
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                  el.focus();
+                  return { ok: true, detail: 'Filled with "' + (action.value || '').slice(0, 50) + '"' };
+                }
+
+                if (action.type === 'scroll') {
+                  const sc = document.scrollingElement || document.documentElement;
+                  const before = sc.scrollTop;
+                  if (target === 'top') { sc.scrollTop = 0; }
+                  else if (target === 'bottom') { sc.scrollTop = sc.scrollHeight; }
+                  else if (/^[+-]\d+$/.test(target)) { sc.scrollTop += parseInt(target, 10); }
+                  else { const el = $(target); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+                  const atBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 10;
+                  return { ok: true, detail: atBottom ? 'Scrolled -- at bottom' : 'Scrolled ' + (sc.scrollTop - before) + 'px', atBottom };
+                }
+
+                if (action.type === 'read_page') {
+                  const clone = document.body.cloneNode(true);
+                  ['script','style','noscript','svg','iframe'].forEach(t => clone.querySelectorAll(t).forEach(el => el.remove()));
+                  const text = (clone.innerText || '').replace(/\s{3,}/g, '\n\n').trim().slice(0, 15000);
+                  return { ok: true, detail: 'Read ' + text.length + ' chars', text };
+                }
+
+                if (action.type === 'select') {
+                  const el = $(target);
+                  if (!el) return { ok: false, detail: 'Element not found: ' + target };
+                  const opts = Array.from(el.options || []);
+                  const match = opts.find(o => o.value === action.value || o.textContent.trim().toLowerCase() === (action.value||'').toLowerCase());
+                  if (match) { el.value = match.value; el.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true, detail: 'Selected "' + match.textContent.trim() + '"' }; }
+                  return { ok: false, detail: 'Option not found: ' + action.value };
+                }
+
+                if (action.type === 'highlight') {
+                  const els = target === '*' ? [document.body] : Array.from(document.querySelectorAll(target)).slice(0, 10);
+                  els.forEach(el => { el.style.outline = '3px solid #00d2ff'; el.style.outlineOffset = '2px'; });
+                  return { ok: true, detail: 'Highlighted ' + els.length + ' element(s)' };
+                }
+
+                return { ok: false, detail: 'Unsupported action type: ' + action.type };
+              } catch (e) {
+                return { ok: false, detail: 'Inline action failed: ' + e.message };
               }
-              return { ok: false, detail: 'JamBot libs failed to initialize' };
             },
             args: [msg.action],
           });
