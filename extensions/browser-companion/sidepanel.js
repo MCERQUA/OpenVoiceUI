@@ -650,6 +650,9 @@ class JamBotPanel {
   // is async and may not arrive in time. This method AWAITS the result.
 
   async _fetchSnapshotNow() {
+    // Direct executeScript into the active tab — always works, no content script needed.
+    // Returns raw bodyText (15000 chars) + interactive elements with CSS selectors.
+    // This is the v1 approach that agents actually understand.
     try {
       const { tabId } = await chrome.runtime.sendMessage({ type: 'get_active_tab_id' });
       if (!tabId) {
@@ -657,82 +660,104 @@ class JamBotPanel {
         return;
       }
 
-      // Try content script first (has semantic tree)
-      try {
-        const response = await chrome.tabs.sendMessage(tabId, { type: 'get_snapshot' });
-        if (response && response.snapshot) {
-          this.currentSnapshot = response.snapshot;
-          if (response.structured) {
-            this.currentUrl = response.structured.url || this.currentUrl;
-            this.currentTitle = response.structured.title || this.currentTitle;
-          }
-          this.updateContextPill(false, true);
-          return;
-        }
-      } catch (_) {
-        // Content script not available -- fall through to executeScript
-      }
-
-      // Fallback: inject content scripts then use executeScript
-      // This also makes subsequent execute_action calls work via messaging
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['lib/semantic-tree.js', 'lib/action-executor.js', 'content.js'],
-        });
-        // Try semantic snapshot again now that scripts are injected
-        const retryResponse = await chrome.tabs.sendMessage(tabId, { type: 'get_snapshot' });
-        if (retryResponse && retryResponse.snapshot) {
-          this.currentSnapshot = retryResponse.snapshot;
-          if (retryResponse.structured) {
-            this.currentUrl = retryResponse.structured.url || this.currentUrl;
-            this.currentTitle = retryResponse.structured.title || this.currentTitle;
-          }
-          this.updateContextPill(false, true);
-          return;
-        }
-      } catch (_) {
-        // Injection failed (restricted page) -- fall through to basic executeScript
-      }
-
-      // Last resort: basic executeScript without lib injection
       const results = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
           try {
             const clone = document.body.cloneNode(true);
-            ['script', 'style', 'noscript', 'nav', 'footer', 'aside', 'iframe']
+            ['script', 'style', 'noscript', 'iframe']
               .forEach(t => clone.querySelectorAll(t).forEach(el => el.remove()));
-            const bodyText = (clone.innerText || '')
-              .replace(/\s{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim().slice(0, 15000);
+            const bodyText = (clone.innerText || clone.textContent || '')
+              .replace(/\s{3,}/g, '\n\n')
+              .replace(/[ \t]{2,}/g, ' ')
+              .trim()
+              .slice(0, 15000);
 
-            // Build basic interactive element list
+            // Interactive elements with CSS selectors the agent can target
             const interactive = [];
-            const btns = Array.from(document.querySelectorAll('button,[role="button"]'))
-              .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
-              .slice(0, 20);
-            for (const el of btns) {
-              const text = (el.getAttribute('aria-label') || el.textContent?.trim() || '').slice(0, 50);
-              if (text && text.length > 1) interactive.push({ t: 'button', text });
+            const seen = new Set();
+            function buildSel(el) {
+              if (el.id) return '#' + el.id;
+              const aria = el.getAttribute('aria-label');
+              if (aria) return '[aria-label="' + aria.slice(0, 60).replace(/"/g, "'") + '"]';
+              const testId = el.getAttribute('data-testid');
+              if (testId) return '[data-testid="' + testId + '"]';
+              const ph = el.placeholder || el.getAttribute('aria-placeholder');
+              if (ph) return '[placeholder="' + ph.slice(0, 40).replace(/"/g, "'") + '"]';
+              const name = el.getAttribute('name');
+              if (name) return el.tagName.toLowerCase() + '[name="' + name + '"]';
+              return el.tagName.toLowerCase();
+            }
+
+            // Inputs + contenteditable
+            const inputEls = [
+              ...document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"])'),
+              ...document.querySelectorAll('textarea'),
+              ...document.querySelectorAll('[contenteditable="true"]'),
+            ];
+            for (const el of inputEls) {
+              const r = el.getBoundingClientRect();
+              if (r.width === 0 && r.height === 0) continue;
+              const sel = buildSel(el);
+              if (seen.has(sel)) continue;
+              seen.add(sel);
+              const hint = (el.placeholder || el.getAttribute('aria-label') || el.name || '').slice(0, 50);
+              const isEditable = el.contentEditable === 'true';
+              interactive.push({
+                t: isEditable ? 'textarea' : (el.tagName === 'TEXTAREA' ? 'textarea' : 'input[' + (el.type || 'text') + ']'),
+                sel, hint,
+              });
+            }
+
+            // Buttons
+            const allBtns = Array.from(document.querySelectorAll('button,[role="button"],div[role="button"]'))
+              .filter(el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0 && r.top < window.innerHeight * 2;
+              }).slice(0, 30);
+            for (const el of allBtns) {
+              const text = (el.textContent?.trim() || el.getAttribute('aria-label') || '').slice(0, 50);
+              if (!text) continue;
+              const sel = buildSel(el);
+              if (seen.has(sel)) continue;
+              seen.add(sel);
+              interactive.push({ t: 'button', text, sel });
+            }
+
+            // Links
+            const linkEls = Array.from(document.querySelectorAll('a[href]'))
+              .filter(el => {
+                const r = el.getBoundingClientRect();
+                const text = el.textContent?.trim();
+                return r.width > 0 && r.height > 0 && r.top < window.innerHeight * 2 && text && text.length > 2 && text.length < 60;
+              }).slice(0, 10);
+            for (const el of linkEls) {
+              const text = el.textContent?.trim().slice(0, 40);
+              if (!text) continue;
+              interactive.push({ t: 'link', text, href: el.href?.replace(window.location.origin, '') || '' });
             }
 
             return {
               url: window.location.href,
               title: document.title || '',
+              description: document.querySelector('meta[name="description"]')?.content
+                || document.querySelector('meta[property="og:description"]')?.content || '',
               bodyText,
+              selectedText: window.getSelection()?.toString()?.trim() || '',
               interactive,
             };
           } catch (e) {
-            return { url: window.location.href, title: document.title || '' };
+            return { url: window.location.href, title: document.title || '', error: e.message };
           }
         },
       });
 
       const ctx = results?.[0]?.result;
-      if (ctx) {
+      if (ctx?.url) {
         this.currentSnapshot = ctx;
-        this.currentUrl = ctx.url || this.currentUrl;
+        this.currentUrl = ctx.url;
         this.currentTitle = ctx.title || this.currentTitle;
+        this._lastKnownUrl = ctx.url;
         this.updateContextPill(false, true);
       }
     } catch (e) {
