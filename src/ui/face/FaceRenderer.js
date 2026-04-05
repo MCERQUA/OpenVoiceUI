@@ -125,7 +125,7 @@ window.FaceRenderer = {
 
         // Persist to server profile (unless explicitly skipped, e.g. when called from applyProfile)
         if (!options?.skipPersist) {
-            const profileId = window.providerManager?._activeProfileId || 'default';
+            const profileId = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
             const update = { ui: { face_mode: modeName } };
             if (config) update.ui.face_config = config;
             fetch('/api/profiles/' + profileId, {

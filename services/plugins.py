@@ -346,6 +346,25 @@ def install_plugin(plugin_id: str) -> Optional[dict]:
     if hook_result.get("warning"):
         manifest["_warning"] = hook_result["warning"]
 
+    # Deploy lore/knowledge files at install time (same logic as load_plugins)
+    lore = manifest.get("lore", {})
+    if lore:
+        workspace_dir = Path("/app/runtime/workspace/Agent")
+        if workspace_dir.is_dir():
+            lore_dest = workspace_dir / plugin_id
+            lore_count = 0
+            for section_key in ("transcripts", "characters", "memories", "files"):
+                for file_rel in lore.get(section_key, []):
+                    src = dest / file_rel
+                    rel_from_lore = file_rel[5:] if file_rel.startswith("lore/") else file_rel
+                    dst = lore_dest / rel_from_lore
+                    if src.is_file() and not dst.exists():
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(src), str(dst))
+                        lore_count += 1
+            if lore_count > 0:
+                logger.info(f"Deployed {lore_count} lore files to workspace/{plugin_id}/")
+
     _registry[plugin_id] = manifest
     return manifest
 
@@ -468,6 +487,57 @@ def load_plugins(app):
                     if src.is_file() and not dst.exists():
                         shutil.copy2(str(src), str(dst))
                         logger.info(f"[Plugin:{plugin_id}] Copied profile: {Path(profile_rel).name}")
+
+            # ── Deploy lore/knowledge files to openclaw workspace ──
+            # Plugins can ship agent knowledge (transcripts, character profiles,
+            # memories, world-building) that gets copied into the openclaw workspace
+            # so agents can read them. Deployed to workspace/<plugin_id>/ to avoid
+            # collisions between plugins. Uses cp -n semantics (no overwrite).
+            #
+            # The workspace mount may be read-only from OVU's perspective, so we
+            # try multiple paths: writable runtime dir first, then read-only mount.
+            # For JamBot: /app/runtime/workspace/Agent is :ro but the plugin dir
+            # itself at /app/plugins/<id>/lore/ is always readable by the agent
+            # via the shared skills mount or direct workspace symlink.
+            lore = manifest.get("lore", {})
+            if lore:
+                # Try writable workspace paths in order of preference
+                workspace_candidates = [
+                    Path("/app/runtime/workspace/Agent"),  # Direct workspace mount
+                    Path("/app/runtime/openclaw-workspace"),  # Alt writable mount
+                ]
+                workspace_dir = None
+                for candidate in workspace_candidates:
+                    if candidate.is_dir():
+                        # Test if writable
+                        test_file = candidate / ".plugin-write-test"
+                        try:
+                            test_file.touch()
+                            test_file.unlink()
+                            workspace_dir = candidate
+                            break
+                        except (OSError, PermissionError):
+                            continue
+
+                if workspace_dir:
+                    lore_dest = workspace_dir / plugin_id
+                    lore_count = 0
+                    for section_key in ("transcripts", "characters", "memories", "files"):
+                        for file_rel in lore.get(section_key, []):
+                            src = plugin_dir / file_rel
+                            rel_from_lore = file_rel[5:] if file_rel.startswith("lore/") else file_rel
+                            dst = lore_dest / rel_from_lore
+                            if src.is_file() and not dst.exists():
+                                dst.parent.mkdir(parents=True, exist_ok=True)
+                                try:
+                                    shutil.copy2(str(src), str(dst))
+                                    lore_count += 1
+                                except (OSError, PermissionError) as e:
+                                    logger.warning(f"[Plugin:{plugin_id}] Cannot copy lore file {file_rel}: {e}")
+                    if lore_count > 0:
+                        logger.info(f"[Plugin:{plugin_id}] Deployed {lore_count} lore files to {lore_dest}")
+                else:
+                    logger.info(f"[Plugin:{plugin_id}] Lore available at /app/plugins/{plugin_id}/lore/ (workspace not writable)")
 
             _registry[plugin_id] = manifest
             count += 1

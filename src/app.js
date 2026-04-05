@@ -231,7 +231,8 @@ initUpdateChecker();
 
             _saveVoiceToProfile() {
                 // Persist to server profile so all devices see the same settings
-                fetch(CONFIG.serverUrl + '/api/profiles/' + this._activeProfileId, {
+                const pid = window._activeProfileData?.id || this._activeProfileId;
+                fetch(CONFIG.serverUrl + '/api/profiles/' + pid, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ voice: { tts_provider: this.selectedProvider, voice_id: this.currentVoice } })
@@ -2146,7 +2147,7 @@ initUpdateChecker();
                 this.enabled = enabled;
                 localStorage.setItem('visualizerEnabled', enabled);
                 // Persist to server profile
-                const pid = window.providerManager?._activeProfileId || 'default';
+                const pid = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
                 fetch('/api/profiles/' + pid, {
                     method: 'PUT', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ ui: { visualizer_enabled: enabled } })
@@ -2159,7 +2160,7 @@ initUpdateChecker();
                 this.autoplayEnabled = enabled;
                 localStorage.setItem('musicAutoplay', enabled);
                 // Persist to server profile
-                const pid = window.providerManager?._activeProfileId || 'default';
+                const pid = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
                 fetch('/api/profiles/' + pid, {
                     method: 'PUT', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ ui: { music_autoplay: enabled } })
@@ -4860,7 +4861,7 @@ initUpdateChecker();
 
                 // Save to localStorage + server profile
                 localStorage.setItem('voice_mode', mode);
-                const pid = window.providerManager?._activeProfileId || 'default';
+                const pid = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
                 fetch('/api/profiles/' + pid, {
                     method: 'PUT', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ ui: { voice_mode: mode } })
@@ -8987,6 +8988,14 @@ initUpdateChecker();
 
         window.applyProfile = function(profile) {
             window._activeProfileData = profile;
+
+            // CRITICAL: Sync the active profile ID so all save operations
+            // (face, TTS, voice mode) write to the CORRECT profile.
+            // Without this, switching profiles leaves _activeProfileId stale
+            // and settings changes leak into the previous profile.
+            if (profile?.id && window.providerManager) {
+                window.providerManager._activeProfileId = profile.id;
+            }
 
             // 1. STT silence timeout — applied immediately if STT is live, else deferred to poll
             const stt = window._sttInstance;

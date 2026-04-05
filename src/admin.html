@@ -426,7 +426,11 @@ select{cursor:pointer}
   <div class="panel" id="panel-plugins">
     <div class="panel-inner">
       <div class="ph"><div class="ph-title">Plugins</div><div class="ph-sub">Manage installed plugins &mdash; face packs, gateways, and extensions</div></div>
-      <div class="ph-row"><button class="btn btn-o" onclick="Plugins.load()">&#8634; Refresh</button></div>
+      <div class="ph-row" style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-o" onclick="Plugins.load()">&#8634; Refresh</button>
+        <button class="btn btn-d" onclick="Plugins.restart()" id="plugins-restart-btn" style="display:none">Restart App</button>
+        <span id="plugins-restart-msg" style="font-size:12px;color:var(--dim);display:none"></span>
+      </div>
       <div class="g2" style="gap:16px">
         <div class="box"><div class="box-title">Installed</div><div class="box-body" id="plugins-installed"><div class="loading"><div class="spin"></div>Loading...</div></div></div>
         <div class="box"><div class="box-title">Available</div><div class="box-body" id="plugins-available"><div class="loading"><div class="spin"></div>Loading...</div></div></div>
@@ -1127,27 +1131,33 @@ const Builder = {
 
 // Plugins
 const Plugins={
+  _hasPending:false,
   async load(){
     const [ir,ar]=await Promise.all([fetch('/api/plugins').catch(()=>null),fetch('/api/plugins/available').catch(()=>null)]);
     // Installed
     const installed=ir?await ir.json():{plugins:[]};
     const iel=$('plugins-installed');
+    this._hasPending=installed.plugins?.some(p=>p.status==='installed_pending_restart');
+    // Show/hide restart button based on pending plugins
+    const rbtn=$('plugins-restart-btn');
+    if(rbtn)rbtn.style.display=this._hasPending?'':'none';
     if(!installed.plugins?.length){iel.innerHTML='<div class="empty" style="padding:16px;font-size:13px;color:var(--dim)">No plugins installed</div>'}
-    else{iel.innerHTML=installed.plugins.map(p=>
-      '<div style="padding:10px 0;border-bottom:1px solid var(--border2)">'+
+    else{iel.innerHTML=installed.plugins.map(p=>{
+      const statusClass=p.status==='active'?'b-green':p.status==='installed_pending_restart'?'b-yellow':'b-gray';
+      const statusLabel=p.status==='installed_pending_restart'?'pending restart':p.status||'?';
+      return '<div style="padding:10px 0;border-bottom:1px solid var(--border2)">'+
         '<div style="display:flex;align-items:center;justify-content:space-between">'+
           '<div><div style="font-weight:600;color:var(--bright)">'+esc(p.name)+'</div>'+
           '<div style="font-size:11px;color:var(--dim);margin-top:2px">'+esc(p.id)+' v'+esc(p.version||'?')+' &middot; '+esc(p.type||'extension')+'</div></div>'+
           '<div style="display:flex;gap:6px;align-items:center">'+
-            '<span class="badge '+(p.status==='active'?'b-green':'b-gray')+'">'+esc(p.status||'?')+'</span>'+
+            '<span class="badge '+statusClass+'">'+esc(statusLabel)+'</span>'+
             '<button class="btn btn-d btn-sm" onclick="Plugins.uninstall(\''+esc(p.id)+'\')">Remove</button>'+
           '</div>'+
         '</div>'+
         '<div style="font-size:12px;color:var(--dim);margin-top:4px">'+esc(p.description||'')+'</div>'+
         (p.faces?.length?'<div style="font-size:11px;color:var(--cyan);margin-top:4px">Faces: '+p.faces.map(f=>esc(f)).join(', ')+'</div>':'')+
         (p.pages?.length?'<div style="font-size:11px;color:var(--blue);margin-top:2px">Pages: '+p.pages.map(f=>esc(f)).join(', ')+'</div>':'')+
-      '</div>'
-    ).join('')}
+      '</div>'}).join('')}
     // Available
     const ael=$('plugins-available');
     if(!ar||!ar.ok){ael.innerHTML='<div class="empty" style="padding:16px;font-size:13px;color:var(--dim)">No plugin catalog available</div>';return}
@@ -1166,13 +1176,43 @@ const Plugins={
     ).join('')}
   },
   async install(id){
-    try{const r=await fetch('/api/plugins/'+id+'/install',{method:'POST'});const d=await r.json();toast(d.ok||d.installed?'Installed: '+id:'Error: '+(d.error||'failed'),d.ok||d.installed?'green':'red');this.load()}
-    catch(e){toast(e.message,'red')}
+    try{
+      const r=await fetch('/api/plugins/'+id+'/install',{method:'POST'});
+      const d=await r.json();
+      if(d.ok){
+        toast('Installed: '+id+(d.restarting?' — restarting...':''),'green');
+        if(d.restarting){this._showRestarting()}
+        else{this.load()}
+      }else{toast('Error: '+(d.error||'failed'),'red')}
+    }catch(e){toast(e.message,'red')}
   },
   async uninstall(id){
-    if(!confirm('Remove plugin "'+id+'"? Container restart may be needed.'))return;
-    try{const r=await fetch('/api/plugins/'+id,{method:'DELETE'});toast(r.ok?'Removed: '+id:'Error removing','green');this.load()}
-    catch(e){toast(e.message,'red')}
+    if(!confirm('Remove plugin "'+id+'"?'))return;
+    try{const r=await fetch('/api/plugins/'+id,{method:'DELETE'});
+      if(r.ok){toast('Removed: '+id+' — restart to deactivate','green');this.load()}
+      else{toast('Error removing','red')}
+    }catch(e){toast(e.message,'red')}
+  },
+  async restart(){
+    const msg=$('plugins-restart-msg');
+    if(msg){msg.style.display='';msg.textContent='Restarting...'}
+    try{
+      await fetch('/api/plugins/restart',{method:'POST'});
+      this._showRestarting();
+    }catch(e){toast(e.message,'red')}
+  },
+  _showRestarting(){
+    const msg=$('plugins-restart-msg');
+    if(msg){msg.style.display='';msg.textContent='Restarting — page will reload automatically...'}
+    // Poll until the app comes back, then reload
+    let attempts=0;
+    const poll=setInterval(async()=>{
+      attempts++;
+      if(attempts>30){clearInterval(poll);if(msg)msg.textContent='Restart taking longer than expected. Reload manually.';return}
+      try{const r=await fetch('/api/plugins',{signal:AbortSignal.timeout(3000)});
+        if(r.ok){clearInterval(poll);window.location.reload()}
+      }catch(e){}
+    },2000);
   }
 };
 
