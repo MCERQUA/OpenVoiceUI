@@ -158,3 +158,4 @@ profiles/*
 !profiles/default.json
 !profiles/manager.py
 !profiles/schema.json
+app/static/canvas-pages/
