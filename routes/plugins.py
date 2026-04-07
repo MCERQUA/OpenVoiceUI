@@ -5,13 +5,17 @@ Endpoints:
   GET    /api/plugins              — list installed plugins
   GET    /api/plugins/available    — list catalog plugins not yet installed
   GET    /api/plugins/assets       — get script/CSS URLs for installed face plugins
-  POST   /api/plugins/<id>/install — install from catalog (triggers container provisioning)
+  POST   /api/plugins/<id>/install — install from catalog (triggers container provisioning + auto-restart)
   DELETE /api/plugins/<id>         — uninstall a plugin (triggers container deprovisioning)
   GET    /api/plugins/<id>/container — check container status for gateway plugins
+  POST   /api/plugins/restart      — restart the app to activate newly installed plugins
 """
 
 import logging
-from flask import Blueprint, jsonify
+import os
+import signal
+import threading
+from flask import Blueprint, jsonify, request
 
 from services.plugins import (
     get_installed_plugins,
@@ -88,6 +92,26 @@ def plugin_assets():
     return jsonify({"scripts": scripts, "styles": styles})
 
 
+def _schedule_restart(delay=2):
+    """Schedule an app restart after a delay so the HTTP response can be sent first."""
+    def _do_restart():
+        import time
+        time.sleep(delay)
+        logger.info("Restarting app to activate plugin changes...")
+        os.kill(os.getpid(), signal.SIGTERM)
+    t = threading.Thread(target=_do_restart, daemon=True)
+    t.start()
+
+
+@plugins_bp.route("/api/plugins/restart", methods=["POST"])
+def restart_app():
+    """Restart the app to activate newly installed/removed plugins.
+    Docker restart policy (unless-stopped) will bring the container back up."""
+    logger.info("Manual restart requested via /api/plugins/restart")
+    _schedule_restart(delay=1)
+    return jsonify({"ok": True, "note": "Restarting in ~2 seconds..."})
+
+
 @plugins_bp.route("/api/plugins/<plugin_id>/install", methods=["POST"])
 def install(plugin_id):
     """Install a plugin from the catalog. Handles container provisioning if needed."""
@@ -102,17 +126,26 @@ def install(plugin_id):
     if result.get("_error"):
         return jsonify({"error": result["_error"]}), 500
 
+    # Auto-restart unless ?no_restart=1 is passed
+    auto_restart = request.args.get("no_restart") != "1"
+
     response = {
         "ok": True,
         "plugin": result.get("name"),
         "status": result.get("_status"),
-        "note": "Restart the container to activate routes and face scripts",
+        "restarting": auto_restart,
     }
     if result.get("_container"):
         response["container"] = result["_container"]
         response["container_status"] = result.get("_container_status", "unknown")
     if result.get("_warning"):
         response["warning"] = result["_warning"]
+
+    if auto_restart:
+        response["note"] = "App restarting in ~3 seconds to activate plugin..."
+        _schedule_restart(delay=3)
+    else:
+        response["note"] = "Restart the container to activate routes and face scripts"
 
     return jsonify(response), 201
 

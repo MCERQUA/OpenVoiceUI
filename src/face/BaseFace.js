@@ -194,7 +194,7 @@ class FaceManager {
         this._active = face;
 
         // Persist selection to server profile
-        const profileId = window.providerManager?._activeProfileId || 'default';
+        const profileId = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
         fetch('/api/profiles/' + profileId, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },

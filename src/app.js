@@ -231,7 +231,8 @@ initUpdateChecker();
 
             _saveVoiceToProfile() {
                 // Persist to server profile so all devices see the same settings
-                fetch(CONFIG.serverUrl + '/api/profiles/' + this._activeProfileId, {
+                const pid = window._activeProfileData?.id || this._activeProfileId;
+                fetch(CONFIG.serverUrl + '/api/profiles/' + pid, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ voice: { tts_provider: this.selectedProvider, voice_id: this.currentVoice } })
@@ -2146,7 +2147,7 @@ initUpdateChecker();
                 this.enabled = enabled;
                 localStorage.setItem('visualizerEnabled', enabled);
                 // Persist to server profile
-                const pid = window.providerManager?._activeProfileId || 'default';
+                const pid = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
                 fetch('/api/profiles/' + pid, {
                     method: 'PUT', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ ui: { visualizer_enabled: enabled } })
@@ -2159,7 +2160,7 @@ initUpdateChecker();
                 this.autoplayEnabled = enabled;
                 localStorage.setItem('musicAutoplay', enabled);
                 // Persist to server profile
-                const pid = window.providerManager?._activeProfileId || 'default';
+                const pid = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
                 fetch('/api/profiles/' + pid, {
                     method: 'PUT', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ ui: { music_autoplay: enabled } })
@@ -3567,22 +3568,37 @@ initUpdateChecker();
                         }).catch(() => {});
                         this.stopAudio();
                     } else {
-                        // Agent working silently → STEER (inject at next tool boundary)
-                        console.log(`🔀 STEER: injecting "${text.substring(0,50)}" into active run`);
-                        ActionConsole.addEntry('system', `Steering: "${text.substring(0, 60)}"`);
-                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                        // Agent working silently → INTERJECT (smart routing)
+                        // Server classifies as context/steer/fast_lane and routes accordingly
+                        console.log(`🔀 INTERJECT: "${text.substring(0,50)}" into active run`);
+                        fetch(`${this.config.serverUrl}/api/conversation/interject`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ message: text, source: 'clawdbot-sendMessage' }),
-                        }).catch(() => {});
-                        // Show the user's steer message in transcript
+                        }).then(r => r.json()).then(data => {
+                            const lane = data.lane || 'context';
+                            const labels = { context: 'Note', steer: 'Steering', fast_lane: 'Quick' };
+                            ActionConsole.addEntry('system', `${labels[lane]}: "${text.substring(0, 60)}"`);
+                            console.log(`🔀 INTERJECT result: lane=${lane} action=${data.action}`);
+                            // Fast lane responses come with text — display + TTS them
+                            if (lane === 'fast_lane' && data.response) {
+                                this.displayMessage('assistant', data.response);
+                                this.callbacks.onMessage('assistant', data.response);
+                                TranscriptPanel.addMessage('assistant', data.response);
+                                // Parse action tags from fast lane response
+                                this.parseActionTags(data.response);
+                            }
+                        }).catch(() => {
+                            ActionConsole.addEntry('system', `Interjecting: "${text.substring(0, 60)}"`);
+                        });
+                        // Show the user's message in transcript
                         if (!opts.skipDisplay) {
                             this.displayMessage('user', text);
                             this.callbacks.onMessage('user', text);
                             TranscriptPanel.addMessage('user', text, { imageUrl: opts.imageUrl || null });
                         }
                         // Return early — the existing streaming response will receive
-                        // the steered output.  Do NOT abort fetch or start a new one.
+                        // the steered/queued output.  Do NOT abort fetch or start a new one.
                         return;
                     }
                 } else {
@@ -4860,7 +4876,7 @@ initUpdateChecker();
 
                 // Save to localStorage + server profile
                 localStorage.setItem('voice_mode', mode);
-                const pid = window.providerManager?._activeProfileId || 'default';
+                const pid = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
                 fetch('/api/profiles/' + pid, {
                     method: 'PUT', headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({ ui: { voice_mode: mode } })
@@ -5162,16 +5178,31 @@ initUpdateChecker();
                         }).catch(() => {});
                         this.stopAudio();
                     } else {
-                        // Agent working silently → STEER
-                        console.log(`🔀 STEER: injecting "${transcript.substring(0,50)}" into active run`);
-                        ActionConsole.addEntry('system', `Steering: "${transcript.substring(0, 60)}"`);
-                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                        // Agent working silently → INTERJECT (smart routing)
+                        console.log(`🔀 INTERJECT: "${transcript.substring(0,50)}" into active run`);
+                        fetch(`${this.config.serverUrl}/api/conversation/interject`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ message: transcript, source: 'voice-handleUserTranscript' }),
-                        }).catch(() => {});
+                        }).then(r => r.json()).then(data => {
+                            const lane = data.lane || 'context';
+                            const labels = { context: 'Note', steer: 'Steering', fast_lane: 'Quick' };
+                            ActionConsole.addEntry('system', `${labels[lane]}: "${transcript.substring(0, 60)}"`);
+                            // Fast lane responses come with text — display + TTS them
+                            if (lane === 'fast_lane' && data.response) {
+                                const cm = ModeManager?.clawdbotMode;
+                                if (cm) {
+                                    cm.displayMessage('assistant', data.response);
+                                    cm.callbacks.onMessage('assistant', data.response);
+                                    cm.parseActionTags(data.response);
+                                }
+                                TranscriptPanel.addMessage('assistant', data.response);
+                            }
+                        }).catch(() => {
+                            ActionConsole.addEntry('system', `Interjecting: "${transcript.substring(0, 60)}"`);
+                        });
                         // Show user text, reset STT for next input, and return.
-                        // The existing streaming response will receive the steered output.
+                        // The existing streaming response will receive the steered/queued output.
                         this.callbacks.onTranscript(transcript, true);
                         TranscriptPanel.addMessage('user', transcript);
                         this.stt.resetProcessing();
@@ -8987,6 +9018,14 @@ initUpdateChecker();
 
         window.applyProfile = function(profile) {
             window._activeProfileData = profile;
+
+            // CRITICAL: Sync the active profile ID so all save operations
+            // (face, TTS, voice mode) write to the CORRECT profile.
+            // Without this, switching profiles leaves _activeProfileId stale
+            // and settings changes leak into the previous profile.
+            if (profile?.id && window.providerManager) {
+                window.providerManager._activeProfileId = profile.id;
+            }
 
             // 1. STT silence timeout — applied immediately if STT is live, else deferred to poll
             const stt = window._sttInstance;

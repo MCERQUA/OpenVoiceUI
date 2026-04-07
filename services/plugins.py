@@ -11,6 +11,11 @@ For each installed plugin:
 Plugins are installed by copying a plugin directory into PLUGIN_DIR.
 Uninstalled by removing it. No Docker rebuild needed — just restart.
 
+Plugin sources (checked in order):
+  1. Local catalog at /app/plugin-catalog (volume mount, used by multi-tenant hosts)
+  2. Remote catalog at GitHub (MCERQUA/openvoiceui-plugins registry.json)
+     Downloaded on-demand when a user clicks "Install" in the admin panel.
+
 Lifecycle hooks: plugins with "lifecycle" in their manifest can trigger
 host-side operations (container provisioning) during install/uninstall.
 """
@@ -20,6 +25,9 @@ import logging
 import importlib.util
 import os
 import shutil
+import tempfile
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -33,9 +41,24 @@ PLUGIN_DIR = Path("/app/plugins")
 # Where the plugin catalog lives (read-only, shared across clients)
 PLUGIN_CATALOG_DIR = Path("/app/plugin-catalog")
 
+# Remote plugin registry — community plugins on GitHub
+REMOTE_REGISTRY_URL = os.getenv(
+    "PLUGIN_REGISTRY_URL",
+    "https://raw.githubusercontent.com/MCERQUA/openvoiceui-plugins/main/registry.json",
+)
+REMOTE_REPO_URL = os.getenv(
+    "PLUGIN_REPO_URL",
+    "https://github.com/MCERQUA/openvoiceui-plugins",
+)
+REMOTE_FETCH_TIMEOUT = 30
+
 # Host provisioning service for plugins that need containers
 PROVISION_PORT = os.getenv("PROVISION_SERVICE_PORT", "5200")
 PROVISION_TIMEOUT = 120
+
+# Cache for remote registry (avoid re-fetching every request)
+_remote_registry_cache: Optional[List[dict]] = None
+_remote_registry_age: float = 0
 
 
 def _get_provision_url() -> str:
@@ -72,9 +95,17 @@ def get_plugin(plugin_id: str) -> Optional[dict]:
 
 
 def get_available_plugins() -> List[dict]:
-    """Return plugins available in the catalog but not yet installed."""
+    """Return plugins available in the catalog but not yet installed.
+
+    Checks local catalog first, then merges in remote plugins (from GitHub)
+    that aren't already listed locally. This ensures standalone/Pinokio
+    installs see community plugins even without a mounted plugin-catalog volume.
+    """
     installed_ids = set(_registry.keys())
     available = []
+    local_ids = set()
+
+    # 1. Local catalog (volume-mounted, used by multi-tenant hosts)
     if PLUGIN_CATALOG_DIR.is_dir():
         for d in sorted(PLUGIN_CATALOG_DIR.iterdir()):
             manifest_path = d / "plugin.json"
@@ -82,13 +113,108 @@ def get_available_plugins() -> List[dict]:
                 try:
                     manifest = json.loads(manifest_path.read_text())
                     pid = manifest.get("id", d.name)
+                    local_ids.add(pid)
                     if pid not in installed_ids:
                         manifest["_catalog_path"] = str(d)
+                        manifest["_source"] = "local"
                         manifest["_status"] = "available"
                         available.append(manifest)
                 except Exception as e:
                     logger.warning(f"Failed to read catalog plugin {d.name}: {e}")
+
+    # 2. Remote registry (GitHub) — only plugins not in local catalog
+    remote = _fetch_remote_registry()
+    for entry in remote:
+        pid = entry.get("id", "")
+        if pid and pid not in installed_ids and pid not in local_ids:
+            entry["_source"] = "remote"
+            entry["_status"] = "available"
+            available.append(entry)
+
     return available
+
+
+def _fetch_remote_registry() -> List[dict]:
+    """Fetch the remote plugin registry from GitHub. Cached for 5 minutes."""
+    global _remote_registry_cache, _remote_registry_age
+    import time
+
+    now = time.time()
+    if _remote_registry_cache is not None and (now - _remote_registry_age) < 300:
+        return _remote_registry_cache
+
+    try:
+        resp = requests.get(REMOTE_REGISTRY_URL, timeout=REMOTE_FETCH_TIMEOUT)
+        if resp.ok:
+            data = resp.json()
+            plugins = data.get("plugins", [])
+            _remote_registry_cache = plugins
+            _remote_registry_age = now
+            logger.info(f"Remote plugin registry: {len(plugins)} plugin(s) fetched")
+            return plugins
+        else:
+            logger.warning(f"Remote registry returned HTTP {resp.status_code}")
+    except requests.ConnectionError:
+        logger.debug("Remote plugin registry unreachable (offline mode)")
+    except Exception as e:
+        logger.warning(f"Failed to fetch remote plugin registry: {e}")
+
+    return _remote_registry_cache or []
+
+
+def _download_remote_plugin(plugin_id: str) -> Optional[Path]:
+    """Download a plugin from the remote GitHub repo into a temp directory.
+
+    Uses the GitHub zipball API to download just the plugin subdirectory.
+    Returns the path to the extracted plugin directory, or None on failure.
+    """
+    # Download the repo archive for the main branch
+    zip_url = f"{REMOTE_REPO_URL}/archive/refs/heads/main.zip"
+    try:
+        logger.info(f"Downloading plugin '{plugin_id}' from {REMOTE_REPO_URL}")
+        resp = requests.get(zip_url, timeout=REMOTE_FETCH_TIMEOUT, stream=True)
+        if not resp.ok:
+            logger.error(f"Failed to download repo archive: HTTP {resp.status_code}")
+            return None
+
+        # Extract the specific plugin directory from the zip
+        with zipfile.ZipFile(BytesIO(resp.content)) as zf:
+            # Zip contains a top-level dir like "openvoiceui-plugins-main/"
+            prefix = None
+            for name in zf.namelist():
+                parts = name.split("/")
+                if len(parts) >= 2 and parts[1] == plugin_id:
+                    if prefix is None:
+                        prefix = parts[0]
+                    break
+
+            if prefix is None:
+                logger.error(f"Plugin '{plugin_id}' not found in remote repo archive")
+                return None
+
+            # Extract plugin files to a temp directory
+            tmp_dir = Path(tempfile.mkdtemp(prefix=f"plugin_{plugin_id}_"))
+            plugin_prefix = f"{prefix}/{plugin_id}/"
+            for member in zf.namelist():
+                if member.startswith(plugin_prefix) and not member.endswith("/"):
+                    # Strip the repo prefix to get the relative path within the plugin
+                    rel_path = member[len(plugin_prefix):]
+                    dest_file = tmp_dir / rel_path
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    dest_file.write_bytes(zf.read(member))
+
+            # Verify it has a plugin.json
+            if not (tmp_dir / "plugin.json").is_file():
+                logger.error(f"Downloaded plugin '{plugin_id}' has no plugin.json")
+                shutil.rmtree(str(tmp_dir))
+                return None
+
+            logger.info(f"Plugin '{plugin_id}' downloaded to {tmp_dir}")
+            return tmp_dir
+
+    except Exception as e:
+        logger.error(f"Failed to download remote plugin '{plugin_id}': {e}")
+        return None
 
 
 # ── Lifecycle hooks ─────────────────────────────────────────────────────
@@ -175,18 +301,32 @@ def _run_lifecycle_hook(manifest: dict, hook_name: str) -> dict:
 
 
 def install_plugin(plugin_id: str) -> Optional[dict]:
-    """Install a plugin from the catalog by copying its directory."""
-    catalog_dir = PLUGIN_CATALOG_DIR / plugin_id
-    if not (catalog_dir / "plugin.json").is_file():
-        return None
+    """Install a plugin from the local catalog or remote repo.
 
+    Checks local catalog first. If not found, downloads from the remote
+    GitHub repository. This allows standalone installs (Pinokio, Docker)
+    to install community plugins without a mounted plugin-catalog volume.
+    """
     dest = PLUGIN_DIR / plugin_id
     if dest.exists():
         return None  # Already installed
 
     PLUGIN_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(str(catalog_dir), str(dest))
-    logger.info(f"Plugin installed: {plugin_id} → {dest}")
+
+    # Try local catalog first
+    catalog_dir = PLUGIN_CATALOG_DIR / plugin_id
+    remote_tmp = None
+    if (catalog_dir / "plugin.json").is_file():
+        shutil.copytree(str(catalog_dir), str(dest))
+        logger.info(f"Plugin installed from local catalog: {plugin_id} → {dest}")
+    else:
+        # Fallback: download from remote repo
+        remote_tmp = _download_remote_plugin(plugin_id)
+        if remote_tmp is None:
+            return None
+        shutil.copytree(str(remote_tmp), str(dest))
+        shutil.rmtree(str(remote_tmp))
+        logger.info(f"Plugin installed from remote repo: {plugin_id} → {dest}")
 
     # Load manifest
     manifest = json.loads((dest / "plugin.json").read_text())
@@ -205,6 +345,25 @@ def install_plugin(plugin_id: str) -> Optional[dict]:
         manifest["_container_status"] = hook_result.get("status", "unknown")
     if hook_result.get("warning"):
         manifest["_warning"] = hook_result["warning"]
+
+    # Deploy lore/knowledge files at install time (same logic as load_plugins)
+    lore = manifest.get("lore", {})
+    if lore:
+        workspace_dir = Path("/app/runtime/workspace/Agent")
+        if workspace_dir.is_dir():
+            lore_dest = workspace_dir / plugin_id
+            lore_count = 0
+            for section_key in ("transcripts", "characters", "memories", "files"):
+                for file_rel in lore.get(section_key, []):
+                    src = dest / file_rel
+                    rel_from_lore = file_rel[5:] if file_rel.startswith("lore/") else file_rel
+                    dst = lore_dest / rel_from_lore
+                    if src.is_file() and not dst.exists():
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(src), str(dst))
+                        lore_count += 1
+            if lore_count > 0:
+                logger.info(f"Deployed {lore_count} lore files to workspace/{plugin_id}/")
 
     _registry[plugin_id] = manifest
     return manifest
@@ -328,6 +487,57 @@ def load_plugins(app):
                     if src.is_file() and not dst.exists():
                         shutil.copy2(str(src), str(dst))
                         logger.info(f"[Plugin:{plugin_id}] Copied profile: {Path(profile_rel).name}")
+
+            # ── Deploy lore/knowledge files to openclaw workspace ──
+            # Plugins can ship agent knowledge (transcripts, character profiles,
+            # memories, world-building) that gets copied into the openclaw workspace
+            # so agents can read them. Deployed to workspace/<plugin_id>/ to avoid
+            # collisions between plugins. Uses cp -n semantics (no overwrite).
+            #
+            # The workspace mount may be read-only from OVU's perspective, so we
+            # try multiple paths: writable runtime dir first, then read-only mount.
+            # For JamBot: /app/runtime/workspace/Agent is :ro but the plugin dir
+            # itself at /app/plugins/<id>/lore/ is always readable by the agent
+            # via the shared skills mount or direct workspace symlink.
+            lore = manifest.get("lore", {})
+            if lore:
+                # Try writable workspace paths in order of preference
+                workspace_candidates = [
+                    Path("/app/runtime/workspace/Agent"),  # Direct workspace mount
+                    Path("/app/runtime/openclaw-workspace"),  # Alt writable mount
+                ]
+                workspace_dir = None
+                for candidate in workspace_candidates:
+                    if candidate.is_dir():
+                        # Test if writable
+                        test_file = candidate / ".plugin-write-test"
+                        try:
+                            test_file.touch()
+                            test_file.unlink()
+                            workspace_dir = candidate
+                            break
+                        except (OSError, PermissionError):
+                            continue
+
+                if workspace_dir:
+                    lore_dest = workspace_dir / plugin_id
+                    lore_count = 0
+                    for section_key in ("transcripts", "characters", "memories", "files"):
+                        for file_rel in lore.get(section_key, []):
+                            src = plugin_dir / file_rel
+                            rel_from_lore = file_rel[5:] if file_rel.startswith("lore/") else file_rel
+                            dst = lore_dest / rel_from_lore
+                            if src.is_file() and not dst.exists():
+                                dst.parent.mkdir(parents=True, exist_ok=True)
+                                try:
+                                    shutil.copy2(str(src), str(dst))
+                                    lore_count += 1
+                                except (OSError, PermissionError) as e:
+                                    logger.warning(f"[Plugin:{plugin_id}] Cannot copy lore file {file_rel}: {e}")
+                    if lore_count > 0:
+                        logger.info(f"[Plugin:{plugin_id}] Deployed {lore_count} lore files to {lore_dest}")
+                else:
+                    logger.info(f"[Plugin:{plugin_id}] Lore available at /app/plugins/{plugin_id}/lore/ (workspace not writable)")
 
             _registry[plugin_id] = manifest
             count += 1

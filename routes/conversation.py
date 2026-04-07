@@ -317,6 +317,13 @@ conversation_histories: dict = {}
 #: Tracks consecutive empty Gateway responses for auto-reset logic.
 _consecutive_empty_responses: int = 0
 
+#: Circuit breaker for double-empty restart cascade.
+#: Prevents runaway restart loops (e.g. 12 restarts from a failing browser task).
+_double_empty_restart_count: int = 0
+_double_empty_window_start: float = 0
+_DOUBLE_EMPTY_MAX_RESTARTS: int = 2       # max restart flags per window
+_DOUBLE_EMPTY_WINDOW_SECONDS: float = 300  # 5-minute sliding window
+
 # ---------------------------------------------------------------------------
 # Voice session management
 # (moved here from server.py so the blueprint owns the session counter)
@@ -413,11 +420,13 @@ def _enter_session_recovery():
 
 def _exit_session_recovery():
     """Clear the recovery key after a successful response.
-    Next request goes back to the stable key (cache-warm path)."""
-    global _session_recovery_key
+    Next request goes back to the stable key (cache-warm path).
+    Also resets the double-empty circuit breaker."""
+    global _session_recovery_key, _double_empty_restart_count
     if _session_recovery_key is not None:
         old_recovery = _session_recovery_key
         _session_recovery_key = None
+        _double_empty_restart_count = 0
         stable = get_voice_session_key()
         logger.info(f'### SESSION RECOVERY CLEARED: "{old_recovery}" → back to stable key "{stable}"')
 
@@ -1182,6 +1191,33 @@ def _conversation_inner():
                     # sentences use the same fallback to keep the voice consistent.
                     _tts_fallback_state = {}
 
+                    # --- Dynamic status: describe what the agent is actually doing ---
+                    _TOOL_DESCRIPTIONS = {
+                        'exec': 'running some code',
+                        'web_search': 'searching the web',
+                        'web_fetch': 'reading a webpage',
+                        'sessions_spawn': 'delegating to a sub-agent',
+                        'sessions_send': 'coordinating with another agent',
+                        'Edit': 'editing a file',
+                        'Write': 'writing a file',
+                        'Read': 'reading a file',
+                        'Glob': 'searching for files',
+                        'Grep': 'searching through code',
+                    }
+
+                    def _build_dynamic_status(tool_name, tools_count, silence_secs):
+                        """Build a contextual status message from what the agent is doing."""
+                        if tool_name:
+                            desc = _TOOL_DESCRIPTIONS.get(tool_name)
+                            if desc:
+                                return f"Still here, just {desc}."
+                            # Unknown tool — use the name directly if it's readable
+                            if tool_name and len(tool_name) < 30 and tool_name.isalnum():
+                                return f"Still working, running {tool_name}."
+                        if tools_count > 3:
+                            return "Going through a few steps, almost there."
+                        return "Still on it, one moment."
+
                     def _fire_tts(raw_text):
                         """Start TTS for raw_text. Parallel or sequential per profile config.
                         Returns (done_event, result)."""
@@ -1243,15 +1279,11 @@ def _conversation_inner():
                     # ── Spoken status updates during long tool execution ──
                     # Prevents dead silence when agent runs tools for 30-90+ seconds.
                     _last_audio_time = time.time()   # last time we sent audio to browser
-                    _status_tts_count = 0            # how many "still working" messages sent
+                    _status_tts_count = 0            # how many status messages spoken
                     _tools_seen = 0                  # count of tool starts seen
-                    _STATUS_SILENCE_THRESHOLD = 15   # seconds of no audio before first status
-                    _STATUS_REPEAT_INTERVAL = 30     # seconds between subsequent status msgs
-                    _STATUS_MESSAGES = [
-                        "Working on that.",
-                        "Still working, one moment.",
-                        "Almost there, still on it.",
-                    ]
+                    _last_tool_name = None           # name of the most recent tool
+                    _STATUS_SILENCE_THRESHOLD = 45   # long safety net — agent should speak naturally
+                    _STATUS_REPEAT_INTERVAL = 90     # almost never repeat
 
                     full_response = None
                     _stream_start = time.time()
@@ -1301,8 +1333,10 @@ def _conversation_inner():
                                     else _STATUS_REPEAT_INTERVAL
                                 )
                                 if _silence_secs >= _threshold:
-                                    _msg_idx = min(_status_tts_count, len(_STATUS_MESSAGES) - 1)
-                                    _status_text = _STATUS_MESSAGES[_msg_idx]
+                                    # Dynamic status from what the agent is actually doing
+                                    _status_text = _build_dynamic_status(
+                                        _last_tool_name, _tools_seen, _silence_secs
+                                    )
                                     logger.info(f"### STATUS TTS ({_status_tts_count}): '{_status_text}' (silence={_silence_secs:.0f}s)")
                                     _status_done, _status_res = _fire_tts(_status_text)
                                     _status_done.wait(timeout=10)
@@ -1345,9 +1379,10 @@ def _conversation_inner():
                             continue
 
                         if evt['type'] == 'action':
-                            # Track tool starts for spoken status logic
+                            # Track tool starts for dynamic status
                             if evt.get('action', {}).get('phase') == 'start':
                                 _tools_seen += 1
+                                _last_tool_name = evt.get('action', {}).get('name', None)
                             # Flush any TTS chunks that already finished —
                             # avoids silence during long tool calls (the first
                             # sentence TTS completes ~1s in but would otherwise
@@ -1550,15 +1585,36 @@ def _conversation_inner():
                                 except Exception as _dfe:
                                     logger.error(f'### Failed to disconnect gateway: {_dfe}')
 
-                                # 3. Write restart flag for host watchdog (background cleanup)
-                                try:
-                                    _flag_path = Path('/app/runtime/uploads/.restart-openclaw.flag')
-                                    _flag_path.write_text(
-                                        f'double-empty at {__import__("datetime").datetime.utcnow().isoformat()}Z'
+                                # 3. Write restart flag — CIRCUIT BREAKER gated
+                                #    Max 2 restarts per 5 minutes. After that, skip the
+                                #    restart flag (Z.AI fallback still fires below).
+                                global _double_empty_restart_count, _double_empty_window_start
+                                _now_de = time.time()
+                                if _now_de - _double_empty_window_start > _DOUBLE_EMPTY_WINDOW_SECONDS:
+                                    _double_empty_restart_count = 0
+                                    _double_empty_window_start = _now_de
+                                _double_empty_restart_count += 1
+
+                                if _double_empty_restart_count <= _DOUBLE_EMPTY_MAX_RESTARTS:
+                                    try:
+                                        _flag_path = Path('/app/runtime/uploads/.restart-openclaw.flag')
+                                        _flag_path.write_text(
+                                            f'double-empty at {__import__("datetime").datetime.utcnow().isoformat()}Z'
+                                        )
+                                        logger.warning(
+                                            f'### Wrote .restart-openclaw.flag — watchdog will clean up poisoned session '
+                                            f'({_double_empty_restart_count}/{_DOUBLE_EMPTY_MAX_RESTARTS} in window)'
+                                        )
+                                    except Exception as _rfe:
+                                        logger.error(f'### Failed to write restart flag: {_rfe}')
+                                else:
+                                    logger.warning(
+                                        f'### CIRCUIT BREAKER: skipping restart flag — '
+                                        f'{_double_empty_restart_count} double-empties in '
+                                        f'{int(_now_de - _double_empty_window_start)}s window '
+                                        f'(max {_DOUBLE_EMPTY_MAX_RESTARTS} per {_DOUBLE_EMPTY_WINDOW_SECONDS}s). '
+                                        f'Z.AI fallback only.'
                                     )
-                                    logger.warning('### Wrote .restart-openclaw.flag — watchdog will clean up poisoned session')
-                                except Exception as _rfe:
-                                    logger.error(f'### Failed to write restart flag: {_rfe}')
 
                                 # 4. Z.AI direct fallback for this message (NEVER Groq — Groq is TTS only)
                                 try:
@@ -1964,6 +2020,142 @@ def conversation_steer():
     log_conversation('user', message, session_id='default')
 
     return jsonify({'ok': True, 'steered': steered})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/conversation/interject — smart message routing
+# ---------------------------------------------------------------------------
+
+
+@conversation_bp.route('/api/conversation/interject', methods=['POST'])
+def conversation_interject():
+    """Smart message routing during active agent runs.
+
+    Classifies the user's message into one of three lanes:
+      context   — queue alongside the current run (collect mode)
+      steer     — inject at next tool boundary, skip remaining tools
+      fast_lane — independent action (for now: treated as steer; Phase 3
+                  will route to a parallel sub-agent)
+
+    The frontend calls this instead of /steer when the agent is busy,
+    letting the backend decide the appropriate routing.
+
+    Request body:
+        message  (str) — the user's text
+        source   (str) — caller label for logging
+
+    Returns:
+        { ok: true, lane: "context"|"steer"|"fast_lane", action: "queued"|"steered" }
+    """
+    from routes.message_classifier import classify_message
+
+    body = request.get_json(silent=True) or {}
+    message = (body.get('message') or '').strip()
+    source = body.get('source', 'unknown')
+
+    if not message:
+        return jsonify({'ok': False, 'error': 'No message provided'}), 400
+    if len(message) > 4000:
+        return jsonify({'ok': False, 'error': 'Message too long'}), 400
+
+    lane = classify_message(message, agent_busy=True)
+    session_key = get_voice_session_key()
+
+    if lane == 'context':
+        # Queue alongside the current run — gateway's collect mode handles this.
+        # We still send via steer because the message needs to reach the session,
+        # but OpenClaw's collect mode will hold it until the current turn completes.
+        steered = gateway_manager.send_steer(message, session_key)
+        action = 'queued'
+        logger.info(
+            f"### INTERJECT [context] session={session_key} action={action} "
+            f"source={source} text={message!r}"
+        )
+    elif lane == 'steer':
+        # Inject at next tool boundary — skip remaining tools
+        steered = gateway_manager.send_steer(message, session_key)
+        action = 'steered'
+        logger.info(
+            f"### INTERJECT [steer] session={session_key} action={action} "
+            f"source={source} text={message!r}"
+        )
+    else:  # fast_lane
+        # Route to the fast lane agent via a separate session key.
+        # This runs in parallel with the main agent — no interference.
+        fast_session_key = 'fast-lane'
+        try:
+            from queue import Queue as _Q
+            _fq = _Q()
+            import threading
+            def _fast_run():
+                try:
+                    gw = gateway_manager.get('openclaw')
+                    if gw:
+                        gw.stream_to_queue(
+                            _fq, message, fast_session_key,
+                            captured_actions=None,
+                            agent_id='openvoiceui-fast',
+                        )
+                except Exception as e:
+                    logger.error(f'### FAST LANE error: {e}')
+                finally:
+                    _fq.put({'type': 'text_done', 'response': None})
+
+            _ft = threading.Thread(target=_fast_run, daemon=True)
+            _ft.start()
+
+            # Collect the fast lane response (with timeout)
+            _fast_text = ''
+            _fast_start = time.time()
+            while time.time() - _fast_start < 15:
+                try:
+                    ev = _fq.get(timeout=1)
+                    if ev.get('type') == 'delta':
+                        _fast_text += ev.get('text', '')
+                    elif ev.get('type') == 'text_done':
+                        if ev.get('response'):
+                            _fast_text = ev['response']
+                        break
+                except Exception:
+                    continue
+
+            action = 'fast_lane'
+            logger.info(
+                f"### INTERJECT [fast_lane] session={fast_session_key} "
+                f"source={source} text={message!r} → response={_fast_text[:100]!r}"
+            )
+
+            # Return the fast lane response directly — frontend can TTS it
+            log_conversation('user', message, session_id='default')
+            if _fast_text.strip():
+                log_conversation('assistant', _fast_text.strip(), session_id='default')
+            return jsonify({
+                'ok': True,
+                'lane': 'fast_lane',
+                'action': 'fast_lane',
+                'response': _fast_text.strip() if _fast_text.strip() else None,
+                'steered': False,
+            })
+
+        except Exception as _fle:
+            logger.error(f'### FAST LANE failed, falling back to steer: {_fle}')
+            # Fallback: steer mode
+            steered = gateway_manager.send_steer(message, session_key)
+            action = 'steered'
+            logger.info(
+                f"### INTERJECT [fast_lane→steer fallback] session={session_key} "
+                f"source={source} text={message!r}"
+            )
+
+    # Log the interjected message as a user turn for transcript
+    log_conversation('user', message, session_id='default')
+
+    return jsonify({
+        'ok': True,
+        'lane': lane,
+        'action': action,
+        'steered': steered if lane != 'context' else None,
+    })
 
 
 # ---------------------------------------------------------------------------

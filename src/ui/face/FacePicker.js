@@ -33,7 +33,8 @@ function getActiveFaceId() {
 
 function persistFaceId(id) {
     // Save to server profile so all devices see the same face
-    const profileId = window.providerManager?._activeProfileId || 'default';
+    // Use _activeProfileData.id as canonical source — _activeProfileId can go stale on profile switch
+    const profileId = window._activeProfileData?.id || window.providerManager?._activeProfileId || 'default';
     fetch('/api/profiles/' + profileId, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

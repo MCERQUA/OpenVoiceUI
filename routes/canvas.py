@@ -697,17 +697,10 @@ def canvas_pages_proxy(path):
             if path.endswith('.html'):
                 with open(resolved, 'rb') as f:
                     content = f.read()
-                # Strip Tailwind CDN — it's a JS runtime that breaks in sandboxed iframes.
-                # Other CDN scripts (Mermaid, etc.) are allowed through and controlled by CSP.
+                # Tailwind CDN is allowed through — CSP controls script loading.
                 import re as _re
                 content_str = content.decode('utf-8', errors='replace')
-                _stripped = _re.sub(
-                    r'<script\s+[^>]*src\s*=\s*["\']https?://cdn\.tailwindcss\.com[^"\']*["\'][^>]*>\s*</script>',
-                    '<!-- tailwind CDN stripped — use inline styles instead -->',
-                    content_str,
-                    flags=_re.IGNORECASE,
-                )
-                content = _stripped.encode('utf-8')
+                content = content_str.encode('utf-8')
 
                 # Inject base dark-theme fallback + padding for UI chrome clearance.
                 # Edge tabs are 44px wide on left+right — safe area is 52px each side.
@@ -715,18 +708,22 @@ def canvas_pages_proxy(path):
                 _base_css = (
                     b'<style id="canvas-base-styles">'
                     b':root{'
-                    b'--canvas-safe-top:0px;'
-                    b'--canvas-safe-right:52px;'
-                    b'--canvas-safe-bottom:0px;'
-                    b'--canvas-safe-left:52px;}'
+                    b'--canvas-safe-top:25px;'
+                    b'--canvas-safe-right:25px;'
+                    b'--canvas-safe-bottom:25px;'
+                    b'--canvas-safe-left:25px;}'
                     b'html,body{'
-                    b'padding-left:20px!important;'
-                    b'padding-right:20px!important;'
+                    b'padding:25px!important;'
                     b'box-sizing:border-box!important;'
                     b'color:#e2e8f0;'
                     b'background:#0a0a0a;}'
                     b'h1,h2,h3,h4{color:#fff;}'
                     b'a{color:#fb923c;}'
+                    b'*,html,body{scrollbar-width:thin;scrollbar-color:#3a3a42 transparent;}'
+                    b'::-webkit-scrollbar{width:5px!important;height:5px!important;}'
+                    b'::-webkit-scrollbar-track{background:transparent!important;}'
+                    b'::-webkit-scrollbar-thumb{background:#3a3a42!important;border-radius:99px!important;}'
+                    b'::-webkit-scrollbar-thumb:hover{background:#555!important;}'
                     b'</style>'
                 )
                 # Inject error bridge — posts JS errors back to parent for debugging
@@ -779,16 +776,22 @@ def canvas_pages_proxy(path):
                 else:
                     content += _body_inject
                 resp = Response(content, mimetype='text/html')
-                resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                resp.headers['Cache-Control'] = 'private, no-cache, no-store, must-revalidate, max-age=0'
                 resp.headers['Pragma'] = 'no-cache'
                 resp.headers['Expires'] = '0'
+                resp.headers['CDN-Cache-Control'] = 'no-store'
+                resp.headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
+                # ETag based on file mtime to force revalidation
+                import os as _os
+                _mtime = str(int(_os.path.getmtime(resolved)))
+                resp.headers['ETag'] = '"canvas-' + _mtime + '"'
                 # Canvas-specific CSP: allow inline scripts (interactive pages)
                 # Canvas CSP: allow scripts and styles inline, allow API connections
                 # for interactive apps (Awesome App Library etc.) that call AI APIs
                 # directly from the browser with user's own API keys.
                 resp.headers['Content-Security-Policy'] = (
                     "default-src 'none'; "
-                    "script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://games.jam-bot.com blob:; "
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://games.jam-bot.com blob:; "
                     "style-src 'unsafe-inline' https://games.jam-bot.com https://fonts.googleapis.com; "
                     "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob: https:; "
@@ -1546,3 +1549,63 @@ def canvas_build_log(project):
     except Exception as exc:
         logger.error(f'Build log read error for {project}: {exc}')
         return jsonify({'lines': [], 'status': 'error', 'error': str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# DataForSEO API proxy — credentials stay server-side
+# ---------------------------------------------------------------------------
+
+_DATAFORSEO_BASE = 'https://api.dataforseo.com/v3'
+
+def _dataforseo_auth():
+    """Return (login, password) from env or None."""
+    login = os.getenv('DATAFORSEO_LOGIN', '')
+    password = os.getenv('DATAFORSEO_PASSWORD', '')
+    if not login or not password:
+        return None
+    return (login, password)
+
+
+@canvas_bp.route('/api/dataforseo/balance', methods=['GET'])
+def dataforseo_balance():
+    """Return DataForSEO account balance and usage info."""
+    auth = _dataforseo_auth()
+    if not auth:
+        return jsonify({'error': 'DataForSEO credentials not configured'}), 503
+    try:
+        resp = http_requests.get(
+            f'{_DATAFORSEO_BASE}/appendix/user_data',
+            auth=auth,
+            timeout=15,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as exc:
+        logger.error(f'DataForSEO balance error: {exc}')
+        return jsonify({'error': str(exc)}), 502
+
+
+@canvas_bp.route('/api/dataforseo/proxy', methods=['POST'])
+def dataforseo_proxy():
+    """Proxy a DataForSEO API call. Body: {endpoint: "...", data: [...]}."""
+    auth = _dataforseo_auth()
+    if not auth:
+        return jsonify({'error': 'DataForSEO credentials not configured'}), 503
+    body = request.get_json(silent=True) or {}
+    endpoint = body.get('endpoint', '')
+    data = body.get('data', [])
+    if not endpoint:
+        return jsonify({'error': 'Missing endpoint'}), 400
+    # Sanitize: only allow alphanum, slashes, underscores, hyphens
+    if not re.match(r'^[a-zA-Z0-9/_\-]+$', endpoint):
+        return jsonify({'error': 'Invalid endpoint'}), 400
+    try:
+        resp = http_requests.post(
+            f'{_DATAFORSEO_BASE}/{endpoint}',
+            auth=auth,
+            json=data,
+            timeout=30,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as exc:
+        logger.error(f'DataForSEO proxy error ({endpoint}): {exc}')
+        return jsonify({'error': str(exc)}), 502

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026.3.29 -->
+<!-- openvoiceui-version: 2026.4.3 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -2076,16 +2076,18 @@ function showProperties(item) {
 function showDesktopProperties() {
   const total = Object.keys(PAGES).length;
   const deleted = recycleBin.length;
+  const themeName = {xp:'Windows XP',mac:'macOS','95':'Windows 95','31':'Windows 3.1',ubuntu:'Ubuntu'}[currentTheme];
   const content = `
     <div style="padding:16px;font-size:12px;display:flex;flex-direction:column;gap:12px">
       <div style="font-weight:bold;font-size:14px;padding-bottom:8px;border-bottom:1px solid #ccc">Desktop Information</div>
       <table style="border-collapse:collapse;width:100%">
-        <tr><td style="padding:3px 12px 3px 0;color:#666">Theme:</td><td style="padding:3px 0">${{xp:'Windows XP',mac:'macOS','95':'Windows 95','31':'Windows 3.1',ubuntu:'Ubuntu'}[currentTheme]}</td></tr>
+        <tr><td style="padding:3px 12px 3px 0;color:#666">Theme:</td><td style="padding:3px 0">${themeName}</td></tr>
         <tr><td style="padding:3px 12px 3px 0;color:#666">Canvas Pages:</td><td style="padding:3px 0">${total} total</td></tr>
         <tr><td style="padding:3px 12px 3px 0;color:#666">Desktop Icons:</td><td style="padding:3px 0">${DESKTOP_ITEMS.length}</td></tr>
         <tr><td style="padding:3px 12px 3px 0;color:#666">In Recycle Bin:</td><td style="padding:3px 0">${deleted}</td></tr>
         <tr><td style="padding:3px 12px 3px 0;color:#666">Categories:</td><td style="padding:3px 0">${Object.keys(CATEGORIES).length}</td></tr>
       </table>
+      <button onclick="this.closest('.window').querySelector('.tb-btn.close').click();openThemeSettings()" style="align-self:flex-start;padding:6px 16px;font-size:12px;cursor:pointer;border:1px solid #999;border-radius:4px;background:#f0f0f0;color:#333">Change Theme\u2026</button>
     </div>`;
   createWindow({title:'Desktop Properties', content, width:320, height:260});
 }
