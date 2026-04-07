@@ -3568,22 +3568,37 @@ initUpdateChecker();
                         }).catch(() => {});
                         this.stopAudio();
                     } else {
-                        // Agent working silently → STEER (inject at next tool boundary)
-                        console.log(`🔀 STEER: injecting "${text.substring(0,50)}" into active run`);
-                        ActionConsole.addEntry('system', `Steering: "${text.substring(0, 60)}"`);
-                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                        // Agent working silently → INTERJECT (smart routing)
+                        // Server classifies as context/steer/fast_lane and routes accordingly
+                        console.log(`🔀 INTERJECT: "${text.substring(0,50)}" into active run`);
+                        fetch(`${this.config.serverUrl}/api/conversation/interject`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ message: text, source: 'clawdbot-sendMessage' }),
-                        }).catch(() => {});
-                        // Show the user's steer message in transcript
+                        }).then(r => r.json()).then(data => {
+                            const lane = data.lane || 'context';
+                            const labels = { context: 'Note', steer: 'Steering', fast_lane: 'Quick' };
+                            ActionConsole.addEntry('system', `${labels[lane]}: "${text.substring(0, 60)}"`);
+                            console.log(`🔀 INTERJECT result: lane=${lane} action=${data.action}`);
+                            // Fast lane responses come with text — display + TTS them
+                            if (lane === 'fast_lane' && data.response) {
+                                this.displayMessage('assistant', data.response);
+                                this.callbacks.onMessage('assistant', data.response);
+                                TranscriptPanel.addMessage('assistant', data.response);
+                                // Parse action tags from fast lane response
+                                this.parseActionTags(data.response);
+                            }
+                        }).catch(() => {
+                            ActionConsole.addEntry('system', `Interjecting: "${text.substring(0, 60)}"`);
+                        });
+                        // Show the user's message in transcript
                         if (!opts.skipDisplay) {
                             this.displayMessage('user', text);
                             this.callbacks.onMessage('user', text);
                             TranscriptPanel.addMessage('user', text, { imageUrl: opts.imageUrl || null });
                         }
                         // Return early — the existing streaming response will receive
-                        // the steered output.  Do NOT abort fetch or start a new one.
+                        // the steered/queued output.  Do NOT abort fetch or start a new one.
                         return;
                     }
                 } else {
@@ -5163,16 +5178,31 @@ initUpdateChecker();
                         }).catch(() => {});
                         this.stopAudio();
                     } else {
-                        // Agent working silently → STEER
-                        console.log(`🔀 STEER: injecting "${transcript.substring(0,50)}" into active run`);
-                        ActionConsole.addEntry('system', `Steering: "${transcript.substring(0, 60)}"`);
-                        fetch(`${this.config.serverUrl}/api/conversation/steer`, {
+                        // Agent working silently → INTERJECT (smart routing)
+                        console.log(`🔀 INTERJECT: "${transcript.substring(0,50)}" into active run`);
+                        fetch(`${this.config.serverUrl}/api/conversation/interject`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ message: transcript, source: 'voice-handleUserTranscript' }),
-                        }).catch(() => {});
+                        }).then(r => r.json()).then(data => {
+                            const lane = data.lane || 'context';
+                            const labels = { context: 'Note', steer: 'Steering', fast_lane: 'Quick' };
+                            ActionConsole.addEntry('system', `${labels[lane]}: "${transcript.substring(0, 60)}"`);
+                            // Fast lane responses come with text — display + TTS them
+                            if (lane === 'fast_lane' && data.response) {
+                                const cm = ModeManager?.clawdbotMode;
+                                if (cm) {
+                                    cm.displayMessage('assistant', data.response);
+                                    cm.callbacks.onMessage('assistant', data.response);
+                                    cm.parseActionTags(data.response);
+                                }
+                                TranscriptPanel.addMessage('assistant', data.response);
+                            }
+                        }).catch(() => {
+                            ActionConsole.addEntry('system', `Interjecting: "${transcript.substring(0, 60)}"`);
+                        });
                         // Show user text, reset STT for next input, and return.
-                        // The existing streaming response will receive the steered output.
+                        // The existing streaming response will receive the steered/queued output.
                         this.callbacks.onTranscript(transcript, true);
                         TranscriptPanel.addMessage('user', transcript);
                         this.stt.resetProcessing();
