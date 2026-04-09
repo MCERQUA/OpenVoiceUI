@@ -40,7 +40,7 @@
 
     <!-- UI modules (global scripts — must load before app module) -->
     <script src="src/ui/themes/ThemeManager.js?v=2"></script>
-    <script src="src/ui/face/FaceRenderer.js?v=2"></script>
+    <script src="src/ui/face/FaceRenderer.js?v=3"></script>
     <script src="src/face/HaloSmokeFace.js?v=2"></script>
     <!-- Plugin face scripts loaded dynamically from /api/plugins/assets -->
     <script>
@@ -63,7 +63,8 @@
         } catch(e) { console.warn('[Plugins] No plugin assets:', e.message); }
     })();
     </script>
-    <script src="src/ui/face/FacePicker.js?v=2"></script>
+    <script src="src/ui/face/FacePicker.js?v=3"></script>
+    <script src="src/ui/face/CustomFaceLoader.js?v=1"></script>
     <script src="src/ui/settings/SettingsPanel.js?v=2"></script>
 
     <!-- Pyodide — Python runtime in the browser (lazy-loaded, non-blocking) -->

@@ -363,6 +363,7 @@ select{cursor:pointer}
   <div class="nav-section">
     <div class="nav-label">Content</div>
     <div class="nav-item" id="nav-canvas" onclick="show('canvas')"><span class="nav-icon">&#x25A3;</span><span class="nav-text">Canvas Pages</span></div>
+    <div class="nav-item" id="nav-faces" onclick="show('faces')"><span class="nav-icon">&#x1F3AD;</span><span class="nav-text">Custom Faces</span></div>
     <div class="nav-item" id="nav-workspace" onclick="show('workspace')"><span class="nav-icon">&#x1F4C2;</span><span class="nav-text">Workspace Files</span></div>
     <div class="nav-item" id="nav-music" onclick="show('music')"><span class="nav-icon">&#x266B;</span><span class="nav-text">Music (Suno)</span></div>
   </div>
@@ -567,6 +568,75 @@ select{cursor:pointer}
     </div>
   </div>
 
+  <!-- CUSTOM FACES -->
+  <div class="panel" id="panel-faces">
+    <div class="panel-inner">
+      <div class="ph">
+        <div class="ph-title">Custom Faces</div>
+        <div class="ph-sub">Custom faces are HTML pages that render in the voice avatar area. They receive mood, audio amplitude, and theme data in real-time.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-o" onclick="CustomFaces.load()" title="Refresh">Refresh</button>
+        <button class="btn btn-p" onclick="CustomFaces.createFromTemplate()" title="Create from starter template">+ New Face</button>
+        <button class="btn btn-o" onclick="CustomFaces.showPromoteDialog()" title="Copy a canvas page into faces">Promote Canvas Page</button>
+        <label class="btn btn-o" style="cursor:pointer" title="Upload an HTML file">Upload HTML
+          <input type="file" accept=".html,.htm" style="display:none" onchange="CustomFaces.uploadFile(this)">
+        </label>
+      </div>
+
+      <!-- Face list -->
+      <div id="faces-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
+        <div class="loading"><div class="spin"></div>Loading...</div>
+      </div>
+
+      <!-- Promote dialog -->
+      <div id="faces-promote-dialog" style="display:none;margin-top:16px">
+        <div class="box" style="padding:12px">
+          <div style="font-weight:600;margin-bottom:8px">Select a canvas page to promote:</div>
+          <select id="faces-promote-select" style="width:100%;padding:8px;border-radius:6px;background:var(--surface-1);color:var(--bright);border:1px solid var(--border)"></select>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-p" onclick="CustomFaces.promote()">Promote</button>
+            <button class="btn btn-o" onclick="$('faces-promote-dialog').style.display='none'">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Editor panel (shown when editing a face) -->
+      <div id="faces-editor" style="display:none;margin-top:16px">
+        <div class="box" style="padding:0;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:between;padding:10px 14px;background:var(--surface-2);border-bottom:1px solid var(--border)">
+            <div style="flex:1">
+              <span style="font-weight:600;color:var(--bright)" id="faces-editor-title">Editing face</span>
+              <span style="font-size:11px;color:var(--dim);margin-left:8px" id="faces-editor-id"></span>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-p btn-sm" onclick="CustomFaces.saveEditor()" title="Save changes">Save</button>
+              <button class="btn btn-o btn-sm" onclick="CustomFaces.closeEditor()">Close</button>
+            </div>
+          </div>
+          <div style="display:flex;min-height:420px">
+            <!-- Code editor -->
+            <div style="flex:1;display:flex;flex-direction:column;border-right:1px solid var(--border)">
+              <div style="padding:6px 10px;font-size:11px;color:var(--dim);background:var(--surface-1);border-bottom:1px solid var(--border)">HTML Source</div>
+              <textarea id="faces-editor-code" spellcheck="false" style="flex:1;width:100%;border:none;resize:none;padding:10px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12px;line-height:1.5;background:var(--surface-1);color:var(--bright);tab-size:2;outline:none"></textarea>
+            </div>
+            <!-- Live preview -->
+            <div style="width:300px;min-width:200px;display:flex;flex-direction:column">
+              <div style="padding:6px 10px;font-size:11px;color:var(--dim);background:var(--surface-1);border-bottom:1px solid var(--border)">Live Preview</div>
+              <div style="flex:1;display:flex;align-items:center;justify-content:center;background:#0a0e1a;padding:12px">
+                <iframe id="faces-editor-preview" style="width:200px;height:200px;border:2px solid rgba(255,255,255,0.1);border-radius:16px;background:#0a0e1a" sandbox="allow-scripts allow-same-origin"></iframe>
+              </div>
+              <div style="padding:8px 10px;display:flex;gap:6px;border-top:1px solid var(--border)">
+                <button class="btn btn-o btn-sm" onclick="CustomFaces.refreshPreview()" title="Refresh preview">Refresh Preview</button>
+                <button class="btn btn-o btn-sm" onclick="CustomFaces.testMood()" title="Cycle through moods">Test Moods</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </main>
 </div>
 
@@ -600,6 +670,7 @@ const loaders = {
   builder:()=>Builder.load(),
   plugins:()=>Plugins.load(),
   canvas:()=>CanvasPages.load(),
+  faces:()=>CustomFaces.load(),
   workspace:()=>Workspace.load(),
   music:()=>Music.load(),
   clients:()=>Clients.load(),
@@ -1747,6 +1818,243 @@ document.addEventListener('keydown',function(e){
     if($('panel-workspace').classList.contains('active')&&Workspace.currentFile&&Workspace.dirty) Workspace.save();
   }
 });
+
+// Custom Faces manager
+const CustomFaces = {
+  faces: {},
+  _editingId: null,
+  _moodIdx: 0,
+  _moods: ['neutral','happy','sad','angry','thinking','surprised','listening'],
+
+  async load() {
+    const grid = $('faces-grid');
+    grid.innerHTML = '<div class="loading"><div class="spin"></div>Loading...</div>';
+    try {
+      const d = await (await fetch('/api/custom-faces?sync=1')).json();
+      this.faces = d.faces || {};
+      this.render();
+    } catch(e) {
+      grid.innerHTML = '<div class="empty">Failed to load: '+esc(e.message)+'</div>';
+    }
+  },
+
+  render() {
+    const grid = $('faces-grid');
+    const entries = Object.entries(this.faces);
+    if (!entries.length) {
+      grid.innerHTML = '<div class="empty" style="grid-column:1/-1;text-align:center;padding:40px">' +
+        '<div style="font-size:32px;margin-bottom:12px">&#x1F3AD;</div>' +
+        '<div style="color:var(--bright);font-weight:600;margin-bottom:4px">No custom faces yet</div>' +
+        '<div style="color:var(--dim);font-size:13px;max-width:360px;margin:0 auto">Click <b>+ New Face</b> to create from a starter template, <b>Upload HTML</b> to add your own, or <b>Promote Canvas Page</b> to turn an existing page into a face.</div>' +
+        '</div>';
+      return;
+    }
+    grid.innerHTML = entries.map(([id, f]) =>
+      '<div class="box" style="padding:14px">' +
+        '<div style="display:flex;gap:10px;margin-bottom:8px">' +
+          // Mini preview iframe
+          '<div style="width:64px;height:64px;border-radius:10px;overflow:hidden;background:#0a0e1a;flex-shrink:0;border:1px solid rgba(255,255,255,0.08)">' +
+            '<iframe src="/faces/custom/' + esc(f.filename || id+'.html') + '" style="width:64px;height:64px;border:none;pointer-events:none;transform-origin:0 0" sandbox="allow-scripts allow-same-origin"></iframe>' +
+          '</div>' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-weight:600;color:var(--bright);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(f.name||id) + '</div>' +
+            '<div style="font-size:11px;color:var(--dim);margin-top:1px">custom:' + esc(id) + '</div>' +
+            (f.description ? '<div style="font-size:11px;color:var(--dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.description) + '</div>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:5px;flex-wrap:wrap">' +
+          '<button class="btn btn-p btn-sm" onclick="CustomFaces.activate(\'custom:' + esc(id) + '\')">Activate</button>' +
+          '<button class="btn btn-o btn-sm" onclick="CustomFaces.edit(\'' + esc(id) + '\')">Edit Code</button>' +
+          '<button class="btn btn-o btn-sm" onclick="CustomFaces.preview(\'' + esc(id) + '\')">Full Preview</button>' +
+          '<button class="btn btn-o btn-sm" style="color:var(--red)" onclick="CustomFaces.remove(\'' + esc(id) + '\')">Remove</button>' +
+        '</div>' +
+      '</div>'
+    ).join('');
+  },
+
+  // ── Editor ──────────────────────────────────────────────────────────────
+  async edit(slug) {
+    this._editingId = slug;
+    $('faces-editor').style.display = 'block';
+    $('faces-editor-title').textContent = (this.faces[slug]?.name || slug);
+    $('faces-editor-id').textContent = 'custom:' + slug;
+    const code = $('faces-editor-code');
+    code.value = 'Loading...';
+    try {
+      const d = await (await fetch('/api/custom-faces/' + encodeURIComponent(slug) + '?source=1')).json();
+      code.value = d.source || '<!-- Source not available -->';
+      this.refreshPreview();
+    } catch(e) { code.value = '<!-- Error loading source: ' + e.message + ' -->'; }
+    // Scroll editor into view
+    $('faces-editor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Tab key inserts spaces instead of changing focus
+    code.addEventListener('keydown', this._tabHandler);
+  },
+
+  _tabHandler(e) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const t = e.target, s = t.selectionStart, end = t.selectionEnd;
+      t.value = t.value.substring(0, s) + '  ' + t.value.substring(end);
+      t.selectionStart = t.selectionEnd = s + 2;
+    }
+  },
+
+  closeEditor() {
+    $('faces-editor').style.display = 'none';
+    const code = $('faces-editor-code');
+    code.removeEventListener('keydown', this._tabHandler);
+    this._editingId = null;
+  },
+
+  async saveEditor() {
+    if (!this._editingId) return;
+    const html = $('faces-editor-code').value;
+    try {
+      const r = await fetch('/api/custom-faces', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ html, filename: this._editingId + '.html' })
+      });
+      if (r.ok) {
+        toast('Face saved', 'green');
+        this.refreshPreview();
+        this.load(); // refresh card list
+      } else { const d = await r.json(); toast(d.error || 'Save failed', 'red'); }
+    } catch(e) { toast(e.message, 'red'); }
+  },
+
+  refreshPreview() {
+    const iframe = $('faces-editor-preview');
+    if (!iframe || !this._editingId) return;
+    // Reload iframe with cache-bust
+    iframe.src = '/faces/custom/' + encodeURIComponent(this._editingId) + '.html?t=' + Date.now();
+  },
+
+  testMood() {
+    const iframe = $('faces-editor-preview');
+    if (!iframe) return;
+    const mood = this._moods[this._moodIdx % this._moods.length];
+    this._moodIdx++;
+    try {
+      iframe.contentWindow.postMessage({ type: 'face:mood', mood }, '*');
+      iframe.contentWindow.postMessage({ type: 'face:amplitude', value: 0.6 }, '*');
+      toast('Mood: ' + mood, 'blue');
+      // Reset amplitude after 1s
+      setTimeout(() => {
+        try { iframe.contentWindow.postMessage({ type: 'face:amplitude', value: 0 }, '*'); } catch(_){}
+      }, 1000);
+    } catch(e) { toast('Preview not ready', 'yellow'); }
+  },
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+  async activate(faceId) {
+    try {
+      const pid = 'default';
+      await fetch('/api/profiles/' + pid, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ ui: { face_mode: faceId } })
+      });
+      toast('Face activated: ' + faceId, 'green');
+    } catch(e) { toast(e.message, 'red'); }
+  },
+
+  preview(slug) {
+    window.open('/faces/custom/' + encodeURIComponent(slug) + '.html', '_blank');
+  },
+
+  async remove(slug) {
+    if (!confirm('Archive face "' + slug + '"? The HTML file will be renamed to .bak.')) return;
+    try {
+      const r = await fetch('/api/custom-faces/' + encodeURIComponent(slug), { method: 'DELETE' });
+      if (r.ok) {
+        toast('Face archived', 'green');
+        if (this._editingId === slug) this.closeEditor();
+        this.load();
+      }
+      else { const d = await r.json(); toast(d.error || 'Failed', 'red'); }
+    } catch(e) { toast(e.message, 'red'); }
+  },
+
+  // ── Create / Upload / Promote ────────────────────────────────────────────
+  async createFromTemplate() {
+    const name = prompt('Face name:', 'My Custom Face');
+    if (!name) return;
+    try {
+      const r = await fetch('/api/custom-faces/template');
+      if (!r.ok) throw new Error('Template not found');
+      const html = await r.text();
+      const slug = name.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_]+/g, '-').replace(/-+/g, '-').trim() || 'custom-face';
+      const finalHtml = html.replace(/content="Template Face"/g, 'content="' + name.replace(/"/g, '&quot;') + '"');
+      const cr = await fetch('/api/custom-faces', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ html: finalHtml, filename: slug + '.html', title: name })
+      });
+      if (cr.ok) {
+        toast('Face created — opening editor', 'green');
+        await this.load();
+        this.edit(slug);
+      }
+      else { const d = await cr.json(); toast(d.error || 'Failed', 'red'); }
+    } catch(e) { toast(e.message, 'red'); }
+  },
+
+  async uploadFile(input) {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const html = await file.text();
+      const slug = file.name.replace(/\.html?$/i, '').replace(/[^\w-]/g, '-').replace(/-+/g, '-') || 'uploaded-face';
+      const r = await fetch('/api/custom-faces', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ html, filename: slug + '.html' })
+      });
+      if (r.ok) {
+        toast('Face uploaded: ' + file.name, 'green');
+        await this.load();
+        this.edit(slug);
+      }
+      else { const d = await r.json(); toast(d.error || 'Upload failed', 'red'); }
+    } catch(e) { toast(e.message, 'red'); }
+  },
+
+  async showPromoteDialog() {
+    $('faces-promote-dialog').style.display = 'block';
+    const select = $('faces-promote-select');
+    select.innerHTML = '<option value="">Loading canvas pages...</option>';
+    try {
+      const d = await (await fetch('/api/canvas/manifest')).json();
+      const pages = Object.keys(d.pages || {}).sort();
+      if (!pages.length) { select.innerHTML = '<option value="">No canvas pages found</option>'; return; }
+      select.innerHTML = pages.map(id =>
+        '<option value="' + esc(id) + '">' + esc(d.pages[id].display_name || id) + ' (' + esc(id) + ')</option>'
+      ).join('');
+    } catch(e) { select.innerHTML = '<option value="">Failed to load pages</option>'; }
+  },
+
+  async promote() {
+    const select = $('faces-promote-select');
+    const pageId = select.value;
+    if (!pageId) { toast('Select a page first', 'yellow'); return; }
+    try {
+      const r = await fetch('/api/custom-faces/promote', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ canvas_page_id: pageId })
+      });
+      if (r.ok) {
+        $('faces-promote-dialog').style.display = 'none';
+        toast('Promoted "' + pageId + '" to face', 'green');
+        await this.load();
+        this.edit(pageId);
+      } else { const d = await r.json(); toast(d.error || 'Failed', 'red'); }
+    } catch(e) { toast(e.message, 'red'); }
+  },
+};
 
 // Canvas Pages manager
 const CanvasPages = {

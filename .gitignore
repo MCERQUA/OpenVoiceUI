@@ -44,7 +44,9 @@ runtime/usage.db-wal
 # Sensitive / private
 runtime/known_faces/*
 !runtime/known_faces/.gitkeep
-runtime/faces/*/*
+runtime/faces/*.html
+runtime/faces/*.bak
+runtime/face-manifest.json
 agent_config_backup.json
 docs/agent-snapshot-*.json
 TOOLS.md

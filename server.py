@@ -202,6 +202,9 @@ app.register_blueprint(chatgpt_import_bp)
 from routes.plugins import plugins_bp
 app.register_blueprint(plugins_bp)
 
+from routes.custom_faces import custom_faces_bp
+app.register_blueprint(custom_faces_bp)
+
 from services.plugins import load_plugins
 load_plugins(app)
 

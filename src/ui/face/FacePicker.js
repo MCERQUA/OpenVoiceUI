@@ -49,11 +49,39 @@ function persistFaceId(id) {
 
 async function loadManifest() {
     try {
-        const res = await fetch(MANIFEST_URL);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return await res.json();
+        // Load built-in manifest and custom faces manifest in parallel
+        const [builtInRes, customRes] = await Promise.all([
+            fetch(MANIFEST_URL).catch(() => null),
+            fetch('/api/custom-faces').catch(() => null),
+        ]);
+
+        const builtIn = builtInRes?.ok ? await builtInRes.json() : {
+            default: 'eyes',
+            faces: [
+                { id: 'eyes', name: 'AI Eyes',   description: 'Classic animated eyes', preview: null, moods: [], features: [] },
+                { id: 'orb',  name: 'Sound Orb', description: 'Audio-reactive orb',   preview: null, moods: [], features: [] }
+            ]
+        };
+
+        const custom = customRes?.ok ? await customRes.json() : { faces: {} };
+
+        // Append custom faces to the faces array
+        const customFaces = Object.entries(custom.faces || {}).map(([id, meta]) => ({
+            id: `custom:${id}`,
+            name: meta.name || id,
+            description: meta.description || '',
+            preview: meta.preview || null,
+            moods: meta.moods || [],
+            features: meta.features || ['custom'],
+            isCustom: true,
+        }));
+
+        return {
+            ...builtIn,
+            faces: [...(builtIn.faces || []), ...customFaces],
+        };
     } catch (err) {
-        console.warn('[FacePicker] Could not load manifest, using defaults:', err.message);
+        console.warn('[FacePicker] Could not load manifests, using defaults:', err.message);
         return {
             default: 'eyes',
             faces: [
@@ -104,12 +132,16 @@ function renderCard(face, isActive) {
         : `<div class="face-card-preview face-card-preview--placeholder">
                <span>${face.name.charAt(0)}</span>
            </div>`;
+    const customBadge = face.isCustom
+        ? '<div class="face-card-custom-badge" style="position:absolute;top:6px;left:6px;background:rgba(59,130,246,0.8);color:#fff;font-size:10px;padding:2px 6px;border-radius:4px;font-weight:600;">Custom</div>'
+        : '';
 
     return `
         <div class="face-card ${isActive ? 'face-card--active' : ''}" data-face-id="${face.id}" role="button" tabindex="0"
              aria-label="Select ${face.name}${isActive ? ' (active)' : ''}">
-            <div class="face-card-media">
+            <div class="face-card-media" style="position:relative">
                 ${previewHtml}
+                ${customBadge}
                 ${isActive ? '<div class="face-card-active-badge">Active</div>' : ''}
             </div>
             <div class="face-card-info">

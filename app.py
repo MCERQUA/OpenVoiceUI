@@ -122,6 +122,8 @@ def create_app(config_override: dict = None):
             '/api/theme',     # theme config — loaded before Clerk init
             '/api/music',     # music track list — loaded before Clerk init
             '/api/faces',     # face list — loaded before Clerk init
+            '/api/custom-faces', # custom face manifest + CRUD — loaded by face picker
+            '/faces/custom/', # custom face HTML — loaded in iframe by face-box
             '/api/icons/',    # icon library + generated icons — static images, no secrets
             '/api/suno',      # Suno song generation — status polling + song list (no secrets)
             '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user

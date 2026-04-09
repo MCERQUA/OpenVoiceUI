@@ -224,11 +224,13 @@
 
     "ui": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
         "theme":            { "type": "string", "enum": ["dark", "light"], "default": "dark" },
         "theme_preset":     { "type": "string", "enum": ["blue", "purple", "green", "red", "orange"] },
         "face_enabled":     { "type": "boolean", "default": true },
+        "face_mode":        { "type": "string", "description": "Active face ID. Built-in: 'eyes', 'halo-smoke', 'orb'. Custom: 'custom:slug-name'." },
+        "face_config":      { "type": ["object", "null"], "additionalProperties": true, "default": null, "description": "Face-specific configuration (e.g. BigHead character traits, custom face settings)." },
         "face_mood":        { "type": "string", "default": "neutral" },
         "transcript_panel": { "type": "boolean", "default": true },
         "thought_bubbles":  { "type": "boolean", "default": true },

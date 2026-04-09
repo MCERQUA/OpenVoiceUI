@@ -70,6 +70,32 @@
             display: none !important;
         }
 
+        /* Custom HTML face (iframe) — transparent box, hide built-in elements */
+        .face-box.custom-face-mode {
+            background: transparent;
+            border-color: transparent;
+            box-shadow: none;
+            padding: 0;
+        }
+        .face-box.custom-face-mode .eyes-container,
+        .face-box.custom-face-mode .mouth-container,
+        .face-box.custom-face-mode .side-visualizer,
+        .face-box.custom-face-mode .visualizer-container {
+            display: none !important;
+        }
+        .face-box .custom-face-iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            border-radius: 25px;
+            z-index: 20;
+            pointer-events: none;
+            background: transparent;
+        }
+
         /* Eyes container */
         .eyes-container {
             display: flex;
