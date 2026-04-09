@@ -464,6 +464,16 @@ def load_plugins(app):
                     if src.is_file() and not dst.exists():
                         shutil.copy2(str(src), str(dst))
                         logger.info(f"[Plugin:{plugin_id}] Copied page: {Path(page_file).name}")
+                        # Register in manifest so icon meta tag gets extracted
+                        try:
+                            from routes.canvas import add_page_to_manifest
+                            page_name = Path(page_file).name
+                            title = page_entry.get("title", Path(page_file).stem.replace('-', ' ').title())
+                            content = dst.read_text(errors='ignore')[:2048] if dst.exists() else ''
+                            add_page_to_manifest(page_name, title, content=content)
+                            logger.info(f"[Plugin:{plugin_id}] Registered {page_name} in manifest")
+                        except Exception as e:
+                            logger.warning(f"[Plugin:{plugin_id}] Manifest registration failed: {e}")
 
             # ── Serve face scripts + CSS as static assets under /plugins/<id>/ ──
             faces = manifest.get("faces", [])

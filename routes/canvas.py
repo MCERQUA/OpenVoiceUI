@@ -114,6 +114,35 @@ def _notify_brain(event_type: str, **data) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Page icon extraction — canonical icon lives in the HTML via meta tag
+# ---------------------------------------------------------------------------
+
+_PAGE_ICON_RE = re.compile(
+    r'<meta\s+name=["\']page-icon["\']\s+content=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+def extract_page_icon(html_content: str) -> str | None:
+    """Extract icon type from <meta name="page-icon" content="..."> in page HTML.
+
+    Returns the content value (an icon type name like 'dashboard', 'game', etc.)
+    or None if no meta tag is found.  Only reads the first 2KB for speed.
+    """
+    m = _PAGE_ICON_RE.search(html_content[:2048])
+    return m.group(1).strip() if m else None
+
+
+def extract_page_icon_from_file(filepath: Path) -> str | None:
+    """Read a canvas page HTML file and extract its icon meta tag."""
+    try:
+        with open(filepath, 'r', errors='ignore') as f:
+            head = f.read(2048)
+        return extract_page_icon(head)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Canvas context helpers (imported by server.py conversation handler)
 # ---------------------------------------------------------------------------
 
@@ -354,6 +383,8 @@ def _sync_canvas_manifest_locked() -> dict:
         except Exception:
             content = ''
         category = existing.get('category') or suggest_category(title, content)
+        # Extract canonical icon from page HTML meta tag
+        page_icon = extract_page_icon_from_file(filepath) or existing.get('icon')
         manifest['pages'][page_id] = {
             **{k: v for k, v in existing.items() if k not in ('file', 'title', 'created_at')},
             'filename': filename,
@@ -367,6 +398,8 @@ def _sync_canvas_manifest_locked() -> dict:
             'voice_aliases': existing.get('voice_aliases') or generate_voice_aliases(title),
             'access_count': existing.get('access_count', 0),
         }
+        if page_icon:
+            manifest['pages'][page_id]['icon'] = page_icon
         if category not in manifest['categories']:
             manifest['categories'][category] = {
                 'name': category.title(),
@@ -379,6 +412,16 @@ def _sync_canvas_manifest_locked() -> dict:
         # Inject every newly-discovered page into the desktop icon list so it
         # appears immediately without requiring the desktop to be open first.
         _inject_page_into_desktop_state(manifest, page_id)
+
+    # Extract icons from page HTML for any page missing an icon in the manifest.
+    # The <meta name="page-icon"> tag in the HTML is the canonical source.
+    for page_id, page_data in manifest['pages'].items():
+        if page_id == 'desktop' or page_data.get('icon'):
+            continue  # already has icon or is the desktop entry
+        filepath = CANVAS_PAGES_DIR / page_data.get('filename', f'{page_id}.html')
+        page_icon = extract_page_icon_from_file(filepath)
+        if page_icon:
+            page_data['icon'] = page_icon
 
     # Reconcile: pages registered in pages{} but missing from their category list
     for page_id, page_data in manifest['pages'].items():
@@ -426,6 +469,11 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
     page_id = Path(filename).stem
     category = suggest_category(title, content)
 
+    # Extract canonical icon from the page HTML meta tag
+    page_icon = extract_page_icon(content) if content else None
+    if not page_icon:
+        page_icon = extract_page_icon_from_file(CANVAS_PAGES_DIR / filename)
+
     is_new_page = False
     if page_id in manifest['pages']:
         # Page already exists — preserve user-customised state (description, starred, etc.)
@@ -439,6 +487,9 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
             # Never clear description — it may hold serialised desktop state or notes
             'description': description[:200] if description else existing.get('description', ''),
         }
+        # Update icon from page HTML if present (page is source of truth)
+        if page_icon:
+            manifest['pages'][page_id]['icon'] = page_icon
     else:
         is_new_page = True
         manifest['pages'][page_id] = {
@@ -455,6 +506,8 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
             'voice_aliases': generate_voice_aliases(title),
             'access_count': 0,
         }
+        if page_icon:
+            manifest['pages'][page_id]['icon'] = page_icon
     if category not in manifest['categories']:
         manifest['categories'][category] = {
             'name': category.title(),
@@ -804,7 +857,7 @@ def canvas_pages_proxy(path):
                         "https://api.anthropic.com https://api.cohere.ai "
                         "https://api.dataforseo.com https://sandbox.dataforseo.com; "
                     "worker-src blob:; "
-                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app"
+                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app https://midiviz.com"
                 )
                 return resp
             else:

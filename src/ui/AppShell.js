@@ -63,9 +63,9 @@ const SHELL_HTML = `
             id="canvas-iframe"
             src="about:blank"
             data-canvas-src=""
-            sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-top-navigation-by-user-activation allow-downloads"
+            sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-top-navigation-by-user-activation allow-downloads allow-pointer-lock"
             style="width: 100vw; height: 100vh; border: none; display: block; touch-action: manipulation;"
-            allow="autoplay; fullscreen">
+            allow="autoplay; fullscreen; microphone; camera; pointer-lock">
         </iframe>
     </div>
 

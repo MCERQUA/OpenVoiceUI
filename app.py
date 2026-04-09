@@ -204,7 +204,7 @@ def create_app(config_override: dict = None):
         response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
         # Allow microphone and camera for voice/vision app; block geolocation
         response.headers.setdefault(
-            'Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()'
+            'Permissions-Policy', 'camera=(self), microphone=*, geolocation=(), pointer-lock=*'
         )
         response.headers.setdefault(
             'Content-Security-Policy',
