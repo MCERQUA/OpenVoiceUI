@@ -1,0 +1,35 @@
+{
+  "id": "twitter-bookmarks",
+  "name": "Twitter Bookmarks",
+  "version": "1.0.0",
+  "description": "Connect your X/Twitter account to fetch and search your bookmarks. Your agent can research bookmarked content and report findings.",
+  "author": "jambot",
+  "type": "page",
+  "license": "MIT",
+  "requires": "openvoiceui >= 1.0",
+
+  "pages": [
+    {
+      "file": "pages/twitter-bookmarks.html",
+      "name": "Bookmarks Intelligence",
+      "icon": "bookmark"
+    },
+    {
+      "file": "pages/twitter-bookmarks-setup.html",
+      "name": "Twitter Bookmarks Setup",
+      "icon": "settings"
+    }
+  ],
+
+  "routes": [
+    {
+      "module": "routes/twitter_bookmarks.py",
+      "blueprint": "twitter_bookmarks_bp",
+      "prefix": "/api/twitter"
+    }
+  ],
+
+  "lore": {
+    "files": ["lore/TWITTER-BOOKMARKS.md"]
+  }
+}

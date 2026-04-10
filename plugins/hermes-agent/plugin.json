@@ -1,0 +1,46 @@
+{
+  "id": "hermes-agent",
+  "name": "Hermes Agent",
+  "version": "1.0.0",
+  "description": "Self-improving AI agent with auto-generated skills, deep memory search, and autonomous tasks. Adds a standalone Hermes agent mode with full voice support.",
+  "author": "Nous Research / OpenVoiceUI",
+  "type": "gateway",
+  "license": "MIT",
+  "repository": "https://github.com/MCERQUA/openvoiceui-plugins",
+  "provides": "gateway",
+  "gateway_class": "HermesGateway",
+  "hermes_version": "0.6.0",
+  "requires_env": ["HERMES_HOST"],
+  "pages": [
+    {
+      "file": "pages/hermes.html",
+      "name": "Agent Skills",
+      "icon": "brain"
+    }
+  ],
+  "routes": [
+    {
+      "module": "routes/hermes.py",
+      "blueprint": "hermes_bp",
+      "prefix": "/api/hermes"
+    }
+  ],
+  "profiles": [
+    "profiles/hermes-agent.json"
+  ],
+  "container": {
+    "image": "nousresearch/hermes-agent:v0.6.0",
+    "hostname": "hermes",
+    "port": 18790,
+    "env": {
+      "API_SERVER_ENABLED": "true",
+      "API_SERVER_PORT": "18790",
+      "API_SERVER_HOST": "0.0.0.0"
+    },
+    "volumes": {
+      "./hermes-data": "/opt/data"
+    },
+    "mem_limit": "2g",
+    "cpus": "1.0"
+  }
+}
