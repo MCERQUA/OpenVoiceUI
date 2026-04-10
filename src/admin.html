@@ -1203,48 +1203,246 @@ const Builder = {
 // Plugins
 const Plugins={
   _hasPending:false,
+  _availableCache:[],
+  _installedCache:[],
   async load(){
     const [ir,ar]=await Promise.all([fetch('/api/plugins').catch(()=>null),fetch('/api/plugins/available').catch(()=>null)]);
     // Installed
     const installed=ir?await ir.json():{plugins:[]};
+    this._installedCache=installed.plugins||[];
     const iel=$('plugins-installed');
     this._hasPending=installed.plugins?.some(p=>p.status==='installed_pending_restart');
-    // Show/hide restart button based on pending plugins
     const rbtn=$('plugins-restart-btn');
     if(rbtn)rbtn.style.display=this._hasPending?'':'none';
     if(!installed.plugins?.length){iel.innerHTML='<div class="empty" style="padding:16px;font-size:13px;color:var(--dim)">No plugins installed</div>'}
     else{iel.innerHTML=installed.plugins.map(p=>{
       const statusClass=p.status==='active'?'b-green':p.status==='installed_pending_restart'?'b-yellow':'b-gray';
       const statusLabel=p.status==='installed_pending_restart'?'pending restart':p.status||'?';
+      const settingsBtn=p.install_config&&p.has_container
+        ?'<button class="btn btn-o btn-sm" onclick="Plugins.toggleInstalledConfig(\''+esc(p.id)+'\')">Settings</button>':'';
       return '<div style="padding:10px 0;border-bottom:1px solid var(--border2)">'+
         '<div style="display:flex;align-items:center;justify-content:space-between">'+
           '<div><div style="font-weight:600;color:var(--bright)">'+esc(p.name)+'</div>'+
           '<div style="font-size:11px;color:var(--dim);margin-top:2px">'+esc(p.id)+' v'+esc(p.version||'?')+' &middot; '+esc(p.type||'extension')+'</div></div>'+
           '<div style="display:flex;gap:6px;align-items:center">'+
             '<span class="badge '+statusClass+'">'+esc(statusLabel)+'</span>'+
+            settingsBtn+
             '<button class="btn btn-d btn-sm" onclick="Plugins.uninstall(\''+esc(p.id)+'\')">Remove</button>'+
           '</div>'+
         '</div>'+
         '<div style="font-size:12px;color:var(--dim);margin-top:4px">'+esc(p.description||'')+'</div>'+
         (p.faces?.length?'<div style="font-size:11px;color:var(--cyan);margin-top:4px">Faces: '+p.faces.map(f=>esc(f)).join(', ')+'</div>':'')+
         (p.pages?.length?'<div style="font-size:11px;color:var(--blue);margin-top:2px">Pages: '+p.pages.map(f=>esc(f)).join(', ')+'</div>':'')+
+        (p.install_config&&p.has_container?'<div id="plugin-iconfig-'+esc(p.id)+'" style="display:none;margin-top:12px;border-top:1px solid var(--border2);padding-top:12px"></div>':'')+
       '</div>'}).join('')}
     // Available
     const ael=$('plugins-available');
     if(!ar||!ar.ok){ael.innerHTML='<div class="empty" style="padding:16px;font-size:13px;color:var(--dim)">No plugin catalog available</div>';return}
     const available=await ar.json();
     const avail=(available.plugins||[]).filter(p=>!installed.plugins?.find(i=>i.id===p.id));
+    this._availableCache=avail;
     if(!avail.length){ael.innerHTML='<div style="padding:16px;font-size:13px;color:var(--dim)">All available plugins are installed</div>'}
-    else{ael.innerHTML=avail.map(p=>
-      '<div style="padding:10px 0;border-bottom:1px solid var(--border2)">'+
+    else{ael.innerHTML=avail.map(p=>{
+      const hasConfig=p.install_config&&p.install_config.sections;
+      const btn=hasConfig
+        ?'<button class="btn btn-p btn-sm" onclick="Plugins.toggleConfig(\''+esc(p.id)+'\')">Configure</button>'
+        :'<button class="btn btn-p btn-sm" onclick="Plugins.install(\''+esc(p.id)+'\')">Install</button>';
+      return '<div style="padding:10px 0;border-bottom:1px solid var(--border2)">'+
         '<div style="display:flex;align-items:center;justify-content:space-between">'+
           '<div><div style="font-weight:600;color:var(--bright)">'+esc(p.name)+'</div>'+
           '<div style="font-size:11px;color:var(--dim);margin-top:2px">'+esc(p.id)+' &middot; '+esc(p.type||'extension')+'</div></div>'+
-          '<button class="btn btn-p btn-sm" onclick="Plugins.install(\''+esc(p.id)+'\')">Install</button>'+
+          btn+
         '</div>'+
         '<div style="font-size:12px;color:var(--dim);margin-top:4px">'+esc(p.description||'')+'</div>'+
-      '</div>'
-    ).join('')}
+        (hasConfig?'<div id="plugin-config-'+esc(p.id)+'" style="display:none;margin-top:12px;border-top:1px solid var(--border2);padding-top:12px"></div>':'')+
+      '</div>'}).join('')}
+  },
+  // Toggle config panel for available (pre-install) plugins
+  toggleConfig(id){
+    const panel=$('plugin-config-'+id);
+    if(!panel)return;
+    if(panel.style.display!=='none'){panel.style.display='none';return}
+    panel.style.display='';
+    const plugin=this._availableCache.find(p=>p.id===id);
+    if(!plugin||!plugin.install_config)return;
+    this._renderConfigPanel(panel,plugin,false);
+  },
+  // Toggle config panel for installed plugins (post-install settings)
+  async toggleInstalledConfig(id){
+    const panel=$('plugin-iconfig-'+id);
+    if(!panel)return;
+    if(panel.style.display!=='none'){panel.style.display='none';return}
+    panel.style.display='';
+    panel.innerHTML='<div style="padding:12px;color:var(--dim);font-size:12px">Loading current config...</div>';
+    const plugin=this._installedCache.find(p=>p.id===id);
+    if(!plugin||!plugin.install_config){panel.innerHTML='<div style="color:var(--dim);font-size:12px">No configuration available</div>';return}
+    try{
+      const r=await fetch('/api/plugins/'+id+'/config');
+      const current=r.ok?await r.json():{};
+      this._renderConfigPanel(panel,plugin,true);
+      // Pre-fill: show masked keys as placeholders, set provider dropdown
+      if(current.provider_keys){
+        for(const section of plugin.install_config.sections){
+          for(const f of section.fields){
+            if(f.type==='password'&&current.provider_keys[f.id]){
+              const inp=$('pcfg-'+id+'-'+f.id);
+              if(inp)inp.placeholder=current.provider_keys[f.id]+' (enter new to change)';
+            }
+          }
+        }
+      }
+      if(current.default_provider){
+        const sel=$('pcfg-'+id+'-default_provider');
+        if(sel){this._updateProviderDropdown(id,plugin);sel.value=current.default_provider}
+      }
+    }catch(e){panel.innerHTML='<div style="color:var(--red);font-size:12px">Failed to load config: '+esc(e.message)+'</div>'}
+  },
+  // Render config form from manifest install_config schema
+  _renderConfigPanel(container,plugin,isPostInstall){
+    const cfg=plugin.install_config;
+    const id=plugin.id;
+    let html='';
+    for(const section of cfg.sections){
+      html+='<div style="margin-bottom:16px">';
+      html+='<div style="font-weight:600;font-size:13px;color:var(--bright);margin-bottom:4px">'+esc(section.title)+'</div>';
+      if(section.description)html+='<div style="font-size:11px;color:var(--dim);margin-bottom:10px">'+esc(section.description)+'</div>';
+      const popular=section.fields.filter(f=>f.group==='popular'||!f.group);
+      const additional=section.fields.filter(f=>f.group==='additional');
+      const renderField=(f)=>{
+        const fid='pcfg-'+id+'-'+f.id;
+        if(f.type==='password'){
+          return '<div style="margin-bottom:10px">'+
+            '<label style="display:block;font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px">'+esc(f.label)+'</label>'+
+            '<div style="display:flex;gap:6px">'+
+              '<input type="password" id="'+fid+'" placeholder="'+esc(f.placeholder||'')+'" '+
+                'style="flex:1;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-family:var(--mono);font-size:13px" '+
+                'autocomplete="off" oninput="Plugins._onKeyChange(\''+esc(id)+'\')">'+
+              '<button class="btn btn-o btn-sm" onclick="const i=this.previousElementSibling;i.type=i.type===\'password\'?\'text\':\'password\';this.textContent=i.type===\'password\'?\'Show\':\'Hide\'">Show</button>'+
+            '</div>'+
+            (f.help?'<div style="font-size:10px;color:var(--dim);margin-top:3px">'+esc(f.help)+'</div>':'')+
+          '</div>';
+        }
+        if(f.type==='select'){
+          return '<div style="margin-bottom:10px">'+
+            '<label style="display:block;font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px">'+esc(f.label)+'</label>'+
+            '<select id="'+fid+'" style="width:100%;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:8px 11px;color:var(--text);font-size:13px">'+
+              '<option value="">-- Select --</option>'+
+            '</select>'+
+            (f.help?'<div style="font-size:10px;color:var(--dim);margin-top:3px">'+esc(f.help)+'</div>':'')+
+          '</div>';
+        }
+        if(f.type==='toggle'){
+          return '<div style="margin-bottom:10px">'+
+            '<label style="display:flex;align-items:center;gap:8px;cursor:pointer">'+
+              '<input type="checkbox" id="'+fid+'"'+(f.default?' checked':'')+' style="width:16px;height:16px;accent-color:var(--blue)">'+
+              '<span style="font-size:12px;color:var(--text)">'+esc(f.label)+'</span>'+
+            '</label>'+
+            (f.help?'<div style="font-size:10px;color:var(--dim);margin-top:3px;margin-left:24px">'+esc(f.help)+'</div>':'')+
+          '</div>';
+        }
+        return '';
+      };
+      html+=popular.map(renderField).join('');
+      if(additional.length){
+        html+='<details style="margin-top:8px"><summary style="cursor:pointer;font-size:11px;color:var(--blue);user-select:none">More providers ('+additional.length+')</summary>'+
+          '<div style="margin-top:8px">'+additional.map(renderField).join('')+'</div></details>';
+      }
+      html+='</div>';
+    }
+    const btnLabel=isPostInstall?'Save Settings':'Install & Start';
+    const btnAction=isPostInstall
+      ?'Plugins.saveConfig(\''+esc(id)+'\')'
+      :'Plugins.installWithConfig(\''+esc(id)+'\')';
+    html+='<div style="display:flex;gap:8px;align-items:center;margin-top:12px">'+
+      '<button class="btn btn-g" onclick="'+btnAction+'">'+btnLabel+'</button>'+
+      '<span id="pcfg-status-'+esc(id)+'" style="font-size:12px;color:var(--dim)"></span>'+
+    '</div>';
+    container.innerHTML=html;
+    this._updateProviderDropdown(id,plugin);
+  },
+  // Update provider dropdown based on which keys have values
+  _onKeyChange(pluginId){
+    const plugin=[...this._availableCache,...this._installedCache].find(p=>p.id===pluginId);
+    if(plugin)this._updateProviderDropdown(pluginId,plugin);
+  },
+  _updateProviderDropdown(pluginId,plugin){
+    const cfg=plugin.install_config;
+    if(!cfg)return;
+    // Find which key fields have values
+    const filledKeys=new Set();
+    for(const section of cfg.sections){
+      for(const f of section.fields){
+        if(f.type==='password'){
+          const inp=$('pcfg-'+pluginId+'-'+f.id);
+          if(inp&&inp.value.trim())filledKeys.add(f.id);
+        }
+      }
+    }
+    // Update select fields that have requires_key
+    for(const section of cfg.sections){
+      for(const f of section.fields){
+        if(f.type==='select'&&f.options){
+          const sel=$('pcfg-'+pluginId+'-'+f.id);
+          if(!sel)continue;
+          const curVal=sel.value;
+          let html='<option value="">-- Select --</option>';
+          for(const opt of f.options){
+            const enabled=!opt.requires_key||filledKeys.has(opt.requires_key);
+            html+='<option value="'+esc(opt.value)+'"'+(enabled?'':' disabled style="color:var(--dim)"')+(curVal===opt.value?' selected':'')+'>'+esc(opt.label)+(enabled?'':' (enter key above)')+'</option>';
+          }
+          sel.innerHTML=html;
+        }
+      }
+    }
+  },
+  // Collect all config field values
+  _collectConfig(id){
+    const config={};
+    document.querySelectorAll('[id^="pcfg-'+id+'-"]').forEach(el=>{
+      const key=el.id.replace('pcfg-'+id+'-','');
+      if(key==='status')return;
+      if(el.type==='checkbox')config[key]=el.checked;
+      else if(el.value.trim())config[key]=el.value.trim();
+    });
+    return config;
+  },
+  // Install with config from the form
+  async installWithConfig(id){
+    const config=this._collectConfig(id);
+    const hasKey=Object.entries(config).some(([k,v])=>k.endsWith('_api_key')||k==='hf_token'||k==='github_token'?v:false);
+    if(!hasKey){toast('Enter at least one API key','orange');return}
+    if(!config.default_provider){toast('Select a default provider','orange');return}
+    const statusEl=$('pcfg-status-'+id);
+    if(statusEl)statusEl.textContent='Installing...';
+    try{
+      const r=await fetch('/api/plugins/'+id+'/install',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({config})
+      });
+      const d=await r.json();
+      if(d.ok){
+        toast('Installed: '+id+(d.restarting?' — restarting...':''),'green');
+        if(d.restarting)this._showRestarting();
+        else this.load();
+      }else{toast('Error: '+(d.error||'failed'),'red');if(statusEl)statusEl.textContent=''}
+    }catch(e){toast(e.message,'red');if(statusEl)statusEl.textContent=''}
+  },
+  // Save settings for an already-installed plugin
+  async saveConfig(id){
+    const config=this._collectConfig(id);
+    const statusEl=$('pcfg-status-'+id);
+    if(statusEl)statusEl.textContent='Saving...';
+    try{
+      const r=await fetch('/api/plugins/'+id+'/config',{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({config})
+      });
+      const d=await r.json();
+      if(d.ok){
+        toast('Settings saved. Container restarting.','green');
+        if(statusEl)statusEl.textContent='Saved';
+      }else{toast(d.error||'Save failed','red');if(statusEl)statusEl.textContent=''}
+    }catch(e){toast(e.message,'red');if(statusEl)statusEl.textContent=''}
   },
   async install(id){
     try{
@@ -1275,7 +1473,6 @@ const Plugins={
   _showRestarting(){
     const msg=$('plugins-restart-msg');
     if(msg){msg.style.display='';msg.textContent='Restarting — page will reload automatically...'}
-    // Poll until the app comes back, then reload
     let attempts=0;
     const poll=setInterval(async()=>{
       attempts++;

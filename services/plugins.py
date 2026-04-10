@@ -238,7 +238,7 @@ def _get_username() -> str:
     return ""
 
 
-def _run_lifecycle_hook(manifest: dict, hook_name: str) -> dict:
+def _run_lifecycle_hook(manifest: dict, hook_name: str, config: dict = None) -> dict:
     """
     Run a plugin lifecycle hook (post_install or pre_uninstall).
     Calls the host provisioning service if the plugin requires a container.
@@ -258,9 +258,11 @@ def _run_lifecycle_hook(manifest: dict, hook_name: str) -> dict:
             logger.warning("Cannot provision: unable to determine username")
             return {"ok": False, "error": "Cannot determine username for provisioning"}
         try:
-            logger.info(f"Provisioning container: {plugin_type} for {username}")
+            logger.info(f"Provisioning container: {plugin_type} for {username} (config: {bool(config)})")
             resp = requests.post(
                 f"{_get_provision_url()}/provision/{plugin_type}/{username}",
+                json=config if config else None,
+                headers={"Content-Type": "application/json"} if config else {},
                 timeout=PROVISION_TIMEOUT,
             )
             result = resp.json()
@@ -300,12 +302,16 @@ def _run_lifecycle_hook(manifest: dict, hook_name: str) -> dict:
 # ── Install / Uninstall ────────────────────────────────────────────────
 
 
-def install_plugin(plugin_id: str) -> Optional[dict]:
+def install_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
     """Install a plugin from the local catalog or remote repo.
 
     Checks local catalog first. If not found, downloads from the remote
     GitHub repository. This allows standalone installs (Pinokio, Docker)
     to install community plugins without a mounted plugin-catalog volume.
+
+    Args:
+        config: Optional configuration dict (API keys, provider selection)
+                passed through to the provisioning service for gateway plugins.
     """
     dest = PLUGIN_DIR / plugin_id
     if dest.exists():
@@ -332,7 +338,7 @@ def install_plugin(plugin_id: str) -> Optional[dict]:
     manifest = json.loads((dest / "plugin.json").read_text())
 
     # Run post_install lifecycle hook (container provisioning, etc.)
-    hook_result = _run_lifecycle_hook(manifest, "post_install")
+    hook_result = _run_lifecycle_hook(manifest, "post_install", config=config)
     if not hook_result.get("ok") and "error" in hook_result:
         logger.error(f"Post-install hook failed for {plugin_id}, rolling back")
         shutil.rmtree(str(dest))
@@ -557,3 +563,62 @@ def load_plugins(app):
             logger.error(f"Failed to load plugin {plugin_dir.name}: {e}")
 
     logger.info(f"Plugin system: {count} plugin(s) loaded from {PLUGIN_DIR}")
+
+
+# ── Plugin config read/write (proxy to provisioning service) ──────────
+
+
+def get_plugin_config(plugin_id: str) -> Optional[dict]:
+    """Read current configuration from a gateway plugin via provisioning service."""
+    plugin = _registry.get(plugin_id)
+    if not plugin:
+        return None
+    lifecycle = plugin.get("lifecycle", {})
+    post_install = lifecycle.get("post_install", {})
+    if not post_install.get("requires_container"):
+        return None
+
+    plugin_type = post_install.get("provision", "")
+    username = _get_username()
+    if not plugin_type or not username:
+        return None
+
+    try:
+        resp = requests.get(
+            f"{_get_provision_url()}/config/{plugin_type}/{username}",
+            timeout=10,
+        )
+        if resp.ok:
+            return resp.json()
+    except Exception as e:
+        logger.error(f"Failed to read config for {plugin_id}: {e}")
+    return None
+
+
+def update_plugin_config(plugin_id: str, config: dict) -> dict:
+    """Update configuration for an installed gateway plugin. Restarts container."""
+    plugin = _registry.get(plugin_id)
+    if not plugin:
+        return {"ok": False, "error": "Plugin not installed"}
+    lifecycle = plugin.get("lifecycle", {})
+    post_install = lifecycle.get("post_install", {})
+    if not post_install.get("requires_container"):
+        return {"ok": False, "error": "Plugin doesn't use containers"}
+
+    plugin_type = post_install.get("provision", "")
+    username = _get_username()
+    if not plugin_type or not username:
+        return {"ok": False, "error": "Cannot determine username"}
+
+    try:
+        resp = requests.put(
+            f"{_get_provision_url()}/config/{plugin_type}/{username}",
+            json=config,
+            headers={"Content-Type": "application/json"},
+            timeout=PROVISION_TIMEOUT,
+        )
+        return resp.json()
+    except requests.ConnectionError:
+        return {"ok": False, "error": "Provisioning service not reachable"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

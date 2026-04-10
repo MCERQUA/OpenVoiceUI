@@ -18,8 +18,6 @@
 
 ---
 
-<!-- TODO: Add 15-30s demo GIF showing voice prompt → canvas page rendering live -->
-
 > **[Watch the demo](https://openvoiceui.com)** -- see voice-to-canvas in action
 
 ---
@@ -80,18 +78,6 @@ Self-hosted. Your hardware, your data. MIT licensed, forever free.
 - Cron jobs for scheduled automation
 - File explorer with drag-and-drop
 - Agent profiles — switch personas, voices, and LLM providers from the admin panel
-
----
-
-## Plugins
-
-OpenVoiceUI has a plugin system for community-built extensions. Plugins can include animated face packs, canvas pages, workflow dashboards, gateway adapters, or any combination of these.
-
-**Our first community plugin:**
-
-- [**BHB Animated Characters**](https://github.com/MCERQUA/openvoiceui-plugins) — Custom animated avatar faces by BHB
-
-**Build your own.** If you can build a canvas page, an animated face, or a workflow dashboard, you can package it as a plugin. See the [plugins repo](https://github.com/MCERQUA/openvoiceui-plugins) for submission guidelines and the BHB plugin as a reference.
 
 ---
 
@@ -260,14 +246,6 @@ Access at **localhost:5001/admin**. Mobile-responsive.
 
 ---
 
-## Extend It
-
-- **Build a plugin** — Face packs, canvas pages, workflow dashboards, or any combination. See the [plugins repo](https://github.com/MCERQUA/openvoiceui-plugins) for examples and submission guidelines.
-- **Build a gateway plugin** — Connect any LLM provider. See [`plugins/README.md`](plugins/README.md)
-- **Build an adapter** — Add new STT/TTS providers. See [`src/adapters/_template.js`](src/adapters/_template.js)
-
----
-
 ## Tech Stack
 
 | Layer | Technology |
@@ -284,13 +262,29 @@ Access at **localhost:5001/admin**. Mobile-responsive.
 
 ---
 
+## Plugins
+
+OpenVoiceUI has a plugin system for community-built extensions. Plugins can include animated face packs, canvas pages, workflow dashboards, gateway adapters, or any combination.
+
+| Plugin | Type | Description |
+|--------|------|-------------|
+| [**BHB Animated Characters**](https://github.com/MCERQUA/openvoiceui-plugins) | Face Pack | Animated BigHead Billionaires character avatars with lip-sync, mood expressions, and show lore. By [BHaleyart](https://github.com/BHALEYART) |
+| **Hermes Agent** | Gateway | Self-improving AI agent with auto-generated skills, deep memory search, and autonomous tasks. Adds OpenClaw+Hermes hybrid and Hermes-only modes |
+| **SEO Platform** | Canvas Page | Full SEO dashboard powered by DataForSEO — keyword research, rank tracking, backlink analysis, site audits, AI visibility, and local SEO |
+| **Twenty CRM** | Canvas Page | Connect to a Twenty CRM instance for contact, company, deal, and task management with embedded CRM view and setup wizard |
+| **Twitter Bookmarks** | Canvas Page | Connect your X/Twitter account to fetch and search bookmarks. Agent can research bookmarked content autonomously |
+| **ByteRover Long-Term Memory** | Context Engine | Persistent long-term memory that curates conversation knowledge every turn into a human-readable markdown knowledge base |
+
+**Build your own.** Face packs, canvas pages, workflow dashboards, gateway adapters ([template](plugins/README.md)), or STT/TTS adapters ([template](src/adapters/_template.js)). See the [plugins repo](https://github.com/MCERQUA/openvoiceui-plugins) for submission guidelines.
+
+---
+
 ## Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE.md)
-- [TTS Provider Guide](docs/tts-providers.md)
-- [Supertonic Setup](docs/supertonic-setup.md)
+- [Introduction](docs/intro.md)
 - [Environment Variables](.env.example)
-- [PR Review Checklist](docs/PR-REVIEW-CHECKLIST.md)
+- [Plugin Development](plugins/README.md)
+- [Contributing](CONTRIBUTING.md)
 - [Website](https://openvoiceui.com)
 
 ## Contributing
