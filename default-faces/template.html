@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="face-name" content="Template Face">
+    <meta name="face-description" content="Starter template - audio-reactive pulsing circle">
+    <meta name="face-author" content="OpenVoiceUI">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+        canvas { display: block; width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+<canvas id="face-canvas"></canvas>
+<script>
+/**
+ * OpenVoiceUI Custom Face Template
+ *
+ * This face runs inside an iframe in the face-box container (~380x380px).
+ * It receives real-time data from the parent via postMessage:
+ *
+ *   face:mood      { mood: 'neutral'|'happy'|'sad'|'angry'|'thinking'|'surprised'|'listening' }
+ *   face:amplitude { value: 0.0-1.0 }  — audio level from TTS speech
+ *   face:theme     { primary: '#hex', accent: '#hex' }  — current theme colors
+ *   face:speaking  { speaking: true|false }  — whether the AI is currently speaking
+ *   face:state     { state: 'speaking'|'listening'|'thinking'|'idle' }
+ *
+ * Customize the draw() function below to create your own face animation.
+ * Use the `state` object to react to mood, audio, and theme changes.
+ */
+
+// ── Face State (updated by postMessage) ────────────────────────────────────
+const state = {
+    mood: 'neutral',
+    amplitude: 0,
+    speaking: false,
+    agentState: 'idle',
+    theme: { primary: '#0088ff', accent: '#00ffff' },
+};
+
+// ── postMessage Bridge ─────────────────────────────────────────────────────
+window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || !d.type) return;
+    switch (d.type) {
+        case 'face:mood':      state.mood = d.mood; break;
+        case 'face:amplitude': state.amplitude = d.value; break;
+        case 'face:theme':     state.theme = { primary: d.primary || state.theme.primary, accent: d.accent || state.theme.accent }; break;
+        case 'face:speaking':  state.speaking = d.speaking; break;
+        case 'face:state':     state.agentState = d.state; break;
+    }
+});
+
+// Signal ready to parent
+window.parent.postMessage({ type: 'face:ready' }, '*');
+
+// ── Canvas Setup ───────────────────────────────────────────────────────────
+const canvas = document.getElementById('face-canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+    W = canvas.width = canvas.clientWidth * devicePixelRatio;
+    H = canvas.height = canvas.clientHeight * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Color Helpers ──────────────────────────────────────────────────────────
+function hexToRgb(hex) {
+    const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return r ? [parseInt(r[1], 16), parseInt(r[2], 16), parseInt(r[3], 16)] : [0, 136, 255];
+}
+
+function rgba(hex, a) {
+    const [r, g, b] = hexToRgb(hex);
+    return `rgba(${r},${g},${b},${a})`;
+}
+
+// ── Mood Color Map ─────────────────────────────────────────────────────────
+const MOOD_GLOW = {
+    neutral:   null,  // use theme accent
+    happy:     '#4ade80',
+    sad:       '#60a5fa',
+    angry:     '#f87171',
+    thinking:  '#c084fc',
+    surprised: '#fbbf24',
+    listening: '#22d3ee',
+};
+
+// ── Animation ──────────────────────────────────────────────────────────────
+let t = 0;
+
+function draw() {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2;
+    const cy = h / 2;
+    const baseR = Math.min(w, h) * 0.25;
+
+    // Audio-reactive radius
+    const amp = state.amplitude;
+    const pulse = 1 + amp * 0.35;
+    const breathe = 1 + Math.sin(t * 0.02) * 0.03;
+    const r = baseR * pulse * breathe;
+
+    // Mood-aware color
+    const glowColor = MOOD_GLOW[state.mood] || state.theme.accent;
+    const primaryColor = state.theme.primary;
+
+    // Outer glow
+    const outerGlow = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r * 2.5);
+    outerGlow.addColorStop(0, rgba(glowColor, 0.15 + amp * 0.2));
+    outerGlow.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = outerGlow;
+    ctx.fill();
+
+    // Main circle
+    const grad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, 0, cx, cy, r);
+    grad.addColorStop(0, rgba(glowColor, 0.9));
+    grad.addColorStop(0.6, rgba(primaryColor, 0.6));
+    grad.addColorStop(1, rgba(primaryColor, 0.2));
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Border ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = rgba(glowColor, 0.5 + amp * 0.3);
+    ctx.lineWidth = 2 + amp * 2;
+    ctx.stroke();
+
+    // Highlight
+    const hl = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, 0, cx - r * 0.35, cy - r * 0.35, r * 0.4);
+    hl.addColorStop(0, 'rgba(255,255,255,0.35)');
+    hl.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = hl;
+    ctx.fill();
+
+    // Speaking indicator — small pulsing ring
+    if (state.speaking) {
+        const sr = r + 8 + Math.sin(t * 0.15) * 4;
+        ctx.beginPath();
+        ctx.arc(cx, cy, sr, 0, Math.PI * 2);
+        ctx.strokeStyle = rgba(glowColor, 0.3 + Math.sin(t * 0.1) * 0.15);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+
+    // Thinking state — rotating dots
+    if (state.mood === 'thinking' || state.agentState === 'thinking') {
+        for (let i = 0; i < 3; i++) {
+            const angle = t * 0.05 + (i * Math.PI * 2 / 3);
+            const dx = cx + Math.cos(angle) * (r + 16);
+            const dy = cy + Math.sin(angle) * (r + 16);
+            ctx.beginPath();
+            ctx.arc(dx, dy, 3, 0, Math.PI * 2);
+            ctx.fillStyle = rgba(glowColor, 0.6);
+            ctx.fill();
+        }
+    }
+
+    t++;
+    requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>

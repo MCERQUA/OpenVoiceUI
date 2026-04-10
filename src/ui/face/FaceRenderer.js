@@ -89,8 +89,8 @@ window.FaceRenderer = {
         if (savedMode && this.hasFace(savedMode)) {
             this.currentMode = savedMode;
             this._currentConfig = savedConfig;
-        } else if (savedMode && !this.hasFace(savedMode)) {
-            // Face plugin not installed — fall back gracefully
+        } else if (savedMode && !this.hasFace(savedMode) && !savedMode?.startsWith('custom:')) {
+            // Face plugin not installed — fall back gracefully (custom faces load async below)
             console.warn(`[FaceRenderer] Face "${savedMode}" not installed, using "${this._defaultMode}"`);
             this.currentMode = this.hasFace(this._defaultMode) ? this._defaultMode : 'eyes';
         }
@@ -102,7 +102,10 @@ window.FaceRenderer = {
             }
         });
 
-        // Initial render
+        // Discover custom faces from server manifest
+        this._discoverCustomFaces(savedMode, savedConfig);
+
+        // Initial render (custom faces may switch later when async load completes)
         this.render();
     },
 
@@ -143,6 +146,50 @@ window.FaceRenderer = {
 
         this.render();
         window.dispatchEvent(new CustomEvent('faceModeChanged', { detail: modeName }));
+    },
+
+    /**
+     * Fetch custom faces from /api/custom-faces and register them.
+     * If the saved face_mode is a custom face, switch to it once loaded.
+     */
+    _discoverCustomFaces(savedMode, savedConfig) {
+        fetch('/api/custom-faces')
+            .then(r => r.ok ? r.json() : null)
+            .then(manifest => {
+                if (!manifest?.faces) return;
+                for (const [faceId, meta] of Object.entries(manifest.faces)) {
+                    const customId = `custom:${faceId}`;
+                    this.modes[customId] = {
+                        name: meta.name || faceId,
+                        description: meta.description || 'Custom face'
+                    };
+                    this._registry[customId] = this._createCustomHandler(faceId);
+                    console.log(`[FaceRenderer] Registered custom face: ${customId}`);
+                }
+                // If saved mode is a custom face that just loaded, switch to it now
+                if (savedMode?.startsWith('custom:') && this.hasFace(savedMode) && this.currentMode !== savedMode) {
+                    this.setMode(savedMode, savedConfig, { skipPersist: true });
+                }
+            })
+            .catch(e => console.warn('[FaceRenderer] Custom faces discovery failed:', e));
+    },
+
+    /** Create a FaceRenderer handler that delegates to CustomFaceLoader. */
+    _createCustomHandler(faceId) {
+        return {
+            start: (container, config) => {
+                window.CustomFaceLoader?.start(container, faceId, config);
+            },
+            stop: () => {
+                window.CustomFaceLoader?.stop();
+            },
+            setMood: (mood) => {
+                window.CustomFaceLoader?.setMood(mood);
+            },
+            setAmplitude: (amp) => {
+                window.CustomFaceLoader?.setAmplitude(amp);
+            }
+        };
     },
 
     cleanup() {

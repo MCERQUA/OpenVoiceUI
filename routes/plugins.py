@@ -24,6 +24,8 @@ from services.plugins import (
     install_plugin,
     uninstall_plugin,
     get_container_status,
+    get_plugin_config,
+    update_plugin_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,10 @@ def list_installed():
                 "status": p.get("_status", "active"),
                 "faces": [f.get("id") for f in p.get("faces", [])],
                 "pages": [pg.get("name") for pg in p.get("pages", [])],
+                "install_config": p.get("install_config"),
+                "has_container": bool(
+                    p.get("lifecycle", {}).get("post_install", {}).get("requires_container")
+                ),
             }
             for p in plugins
         ]
@@ -66,6 +72,10 @@ def list_available():
                 "description": p.get("description"),
                 "type": p.get("type"),
                 "author": p.get("author"),
+                "install_config": p.get("install_config"),
+                "has_container": bool(
+                    p.get("lifecycle", {}).get("post_install", {}).get("requires_container")
+                ),
             }
             for p in plugins
         ]
@@ -115,7 +125,9 @@ def restart_app():
 @plugins_bp.route("/api/plugins/<plugin_id>/install", methods=["POST"])
 def install(plugin_id):
     """Install a plugin from the catalog. Handles container provisioning if needed."""
-    result = install_plugin(plugin_id)
+    body = request.get_json(silent=True) or {}
+    config = body.get("config")
+    result = install_plugin(plugin_id, config=config)
     if result is None:
         existing = get_plugin(plugin_id)
         if existing:
@@ -168,3 +180,26 @@ def plugin_container_status(plugin_id):
     if status is None:
         return jsonify({"error": "Plugin not found or doesn't use containers"}), 404
     return jsonify(status)
+
+
+@plugins_bp.route("/api/plugins/<plugin_id>/config", methods=["GET"])
+def get_config(plugin_id):
+    """Read current config from a running gateway plugin."""
+    config = get_plugin_config(plugin_id)
+    if config is None:
+        return jsonify({"error": "Plugin not found or has no configuration"}), 404
+    return jsonify(config)
+
+
+@plugins_bp.route("/api/plugins/<plugin_id>/config", methods=["PUT"])
+def save_config(plugin_id):
+    """Update config for an installed gateway plugin. Restarts container."""
+    body = request.get_json(silent=True) or {}
+    config = body.get("config")
+    if not config:
+        return jsonify({"error": "config is required"}), 400
+
+    result = update_plugin_config(plugin_id, config)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error", "Update failed")}), 500
+    return jsonify(result)

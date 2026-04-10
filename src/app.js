@@ -4486,6 +4486,11 @@ initUpdateChecker();
 
             playAudio(base64Audio, format = 'wav') {
                 try {
+                    // Skip audio if user switched to text mode mid-stream
+                    if (window.TranscriptPanel?.textMode) {
+                        console.log('[ClawdbotMode] Skipping audio chunk — text mode active');
+                        return;
+                    }
                     // Queue audio - if already playing, it will play after current finishes
                     this.audioQueue.push({ base64: base64Audio, format });
                     // Only start playback if nothing is currently playing
@@ -7633,6 +7638,10 @@ initUpdateChecker();
                 this.textMode = !this.textMode;
                 this._updateModeUI();
                 console.log(`[TranscriptPanel] Mode: ${this.textMode ? 'TEXT' : 'VOICE'}`);
+                // Switching to text mode: stop any in-progress audio and clear queue
+                if (this.textMode) {
+                    ModeManager.clawdbotMode?.stopAudio();
+                }
             },
 
             _updateModeUI() {

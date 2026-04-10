@@ -1,0 +1,32 @@
+{
+  "id": "seo-platform",
+  "name": "SEO Platform",
+  "version": "1.0.0",
+  "description": "Full SEO dashboard powered by DataForSEO — keyword research, rank tracking, backlink analysis, site audits, AI visibility, local SEO, and brand monitoring.",
+  "author": "jambot",
+  "type": "page",
+  "license": "MIT",
+  "requires": "openvoiceui >= 1.0",
+  "repository": "https://github.com/MCERQUA/openvoiceui-plugins",
+
+  "pages": [
+    {
+      "file": "pages/seo-platform.html",
+      "name": "SEO Platform",
+      "icon": "seo"
+    },
+    {
+      "file": "pages/seo-settings.html",
+      "name": "SEO Settings",
+      "icon": "settings"
+    }
+  ],
+
+  "routes": [
+    {
+      "module": "routes/seo.py",
+      "blueprint": "seo_platform_bp",
+      "prefix": "/api/seo-platform"
+    }
+  ]
+}

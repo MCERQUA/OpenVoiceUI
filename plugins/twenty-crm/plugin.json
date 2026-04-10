@@ -1,0 +1,33 @@
+{
+  "id": "twenty-crm",
+  "name": "Twenty CRM",
+  "version": "1.0.0",
+  "description": "Connect to a Twenty CRM instance for contact, company, deal, and task management. Includes an embedded CRM view and guided setup wizard.",
+  "author": "jambot",
+  "type": "page",
+  "license": "MIT",
+  "requires": "openvoiceui >= 1.0",
+
+  "pages": [
+    {
+      "file": "pages/crm.html",
+      "name": "CRM",
+      "icon": "crm"
+    },
+    {
+      "file": "pages/crm-setup.html",
+      "name": "CRM Setup",
+      "icon": "settings"
+    }
+  ],
+
+  "routes": [
+    {
+      "module": "routes/crm.py",
+      "blueprint": "twenty_crm_bp",
+      "prefix": "/api/crm"
+    }
+  ],
+
+  "requires_env": ["TWENTY_CRM_API_KEY"]
+}
