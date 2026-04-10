@@ -1,7 +1,7 @@
 {
   "name": "openvoiceui",
-  "version": "2026.4.7",
-  "description": "Voice-powered AI assistant platform — connect any LLM, any TTS, with a live web canvas, music generation, and agent orchestration",
+  "version": "2026.4.10",
+  "description": "Voice-powered AI assistant platform \u2014 connect any LLM, any TTS, with a live web canvas, music generation, and agent orchestration",
   "bin": {
     "openvoiceui": "cli/index.js"
   },
