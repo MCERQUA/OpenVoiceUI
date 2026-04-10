@@ -289,7 +289,7 @@ OpenVoiceUI has a plugin system for community-built extensions. Plugins can incl
 
 ## Contributing
 
-We welcome contributions — especially plugins. Build a face pack, a canvas page, a workflow dashboard, or a full extension and submit it to the [plugins repo](https://github.com/MCERQUA/openvoiceui-plugins). See [CONTRIBUTING.md](CONTRIBUTING.md) for code contribution guidelines. This project is MIT licensed — fork it, build on it, make it yours.
+We welcome contributions — especially plugins. Build a face pack, a canvas page, a workflow dashboard, or a full extension and submit it to the [plugins repo](https://github.com/MCERQUA/openvoiceui-plugins). See [CONTRIBUTING.md](CONTRIBUTING.md) for code contribution guidelines and [openvoiceui.com](https://openvoiceui.com) for full documentation.
 
 ## License
 
@@ -301,6 +301,5 @@ We welcome contributions — especially plugins. Build a face pack, a canvas pag
   <a href="https://openvoiceui.com">Website</a> &nbsp;&middot;&nbsp;
   <a href="https://github.com/MCERQUA/OpenVoiceUI">GitHub</a> &nbsp;&middot;&nbsp;
   <a href="https://www.npmjs.com/package/openvoiceui">npm</a> &nbsp;&middot;&nbsp;
-  <a href="https://github.com/MCERQUA/openvoiceui-plugins">Plugins</a> &nbsp;&middot;&nbsp;
-  <a href="mailto:hello@openvoiceui.com">hello@openvoiceui.com</a>
+  <a href="https://github.com/MCERQUA/openvoiceui-plugins">Plugins</a>
 </p>
