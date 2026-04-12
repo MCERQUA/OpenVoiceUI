@@ -544,10 +544,32 @@ def _truncate_at_sentence(text: str, max_chars: int) -> str:
     return chunk.strip()
 
 
+def normalize_action_tags(text: str) -> str:
+    """Normalize whitespace inside action-tag brackets.
+
+    GLM sometimes emits `[ MUSIC_PLAY:Title ]` with stray whitespace after `[`
+    or around `:` / before `]`. Every downstream regex (TTS strip, frontend
+    tag extraction) requires a tight `[TAG:value]` form, so we collapse the
+    spaces here before any other processing runs.
+    """
+    if not text:
+        return text
+    text = re.sub(r'\[\s+', '[', text)
+    def _fix(m):
+        inner = m.group(1).strip()
+        inner = re.sub(r'\s*:\s*', ':', inner, count=1)
+        return f'[{inner}]'
+    text = re.sub(r'\[([A-Z][A-Z0-9_]*(?:\s*:[^\]]*)?)\]', _fix, text)
+    return text
+
+
 def clean_for_tts(text: str) -> str:
     """Remove markdown, reasoning tokens, and non-speech characters for TTS."""
     if not text:
         return ''
+
+    # Normalize sloppy tag whitespace FIRST so every strip regex below matches.
+    text = normalize_action_tags(text)
 
     # Strip GPT-OSS-120B reasoning tokens (but not if NO/YES is the full response)
     if text.strip().upper() not in ['NO', 'YES', 'NO.', 'YES.']:
@@ -1089,15 +1111,35 @@ def _conversation_inner():
                 'A new voice session has just started. Give a brief, friendly one-sentence greeting. '
                 'Do NOT address anyone by name — no face has been recognized and you do not know who is speaking.'
             )
-    elif user_message.startswith('__suno_complete__:'):
-        _song_title = user_message[len('__suno_complete__:'):].strip() or 'your track'
-        _gateway_message = (
-            f'The Suno song "{_song_title}" just finished generating and is now ready in the music player. '
-            f'Let the user know in one brief, friendly sentence and offer to play it for them.'
-        )
     else:
         _gateway_message = user_message
-    message_with_context = context_prefix + _gateway_message if context_prefix else _gateway_message
+
+    # Suno completion → inject as [SYSTEM] prefix on the NEXT real user turn so
+    # the agent sees the event in the same conversation turn as the user's reply.
+    # This replaces the old ghost-LLM `__suno_complete__` path that left the main
+    # session without context when the user said "yeah" to play the song.
+    _suno_prefix = ''
+    if user_message not in ('__session_start__',):
+        try:
+            from routes.suno import completed_songs_queue as _suno_q
+            if _suno_q:
+                _pending_titles = [s.get('title', 'Unknown Track') for s in list(_suno_q)]
+                if _pending_titles:
+                    _titles_str = ', '.join(f'"{t}"' for t in _pending_titles)
+                    _play_tag = _pending_titles[0]  # most recent — what "yeah/play it" refers to
+                    _suno_prefix = (
+                        f'[SYSTEM: Suno just finished generating {_titles_str} and they are now '
+                        f'loaded in the Generated playlist. If the user is asking to play the song '
+                        f'(e.g. "yeah", "play it", "let\'s hear it"), confirm briefly and emit '
+                        f'[MUSIC_PLAY:{_play_tag}] in your response.]\n\n'
+                    )
+                    # Pop so the note only fires on the turn immediately after completion.
+                    _suno_q.clear()
+        except Exception as _e:
+            logger.warning(f'Suno pending-note injection failed: {_e}')
+
+    _gateway_message_with_suno = _suno_prefix + _gateway_message if _suno_prefix else _gateway_message
+    message_with_context = context_prefix + _gateway_message_with_suno if context_prefix else _gateway_message_with_suno
     ai_response = None
     captured_actions = []
 
@@ -1470,6 +1512,8 @@ def _conversation_inner():
                                 evt['response'] = "One moment, still working on that."
                                 metrics['fallback_used'] = 1
                             full_response = evt.get('response')
+                            if full_response:
+                                full_response = normalize_action_tags(full_response)
                             if full_response and max_response_chars:
                                 full_response = _truncate_at_sentence(full_response, max_response_chars)
 
@@ -1843,6 +1887,8 @@ def _conversation_inner():
                     evt = event_queue.get_nowait()
                     if evt['type'] == 'text_done':
                         ai_response = evt.get('response')
+                        if ai_response:
+                            ai_response = normalize_action_tags(ai_response)
                     elif evt['type'] == 'handshake':
                         metrics['handshake_ms'] = evt['ms']
                 metrics['llm_inference_ms'] = int((time.time() - t_llm_start) * 1000)
