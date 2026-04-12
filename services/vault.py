@@ -139,10 +139,14 @@ def _is_oauth_platform_configured(catalog_entry: dict) -> bool:
 # JSONC parser — string-aware so URLs and other // inside strings are preserved
 # ---------------------------------------------------------------------------
 def _parse_jsonc(text: str) -> dict:
-    """Parse JSONC (JSON with // and /* */ comments and trailing commas).
+    """Parse JSONC / JS object literal — JSON plus:
+      - // and /* */ comments
+      - trailing commas before } or ]
+      - unquoted identifier keys (e.g., `agents: {` instead of `"agents": {`)
 
-    Walks character-by-character so comment markers inside string literals
-    (e.g., "postgresql://..." or "https://...") are left intact.
+    Walks character-by-character so comment markers and key-quoting regexes
+    only apply OUTSIDE of string literals (so URLs like "postgresql://..."
+    and string values like "foo: bar" aren't touched).
     """
     out = []
     i = 0
@@ -180,6 +184,17 @@ def _parse_jsonc(text: str) -> dict:
             out.append(c)
             i += 1
     stripped = ''.join(out)
+
+    # Quote unquoted identifier keys. Matches `identifier:` at the start
+    # of a line (after whitespace or `{` or `,`), followed by a colon.
+    # Only rewrites when the identifier is NOT already in quotes.
+    # (?<![\"\w]) ensures we don't eat part of a larger identifier/string.
+    stripped = re.sub(
+        r'([\{\,\n]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)',
+        r'\1"\2"\3',
+        stripped,
+    )
+
     # Strip trailing commas before } or ]
     stripped = re.sub(r',(\s*[}\]])', r'\1', stripped)
     return json.loads(stripped)
@@ -1404,15 +1419,23 @@ def get_available_models(username: str) -> list[dict]:
 def get_current_model_selection(username: str) -> dict:
     """Get current primary/fallback model selection from openclaw.json.
 
-    openclaw.json is owned by UID 1000 (openclaw's node user) with chmod 600.
-    The openvoiceui Flask container runs as UID 1001 so reads will fail with
-    PermissionError. We catch that and return empty defaults so the
-    Connections page still loads; Phase 2 (Vault v2) moves model selection
-    into the vault itself and eliminates this cross-container read.
+    Resolution order:
+      1. /app/runtime/openclaw-client.json — Phase 1.5 single-file bind mount
+         (bypasses 700-perm parent dir; read-only)
+      2. /mnt/clients/<user>/openclaw/openclaw.json — direct host path
+         (usually fails PermissionError from the openvoiceui container)
+      3. /app/runtime/openclaw.json — fallback runtime path
+
+    The read is guarded against PermissionError so the Connections page
+    still loads gracefully if none of the paths work.
     """
-    config_path = _CLIENTS_DIR / username / 'openclaw' / 'openclaw.json'
-    if not _safe_exists(config_path):
-        config_path = _OPENCLAW_CONFIG_PATH
+    _phase15_path = Path('/app/runtime/openclaw-client.json')
+    if _safe_exists(_phase15_path):
+        config_path = _phase15_path
+    else:
+        config_path = _CLIENTS_DIR / username / 'openclaw' / 'openclaw.json'
+        if not _safe_exists(config_path):
+            config_path = _OPENCLAW_CONFIG_PATH
     if not _safe_exists(config_path):
         return {'primary': '', 'fallback': ''}
 
