@@ -845,18 +845,29 @@ def _update_env_file(path: Path, updates: dict) -> bool:
     if not new_text.endswith('\n'):
         new_text += '\n'
 
-    # Atomic write via tmp + rename
+    # Try atomic write via tmp + rename first (works when parent dir is writable).
+    # Fall back to direct write if the parent dir isn't writable but the file
+    # itself is — this is the case for /mnt/system/base/.platform-oauth.env
+    # which is bind-mounted as a single file rw, with parent dir read-only.
     tmp = path.with_suffix(path.suffix + '.vault-tmp')
     try:
         tmp.write_text(new_text)
         tmp.replace(path)
     except (PermissionError, OSError) as exc:
-        logger.error(f"Cannot write env file {path}: {exc}")
+        # Parent dir not writable — try direct write to the existing file
         try:
             tmp.unlink()
         except Exception:
             pass
-        return False
+        try:
+            with open(path, 'w') as f:
+                f.write(new_text)
+                f.flush()
+                os.fsync(f.fileno())
+            logger.info(f"Wrote env file {path} via direct write (parent dir not writable: {exc})")
+        except (PermissionError, OSError) as exc2:
+            logger.error(f"Cannot write env file {path}: {exc2}")
+            return False
     return True
 
 

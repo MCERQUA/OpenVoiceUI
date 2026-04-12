@@ -375,6 +375,7 @@ select{cursor:pointer}
     <div class="nav-label">Config</div>
     <div class="nav-item" id="nav-providers" onclick="show('providers')"><span class="nav-icon">&#x26A1;</span><span class="nav-text">Provider Config</span></div>
     <div class="nav-item" id="nav-connections" onclick="show('connections')"><span class="nav-icon">&#x1F517;</span><span class="nav-text">Connections</span></div>
+    <div class="nav-item" id="nav-platform-setup" onclick="show('platform-setup')"><span class="nav-icon">&#x2699;</span><span class="nav-text">Platform Setup</span></div>
   </div>
   <div class="nav-section">
     <div class="nav-label">System</div>
@@ -534,6 +535,17 @@ select{cursor:pointer}
     </div>
   </div>
 
+  <!-- PLATFORM SETUP — register OAuth apps once for all clients -->
+  <div class="panel" id="panel-platform-setup">
+    <div class="panel-inner">
+      <div class="ph">
+        <div class="ph-title">Platform Setup</div>
+        <div class="ph-sub">Register OAuth apps with Google, Facebook, QuickBooks, and LinkedIn so your clients can connect their accounts. This is operator-level configuration — done once, applies to every client on this instance. OAuth is optional; if you skip this, the OAuth section of the Connections page stays disabled and everything else works.</div>
+      </div>
+      <div id="platform-setup-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
+
   <!-- SYSTEM -->
   <div class="panel" id="panel-system">
     <div class="panel-inner">
@@ -676,6 +688,7 @@ const loaders = {
   clients:()=>Clients.load(),
   providers:()=>Providers.load(),
   connections:()=>Connections.load(),
+  'platform-setup':()=>PlatformSetup.load(),
   system:()=>System.load(),
   tests:()=>Tests.initSel(),
 };
@@ -1975,9 +1988,15 @@ const Connections={
       '</div>'+body;
     }
 
+    // Phase 1.5: docs/signup link so users can quickly get to the provider's
+    // site to register/sign up for an API key
+    const docsLink=c.docs_url
+      ?'<a href="'+esc(c.docs_url)+'" target="_blank" rel="noopener" style="font-size:11px;color:#3b82f6;text-decoration:none;margin-left:8px;white-space:nowrap" title="Open '+esc(c.name)+' to get an API key">Get key ↗</a>'
+      :'';
+
     return '<div class="box" style="margin-bottom:8px">'+
       '<div class="box-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">'+
-        '<span>'+esc(c.name)+pluginBadge+sourceBadge+'</span>'+
+        '<span>'+esc(c.name)+pluginBadge+sourceBadge+docsLink+'</span>'+
         '<span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0">'+statusDot+'</span>'+
       '</div>'+
       (c.description?'<div style="font-size:12px;color:var(--dim);padding:0 12px;margin-bottom:4px">'+esc(c.description)+'</div>':'')+
@@ -2145,6 +2164,144 @@ const Connections={
       else toast(d.error||'Failed','red');
     }catch(e){toast(e.message,'red')}
   }
+};
+
+// Phase 1.5 Cycle C — Platform Setup
+// Operator-level OAuth app registration. Read/write .platform-oauth.env
+// via /api/vault/platform-setup. Always visible to admins.
+const PlatformSetup={
+  async load(){
+    const el=$('platform-setup-content');
+    if(!el)return;
+    el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      const r=await fetch('/api/vault/platform-setup');
+      if(!r.ok)throw new Error('Failed to load: '+r.status);
+      const d=await r.json();
+      this.render(d);
+    }catch(e){
+      el.innerHTML='<div class="empty" style="padding:20px;color:#ef4444">'+
+        '⚠ Could not load Platform Setup: '+esc(e.message)+
+        '<br><br><span style="color:var(--dim);font-size:12px">If you see "platform-setup endpoint not found", make sure routes/vault.py has been updated for Phase 1.5 Cycle C and the openvoiceui container has been restarted.</span></div>';
+    }
+  },
+  render(d){
+    const el=$('platform-setup-content');
+    const providers=d.providers||[];
+    let html='<div style="display:flex;flex-direction:column;gap:16px">';
+
+    // Top-of-page summary
+    const configured=providers.filter(p=>p.configured).length;
+    const total=providers.length;
+    html+='<div class="box"><div class="box-body" style="padding:12px 16px;background:var(--panel2);border:1px solid var(--border);border-radius:var(--radius)">'+
+      '<div style="font-size:13px;color:var(--text)"><strong>'+configured+' of '+total+'</strong> OAuth providers configured</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-top:4px">'+
+        'Each provider you enable here unlocks Connect buttons for the matching credentials in the Connections page. Clients then authorize their own accounts via the standard OAuth consent screen.'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-top:4px">Stored in <code style="background:var(--panel3);padding:1px 4px;border-radius:3px">'+esc(d.env_file||'.platform-oauth.env')+'</code></div>'+
+    '</div></div>';
+
+    // Provider cards
+    for(const p of providers){
+      const statusBadge=p.configured
+        ?'<span style="font-size:10px;background:#10b98120;color:#10b981;padding:2px 8px;border-radius:3px;font-weight:600">CONFIGURED</span>'
+        :'<span style="font-size:10px;background:#71717a20;color:#a1a1aa;padding:2px 8px;border-radius:3px;font-weight:600">NOT CONFIGURED</span>';
+
+      const enabledList=(p.enables_credentials||[]).join(', ')||'(no catalog credentials registered yet)';
+
+      html+='<div class="box" style="border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;background:var(--panel2)">'+
+        // Header
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">'+
+          '<div style="font-size:15px;font-weight:600;color:var(--text)">'+esc(p.name)+'</div>'+
+          statusBadge+
+        '</div>'+
+        '<div style="font-size:12px;color:var(--dim);margin-bottom:10px">'+esc(p.description)+'</div>'+
+        '<div style="font-size:11px;color:var(--dim);margin-bottom:12px">Enables: <code style="background:var(--panel3);padding:1px 4px;border-radius:3px">'+esc(enabledList)+'</code></div>'+
+
+        // Step-by-step (collapsible)
+        '<details style="margin-bottom:12px"><summary style="cursor:pointer;font-size:12px;color:#3b82f6;font-weight:500">▶ How to set up '+esc(p.name)+' OAuth</summary>'+
+          '<div style="margin-top:10px;padding:10px;background:var(--panel3);border-radius:var(--radius)">'+
+            '<div style="margin-bottom:8px"><a href="'+esc(p.console_create_url||p.console_url)+'" target="_blank" rel="noopener" class="btn btn-sm" style="background:#3b82f6;color:#fff;text-decoration:none;display:inline-block">Open '+esc(p.name)+' Console ↗</a></div>'+
+            '<ol style="margin:0;padding-left:18px;font-size:12px;color:var(--text);line-height:1.6">'+
+              p.setup_steps.map(s=>'<li>'+esc(s)+'</li>').join('')+
+            '</ol>'+
+            '<div style="margin-top:12px;font-size:11px;color:var(--dim)">'+
+              '<strong>Authorized redirect URIs</strong> (paste these in the console — one per client):'+
+            '</div>'+
+            '<textarea readonly id="psu-uris-'+p.id+'" style="width:100%;margin-top:6px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px;color:var(--text);font-family:var(--mono);font-size:11px;height:120px;resize:vertical">'+
+              esc((p.redirect_uris||[]).join('\n'))+
+            '</textarea>'+
+            '<button class="btn btn-o btn-sm" style="margin-top:6px" onclick="PlatformSetup.copyUris(\''+esc(p.id)+'\')">Copy URIs</button>'+
+            (p.docs_url?'<a href="'+esc(p.docs_url)+'" target="_blank" rel="noopener" style="margin-left:8px;font-size:11px;color:#3b82f6;text-decoration:none">📖 Docs</a>':'')+
+          '</div>'+
+        '</details>'+
+
+        // Credential inputs
+        '<div style="display:flex;flex-direction:column;gap:8px">'+
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+            '<label style="min-width:110px;font-size:12px;color:var(--dim)">Client ID</label>'+
+            '<input type="text" id="psu-cid-'+p.id+'" name="psu-cid-'+p.id+'" placeholder="(not set)" value="'+esc(p.client_id||'')+'" style="flex:1;min-width:200px;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:var(--mono);font-size:12px" autocomplete="off" data-lpignore="true" data-1p-ignore="true">'+
+          '</div>'+
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+            '<label style="min-width:110px;font-size:12px;color:var(--dim)">Client Secret</label>'+
+            '<input type="password" id="psu-csec-'+p.id+'" name="psu-csec-'+p.id+'" placeholder="'+(p.has_secret?esc(p.client_secret_masked||'(set)'):'(not set)')+'" style="flex:1;min-width:200px;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:var(--mono);font-size:12px" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true">'+
+          '</div>'+
+          (p.has_secret?'<div style="font-size:11px;color:var(--dim);margin-left:118px">Current secret: <code style="background:var(--panel3);padding:1px 4px;border-radius:3px">'+esc(p.client_secret_masked||'(set)')+'</code> (paste a new value to replace)</div>':'')+
+          '<div style="display:flex;gap:8px;margin-top:4px">'+
+            '<button class="btn btn-g btn-sm" onclick="PlatformSetup.save(\''+esc(p.id)+'\')">Save</button>'+
+            (p.configured?'<button class="btn btn-o btn-sm" style="color:#ef4444;border-color:#ef4444" onclick="PlatformSetup.clear(\''+esc(p.id)+'\')">Clear</button>':'')+
+            '<span id="psu-status-'+p.id+'" style="font-size:11px;color:var(--dim);line-height:28px"></span>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+    }
+
+    html+='</div>';
+    el.innerHTML=html;
+  },
+  copyUris(id){
+    const ta=$('psu-uris-'+id);
+    if(!ta)return;
+    ta.select();
+    document.execCommand('copy');
+    toast('Redirect URIs copied','green');
+  },
+  async save(id){
+    const cid=$('psu-cid-'+id)?.value?.trim()||'';
+    const csec=$('psu-csec-'+id)?.value?.trim()||'';
+    if(!cid){toast('Client ID is required','red');return}
+    // If user left secret blank but it was already set, that means "no change"
+    // — server keeps the existing value. We send empty string only when the
+    // user actually wants to clear it (use the Clear button for that).
+    if(!csec){
+      toast('Paste the Client Secret too (leave both blank only if you used Clear)','red');
+      return;
+    }
+    const st=$('psu-status-'+id);
+    if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/vault/platform-setup/'+id,{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({client_id:cid,client_secret:csec})
+      });
+      const d=await r.json();
+      if(!d.ok){toast(d.error||'Failed','red');if(st)st.textContent='Error';return}
+      // Phase 1.5 Cycle C: env var update is live immediately, no restart needed
+      toast(d.message||'Saved','green');
+      if(st)st.textContent='Saved';
+      setTimeout(()=>{this.load()},500);
+      setTimeout(()=>{if(st)st.textContent=''},4000);
+    }catch(e){toast(e.message,'red');if(st)st.textContent='Error'}
+  },
+  async clear(id){
+    if(!confirm('Clear '+id+' OAuth credentials? Clients will no longer be able to connect this provider.'))return;
+    try{
+      const r=await fetch('/api/vault/platform-setup/'+id,{method:'DELETE'});
+      const d=await r.json();
+      if(d.ok){toast(d.message||'Cleared','green');setTimeout(()=>this.load(),500)}
+      else toast(d.error||'Failed','red');
+    }catch(e){toast(e.message,'red')}
+  },
 };
 
 // System
