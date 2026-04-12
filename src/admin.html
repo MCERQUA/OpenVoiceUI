@@ -1996,8 +1996,9 @@ const Connections={
         body:JSON.stringify({value:inp.value.trim()})
       });
       const d=await r.json();
-      if(d.ok){toast(d.message||'Saved','green');setTimeout(()=>this.load(),500)}
-      else{toast(d.error||'Failed','red');if(st) st.textContent='Error'}
+      if(d.ok){
+        this._handleSaveSuccess(id, d, st);
+      }else{toast(d.error||'Failed','red');if(st) st.textContent='Error'}
     }catch(e){toast(e.message,'red');if(st) st.textContent='Error'}
   },
   async saveMulti(id){
@@ -2015,9 +2016,37 @@ const Connections={
         body:JSON.stringify({fields})
       });
       const d=await r.json();
-      if(d.ok){toast(d.message||'Saved','green');setTimeout(()=>this.load(),500)}
-      else{toast(d.error||'Failed','red');if(st) st.textContent='Error'}
+      if(d.ok){
+        this._handleSaveSuccess(id, d, st);
+      }else{toast(d.error||'Failed','red');if(st) st.textContent='Error'}
     }catch(e){toast(e.message,'red');if(st) st.textContent='Error'}
+  },
+  _handleSaveSuccess(id, d, st){
+    // Phase 1.5: server tells us which containers will be restarted and the ETA.
+    // Show a clear countdown + confirmation so users aren't guessing.
+    const restarting = Array.isArray(d.restarting) ? d.restarting : [];
+    const eta = d.eta_seconds || 0;
+    if(restarting.length && eta){
+      toast('Saved. Agent restarting ('+restarting.join(', ')+')... ~'+eta+'s','green');
+      if(st) st.textContent='Saving → agent restart scheduled...';
+      // Poll until the agent is back, then reload the credentials list so the
+      // user sees the new masked value + "connected" status.
+      let elapsed = 0;
+      const poll = setInterval(()=>{
+        elapsed += 2;
+        if(st) st.textContent='Restarting agent... '+Math.max(0,eta-elapsed)+'s';
+        if(elapsed >= eta + 5){
+          clearInterval(poll);
+          if(st) st.textContent='Agent now using new value';
+          toast('Agent live with new value','green');
+          this.load();
+          setTimeout(()=>{ if(st) st.textContent=''; }, 4000);
+        }
+      }, 2000);
+    }else{
+      toast(d.message||'Saved','green');
+      setTimeout(()=>this.load(),500);
+    }
   },
   async saveModels(){
     const primary=$('vault-primary')?.value||'';

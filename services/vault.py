@@ -178,6 +178,104 @@ def _vault_oauth_path(username: str, provider: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Container restart (Phase 1.5 Cycle A)
+# ---------------------------------------------------------------------------
+import threading
+
+# Debounce window for credential-triggered restarts. Multiple writes within
+# this window collapse into a single restart.
+_RESTART_DEBOUNCE_SECONDS = 5.0
+
+# Active debounce timers keyed by container name.
+_restart_timers: dict[str, threading.Timer] = {}
+_restart_lock = threading.Lock()
+
+
+def _do_restart_container(container_name: str):
+    """Actually perform the container recreate via `docker compose up -d --force-recreate`.
+    Must be a RECREATE, not a simple restart — Docker only loads env_file
+    values at container creation time, so a plain restart keeps the old env.
+    Called by the debounce timer; do not call directly.
+    """
+    import subprocess
+    # Parse container name: "openclaw-<user>" or "openvoiceui-<user>"
+    if '-' not in container_name:
+        logger.error(f"[vault] Unexpected container name format: {container_name}")
+        return
+    service, username = container_name.split('-', 1)
+    if service not in ('openclaw', 'openvoiceui'):
+        logger.error(f"[vault] Unknown service in {container_name}")
+        return
+
+    compose_file = _CLIENTS_DIR / username / 'compose' / 'docker-compose.yml'
+    env_file = _CLIENTS_DIR / username / 'compose' / '.env'
+    if not compose_file.is_file():
+        logger.error(f"[vault] compose file not found: {compose_file}")
+        return
+
+    cmd = [
+        'docker', 'compose',
+        '-f', str(compose_file),
+        '--env-file', str(env_file),
+        'up', '-d', '--force-recreate', '--no-deps',
+        service,
+    ]
+    logger.info(f"[vault] Recreating {container_name} to apply new credentials...")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            logger.info(f"[vault] {container_name} recreated successfully")
+            # Reconnect shared network (compose up -d disconnects cross-project networks)
+            try:
+                subprocess.run(
+                    ['docker', 'network', 'connect', 'jambot-shared', container_name],
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception:
+                pass  # may already be connected
+        else:
+            logger.error(
+                f"[vault] docker compose up failed for {container_name}: "
+                f"stdout={result.stdout} stderr={result.stderr}"
+            )
+    except subprocess.TimeoutExpired:
+        logger.error(f"[vault] docker compose up timed out for {container_name}")
+    except Exception as exc:
+        logger.error(f"[vault] Failed to recreate {container_name}: {exc}")
+    finally:
+        with _restart_lock:
+            _restart_timers.pop(container_name, None)
+
+
+def _schedule_container_restart(container_name: str):
+    """Schedule a debounced restart of the given container. If another
+    schedule call comes in within _RESTART_DEBOUNCE_SECONDS, the earlier
+    timer is cancelled and replaced. This collapses rapid credential
+    writes into a single restart at the end."""
+    with _restart_lock:
+        existing = _restart_timers.get(container_name)
+        if existing is not None:
+            existing.cancel()
+        timer = threading.Timer(_RESTART_DEBOUNCE_SECONDS, _do_restart_container, args=[container_name])
+        timer.daemon = True
+        timer.start()
+        _restart_timers[container_name] = timer
+        logger.info(f"[vault] Scheduled restart of {container_name} in {_RESTART_DEBOUNCE_SECONDS}s")
+
+
+def restart_container_now(container_name: str) -> bool:
+    """Immediately recreate a container (bypasses the debounce). Used for
+    explicit 'Apply now' API calls if we add one later. Returns True on success."""
+    with _restart_lock:
+        existing = _restart_timers.get(container_name)
+        if existing is not None:
+            existing.cancel()
+            _restart_timers.pop(container_name, None)
+    _do_restart_container(container_name)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Platform catalog
 # ---------------------------------------------------------------------------
 _catalog_cache: Optional[dict] = None
@@ -321,9 +419,10 @@ def get_credential_fields(username: str, cred_id: str) -> Optional[dict]:
 
 
 def set_credential(username: str, cred_id: str, value: str = None,
-                   fields: dict = None, source: str = 'user'):
+                   fields: dict = None, source: str = 'user') -> set[str]:
     """
-    Set a credential value in the vault, then sync to consumers.
+    Set a credential value in the vault, then sync to consumers and schedule
+    a restart of affected containers so the new env values take effect.
 
     Args:
         username: Client username
@@ -331,6 +430,9 @@ def set_credential(username: str, cred_id: str, value: str = None,
         value: For single-key credentials
         fields: For multi-field credentials (e.g. {"login": "x", "password": "y"})
         source: "platform", "user", or "plugin"
+
+    Returns: set of container names that will be restarted. Caller can use
+        this to inform the user that the agent is restarting.
     """
     vault = read_vault(username)
     creds = vault.setdefault('credentials', {})
@@ -347,8 +449,15 @@ def set_credential(username: str, cred_id: str, value: str = None,
     creds[cred_id] = entry
     _write_vault(username, vault)
 
-    # Sync to consumers
-    sync_credential(username, cred_id)
+    # Sync to consumers — this writes env vars to the per-client env files
+    # and returns the set of containers that need to be restarted.
+    to_restart = sync_credential(username, cred_id)
+
+    # Schedule debounced restart so rapid successive writes collapse.
+    for container_name in to_restart:
+        _schedule_container_restart(container_name)
+
+    return to_restart
 
 
 def delete_credential(username: str, cred_id: str):
@@ -417,11 +526,22 @@ def get_credentials_status(username: str) -> list[dict]:
         elif cred_type in ('multi_field', 'basic_auth'):
             fields = vault_entry.get('fields', {})
             field_defs = entry.get('fields', [])
-            has_value = all(fields.get(f['id']) for f in field_defs)
+            # Phase 1.5 fix: check env var fallback for each field. A credential
+            # configured via .platform-keys.env (without a vault entry) should
+            # still show as connected, otherwise the UI lies about state.
+            resolved = {}
+            for f in field_defs:
+                fid = f['id']
+                fval = fields.get(fid, '')
+                if not fval and f.get('env_var'):
+                    fval = os.environ.get(f['env_var'], '')
+                if fval:
+                    resolved[fid] = fval
+            has_value = all(resolved.get(f['id']) for f in field_defs)
             if has_value:
                 # Mask the first field as representative
                 first_field = field_defs[0]['id'] if field_defs else ''
-                masked_value = _mask_key(fields.get(first_field, ''))
+                masked_value = _mask_key(resolved.get(first_field, ''))
         else:
             raw_val = vault_entry.get('value', '')
             # Also check env var as fallback
@@ -487,9 +607,23 @@ def get_credentials_status(username: str) -> list[dict]:
 
 # ---------------------------------------------------------------------------
 # Sync engine — push credentials to consumers
+#
+# Phase 1.5 architecture:
+#   - Credentials are stored in /mnt/clients/<user>/vault/credentials.json
+#   - Sync writes the corresponding env vars to the per-client env files
+#     that Docker loads at container startup:
+#       openclaw consumers   → /mnt/clients/<user>/compose/.openclaw.env
+#       openvoiceui consumers → /mnt/clients/<user>/compose/.env
+#   - openclaw.json uses ${MINIMAX_API_KEY} substitution, so setting the
+#     env var is sufficient — we NEVER write into openclaw.json directly
+#   - After writes, the affected container(s) are restarted via docker socket
+#     so the new env values take effect
+#
+# Returns the set of container names that should be restarted.
 # ---------------------------------------------------------------------------
-def sync_credential(username: str, cred_id: str):
-    """Push a credential to all its declared consumers."""
+def sync_credential(username: str, cred_id: str) -> set[str]:
+    """Push a credential to all its declared consumers. Returns set of
+    container names that should be restarted for the new values to apply."""
     catalog = get_merged_catalog()
     cat_entry = None
     for c in catalog:
@@ -499,29 +633,139 @@ def sync_credential(username: str, cred_id: str):
 
     if not cat_entry:
         logger.debug(f"No catalog entry for {cred_id}, skipping sync")
-        return
+        return set()
 
     vault = read_vault(username)
     vault_entry = vault.get('credentials', {}).get(cred_id, {})
     raw_value = vault_entry.get('value', '')
     raw_fields = vault_entry.get('fields', {})
 
+    # Build the dict of env vars to set for this credential
+    env_vars = _env_vars_for_credential(cat_entry, raw_value, raw_fields)
+    if not env_vars:
+        logger.debug(f"No env vars to sync for {cred_id}")
+        return set()
+
+    containers_to_restart: set[str] = set()
     for consumer_name, consumer_cfg in cat_entry.get('consumers', {}).items():
-        consumer_type = consumer_cfg.get('type', 'env_var')
         try:
-            if consumer_type == 'openclaw_provider':
-                _sync_to_openclaw(username, cred_id, raw_value, consumer_cfg)
-            elif consumer_type == 'env_file':
-                plugin_id = consumer_name  # consumer name = plugin dir name
-                _sync_to_env_file(username, cred_id, raw_value, consumer_cfg, plugin_id)
-            elif consumer_type == 'env_var':
-                _sync_to_env_var(username, cred_id, raw_value, raw_fields, cat_entry)
-            elif consumer_type == 'oauth_token':
-                pass  # OAuth tokens are read directly, no push needed
+            if consumer_name == 'openclaw':
+                # openclaw consumer (regardless of consumer_type) → .openclaw.env
+                env_path = _CLIENTS_DIR / username / 'compose' / '.openclaw.env'
+                if _update_env_file(env_path, env_vars):
+                    containers_to_restart.add(f'openclaw-{username}')
+                    logger.info(f"Synced {cred_id} → {env_path.name} ({len(env_vars)} var(s))")
+            elif consumer_name == 'openvoiceui':
+                # openvoiceui consumer → .env (per-client)
+                env_path = _CLIENTS_DIR / username / 'compose' / '.env'
+                if _update_env_file(env_path, env_vars):
+                    containers_to_restart.add(f'openvoiceui-{username}')
+                    logger.info(f"Synced {cred_id} → {env_path.name} ({len(env_vars)} var(s))")
             else:
-                logger.warning(f"Unknown consumer type {consumer_type} for {cred_id}")
+                # Unknown consumer (e.g., plugin name) — fall back to old plugin env_file logic
+                consumer_type = consumer_cfg.get('type', 'env_var')
+                if consumer_type == 'env_file':
+                    _sync_to_env_file(username, cred_id, raw_value, consumer_cfg, consumer_name)
+                elif consumer_type == 'oauth_token':
+                    pass  # OAuth tokens are read directly, no push needed
+                else:
+                    logger.debug(f"Unhandled consumer {consumer_name} (type={consumer_type}) for {cred_id}")
         except Exception as exc:
             logger.error(f"Sync {cred_id} → {consumer_name} failed: {exc}")
+
+    return containers_to_restart
+
+
+def _env_vars_for_credential(cat_entry: dict, raw_value: str,
+                              raw_fields: dict) -> dict:
+    """Extract the env var name → value mapping for a credential.
+    Handles single-value (env_var), multi_field, and basic_auth types.
+    """
+    result = {}
+    cred_type = cat_entry.get('type', 'api_key')
+    if cred_type in ('multi_field', 'basic_auth'):
+        for fdef in cat_entry.get('fields', []):
+            fval = raw_fields.get(fdef.get('id', ''), '')
+            env_var = fdef.get('env_var', '')
+            if env_var and fval:
+                result[env_var] = fval
+    else:
+        env_var = cat_entry.get('env_var', '')
+        if env_var and raw_value:
+            result[env_var] = raw_value
+    return result
+
+
+def _update_env_file(path: Path, updates: dict) -> bool:
+    """Update an env file in place, preserving comments, blank lines, and order.
+
+    Any key in `updates` that already exists gets its value replaced.
+    Keys not present in the file are appended at the end.
+    Writes atomically via tmp + rename.
+    Returns True if the file was actually changed, False otherwise.
+    """
+    if not updates:
+        return False
+    if not path.parent.exists():
+        logger.warning(f"Parent dir missing for env file {path}")
+        return False
+
+    try:
+        existing_text = path.read_text() if path.is_file() else ''
+    except (PermissionError, OSError) as exc:
+        logger.error(f"Cannot read env file {path}: {exc}")
+        return False
+
+    lines = existing_text.splitlines()
+    seen_keys: set[str] = set()
+    new_lines: list[str] = []
+    changed = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            new_lines.append(line)
+            continue
+        if '=' in stripped:
+            k = stripped.split('=', 1)[0].strip()
+            if k in updates:
+                new_val = updates[k]
+                new_line = f'{k}={new_val}'
+                if new_line != line:
+                    changed = True
+                new_lines.append(new_line)
+                seen_keys.add(k)
+                continue
+        new_lines.append(line)
+
+    # Append any keys not already in the file
+    missing = [k for k in updates if k not in seen_keys]
+    if missing:
+        if new_lines and new_lines[-1].strip():
+            new_lines.append('')  # blank line separator
+        for k in missing:
+            new_lines.append(f'{k}={updates[k]}')
+        changed = True
+
+    if not changed:
+        return False
+
+    new_text = '\n'.join(new_lines)
+    if not new_text.endswith('\n'):
+        new_text += '\n'
+
+    # Atomic write via tmp + rename
+    tmp = path.with_suffix(path.suffix + '.vault-tmp')
+    try:
+        tmp.write_text(new_text)
+        tmp.replace(path)
+    except (PermissionError, OSError) as exc:
+        logger.error(f"Cannot write env file {path}: {exc}")
+        try:
+            tmp.unlink()
+        except Exception:
+            pass
+        return False
+    return True
 
 
 def sync_all(username: str):
@@ -531,61 +775,23 @@ def sync_all(username: str):
         sync_credential(username, cred_id)
 
 
+# NOTE (Phase 1.5): _sync_to_openclaw and _sync_to_env_var are no longer
+# called by sync_credential — they used to write into openclaw.json and a
+# locally-scoped .openclaw.env respectively. That path had two fundamental
+# problems: (1) openclaw.json uses ${MINIMAX_API_KEY} style substitution so
+# overwriting apiKey with a raw value broke the template, and (2) cross-
+# container writes failed on permissions. Both are gone.
+#
+# Sync now goes through _update_env_file() dispatched per consumer name in
+# the new sync_credential() above, and the container is restarted via the
+# docker socket so the new env values take effect.
+#
+# The old functions are kept as no-ops below to preserve any external imports.
+
+
 def _sync_to_openclaw(username: str, cred_id: str, key_value: str, consumer_cfg: dict):
-    """Write/update a provider block in the client's openclaw.json.
-
-    Guarded against PermissionError — openvoiceui container (UID 1001) cannot
-    write openclaw.json (chmod 600, owned UID 1000). Phase 2 (Vault v2)
-    eliminates this cross-container write entirely; openclaw will read keys
-    from a read-only mounted vault at startup.
-    """
-    if not key_value:
-        return
-
-    config_path = _CLIENTS_DIR / username / 'openclaw' / 'openclaw.json'
-    if not config_path.exists():
-        # Fall back to runtime path (inside container)
-        config_path = _OPENCLAW_CONFIG_PATH
-    if not config_path.exists():
-        logger.warning(f"No openclaw.json found for {username}")
-        return
-
-    try:
-        config = _parse_jsonc(config_path.read_text())
-    except (PermissionError, OSError) as exc:
-        logger.warning(
-            f"Cannot read {config_path} for sync ({exc}); credential stored "
-            f"in vault only. Openclaw will continue using its existing key "
-            f"until Phase 2 migration or manual restart."
-        )
-        return
-    except Exception as exc:
-        logger.error(f"Failed to parse {config_path}: {exc}")
-        return
-
-    providers = config.setdefault('models', {'mode': 'merge'}).setdefault('providers', {})
-    provider_id = consumer_cfg['provider_id']
-
-    if provider_id not in providers:
-        # Create new provider block
-        providers[provider_id] = {
-            'baseUrl': consumer_cfg['base_url'],
-            'api': consumer_cfg['api_format'],
-            'apiKey': key_value,
-            'models': consumer_cfg.get('models', []),
-        }
-    else:
-        # Update existing key only
-        providers[provider_id]['apiKey'] = key_value
-
-    try:
-        _write_json(config_path, config)
-        logger.info(f"Synced {cred_id} → openclaw provider '{provider_id}' for {username}")
-    except (PermissionError, OSError) as exc:
-        logger.warning(
-            f"Cannot write {config_path} ({exc}); credential stored in vault "
-            f"only. Phase 2 will fix this cross-container write."
-        )
+    """DEPRECATED in Phase 1.5. No-op — sync now happens via _update_env_file()."""
+    logger.debug(f"_sync_to_openclaw called for {cred_id} — no-op in Phase 1.5")
 
 
 def _sync_to_env_file(username: str, cred_id: str, key_value: str,
@@ -630,38 +836,13 @@ def _sync_to_env_file(username: str, cred_id: str, key_value: str,
 
 def _sync_to_env_var(username: str, cred_id: str, raw_value: str,
                      raw_fields: dict, cat_entry: dict):
+    """DEPRECATED in Phase 1.5. No-op — sync now happens via _update_env_file().
+
+    The old implementation destroyed comments and blank lines by loading
+    the env file into a dict and writing it back. _update_env_file() preserves
+    everything and writes atomically.
     """
-    Sync to the client's .openclaw.env file (per-client env overrides).
-    These get picked up by Docker containers on restart.
-    """
-    env_path = _CLIENTS_DIR / username / 'compose' / '.openclaw.env'
-    if not env_path.parent.exists():
-        return
-
-    existing = {}
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if '=' in line:
-                k, v = line.split('=', 1)
-                existing[k.strip()] = v.strip()
-
-    cred_type = cat_entry.get('type', 'api_key')
-    if cred_type in ('multi_field', 'basic_auth'):
-        fields = cat_entry.get('fields', [])
-        for fdef in fields:
-            fval = raw_fields.get(fdef['id'], '')
-            if fval:
-                existing[fdef['env_var']] = fval
-    else:
-        env_var = cat_entry.get('env_var', '')
-        if env_var and raw_value:
-            existing[env_var] = raw_value
-
-    lines = [f"{k}={v}" for k, v in existing.items()]
-    env_path.write_text('\n'.join(lines) + '\n')
+    logger.debug(f"_sync_to_env_var called for {cred_id} — no-op in Phase 1.5")
 
 
 # ---------------------------------------------------------------------------

@@ -103,8 +103,26 @@ def update_credential(cred_id):
         if not fields:
             return jsonify({'ok': True, 'message': 'No change (masked values)'})
 
-    set_credential(username, cred_id, value=value, fields=fields)
-    return jsonify({'ok': True, 'message': f'Credential {cred_id} updated and synced'})
+    to_restart = set_credential(username, cred_id, value=value, fields=fields)
+
+    if to_restart:
+        containers = sorted(to_restart)
+        msg = (
+            f'Saved. Agent will restart in ~6s to pick up the new value '
+            f'(affects: {", ".join(containers)}).'
+        )
+        return jsonify({
+            'ok': True,
+            'message': msg,
+            'restarting': containers,
+            'eta_seconds': 15,
+        })
+    return jsonify({
+        'ok': True,
+        'message': f'Credential {cred_id} saved (no container restart needed)',
+        'restarting': [],
+        'eta_seconds': 0,
+    })
 
 
 @vault_bp.route('/api/vault/credentials', methods=['POST'])
