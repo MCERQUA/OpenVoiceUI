@@ -374,7 +374,7 @@ select{cursor:pointer}
   <div class="nav-section">
     <div class="nav-label">Config</div>
     <div class="nav-item" id="nav-providers" onclick="show('providers')"><span class="nav-icon">&#x26A1;</span><span class="nav-text">Provider Config</span></div>
-    <div class="nav-item" id="nav-aiconfig" onclick="show('aiconfig')"><span class="nav-icon">&#x1F9E0;</span><span class="nav-text">AI Models &amp; Keys</span></div>
+    <div class="nav-item" id="nav-connections" onclick="show('connections')"><span class="nav-icon">&#x1F517;</span><span class="nav-text">Connections</span></div>
   </div>
   <div class="nav-section">
     <div class="nav-label">System</div>
@@ -526,11 +526,11 @@ select{cursor:pointer}
   </div>
 
 
-  <!-- AI CONFIG -->
-  <div class="panel" id="panel-aiconfig">
+  <!-- CONNECTIONS (replaces AI CONFIG) -->
+  <div class="panel" id="panel-connections">
     <div class="panel-inner">
-      <div class="ph"><div class="ph-title">AI Models &amp; API Keys</div><div class="ph-sub">Configure which AI models power your agent and manage API keys</div></div>
-      <div id="aiconfig-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+      <div class="ph"><div class="ph-title">Connections</div><div class="ph-sub">Manage API keys, model providers, and connected accounts. Plugins add their requirements here automatically.</div></div>
+      <div id="connections-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
     </div>
   </div>
 
@@ -675,7 +675,7 @@ const loaders = {
   music:()=>Music.load(),
   clients:()=>Clients.load(),
   providers:()=>Providers.load(),
-  aiconfig:()=>AIConfig.load(),
+  connections:()=>Connections.load(),
   system:()=>System.load(),
   tests:()=>Tests.initSel(),
 };
@@ -1833,103 +1833,278 @@ const Providers={
 };
 
 
-// AI Config — model selection + API keys
-const AIConfig={
+// Connections — dynamic credential vault + OAuth connections + model selection
+const Connections={
   data:null,
   async load(){
-    const el=$('aiconfig-content');
+    const el=$('connections-content');
     el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
     try{
-      const r=await fetch('/api/admin/ai-config');
+      const r=await fetch('/api/vault/credentials');
       this.data=await r.json();
       this.render();
-    }catch(e){el.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;</div>'+esc(e.message)+'<br><br><span style="color:var(--dim);font-size:12px">The openclaw.json config mount may be missing. Recreate containers with the updated docker-compose template.</span></div>'}
+    }catch(e){
+      el.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;</div>'+esc(e.message)+
+        '<br><br><span style="color:var(--dim);font-size:12px">Vault service may not be available. Check that routes/vault.py is loaded.</span></div>';
+    }
   },
   render(){
     const d=this.data;
-    if(!d||!d.providers){$('aiconfig-content').innerHTML='<div class="empty">No config data</div>';return}
+    if(!d||!d.groups){$('connections-content').innerHTML='<div class="empty">No credential data</div>';return}
 
-    // Build model options from all providers
-    const allModels=[];
-    for(const[pid,p]of Object.entries(d.providers)){
-      for(const m of p.models||[]){
-        allModels.push({value:pid+'/'+m.id, label:p.name+' — '+m.name, hasKey:p.hasKey, pid});
-      }
-    }
-    const mkOpt=(val)=>allModels.map(m=>
-      '<option value="'+esc(m.value)+'"'+(m.value===val?' selected':'')+(!m.hasKey?' style="color:var(--dim)"':'')+'>'+
-      esc(m.label)+(m.hasKey?'':' (no key)')+'</option>'
+    let html='';
+
+    // Model selection at top
+    const models=d.models||[];
+    const sel=d.model_selection||{};
+    const mkOpt=(val)=>models.map(m=>
+      '<option value="'+esc(m.id)+'"'+(m.id===val?' selected':'')+'>'+esc(m.provider)+' \u2014 '+esc(m.name)+'</option>'
     ).join('');
 
-    // Provider cards with key inputs
-    const provCards=Object.entries(d.providers).map(([pid,p])=>{
-      const keyStatus=p.hasKey
-        ?'<span style="color:var(--green)">Key set: '+esc(p.maskedKey)+'</span>'
-        :'<span style="color:var(--orange)">No key configured</span>';
-      return '<div class="box" style="margin-bottom:12px">'+
-        '<div class="box-title" style="display:flex;justify-content:space-between;align-items:center">'+
-          '<span>'+esc(p.name)+'</span>'+
-          '<span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0">'+keyStatus+'</span>'+
-        '</div>'+
-        '<div class="box-body" style="display:flex;gap:8px;align-items:center">'+
-          '<input type="password" id="aikey-'+pid+'" placeholder="Paste '+esc(p.name)+' API key..." '+
-            'style="flex:1;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:var(--mono);font-size:13px" '+
-            'autocomplete="off">'+
-          '<button class="btn btn-o btn-sm" onclick="this.previousElementSibling.type=this.previousElementSibling.type===\'password\'?\'text\':\'password\'">Show</button>'+
-        '</div>'+
-      '</div>';
-    }).join('');
+    html+='<div class="g2" style="margin-bottom:24px;gap:16px">'+
+      '<div class="box"><div class="box-title">Primary Model</div><div class="box-body">'+
+        '<select id="vault-primary" style="width:100%;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;color:var(--text);font-size:13px" onchange="Connections.saveModels()">'+
+          '<option value="">-- Select primary model --</option>'+mkOpt(sel.primary||'')+
+        '</select>'+
+        '<div style="margin-top:6px;font-size:11px;color:var(--dim)">Main model for all conversations and tool calls</div>'+
+      '</div></div>'+
+      '<div class="box"><div class="box-title">Fallback Model</div><div class="box-body">'+
+        '<select id="vault-fallback" style="width:100%;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;color:var(--text);font-size:13px" onchange="Connections.saveModels()">'+
+          '<option value="">-- No fallback --</option>'+mkOpt(sel.fallback||'')+
+        '</select>'+
+        '<div style="margin-top:6px;font-size:11px;color:var(--dim)">Used when primary model fails or is rate-limited</div>'+
+      '</div></div>'+
+    '</div>';
 
-    $('aiconfig-content').innerHTML=
-      '<div class="g2" style="margin-bottom:20px;gap:16px">'+
-        '<div class="box"><div class="box-title">Primary Model</div><div class="box-body">'+
-          '<select id="ai-primary" style="width:100%;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;color:var(--text);font-size:13px">'+
-            '<option value="">-- Select primary model --</option>'+mkOpt(d.primary)+
-          '</select>'+
-          '<div style="margin-top:6px;font-size:11px;color:var(--dim)">Main model used for all conversations and tool calls</div>'+
-        '</div></div>'+
-        '<div class="box"><div class="box-title">Fallback Model</div><div class="box-body">'+
-          '<select id="ai-fallback" style="width:100%;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;color:var(--text);font-size:13px">'+
-            '<option value="">-- No fallback --</option>'+mkOpt(d.fallback)+
-          '</select>'+
-          '<div style="margin-top:6px;font-size:11px;color:var(--dim)">Used when primary model fails or is rate-limited</div>'+
-        '</div></div>'+
-      '</div>'+
-      '<div class="ph" style="margin-bottom:12px"><div class="ph-title" style="font-size:16px">API Keys</div><div class="ph-sub">Add or update keys for each provider. Changes take effect immediately.</div></div>'+
-      '<div class="gauto" style="margin-bottom:20px">'+provCards+'</div>'+
-      '<div style="display:flex;gap:8px;align-items:center">'+
-        '<button class="btn btn-g" onclick="AIConfig.save()">Save Configuration</button>'+
-        '<span id="aiconfig-status" style="font-size:12px;color:var(--dim)"></span>'+
-      '</div>';
-  },
-  async save(){
-    const primary=$('ai-primary')?.value||'';
-    const fallback=$('ai-fallback')?.value||'';
-    const keys={};
-    for(const pid of Object.keys(this.data?.providers||{})){
-      const inp=$('aikey-'+pid);
-      if(inp&&inp.value.trim()){
-        keys[pid]=inp.value.trim();
+    // Credential groups
+    for(const group of d.groups){
+      html+='<div style="margin-bottom:24px">'+
+        '<div class="ph" style="margin-bottom:12px"><div class="ph-title" style="font-size:16px">'+esc(group.name)+'</div></div>';
+
+      for(const c of group.credentials){
+        html+=this._renderCredential(c);
       }
+      html+='</div>';
     }
-    $('aiconfig-status').textContent='Saving...';
+
+    // Add custom credential button
+    html+='<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">'+
+      '<button class="btn btn-o" onclick="Connections.showAddCustom()">+ Add Custom Credential</button>'+
+      '<div id="vault-add-custom" style="display:none;margin-top:12px"></div>'+
+    '</div>';
+
+    $('connections-content').innerHTML=html;
+
+    // Listen for OAuth popup callbacks
+    window.addEventListener('message',this._onOAuthMessage);
+  },
+  _renderCredential(c){
+    const id=c.id;
+    const statusDot=c.has_value
+      ?'<span style="color:#4ade80;font-size:10px">\u25CF</span> <span style="color:#4ade80">Connected</span>'
+      :'<span style="color:#f97316;font-size:10px">\u25CF</span> <span style="color:#f97316">Not configured</span>';
+    const consumers=c.consumers&&c.consumers.length
+      ?'<span style="font-size:11px;color:var(--dim)">Used by: '+c.consumers.map(n=>'<span style="background:var(--panel3);padding:1px 6px;border-radius:3px;font-size:10px">'+esc(n)+'</span>').join(' ')+'</span>'
+      :'';
+    const pluginBadge=c.plugin_name
+      ?'<span style="font-size:10px;background:#3b82f620;color:#3b82f6;padding:1px 6px;border-radius:3px;margin-left:8px">'+esc(c.plugin_name)+'</span>'
+      :'';
+    const sourceBadge=c.source==='platform'
+      ?'<span style="font-size:10px;background:var(--panel3);color:var(--dim);padding:1px 6px;border-radius:3px;margin-left:4px">platform</span>'
+      :'';
+
+    let body='';
+    if(c.type==='oauth2'){
+      // OAuth: connect/disconnect button
+      if(c.has_value){
+        body='<div style="display:flex;gap:8px;align-items:center">'+
+          '<span style="color:var(--text);font-size:13px">'+esc(c.masked_value)+'</span>'+
+          '<button class="btn btn-o btn-sm" style="color:#f97316;border-color:#f97316" onclick="Connections.disconnectOAuth(\''+esc(id)+'\')">Disconnect</button>'+
+        '</div>';
+      }else{
+        body='<button class="btn btn-sm" style="background:#3b82f6;color:#fff;border:none" onclick="Connections.connectOAuth(\''+esc(id)+'\')">Connect '+esc(c.name)+'</button>';
+      }
+    }else if(c.type==='multi_field'||c.type==='basic_auth'){
+      // Multiple fields
+      const fields=c.fields||[];
+      body='<div id="vault-fields-'+id+'" style="display:none;margin-top:8px">';
+      for(const f of fields){
+        const isSecret=f.secret!==false;
+        body+='<div style="margin-bottom:6px;display:flex;gap:8px;align-items:center">'+
+          '<label style="min-width:100px;font-size:12px;color:var(--dim)">'+esc(f.name)+'</label>'+
+          '<input type="'+(isSecret?'password':'text')+'" id="vault-f-'+id+'-'+f.id+'" placeholder="'+esc(f.name)+'..." '+
+            'style="flex:1;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;color:var(--text);font-family:var(--mono);font-size:12px" autocomplete="off">'+
+        '</div>';
+      }
+      body+='<div style="display:flex;gap:8px;margin-top:8px">'+
+        '<button class="btn btn-g btn-sm" onclick="Connections.saveMulti(\''+esc(id)+'\')">Save</button>'+
+        (c.has_test?'<button class="btn btn-o btn-sm" onclick="Connections.test(\''+esc(id)+'\')">Test</button>':'')+
+        '<span id="vault-status-'+id+'" style="font-size:11px;color:var(--dim);line-height:28px"></span>'+
+      '</div></div>';
+      body='<div style="display:flex;gap:8px;align-items:center">'+
+        (c.has_value?'<span style="font-size:12px;font-family:var(--mono);color:var(--dim)">'+esc(c.masked_value)+'</span>':'')+
+        '<button class="btn btn-o btn-sm" onclick="Connections.toggleFields(\''+id+'\')">Configure</button>'+
+        (c.has_test&&c.has_value?'<button class="btn btn-o btn-sm" onclick="Connections.test(\''+esc(id)+'\')">Test</button>':'')+
+        '<span id="vault-status-'+id+'" style="font-size:11px;color:var(--dim);line-height:28px"></span>'+
+      '</div>'+body;
+    }else{
+      // Single API key
+      body='<div id="vault-input-'+id+'" style="display:none;margin-top:8px">'+
+        '<div style="display:flex;gap:8px;align-items:center">'+
+          '<input type="password" id="vault-key-'+id+'" placeholder="Paste '+esc(c.name)+' API key..." '+
+            'style="flex:1;background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;color:var(--text);font-family:var(--mono);font-size:12px" autocomplete="off">'+
+          '<button class="btn btn-o btn-sm" onclick="this.parentElement.querySelector(\'input\').type=this.parentElement.querySelector(\'input\').type===\'password\'?\'text\':\'password\'">Show</button>'+
+          '<button class="btn btn-g btn-sm" onclick="Connections.saveKey(\''+esc(id)+'\')">Save</button>'+
+        '</div>'+
+      '</div>';
+      body='<div style="display:flex;gap:8px;align-items:center">'+
+        (c.has_value?'<span style="font-size:12px;font-family:var(--mono);color:var(--dim)">'+esc(c.masked_value)+'</span>':'')+
+        '<button class="btn btn-o btn-sm" onclick="Connections.toggleInput(\''+id+'\')">Configure</button>'+
+        (c.has_test&&c.has_value?'<button class="btn btn-o btn-sm" onclick="Connections.test(\''+esc(id)+'\')">Test</button>':'')+
+        '<span id="vault-status-'+id+'" style="font-size:11px;color:var(--dim);line-height:28px"></span>'+
+      '</div>'+body;
+    }
+
+    return '<div class="box" style="margin-bottom:8px">'+
+      '<div class="box-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">'+
+        '<span>'+esc(c.name)+pluginBadge+sourceBadge+'</span>'+
+        '<span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0">'+statusDot+'</span>'+
+      '</div>'+
+      (c.description?'<div style="font-size:12px;color:var(--dim);padding:0 12px;margin-bottom:4px">'+esc(c.description)+'</div>':'')+
+      '<div class="box-body">'+
+        (consumers?'<div style="margin-bottom:8px">'+consumers+'</div>':'')+
+        body+
+      '</div>'+
+    '</div>';
+  },
+  toggleInput(id){
+    const el=$('vault-input-'+id);
+    if(el) el.style.display=el.style.display==='none'?'block':'none';
+  },
+  toggleFields(id){
+    const el=$('vault-fields-'+id);
+    if(el) el.style.display=el.style.display==='none'?'block':'none';
+  },
+  async saveKey(id){
+    const inp=$('vault-key-'+id);
+    if(!inp||!inp.value.trim())return;
+    const st=$('vault-status-'+id);
+    if(st) st.textContent='Saving...';
     try{
-      const r=await fetch('/api/admin/ai-config',{
-        method:'PUT',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({primary,fallback,keys})
+      const r=await fetch('/api/vault/credentials/'+id,{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({value:inp.value.trim()})
       });
       const d=await r.json();
+      if(d.ok){toast(d.message||'Saved','green');setTimeout(()=>this.load(),500)}
+      else{toast(d.error||'Failed','red');if(st) st.textContent='Error'}
+    }catch(e){toast(e.message,'red');if(st) st.textContent='Error'}
+  },
+  async saveMulti(id){
+    const fields={};
+    document.querySelectorAll('[id^="vault-f-'+id+'-"]').forEach(inp=>{
+      const fid=inp.id.replace('vault-f-'+id+'-','');
+      if(inp.value.trim()) fields[fid]=inp.value.trim();
+    });
+    if(!Object.keys(fields).length)return;
+    const st=$('vault-status-'+id);
+    if(st) st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/vault/credentials/'+id,{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({fields})
+      });
+      const d=await r.json();
+      if(d.ok){toast(d.message||'Saved','green');setTimeout(()=>this.load(),500)}
+      else{toast(d.error||'Failed','red');if(st) st.textContent='Error'}
+    }catch(e){toast(e.message,'red');if(st) st.textContent='Error'}
+  },
+  async saveModels(){
+    const primary=$('vault-primary')?.value||'';
+    const fallback=$('vault-fallback')?.value||'';
+    try{
+      const r=await fetch('/api/vault/credentials/_model_selection',{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({primary,fallback})
+      });
+      const d=await r.json();
+      if(d.ok) toast('Model selection saved','green');
+      else toast(d.error||'Failed','red');
+    }catch(e){toast(e.message,'red')}
+  },
+  async test(id){
+    const st=$('vault-status-'+id);
+    if(st) st.innerHTML='<span style="color:var(--dim)">Testing...</span>';
+    try{
+      const r=await fetch('/api/vault/credentials/'+id+'/test',{method:'POST'});
+      const d=await r.json();
       if(d.ok){
-        toast(d.message||'Saved','green');
-        $('aiconfig-status').textContent='Saved';
-        // Reload to reflect changes
-        setTimeout(()=>this.load(),500);
+        if(st) st.innerHTML='<span style="color:#4ade80">\u2713 '+esc(d.message||'OK')+' ('+d.latency_ms+'ms)</span>';
       }else{
-        toast(d.error||'Save failed','red');
-        $('aiconfig-status').textContent='Error';
+        if(st) st.innerHTML='<span style="color:#f97316">\u2717 '+esc(d.message||'Failed')+'</span>';
       }
-    }catch(e){toast(e.message,'red');$('aiconfig-status').textContent='Error'}
+    }catch(e){if(st) st.innerHTML='<span style="color:#ef4444">'+esc(e.message)+'</span>'}
+  },
+  async connectOAuth(id){
+    try{
+      const r=await fetch('/api/vault/oauth/'+id+'/connect');
+      const d=await r.json();
+      if(d.url){
+        // Open OAuth popup
+        this._oauthCredId=id;
+        window.open(d.url,'oauth_popup','width=600,height=700,scrollbars=yes');
+      }else{
+        toast(d.error||'OAuth not configured','red');
+      }
+    }catch(e){toast(e.message,'red')}
+  },
+  _oauthCredId:null,
+  _onOAuthMessage(e){
+    if(e.data&&e.data.type==='oauth_callback'){
+      if(e.data.status==='success'){
+        toast('Connected: '+e.data.message,'green');
+      }else{
+        toast('OAuth failed: '+e.data.message,'red');
+      }
+      setTimeout(()=>Connections.load(),500);
+    }
+  },
+  async disconnectOAuth(id){
+    if(!confirm('Disconnect this account? You can reconnect later.'))return;
+    try{
+      const r=await fetch('/api/vault/oauth/'+id+'/disconnect',{method:'POST'});
+      const d=await r.json();
+      if(d.ok){toast('Disconnected','green');setTimeout(()=>this.load(),500)}
+      else toast(d.error||'Failed','red');
+    }catch(e){toast(e.message,'red')}
+  },
+  showAddCustom(){
+    const el=$('vault-add-custom');
+    if(!el)return;
+    if(el.style.display!=='none'){el.style.display='none';return}
+    el.style.display='block';
+    el.innerHTML='<div class="box"><div class="box-title">Add Custom Credential</div><div class="box-body">'+
+      '<div style="display:flex;flex-direction:column;gap:8px">'+
+        '<input id="vault-custom-name" type="text" placeholder="Display name (e.g. My Custom API)" style="background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-size:13px">'+
+        '<input id="vault-custom-env" type="text" placeholder="Environment variable (e.g. MY_API_KEY)" style="background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:var(--mono);font-size:13px">'+
+        '<input id="vault-custom-value" type="password" placeholder="API key value" style="background:var(--panel3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:var(--mono);font-size:13px" autocomplete="off">'+
+        '<div style="display:flex;gap:8px"><button class="btn btn-g btn-sm" onclick="Connections.addCustom()">Add</button><button class="btn btn-o btn-sm" onclick="$(\'vault-add-custom\').style.display=\'none\'">Cancel</button></div>'+
+      '</div></div></div>';
+  },
+  async addCustom(){
+    const name=$('vault-custom-name')?.value?.trim();
+    const env_var=$('vault-custom-env')?.value?.trim();
+    const value=$('vault-custom-value')?.value?.trim();
+    if(!name||!env_var){toast('Name and env var are required','red');return}
+    try{
+      const r=await fetch('/api/vault/credentials',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name,env_var,value})
+      });
+      const d=await r.json();
+      if(d.ok){toast(d.message||'Added','green');setTimeout(()=>this.load(),500)}
+      else toast(d.error||'Failed','red');
+    }catch(e){toast(e.message,'red')}
   }
 };
 
