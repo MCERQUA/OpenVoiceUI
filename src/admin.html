@@ -1921,6 +1921,16 @@ const Connections={
           '<span style="color:var(--text);font-size:13px">'+esc(c.masked_value)+'</span>'+
           '<button class="btn btn-o btn-sm" style="color:#f97316;border-color:#f97316" onclick="Connections.disconnectOAuth(\''+esc(id)+'\')">Disconnect</button>'+
         '</div>';
+      }else if(c.platform_configured===false){
+        // Phase 1.5 Cycle B: platform operator hasn't registered an OAuth app
+        // for this provider. Show a clear, non-clickable disabled state with
+        // a deep link to Platform Setup so the operator can enable it.
+        body='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+          '<button class="btn btn-sm" style="background:var(--panel3);color:var(--dim);border:1px dashed var(--border);cursor:not-allowed" disabled title="Platform operator needs to configure this OAuth provider in Platform Setup">'+
+            'Connect '+esc(c.name)+
+          '</button>'+
+          '<a href="#platform-setup" style="font-size:11px;color:#3b82f6;text-decoration:none">⚠ Not enabled by platform — set up →</a>'+
+        '</div>';
       }else{
         body='<button class="btn btn-sm" style="background:#3b82f6;color:#fff;border:none" onclick="Connections.connectOAuth(\''+esc(id)+'\')">Connect '+esc(c.name)+'</button>';
       }

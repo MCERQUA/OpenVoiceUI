@@ -24,10 +24,38 @@ import requests
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Paths
+# Paths — install-mode aware (Docker / Pinokio / npm)
 # ---------------------------------------------------------------------------
-_PLATFORM_CATALOG_PATH = Path('/mnt/system/base/platform-credentials.json')
-_PLATFORM_OAUTH_PATH = Path('/mnt/system/base/platform-oauth.json')
+def _platform_config_dir() -> Path:
+    """Resolve the platform config directory based on install mode.
+
+    Order of precedence:
+      1. PLATFORM_CONFIG_DIR env var (explicit override — set by Pinokio
+         install.js or npm postinstall)
+      2. /mnt/system/base — Docker mode (the JamBot multi-tenant deployment)
+      3. $XDG_CONFIG_HOME/openvoiceui — XDG standard for desktop installs
+      4. Current working directory — last-resort fallback for dev/test
+
+    All platform-level config files (platform-credentials.json,
+    .platform-oauth.env, .platform-keys.env, etc.) are located here.
+    """
+    explicit = os.getenv('PLATFORM_CONFIG_DIR', '').strip()
+    if explicit:
+        return Path(explicit)
+    docker_path = Path('/mnt/system/base')
+    if docker_path.is_dir():
+        return docker_path
+    xdg_config = Path(os.getenv('XDG_CONFIG_HOME', str(Path.home() / '.config')))
+    xdg_path = xdg_config / 'openvoiceui'
+    if xdg_path.is_dir():
+        return xdg_path
+    return Path.cwd()
+
+
+_PLATFORM_CONFIG_DIR = _platform_config_dir()
+_PLATFORM_CATALOG_PATH = _PLATFORM_CONFIG_DIR / 'platform-credentials.json'
+_PLATFORM_OAUTH_PATH = _PLATFORM_CONFIG_DIR / 'platform-oauth.json'  # legacy
+_PLATFORM_OAUTH_ENV = _PLATFORM_CONFIG_DIR / '.platform-oauth.env'   # Phase 1.5
 _CLIENTS_DIR = Path('/mnt/clients')
 _PLUGINS_DIR = Path('/app/plugins')
 _OPENCLAW_CONFIG_PATH = Path('/app/runtime/openclaw.json')
@@ -45,6 +73,66 @@ if not _PLATFORM_CATALOG_PATH.exists():
         _alt = Path(_alt_path)
         if _alt.is_file():
             _PLATFORM_CATALOG_PATH = _alt
+
+
+def _load_platform_oauth_env():
+    """Load .platform-oauth.env into os.environ if it exists.
+
+    In Docker mode, the compose `env_file:` mount loads this file already
+    and `os.environ.setdefault` is a no-op (we don't override what compose
+    set). In Pinokio/npm mode, the file isn't auto-loaded by anything, so
+    this function does the loading.
+
+    Silent no-op when the file is missing — OAuth is opt-in.
+    Comments and blank lines are ignored. Quoted values are unquoted.
+    """
+    path = _PLATFORM_OAUTH_ENV
+    try:
+        if not path.is_file():
+            return
+        for raw in path.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' not in line:
+                continue
+            k, v = line.split('=', 1)
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k:
+                os.environ.setdefault(k, v)
+    except (PermissionError, OSError) as exc:
+        logger.warning(f"[vault] Cannot read {path}: {exc}")
+
+
+_load_platform_oauth_env()
+
+
+def _is_oauth_platform_configured(catalog_entry: dict) -> bool:
+    """Check whether the platform operator has registered an OAuth app for
+    this credential. Returns True for non-OAuth credentials (no operator
+    setup needed). For OAuth, requires both client_id and client_secret
+    env vars to be set and non-empty.
+
+    Convention: provider 'google' looks for GOOGLE_OAUTH_CLIENT_ID and
+    GOOGLE_OAUTH_CLIENT_SECRET. Provider 'facebook' uses
+    FACEBOOK_OAUTH_APP_ID + FACEBOOK_OAUTH_APP_SECRET (Facebook's preferred
+    naming). Custom var names can be specified in the catalog entry's
+    `oauth.client_id_env` / `oauth.client_secret_env` if needed.
+    """
+    if catalog_entry.get('type') != 'oauth2':
+        return True
+    oauth = catalog_entry.get('oauth', {}) or {}
+    provider = oauth.get('provider', '').strip().lower()
+    if not provider:
+        return False
+    cid_var = oauth.get('client_id_env') or f'{provider.upper()}_OAUTH_CLIENT_ID'
+    csec_var = oauth.get('client_secret_env') or f'{provider.upper()}_OAUTH_CLIENT_SECRET'
+    cid = (os.environ.get(cid_var, '') or
+           os.environ.get(f'{provider.upper()}_OAUTH_APP_ID', '')).strip()
+    csec = (os.environ.get(csec_var, '') or
+            os.environ.get(f'{provider.upper()}_OAUTH_APP_SECRET', '')).strip()
+    return bool(cid and csec)
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +657,10 @@ def get_credentials_status(username: str) -> list[dict]:
             'docs_url': entry.get('docs_url', ''),
             'has_test': bool(entry.get('test')),
             'fields': entry.get('fields'),  # For multi-field rendering
+            # Phase 1.5 Cycle B: tells UI whether the platform operator has
+            # set up this provider. Only meaningful for OAuth — for non-OAuth
+            # creds it's always True (operator setup not required).
+            'platform_configured': _is_oauth_platform_configured(entry),
         }
 
         if cred_type == 'oauth2':
@@ -949,14 +1041,61 @@ def test_credential(username: str, cred_id: str) -> dict:
 
 # ---------------------------------------------------------------------------
 # OAuth token management
+#
+# Phase 1.5 Cycle B: OAuth app credentials (client_id + client_secret) come
+# from .platform-oauth.env via os.environ — they're loaded at module import
+# by _load_platform_oauth_env(). The legacy platform-oauth.json reader is
+# kept as a fallback for any deployments still using the old format.
 # ---------------------------------------------------------------------------
+def _get_oauth_app_creds(catalog_entry: dict, domain: str) -> Optional[dict]:
+    """Resolve OAuth app credentials for a catalog entry. Returns
+    {client_id, client_secret, redirect_uri} or None if not configured.
+
+    Reads from os.environ first (Phase 1.5 .platform-oauth.env), falls back
+    to legacy platform-oauth.json for backwards compat.
+
+    Redirect URI is built from the requesting domain — every client serves
+    its own /api/vault/oauth/callback/<provider> endpoint.
+    """
+    oauth_cfg = catalog_entry.get('oauth', {}) or {}
+    provider = oauth_cfg.get('provider', '').strip().lower()
+    if not provider:
+        return None
+
+    cid_var = oauth_cfg.get('client_id_env') or f'{provider.upper()}_OAUTH_CLIENT_ID'
+    csec_var = oauth_cfg.get('client_secret_env') or f'{provider.upper()}_OAUTH_CLIENT_SECRET'
+
+    cid = (os.environ.get(cid_var, '') or
+           os.environ.get(f'{provider.upper()}_OAUTH_APP_ID', '')).strip()
+    csec = (os.environ.get(csec_var, '') or
+            os.environ.get(f'{provider.upper()}_OAUTH_APP_SECRET', '')).strip()
+
+    if cid and csec:
+        return {
+            'client_id': cid,
+            'client_secret': csec,
+            'redirect_uri': f'https://{domain}/api/vault/oauth/callback/{provider}',
+        }
+
+    # Legacy fallback — platform-oauth.json (deprecated, kept for backcompat)
+    legacy = _read_json(_PLATFORM_OAUTH_PATH).get(provider)
+    if legacy and legacy.get('client_id') and legacy.get('client_secret'):
+        return legacy
+
+    return None
+
+
 def get_oauth_apps() -> dict:
-    """Read platform OAuth app credentials (client_id/secret per provider)."""
+    """DEPRECATED — kept for backwards compatibility with legacy callers.
+    Phase 1.5 reads OAuth app creds from os.environ via _get_oauth_app_creds().
+    """
     return _read_json(_PLATFORM_OAUTH_PATH)
 
 
 def set_oauth_app(provider: str, client_id: str, client_secret: str, redirect_uri: str):
-    """Register/update an OAuth app."""
+    """DEPRECATED — kept for backwards compatibility. Cycle C will replace
+    this with a proper Platform Setup endpoint that writes to
+    .platform-oauth.env."""
     apps = get_oauth_apps()
     apps[provider] = {
         'client_id': client_id,
@@ -969,20 +1108,25 @@ def set_oauth_app(provider: str, client_id: str, client_secret: str, redirect_ur
 def build_oauth_url(cred_id: str, username: str, domain: str) -> Optional[str]:
     """
     Build the OAuth authorization URL for a credential.
-    Returns the URL the user should be redirected to.
+    Returns the URL the user should be redirected to, or None if the
+    platform operator hasn't registered an OAuth app for this provider.
     """
     cat_entry = get_catalog_credential(cred_id)
     if not cat_entry or cat_entry.get('type') != 'oauth2':
         return None
 
-    oauth_cfg = cat_entry.get('oauth', {})
-    provider = oauth_cfg.get('provider', '')
-    apps = get_oauth_apps()
-    app_creds = apps.get(provider)
+    app_creds = _get_oauth_app_creds(cat_entry, domain)
     if not app_creds:
-        logger.error(f"No OAuth app registered for provider '{provider}'")
+        oauth_cfg = cat_entry.get('oauth', {})
+        provider = oauth_cfg.get('provider', '')
+        logger.warning(
+            f"OAuth not configured for provider '{provider}' — "
+            f"set {provider.upper()}_OAUTH_CLIENT_ID and "
+            f"{provider.upper()}_OAUTH_CLIENT_SECRET in .platform-oauth.env"
+        )
         return None
 
+    oauth_cfg = cat_entry.get('oauth', {})
     import urllib.parse
     params = {
         'client_id': app_creds['client_id'],
@@ -1006,12 +1150,15 @@ def exchange_oauth_code(cred_id: str, code: str, username: str) -> dict:
     if not cat_entry or cat_entry.get('type') != 'oauth2':
         return {'ok': False, 'error': 'Not an OAuth credential'}
 
+    # Phase 1.5 Cycle B: read OAuth app creds from .platform-oauth.env
+    # via _get_oauth_app_creds, which uses the same domain the auth URL
+    # was built with so the redirect_uri matches what the provider expects.
+    domain = os.getenv('DOMAIN', 'localhost')
+    app_creds = _get_oauth_app_creds(cat_entry, domain)
     oauth_cfg = cat_entry.get('oauth', {})
     provider = oauth_cfg.get('provider', '')
-    apps = get_oauth_apps()
-    app_creds = apps.get(provider)
     if not app_creds:
-        return {'ok': False, 'error': f'No OAuth app for provider {provider}'}
+        return {'ok': False, 'error': f'No OAuth app configured for provider {provider}'}
 
     # Exchange code for tokens
     try:

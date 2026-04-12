@@ -185,3 +185,7 @@ profiles/*
 !profiles/manager.py
 !profiles/schema.json
 app/static/canvas-pages/
+
+# Phase 1.5: platform OAuth credentials — operator-supplied secrets,
+# never committed. The committed template is .platform-oauth.env.example.
+.platform-oauth.env
