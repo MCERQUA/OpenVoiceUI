@@ -10,7 +10,297 @@
   "provides": "gateway",
   "gateway_class": "HermesGateway",
   "hermes_version": "0.6.0",
-  "requires_env": ["HERMES_HOST"],
+  "requires_env": [
+    "HERMES_HOST"
+  ],
+  "lifecycle": {
+    "post_install": {
+      "requires_container": true,
+      "provision": "hermes"
+    },
+    "pre_uninstall": {
+      "deprovision": "hermes"
+    }
+  },
+  "install_config": {
+    "sections": [
+      {
+        "title": "Hermes Agent Configuration",
+        "description": "Hermes supports 14 inference providers. Fill in API keys for the ones you want to use \u2014 you need at least one for the agent to work. The Default Provider picks which one Hermes uses first; the others become fallbacks. All fields can be updated later from the Connections page.",
+        "fields": [
+          {
+            "id": "default_provider",
+            "label": "Default Provider",
+            "type": "select",
+            "required": true,
+            "options": [
+              {
+                "value": "auto",
+                "label": "Auto-detect (use any available)"
+              },
+              {
+                "value": "openrouter",
+                "label": "OpenRouter (access 200+ models)"
+              },
+              {
+                "value": "anthropic",
+                "label": "Anthropic Claude"
+              },
+              {
+                "value": "minimax",
+                "label": "MiniMax (global)"
+              },
+              {
+                "value": "minimax-cn",
+                "label": "MiniMax (China)"
+              },
+              {
+                "value": "zai",
+                "label": "Z.AI / ZhipuAI GLM"
+              },
+              {
+                "value": "kimi-coding",
+                "label": "Kimi (Moonshot)"
+              },
+              {
+                "value": "huggingface",
+                "label": "HuggingFace Inference"
+              },
+              {
+                "value": "copilot",
+                "label": "GitHub Copilot"
+              },
+              {
+                "value": "kilocode",
+                "label": "KiloCode gateway"
+              },
+              {
+                "value": "ai-gateway",
+                "label": "Vercel AI Gateway"
+              },
+              {
+                "value": "nous-api",
+                "label": "Nous Portal (API key)"
+              },
+              {
+                "value": "custom",
+                "label": "Custom local (LM Studio / Ollama / vLLM)"
+              }
+            ]
+          },
+          {
+            "id": "openrouter_api_key",
+            "label": "OpenRouter API Key",
+            "type": "password",
+            "docs_url": "https://openrouter.ai/keys"
+          },
+          {
+            "id": "anthropic_api_key",
+            "label": "Anthropic API Key",
+            "type": "password",
+            "docs_url": "https://console.anthropic.com/settings/keys"
+          },
+          {
+            "id": "minimax_api_key",
+            "label": "MiniMax API Key",
+            "type": "password",
+            "docs_url": "https://www.minimax.io/"
+          },
+          {
+            "id": "minimax_cn_api_key",
+            "label": "MiniMax China API Key",
+            "type": "password",
+            "docs_url": "https://platform.minimaxi.com/"
+          },
+          {
+            "id": "glm_api_key",
+            "label": "Z.AI / GLM API Key",
+            "type": "password",
+            "docs_url": "https://z.ai/"
+          },
+          {
+            "id": "kimi_api_key",
+            "label": "Kimi (Moonshot) API Key",
+            "type": "password",
+            "docs_url": "https://platform.moonshot.cn/console/api-keys"
+          },
+          {
+            "id": "hf_token",
+            "label": "HuggingFace Token",
+            "type": "password",
+            "docs_url": "https://huggingface.co/settings/tokens"
+          },
+          {
+            "id": "github_token",
+            "label": "GitHub Token (for Copilot)",
+            "type": "password",
+            "docs_url": "https://github.com/settings/tokens"
+          },
+          {
+            "id": "kilocode_api_key",
+            "label": "KiloCode API Key",
+            "type": "password",
+            "docs_url": "https://kilocode.ai/"
+          },
+          {
+            "id": "ai_gateway_api_key",
+            "label": "Vercel AI Gateway Key",
+            "type": "password",
+            "docs_url": "https://vercel.com/docs/ai-gateway"
+          },
+          {
+            "id": "nous_api_key",
+            "label": "Nous Portal API Key",
+            "type": "password",
+            "docs_url": "https://portal.nousresearch.com/"
+          },
+          {
+            "id": "custom_base_url",
+            "label": "Custom Endpoint URL (for local servers)",
+            "type": "text",
+            "placeholder": "http://host.docker.internal:1234/v1",
+            "docs_url": "https://lmstudio.ai/docs/local-server"
+          }
+        ]
+      }
+    ]
+  },
+  "credentials": [
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "description": "Access 200+ models through one API key",
+      "type": "api_key",
+      "group": "LLM Providers",
+      "env_var": "OPENROUTER_API_KEY",
+      "docs_url": "https://openrouter.ai/keys",
+      "test": {
+        "url": "https://openrouter.ai/api/v1/models",
+        "method": "GET",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer "
+      },
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "OPENROUTER_API_KEY"
+        }
+      }
+    },
+    {
+      "id": "minimax",
+      "extend": true,
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "MINIMAX_API_KEY"
+        }
+      }
+    },
+    {
+      "id": "minimax_cn",
+      "name": "MiniMax China",
+      "description": "MiniMax China (minimaxi.com) inference API",
+      "type": "api_key",
+      "group": "LLM Providers",
+      "env_var": "MINIMAX_CN_API_KEY",
+      "docs_url": "https://platform.minimaxi.com/",
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "MINIMAX_CN_API_KEY"
+        }
+      }
+    },
+    {
+      "id": "anthropic",
+      "extend": true,
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "ANTHROPIC_API_KEY"
+        }
+      }
+    },
+    {
+      "id": "zai",
+      "extend": true,
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "GLM_API_KEY",
+          "also_set": {
+            "GLM_BASE_URL": "https://api.z.ai/api/paas/v4"
+          }
+        }
+      }
+    },
+    {
+      "id": "huggingface",
+      "extend": true,
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "HF_TOKEN"
+        }
+      }
+    },
+    {
+      "id": "kimi",
+      "extend": true,
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "KIMI_API_KEY"
+        }
+      }
+    },
+    {
+      "id": "nous_api",
+      "name": "Nous Portal",
+      "description": "Nous Research Portal API key (for Hermes backend)",
+      "type": "api_key",
+      "group": "LLM Providers",
+      "env_var": "NOUS_API_KEY",
+      "docs_url": "https://portal.nousresearch.com/",
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "NOUS_API_KEY"
+        }
+      }
+    },
+    {
+      "id": "kilocode",
+      "name": "KiloCode",
+      "description": "KiloCode AI gateway",
+      "type": "api_key",
+      "group": "LLM Providers",
+      "env_var": "KILOCODE_API_KEY",
+      "docs_url": "https://kilocode.ai/",
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "KILOCODE_API_KEY"
+        }
+      }
+    },
+    {
+      "id": "ai_gateway",
+      "name": "Vercel AI Gateway",
+      "description": "Vercel's managed AI gateway \u2014 one endpoint, many providers",
+      "type": "api_key",
+      "group": "LLM Providers",
+      "env_var": "AI_GATEWAY_API_KEY",
+      "docs_url": "https://vercel.com/docs/ai-gateway",
+      "consumers": {
+        "hermes": {
+          "type": "env_file",
+          "env_var": "AI_GATEWAY_API_KEY"
+        }
+      }
+    }
+  ],
   "pages": [
     {
       "file": "pages/hermes.html",

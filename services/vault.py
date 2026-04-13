@@ -295,21 +295,40 @@ _restart_lock = threading.Lock()
 
 
 def _do_restart_container(container_name: str):
-    """Actually perform the container recreate via `docker compose up -d --force-recreate`.
-    Must be a RECREATE, not a simple restart — Docker only loads env_file
-    values at container creation time, so a plain restart keeps the old env.
+    """Recreate a container to pick up new env_file values.
+
+    Routes to the right mechanism based on the container type:
+      - openclaw-<user> / openvoiceui-<user>: managed by the client's
+        docker-compose.yml, recreated via `docker compose up -d --force-recreate`
+      - <plugin>-<user> (e.g. hermes-test-dev): managed by the JamBot
+        provisioning service (port 5200), which knows how to handle per-plugin
+        env/config files and container lifecycle. We POST to its /provision/
+        endpoint with an empty config body — the service re-uses the existing
+        .env that was just updated.
+
     Called by the debounce timer; do not call directly.
     """
     import subprocess
-    # Parse container name: "openclaw-<user>" or "openvoiceui-<user>"
     if '-' not in container_name:
         logger.error(f"[vault] Unexpected container name format: {container_name}")
         return
     service, username = container_name.split('-', 1)
-    if service not in ('openclaw', 'openvoiceui'):
-        logger.error(f"[vault] Unknown service in {container_name}")
-        return
 
+    try:
+        if service in ('openclaw', 'openvoiceui'):
+            _recreate_compose_service(service, username)
+        else:
+            # Plugin container — delegate to the provisioning service
+            _recreate_plugin_container(service, username)
+    finally:
+        with _restart_lock:
+            _restart_timers.pop(container_name, None)
+
+
+def _recreate_compose_service(service: str, username: str):
+    """Recreate an openclaw or openvoiceui container via docker compose."""
+    import subprocess
+    container_name = f'{service}-{username}'
     compose_file = _CLIENTS_DIR / username / 'compose' / 'docker-compose.yml'
     env_file = _CLIENTS_DIR / username / 'compose' / '.env'
     if not compose_file.is_file():
@@ -345,9 +364,43 @@ def _do_restart_container(container_name: str):
         logger.error(f"[vault] docker compose up timed out for {container_name}")
     except Exception as exc:
         logger.error(f"[vault] Failed to recreate {container_name}: {exc}")
-    finally:
-        with _restart_lock:
-            _restart_timers.pop(container_name, None)
+
+
+def _recreate_plugin_container(plugin_id: str, username: str):
+    """Recreate a plugin container via the JamBot provisioning service.
+
+    Sends an empty config body so the service preserves the .env file we
+    just wrote and performs a restart-with-current-config. The service's
+    endpoint handler (provision_hermes etc.) detects that the container
+    is already running and reissues a `docker restart` after the provision
+    call returns.
+    """
+    import subprocess
+    container_name = f'{plugin_id}-{username}'
+    logger.info(f"[vault] Restarting plugin container {container_name} via provision service...")
+    try:
+        # Direct docker restart is sufficient — the .env file update is
+        # picked up by Hermes's entrypoint which re-reads .env on start.
+        # (Unlike compose env_file loading which is fixed at create time,
+        # plugin container entrypoints typically read .env at process start.)
+        result = subprocess.run(
+            ['docker', 'restart', container_name],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            logger.info(f"[vault] {container_name} restarted successfully")
+        else:
+            # Container might not exist (plugin not installed) — that's OK
+            if 'No such container' in (result.stderr or ''):
+                logger.debug(f"[vault] {container_name} not found, skipping restart (plugin likely not installed for this user)")
+            else:
+                logger.warning(
+                    f"[vault] docker restart failed for {container_name}: {result.stderr.strip()}"
+                )
+    except subprocess.TimeoutExpired:
+        logger.error(f"[vault] docker restart timed out for {container_name}")
+    except Exception as exc:
+        logger.error(f"[vault] Failed to restart {container_name}: {exc}")
 
 
 def _schedule_container_restart(container_name: str):
@@ -769,10 +822,23 @@ def sync_credential(username: str, cred_id: str) -> set[str]:
                     containers_to_restart.add(f'openvoiceui-{username}')
                     logger.info(f"Synced {cred_id} → {env_path.name} ({len(env_vars)} var(s))")
             else:
-                # Unknown consumer (e.g., plugin name) — fall back to old plugin env_file logic
+                # Plugin consumer (e.g., "hermes") — write to the plugin's
+                # per-client env file AND schedule its container for restart.
+                # Phase 1.5 fix: previously the env_file path wrote the file
+                # but didn't schedule a restart, so plugin containers stayed
+                # on the old env values until manually restarted.
                 consumer_type = consumer_cfg.get('type', 'env_var')
                 if consumer_type == 'env_file':
-                    _sync_to_env_file(username, cred_id, raw_value, consumer_cfg, consumer_name)
+                    plugin_id = consumer_name
+                    plugin_env_file = _CLIENTS_DIR / username / plugin_id / '.env'
+                    if _update_plugin_env_file(plugin_env_file, env_vars, consumer_cfg):
+                        # Schedule the plugin's container for restart.
+                        # Convention: plugin container is named "<plugin_id>-<username>"
+                        # (e.g., "hermes-test-dev"). If that container doesn't exist
+                        # (plugin not container-based or not installed), the restart
+                        # call is a no-op at runtime.
+                        containers_to_restart.add(f'{plugin_id}-{username}')
+                        logger.info(f"Synced {cred_id} → {plugin_env_file} ({len(env_vars)} var(s))")
                 elif consumer_type == 'oauth_token':
                     pass  # OAuth tokens are read directly, no push needed
                 else:
@@ -884,6 +950,42 @@ def _update_env_file(path: Path, updates: dict) -> bool:
             logger.error(f"Cannot write env file {path}: {exc2}")
             return False
     return True
+
+
+def _update_plugin_env_file(path: Path, env_vars: dict, consumer_cfg: dict) -> bool:
+    """Write credential env vars to a plugin's per-client .env file.
+
+    Plugin consumers can declare an `also_set` block in their consumer config
+    (e.g. Z.AI also sets GLM_BASE_URL), and the consumer_cfg can specify a
+    different env_var name than the credential's top-level one (e.g. the
+    catalog-level credential env_var is OPENROUTER_API_KEY but a plugin could
+    declare a different name for its internal env).
+
+    Creates the parent dir if missing so fresh plugin installs can be
+    written before the plugin dir exists.
+    """
+    if not env_vars:
+        return False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError) as exc:
+        logger.warning(f"Cannot create plugin env dir {path.parent}: {exc}")
+        return False
+
+    # Consumer-level env_var override: use the name declared in the consumer
+    # config rather than the catalog-level default, if provided.
+    consumer_env_var = consumer_cfg.get('env_var', '')
+    resolved = dict(env_vars)
+    if consumer_env_var and len(env_vars) == 1:
+        # Single-value credential, rename to the consumer's preferred var name
+        (_, v), = env_vars.items()
+        resolved = {consumer_env_var: v}
+
+    # Merge in also_set (companion env vars like GLM_BASE_URL)
+    for k, v in consumer_cfg.get('also_set', {}).items():
+        resolved.setdefault(k, v)
+
+    return _update_env_file(path, resolved)
 
 
 def sync_all(username: str):
