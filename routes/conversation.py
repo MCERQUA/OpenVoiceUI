@@ -1584,15 +1584,17 @@ def _conversation_inner():
                                 yield json.dumps({'type': 'retrying'}) + '\n'
                                 time.sleep(2)
                                 # Re-send the message through the gateway.
-                                # If the first empty was suspiciously fast (< 500ms), the session
-                                # is likely dead (openclaw restarted, no state). Use a fresh
-                                # session key so the retry doesn't hit the same dead session.
+                                # Always retry on the SAME session key first. The gateway
+                                # may have been momentarily busy (queue flush, lane transition)
+                                # and the same key will work 2 seconds later with full context.
+                                # Switching to a recovery key here loses all conversation history
+                                # (the agent doesn't know what was just discussed).
+                                # Only the double-empty handler switches to a stable "recovery" key.
                                 _retry_key = _session_key
                                 if metrics.get('llm_inference_ms', 9999) < 500:
-                                    _retry_key = f"recovery-{int(time.time())}"
                                     logger.warning(
                                         f"### Fast empty ({metrics['llm_inference_ms']}ms) — "
-                                        f"session likely dead, retrying on key '{_retry_key}'"
+                                        f"retrying on same session key '{_retry_key}'"
                                     )
                                 retry_queue = queue.Queue()
                                 captured_actions.clear()
