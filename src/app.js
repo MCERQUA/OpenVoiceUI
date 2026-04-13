@@ -300,6 +300,12 @@ initUpdateChecker();
                     const activeProfile = this._profiles.find(p => p.id === activeId);
                     const agentId = activeProfile?.adapter_config?.agentId || null;
                     localStorage.setItem('gateway_agent_id', agentId || '');
+                    // Store the gateway_id so the Action Console can show which
+                    // backend gateway is handling conversations ("openclaw",
+                    // "hermes", etc.). Defaults to "openclaw" to match the
+                    // server-side conversation.py fallback.
+                    const gatewayId = activeProfile?.adapter_config?.gateway_id || 'openclaw';
+                    localStorage.setItem('gateway_id', gatewayId);
                     if (activeProfile) TranscriptPanel.agentName = activeProfile.name;
                     localStorage.setItem('active_profile_id', activeId);
 
@@ -1581,42 +1587,29 @@ initUpdateChecker();
             },
 
             async _notifyAgent(title) {
+                // Plays a canned TTS announcement only — no ghost LLM call.
+                // The server-side `completed_songs_queue` already has the event; on the
+                // NEXT real user turn, conversation.py injects it as a [SYSTEM] prefix so
+                // the agent has full context when the user says "yeah" / "play it".
+                const line = `Your song "${title}" is ready. Just say play it to hear it.`;
+                TranscriptPanel?.addMessage('system', `🎵 ${line}`);
+                ActionConsole?.addEntry('system', `🎵 Song ready: "${title}"`);
                 try {
                     const provider = window.voiceAgent?.selectedProvider || 'groq';
                     const voice = window.voiceAgent?.currentVoice || 'autumn';
-                    const sessionId = window._activeSessionId || `suno-${Date.now()}`;
-
-                    const resp = await fetch(`${CONFIG.serverUrl}/api/conversation`, {
+                    const resp = await fetch(`${CONFIG.serverUrl}/api/tts/generate`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            message: `__suno_complete__:${title}`,
-                            tts_provider: provider,
-                            voice: voice,
-                            session_id: sessionId,
-                            ui_context: {},
-                        }),
+                        body: JSON.stringify({ text: line, provider, voice }),
                     });
-                    if (!resp.ok) throw new Error('notify failed');
-                    const data = await resp.json();
-
-                    if (data.response) {
-                        TranscriptPanel?.addMessage('assistant', data.response);
-                        ActionConsole?.addEntry('system', `🎵 Agent: ${data.response.substring(0, 80)}`);
-                    }
-                    if (data.audio) {
-                        const binary = atob(data.audio);
-                        const bytes = new Uint8Array(binary.length);
-                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                        const blob = new Blob([bytes], { type: 'audio/mpeg' });
-                        const url = URL.createObjectURL(blob);
-                        const audio = new Audio(url);
-                        audio.onended = () => URL.revokeObjectURL(url);
-                        audio.play().catch(() => {});
-                    }
+                    if (!resp.ok) throw new Error(`tts ${resp.status}`);
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const audio = new Audio(url);
+                    audio.onended = () => URL.revokeObjectURL(url);
+                    audio.play().catch(() => {});
                 } catch (e) {
-                    console.warn('[Suno] Agent notify failed, falling back to TTS:', e);
-                    this._speakCompletion(title);
+                    console.warn('[Suno] announce TTS failed:', e);
                 }
             },
         };
@@ -3480,8 +3473,12 @@ initUpdateChecker();
                         this.callbacks.onListening();
                     }
                 } else {
-                    console.error('Failed to start voice input');
-                    this.callbacks.onError('Failed to start voice input');
+                    // stt.start() returning false is almost always "user muted their
+                    // mic before the call fully started" (common pattern for text-only
+                    // reply in a noisy room), NOT an actual device failure. Don't show
+                    // an error popup for this — the text input still works fine.
+                    console.log('Voice input not started (likely muted by user — text input still works)');
+                    ActionConsole.addEntry('system', 'Mic is muted — text input active');
                 }
                 this._startingSession = false;
             }
@@ -3666,7 +3663,13 @@ initUpdateChecker();
                     if (!response.ok) {
                         throw new Error(`API error: ${response.status}`);
                     }
-                    ActionConsole.addEntry('system', 'Connected to server — waiting for agent...');
+                    {
+                        const _gwId = localStorage.getItem('gateway_id') || 'openclaw';
+                        const _gwLabel = _gwId === 'hermes' ? 'Hermes' :
+                                         _gwId === 'openclaw' ? 'OpenClaw' :
+                                         _gwId;
+                        ActionConsole.addEntry('system', `Connected to ${_gwLabel} gateway — waiting for agent...`);
+                    }
 
                     // Stream mode: read NDJSON lines with real-time deltas
                     const reader = response.body.getReader();
@@ -3694,8 +3697,18 @@ initUpdateChecker();
                     const escapeHtml = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
                     // Helper: strip canvas and music tags from display text
-                    const stripCanvasTags = (text) => {
+                    // Normalize sloppy `[ TAG:val ]` → `[TAG:val]` before any tag regex runs.
+                    // GLM sometimes emits stray whitespace that defeats every downstream
+                    // match (display strip + MUSIC_PLAY extract + canvas open).
+                    const normalizeActionTags = (text) => {
+                        if (!text) return text;
                         return text
+                            .replace(/\[\s+/g, '[')
+                            .replace(/\[([A-Z][A-Z0-9_]*)\s*:\s*([^\]]*?)\s*\]/g, '[$1:$2]')
+                            .replace(/\[([A-Z][A-Z0-9_]*)\s*\]/g, '[$1]');
+                    };
+                    const stripCanvasTags = (text) => {
+                        return normalizeActionTags(text)
                             .replace(/```html[\s\S]*?```/gi, '')  // complete html fences
                             .replace(/```[\s\S]*?```/g, '')        // complete generic fences
                             .replace(/```html[\s\S]*/gi, '')       // unclosed html fence (streaming)
@@ -3718,6 +3731,7 @@ initUpdateChecker();
 
                     // Helper: check for canvas/music commands in accumulated text
                     const checkCanvasInStream = async (text) => {
+                        text = normalizeActionTags(text);
                         // Check for [CANVAS_MENU]
                         if (/\[CANVAS_MENU\]/i.test(text) && !canvasCommandsProcessed.has('CANVAS_MENU')) {
                             canvasCommandsProcessed.add('CANVAS_MENU');
@@ -4775,7 +4789,7 @@ initUpdateChecker();
                         console.log(`Clawdbot ${role}:`, text);
                     },
                     onError: (error) => {
-                        UIModule.showError(`Clawdbot error: ${error}`);
+                        UIModule.showError(`Agent error: ${error}`);
                         FaceModule.setMood('sad');
                         setTimeout(() => FaceModule.setMood('neutral'), 2000);
                     }
@@ -6151,7 +6165,7 @@ initUpdateChecker();
 
                     return { success: true, response: data.response };
                 } catch (error) {
-                    return { success: false, error: `Clawdbot error: ${error.message}` };
+                    return { success: false, error: `Agent error: ${error.message}` };
                 }
             }
 
@@ -8083,20 +8097,35 @@ initUpdateChecker();
                 for (const action of actions) {
                     if (action.type === 'tool') {
                         const phase = action.phase === 'result' ? '✓' : '→';
-                        // Build a readable detail line from the input parameters
+                        // Build a readable detail line from the action's fields.
+                        // Different gateways emit different shapes:
+                        //   OpenClaw: action.input (object with command/path/etc)
+                        //             action.result (string) on phase=result
+                        //             action.meta (summary string) on phase=result
+                        //   Hermes:   action.detail (flat string with the command/target)
+                        // The Action Console is the VERBOSE view — show full detail here.
+                        // A 2000-char sanity cap prevents a giant file-content fallback from
+                        // blowing out the UI but real shell commands and paths always fit.
+                        const DETAIL_MAX = 2000;
                         let detail = '';
                         if (action.phase === 'result') {
-                            // For results, show first meaningful line of output
-                            const raw = action.result || '';
-                            detail = raw.split('\n').filter(l => l.trim())[0]?.slice(0, 120) || raw.slice(0, 120);
+                            if (action.meta) {
+                                detail = String(action.meta).slice(0, DETAIL_MAX);
+                            } else {
+                                const raw = action.result || '';
+                                detail = raw.split('\n').filter(l => l.trim())[0]?.slice(0, DETAIL_MAX) || raw.slice(0, DETAIL_MAX);
+                            }
+                        } else if (action.detail) {
+                            // Hermes format: flat string detail — no truncation at source
+                            detail = String(action.detail).slice(0, DETAIL_MAX);
                         } else if (action.input && typeof action.input === 'object' && Object.keys(action.input).length) {
+                            // OpenClaw format: nested input object
                             const inp = action.input;
-                            // Extract the most useful field for display
                             detail = inp.command || inp.path || inp.file_path || inp.filePath ||
                                      inp.query || inp.url || inp.pattern ||
-                                     inp.oldText?.slice?.(0, 60) ||
-                                     inp.content?.slice?.(0, 60) ||
-                                     Object.values(inp)[0]?.toString?.()?.slice(0, 120) || '';
+                                     inp.oldText?.slice?.(0, 500) ||
+                                     inp.content?.slice?.(0, 500) ||
+                                     Object.values(inp)[0]?.toString?.()?.slice(0, DETAIL_MAX) || '';
                         }
                         this.addEntry('tool', `${phase} Tool: ${action.name}`, detail, action.ts);
                     } else if (action.type === 'lifecycle') {

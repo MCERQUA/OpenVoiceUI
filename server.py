@@ -205,6 +205,9 @@ app.register_blueprint(plugins_bp)
 from routes.custom_faces import custom_faces_bp
 app.register_blueprint(custom_faces_bp)
 
+from routes.vault import vault_bp
+app.register_blueprint(vault_bp)
+
 from services.plugins import load_plugins
 load_plugins(app)
 
