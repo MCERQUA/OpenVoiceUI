@@ -116,6 +116,7 @@ def create_app(config_override: dict = None):
             '/api/uploads',   # uploads list — files are already public at /uploads/, listing is fine
             '/api/profiles',  # read-only profile config — loaded before Clerk init
             '/api/plugins',   # Plugin system — asset loading, install/uninstall
+            '/api/vault/oauth/callback/',  # OAuth callbacks — redirected from external providers
             '/plugins/',      # Plugin static assets — face scripts, CSS, previews
             '/api/chat',      # LLM proxy (Groq) — used by canvas pages for inline AI
             '/api/tts/',      # TTS provider list — loaded before Clerk init
