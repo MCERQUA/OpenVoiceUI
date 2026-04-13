@@ -295,16 +295,13 @@ _restart_lock = threading.Lock()
 
 
 def _do_restart_container(container_name: str):
-    """Recreate a container to pick up new env_file values.
+    """Recreate a compose-managed container (openclaw / openvoiceui) to pick
+    up new env_file values. Must be a RECREATE, not a plain restart — Docker
+    only loads env_file: values at container creation time.
 
-    Routes to the right mechanism based on the container type:
-      - openclaw-<user> / openvoiceui-<user>: managed by the client's
-        docker-compose.yml, recreated via `docker compose up -d --force-recreate`
-      - <plugin>-<user> (e.g. hermes-test-dev): managed by the JamBot
-        provisioning service (port 5200), which knows how to handle per-plugin
-        env/config files and container lifecycle. We POST to its /provision/
-        endpoint with an empty config body — the service re-uses the existing
-        .env that was just updated.
+    Plugin containers (e.g. hermes-<user>) are NOT handled here — the vault
+    syncs to them via the provisioning service (_sync_to_plugin_via_provision_service)
+    which owns plugin file writes + restart in one HTTP call.
 
     Called by the debounce timer; do not call directly.
     """
@@ -313,94 +310,52 @@ def _do_restart_container(container_name: str):
         logger.error(f"[vault] Unexpected container name format: {container_name}")
         return
     service, username = container_name.split('-', 1)
+    if service not in ('openclaw', 'openvoiceui'):
+        logger.error(
+            f"[vault] _do_restart_container only handles openclaw/openvoiceui, "
+            f"got {container_name}"
+        )
+        return
 
     try:
-        if service in ('openclaw', 'openvoiceui'):
-            _recreate_compose_service(service, username)
-        else:
-            # Plugin container — delegate to the provisioning service
-            _recreate_plugin_container(service, username)
+        compose_file = _CLIENTS_DIR / username / 'compose' / 'docker-compose.yml'
+        env_file = _CLIENTS_DIR / username / 'compose' / '.env'
+        if not compose_file.is_file():
+            logger.error(f"[vault] compose file not found: {compose_file}")
+            return
+
+        cmd = [
+            'docker', 'compose',
+            '-f', str(compose_file),
+            '--env-file', str(env_file),
+            'up', '-d', '--force-recreate', '--no-deps',
+            service,
+        ]
+        logger.info(f"[vault] Recreating {container_name} to apply new credentials...")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode == 0:
+                logger.info(f"[vault] {container_name} recreated successfully")
+                # Reconnect shared network (compose up -d disconnects cross-project networks)
+                try:
+                    subprocess.run(
+                        ['docker', 'network', 'connect', 'jambot-shared', container_name],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                except Exception:
+                    pass
+            else:
+                logger.error(
+                    f"[vault] docker compose up failed for {container_name}: "
+                    f"stdout={result.stdout} stderr={result.stderr}"
+                )
+        except subprocess.TimeoutExpired:
+            logger.error(f"[vault] docker compose up timed out for {container_name}")
+        except Exception as exc:
+            logger.error(f"[vault] Failed to recreate {container_name}: {exc}")
     finally:
         with _restart_lock:
             _restart_timers.pop(container_name, None)
-
-
-def _recreate_compose_service(service: str, username: str):
-    """Recreate an openclaw or openvoiceui container via docker compose."""
-    import subprocess
-    container_name = f'{service}-{username}'
-    compose_file = _CLIENTS_DIR / username / 'compose' / 'docker-compose.yml'
-    env_file = _CLIENTS_DIR / username / 'compose' / '.env'
-    if not compose_file.is_file():
-        logger.error(f"[vault] compose file not found: {compose_file}")
-        return
-
-    cmd = [
-        'docker', 'compose',
-        '-f', str(compose_file),
-        '--env-file', str(env_file),
-        'up', '-d', '--force-recreate', '--no-deps',
-        service,
-    ]
-    logger.info(f"[vault] Recreating {container_name} to apply new credentials...")
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode == 0:
-            logger.info(f"[vault] {container_name} recreated successfully")
-            # Reconnect shared network (compose up -d disconnects cross-project networks)
-            try:
-                subprocess.run(
-                    ['docker', 'network', 'connect', 'jambot-shared', container_name],
-                    capture_output=True, text=True, timeout=10,
-                )
-            except Exception:
-                pass  # may already be connected
-        else:
-            logger.error(
-                f"[vault] docker compose up failed for {container_name}: "
-                f"stdout={result.stdout} stderr={result.stderr}"
-            )
-    except subprocess.TimeoutExpired:
-        logger.error(f"[vault] docker compose up timed out for {container_name}")
-    except Exception as exc:
-        logger.error(f"[vault] Failed to recreate {container_name}: {exc}")
-
-
-def _recreate_plugin_container(plugin_id: str, username: str):
-    """Recreate a plugin container via the JamBot provisioning service.
-
-    Sends an empty config body so the service preserves the .env file we
-    just wrote and performs a restart-with-current-config. The service's
-    endpoint handler (provision_hermes etc.) detects that the container
-    is already running and reissues a `docker restart` after the provision
-    call returns.
-    """
-    import subprocess
-    container_name = f'{plugin_id}-{username}'
-    logger.info(f"[vault] Restarting plugin container {container_name} via provision service...")
-    try:
-        # Direct docker restart is sufficient — the .env file update is
-        # picked up by Hermes's entrypoint which re-reads .env on start.
-        # (Unlike compose env_file loading which is fixed at create time,
-        # plugin container entrypoints typically read .env at process start.)
-        result = subprocess.run(
-            ['docker', 'restart', container_name],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode == 0:
-            logger.info(f"[vault] {container_name} restarted successfully")
-        else:
-            # Container might not exist (plugin not installed) — that's OK
-            if 'No such container' in (result.stderr or ''):
-                logger.debug(f"[vault] {container_name} not found, skipping restart (plugin likely not installed for this user)")
-            else:
-                logger.warning(
-                    f"[vault] docker restart failed for {container_name}: {result.stderr.strip()}"
-                )
-    except subprocess.TimeoutExpired:
-        logger.error(f"[vault] docker restart timed out for {container_name}")
-    except Exception as exc:
-        logger.error(f"[vault] Failed to restart {container_name}: {exc}")
 
 
 def _schedule_container_restart(container_name: str):
@@ -822,23 +777,27 @@ def sync_credential(username: str, cred_id: str) -> set[str]:
                     containers_to_restart.add(f'openvoiceui-{username}')
                     logger.info(f"Synced {cred_id} → {env_path.name} ({len(env_vars)} var(s))")
             else:
-                # Plugin consumer (e.g., "hermes") — write to the plugin's
-                # per-client env file AND schedule its container for restart.
-                # Phase 1.5 fix: previously the env_file path wrote the file
-                # but didn't schedule a restart, so plugin containers stayed
-                # on the old env values until manually restarted.
+                # Plugin consumer (e.g., "hermes") — route credential updates
+                # through the JamBot provisioning service's PUT /config/<plugin>/<user>
+                # endpoint instead of writing the plugin's .env directly. The
+                # provision service runs as mike on the host with full access
+                # to /mnt/clients/<user>/<plugin>/ (chmod 700 mike:mike) which
+                # the openvoiceui container cannot reach. The service handles
+                # the file write AND the container restart in one call.
+                #
+                # This is a NETWORK call, not a file write, so it doesn't
+                # participate in the debounce + docker restart dispatch path.
+                # Instead it's fired directly here and the provision service
+                # restarts the plugin container itself.
                 consumer_type = consumer_cfg.get('type', 'env_var')
                 if consumer_type == 'env_file':
                     plugin_id = consumer_name
-                    plugin_env_file = _CLIENTS_DIR / username / plugin_id / '.env'
-                    if _update_plugin_env_file(plugin_env_file, env_vars, consumer_cfg):
-                        # Schedule the plugin's container for restart.
-                        # Convention: plugin container is named "<plugin_id>-<username>"
-                        # (e.g., "hermes-test-dev"). If that container doesn't exist
-                        # (plugin not container-based or not installed), the restart
-                        # call is a no-op at runtime.
-                        containers_to_restart.add(f'{plugin_id}-{username}')
-                        logger.info(f"Synced {cred_id} → {plugin_env_file} ({len(env_vars)} var(s))")
+                    if _sync_to_plugin_via_provision_service(
+                        username, plugin_id, env_vars, consumer_cfg
+                    ):
+                        logger.info(
+                            f"Synced {cred_id} → {plugin_id}-{username} via provision service"
+                        )
                 elif consumer_type == 'oauth_token':
                     pass  # OAuth tokens are read directly, no push needed
                 else:
@@ -952,40 +911,109 @@ def _update_env_file(path: Path, updates: dict) -> bool:
     return True
 
 
-def _update_plugin_env_file(path: Path, env_vars: dict, consumer_cfg: dict) -> bool:
-    """Write credential env vars to a plugin's per-client .env file.
+def _sync_to_plugin_via_provision_service(
+    username: str, plugin_id: str, env_vars: dict, consumer_cfg: dict
+) -> bool:
+    """Update a plugin's per-user config via the JamBot provisioning service.
 
-    Plugin consumers can declare an `also_set` block in their consumer config
-    (e.g. Z.AI also sets GLM_BASE_URL), and the consumer_cfg can specify a
-    different env_var name than the credential's top-level one (e.g. the
-    catalog-level credential env_var is OPENROUTER_API_KEY but a plugin could
-    declare a different name for its internal env).
+    The provision service (scripts/jambot-provision-service.py on the host,
+    port 5200) exposes PUT /config/<plugin>/<user> which:
+      1. Writes the plugin's .env + config.yaml from the posted body
+      2. Restarts the plugin container so new values take effect
 
-    Creates the parent dir if missing so fresh plugin installs can be
-    written before the plugin dir exists.
+    We use this instead of writing env files directly because plugin data
+    dirs are typically /mnt/clients/<user>/<plugin>/ owned 700 mike:mike —
+    not accessible from inside the openvoiceui container. The provision
+    service runs as mike on the host and has full access.
+
+    The service expects config field IDs (e.g. `openrouter_api_key`) in the
+    body, not the env var names (`OPENROUTER_API_KEY`). We map from env var
+    back to field ID using a lowercase snake_case convention that matches
+    how the service's _HERMES_KEY_MAP is structured:
+        OPENROUTER_API_KEY → openrouter_api_key
+        HF_TOKEN           → hf_token
+        GITHUB_TOKEN       → github_token
     """
     if not env_vars:
         return False
+
+    # Build config body in the provision service's field-ID format.
+    # Convention: env var names are UPPERCASE_SNAKE → lowercase_snake field IDs.
+    body = {}
+    for env_var, value in env_vars.items():
+        field_id = env_var.lower()
+        body[field_id] = value
+
+    # Companion vars (GLM_BASE_URL etc.) go in as-is with their own field IDs.
+    # Most provision services ignore unknown field IDs.
+    for k, v in consumer_cfg.get('also_set', {}).items():
+        body[k.lower()] = v
+
+    # POST to PUT /config/<plugin>/<username>
+    # We use urllib from stdlib so services/vault.py has no new deps
+    import urllib.request
+    import urllib.error
+    import socket
+
+    url = f"{_get_provision_url()}/config/{plugin_id}/{username}"
+    data = json.dumps(body).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method='PUT',
+        headers={'Content-Type': 'application/json'},
+    )
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except (PermissionError, OSError) as exc:
-        logger.warning(f"Cannot create plugin env dir {path.parent}: {exc}")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            if result.get('ok'):
+                return True
+            logger.warning(f"[vault] provision service returned: {result}")
+            return False
+    except urllib.error.HTTPError as exc:
+        # Non-2xx from provision service — log the body for diagnosis
+        try:
+            err_body = exc.read().decode('utf-8', errors='replace')
+        except Exception:
+            err_body = '(no body)'
+        # 404 means the plugin isn't installed for this user — not an error
+        if exc.code == 404:
+            logger.debug(
+                f"[vault] plugin {plugin_id} not installed for {username}, skipping sync"
+            )
+            return False
+        logger.warning(
+            f"[vault] provision service {exc.code} for {plugin_id}/{username}: {err_body}"
+        )
+        return False
+    except (urllib.error.URLError, socket.timeout, ConnectionError) as exc:
+        logger.warning(
+            f"[vault] provision service unreachable (port 5200): {exc}. "
+            f"Plugin {plugin_id} env will not update until service is back."
+        )
         return False
 
-    # Consumer-level env_var override: use the name declared in the consumer
-    # config rather than the catalog-level default, if provided.
-    consumer_env_var = consumer_cfg.get('env_var', '')
-    resolved = dict(env_vars)
-    if consumer_env_var and len(env_vars) == 1:
-        # Single-value credential, rename to the consumer's preferred var name
-        (_, v), = env_vars.items()
-        resolved = {consumer_env_var: v}
 
-    # Merge in also_set (companion env vars like GLM_BASE_URL)
-    for k, v in consumer_cfg.get('also_set', {}).items():
-        resolved.setdefault(k, v)
-
-    return _update_env_file(path, resolved)
+def _get_provision_url() -> str:
+    """Resolve the provision service URL. Same logic as services/plugins.py."""
+    import os
+    port = os.getenv("PROVISION_SERVICE_PORT", "5200")
+    host = os.getenv("PROVISION_SERVICE_HOST", "").strip()
+    if host:
+        return f"http://{host}:{port}"
+    # Auto-detect the Docker gateway IP from /proc/net/route
+    try:
+        with open("/proc/net/route") as f:
+            next(f)  # skip header
+            for line in f:
+                fields = line.strip().split()
+                if len(fields) > 2 and fields[1] == "00000000":
+                    h = fields[2]
+                    ip = f"{int(h[6:8],16)}.{int(h[4:6],16)}.{int(h[2:4],16)}.{int(h[0:2],16)}"
+                    return f"http://{ip}:{port}"
+    except Exception:
+        pass
+    return f"http://172.17.0.1:{port}"
 
 
 def sync_all(username: str):
