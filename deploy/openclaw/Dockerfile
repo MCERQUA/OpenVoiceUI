@@ -20,8 +20,6 @@ RUN mkdir -p $PNPM_HOME
 ARG OPENCLAW_VERSION=2026.3.24
 RUN pnpm add -g openclaw@${OPENCLAW_VERSION} && pnpm approve-builds -g
 
-# ByteRover long-term memory: install via plugin (see plugins/byterover-memory/)
-
 # Optional: install a coding CLI so the coding-agent skill is available.
 # Set CODING_CLI at build time:  docker compose build --build-arg CODING_CLI=codex
 # Or set CODING_CLI=codex in your .env and use the docker-compose args block.

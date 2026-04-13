@@ -101,10 +101,6 @@ plugins/*/
 plugins/bhb-animated-characters/*
 !plugins/bhb-animated-characters/plugin.json
 !plugins/bhb-animated-characters/README.md
-!plugins/byterover-memory/
-plugins/byterover-memory/*
-!plugins/byterover-memory/plugin.json
-!plugins/byterover-memory/README.md
 !plugins/hermes-agent/
 plugins/hermes-agent/*
 !plugins/hermes-agent/plugin.json
