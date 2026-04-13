@@ -8097,30 +8097,35 @@ initUpdateChecker();
                 for (const action of actions) {
                     if (action.type === 'tool') {
                         const phase = action.phase === 'result' ? '✓' : '→';
-                        // Different gateways emit different action event shapes:
-                        //   OpenClaw: action.input (nested object) on start,
-                        //             action.result (string) on result,
-                        //             action.meta (summary) on result
-                        //   Hermes:   action.detail (flat string with command/target)
+                        // Build a readable detail line from the action's fields.
+                        // Different gateways emit different shapes:
+                        //   OpenClaw: action.input (object with command/path/etc)
+                        //             action.result (string) on phase=result
+                        //             action.meta (summary string) on phase=result
+                        //   Hermes:   action.detail (flat string with the command/target)
+                        // The Action Console is the VERBOSE view — show full detail here.
+                        // A 2000-char sanity cap prevents a giant file-content fallback from
+                        // blowing out the UI but real shell commands and paths always fit.
+                        const DETAIL_MAX = 2000;
                         let detail = '';
                         if (action.phase === 'result') {
                             if (action.meta) {
-                                detail = String(action.meta).slice(0, 120);
+                                detail = String(action.meta).slice(0, DETAIL_MAX);
                             } else {
                                 const raw = action.result || '';
-                                detail = raw.split('\n').filter(l => l.trim())[0]?.slice(0, 120) || raw.slice(0, 120);
+                                detail = raw.split('\n').filter(l => l.trim())[0]?.slice(0, DETAIL_MAX) || raw.slice(0, DETAIL_MAX);
                             }
                         } else if (action.detail) {
-                            // Hermes format: flat string detail
-                            detail = String(action.detail).slice(0, 120);
+                            // Hermes format: flat string detail — no truncation at source
+                            detail = String(action.detail).slice(0, DETAIL_MAX);
                         } else if (action.input && typeof action.input === 'object' && Object.keys(action.input).length) {
                             // OpenClaw format: nested input object
                             const inp = action.input;
                             detail = inp.command || inp.path || inp.file_path || inp.filePath ||
                                      inp.query || inp.url || inp.pattern ||
-                                     inp.oldText?.slice?.(0, 60) ||
-                                     inp.content?.slice?.(0, 60) ||
-                                     Object.values(inp)[0]?.toString?.()?.slice(0, 120) || '';
+                                     inp.oldText?.slice?.(0, 500) ||
+                                     inp.content?.slice?.(0, 500) ||
+                                     Object.values(inp)[0]?.toString?.()?.slice(0, DETAIL_MAX) || '';
                         }
                         this.addEntry('tool', `${phase} Tool: ${action.name}`, detail, action.ts);
                     } else if (action.type === 'lifecycle') {
