@@ -381,6 +381,10 @@ initUpdateChecker();
                     const profile = this._profiles.find(p => p.id === profileId);
                     const agentId = profile?.adapter_config?.agentId || null;
                     localStorage.setItem('gateway_agent_id', agentId || '');
+                    // Keep gateway_id in sync so the Action Console label reflects
+                    // the backend gateway of the newly-activated profile (openclaw / hermes).
+                    const gatewayId = profile?.adapter_config?.gateway_id || 'openclaw';
+                    localStorage.setItem('gateway_id', gatewayId);
                     if (profile) TranscriptPanel.agentName = profile.name;
                     console.log(`[QuickSettings] switched to ${profileId}, agentId=${agentId || 'main'}`);
                     // Apply full profile settings from activate response
