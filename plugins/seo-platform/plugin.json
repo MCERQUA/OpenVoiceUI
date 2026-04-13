@@ -28,5 +28,14 @@
       "blueprint": "seo_platform_bp",
       "prefix": "/api/seo-platform"
     }
+  ],
+  "credentials": [
+    {
+      "id": "dataforseo",
+      "extend": true,
+      "consumers": {
+        "seo_platform": {"type": "env_var"}
+      }
+    }
   ]
 }
