@@ -224,12 +224,13 @@ def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
     provider_info = provider.get_info()
     audio_format = provider_info.get('audio_format', 'wav')
 
-    # Resemble returns WAV — chunk long texts to reduce latency and 500 errors.
-    # Their cluster is much more reliable with <500 char requests (4-8s) vs
-    # long ones (40-60s + frequent 500s).
+    # Resemble returns WAV. Their streaming endpoint accepts up to 2000 chars
+    # per request — we chunk at 1500 (with 500 char headroom) to minimize the
+    # number of individual API calls. Fewer requests = fewer chances for any
+    # single one to hit a transient cluster issue.
     if tts_provider == 'resemble':
-        if len(text) > 500:
-            return generate_tts_chunked(provider, text, voice, max_chars=500)
+        if len(text) > 1500:
+            return generate_tts_chunked(provider, text, voice, max_chars=1500)
         return provider.generate_speech(text=text, voice=voice)
     # Cloud providers returning MP3 (groq, elevenlabs) handle their own limits
     if audio_format == 'mp3':
