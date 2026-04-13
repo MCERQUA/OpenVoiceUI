@@ -849,7 +849,7 @@ def canvas_pages_proxy(path):
                     "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob: https:; "
                     "font-src 'self' https://fonts.gstatic.com; "
-                    "connect-src 'self' https://games.jam-bot.com "
+                    "connect-src 'self' blob: https://games.jam-bot.com "
                         "https://*.jam-bot.com wss://*.jam-bot.com "
                         "https://api.openai.com https://generativelanguage.googleapis.com "
                         "https://api.x.ai https://api.groq.com "
