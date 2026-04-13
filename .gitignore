@@ -54,8 +54,10 @@ TOOLS.md
 prompts/dj_prompt_*.txt
 prompts/hume_config_snapshot*.txt
 
-# Claude Code project instructions and local dev notes — never commit these
-CLAUDE.md
+# Local / private Claude Code notes — never commit these.
+# Only the ROOT CLAUDE.md is ignored; .claude/CLAUDE.md (project context
+# for contributors) is tracked and lives in the repo.
+/CLAUDE.md
 development-notes/
 
 # Netlify
