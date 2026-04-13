@@ -1942,7 +1942,7 @@ const Connections={
           '<button class="btn btn-sm" style="background:var(--panel3);color:var(--dim);border:1px dashed var(--border);cursor:not-allowed" disabled title="Platform operator needs to configure this OAuth provider in Platform Setup">'+
             'Connect '+esc(c.name)+
           '</button>'+
-          '<a href="#platform-setup" style="font-size:11px;color:#3b82f6;text-decoration:none">⚠ Not enabled by platform — set up →</a>'+
+          '<a href="#" onclick="show(\'platform-setup\');return false" style="font-size:11px;color:#3b82f6;text-decoration:none;cursor:pointer">⚠ Not enabled by platform — set up →</a>'+
         '</div>';
       }else{
         body='<button class="btn btn-sm" style="background:#3b82f6;color:#fff;border:none" onclick="Connections.connectOAuth(\''+esc(id)+'\')">Connect '+esc(c.name)+'</button>';

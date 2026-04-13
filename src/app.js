@@ -2681,7 +2681,7 @@ initUpdateChecker();
                     try {
                         const token = await Clerk.session?.getToken();
                         if (token) {
-                            document.cookie = `__session=${token}; path=/; SameSite=Lax; Secure`;
+                            document.cookie = `__session=${token}; path=/; Max-Age=2592000; SameSite=Lax; Secure`;
                             // Also push fresh token to canvas iframe so long-running
                             // uploads/API calls never hit an expired cookie
                             const iframe = document.getElementById('canvas-iframe');

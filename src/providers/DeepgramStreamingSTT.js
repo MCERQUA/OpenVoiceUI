@@ -229,6 +229,11 @@ class DeepgramStreamingSTT {
 
     pttActivate() {
         if (this._usingFallback && this._fallback) { this._fallback.pttActivate(); return; }
+        // Cancel any in-flight pttRelease timer — user is starting a new press.
+        // Without this, the previous release's 300ms timer would fire mid-press
+        // and re-mute the audio pipeline (line ~525), killing this press.
+        if (this._pttReleaseTimer) { clearTimeout(this._pttReleaseTimer); this._pttReleaseTimer = null; }
+
         this._pttHolding = true;
         this._micMuted = false;
         this._muteActive = false;
@@ -247,22 +252,36 @@ class DeepgramStreamingSTT {
     pttRelease() {
         if (this._usingFallback && this._fallback) { this._fallback.pttRelease(); return; }
         this._pttHolding = false;
-        this._micMuted = true;
+        // _micMuted is intentionally NOT set to true here.
+        //
+        // Deepgram's final transcript arrives async via onmessage AFTER we send
+        // CloseStream below. The downstream handler in app.js (ClawdbotMode's
+        // stt.onResult) checks `if (this.stt._micMuted) return;` — so muting
+        // synchronously would cause the result to be dropped before it ever
+        // reaches sendMessage(). We mute below in the timer, AFTER onResult
+        // has been called.
+        if (this._pttReleaseTimer) { clearTimeout(this._pttReleaseTimer); this._pttReleaseTimer = null; }
 
         // Tell Deepgram we're done speaking — triggers final transcript
         if (this._ws && this._ws.readyState === WebSocket.OPEN) {
             this._ws.send(JSON.stringify({ type: 'CloseStream' }));
         }
 
-        // Wait briefly for final transcript, then send accumulated
-        setTimeout(() => {
+        // Wait briefly for the final transcript to arrive, then deliver it.
+        this._pttReleaseTimer = setTimeout(() => {
+            this._pttReleaseTimer = null;
             const text = this.accumulatedText.trim();
             if (text && this.onResult) {
                 console.log('PTT release — sending:', text);
                 this.isProcessing = true;
-                this.onResult(text);
+                this.onResult(text);   // call BEFORE muting so the gate is open
             }
             this.accumulatedText = '';
+            // Only mute if user hasn't already started a new PTT press during
+            // this 300ms window — otherwise we'd re-mute mid-press and kill it.
+            if (!this._pttHolding) {
+                this._micMuted = true;
+            }
         }, 300);
     }
 
@@ -381,7 +400,7 @@ class DeepgramStreamingSTT {
                 interim_results: 'true',
                 utterance_end_ms: '1000',
                 vad_events: 'true',
-                endpointing: '300',
+                endpointing: '500',
                 encoding: 'linear16',
                 sample_rate: '16000',
                 channels: '1',
@@ -508,12 +527,31 @@ class DeepgramStreamingSTT {
     // ---- Audio Pipeline ----
 
     _startAudioPipeline() {
-        // Clean up existing pipeline
-        this._stopAudioPipeline();
-
         if (!this._stream || !this._stream.active) return;
 
+        // Idempotent — reuse the existing audio context across WebSocket reconnects.
+        //
+        // CRITICAL: do NOT tear down and recreate the AudioContext on every reconnect.
+        // Modern Chrome auto-suspends new AudioContexts unless they're created from a
+        // user-gesture call stack. Subsequent reconnects (e.g. from pttActivate after
+        // an idle WS close) call this method from a Promise.then() callback which has
+        // lost the user-gesture context — so a freshly-created context starts in
+        // 'suspended' state and the ScriptProcessor never fires audioprocess events,
+        // meaning zero PCM bytes get sent to Deepgram. Symptom: PTT button activates,
+        // WebSocket connects, but no transcripts ever come back.
+        if (this._audioCtx && this._processorNode && this._sourceNode) {
+            // Already running — just unsuspend if needed (free if already running)
+            if (this._audioCtx.state === 'suspended') {
+                this._audioCtx.resume().catch(() => {});
+            }
+            return;
+        }
+
+        // First-time setup (called from start() under user-gesture context)
         this._audioCtx = new AudioContext({ sampleRate: 16000 });
+        // Resume in case the constructor returned a suspended context anyway
+        // (e.g. browser autoplay policy variations)
+        this._audioCtx.resume().catch(() => {});
         this._sourceNode = this._audioCtx.createMediaStreamSource(this._stream);
 
         // ScriptProcessorNode for raw PCM access (AudioWorklet would be better
@@ -634,7 +672,19 @@ class DeepgramStreamingSTT {
                     }, this.accumulationDelayMs);
                 }
             } else {
-                // Interim result — show live feedback
+                // Interim result — user is STILL speaking. Cancel any pending
+                // accumulation timer so we don't fire it mid-sentence.
+                //
+                // Deepgram's endpointing=300 emits speech_final after just 300ms
+                // of silence (a normal mid-sentence pause). That schedules the
+                // 1.5s flush timer. Without this cancellation, if the user
+                // resumes speaking, the timer keeps counting down and fires
+                // while they're still mid-thought — chopping the transcript.
+                if (this._accumulationTimer) {
+                    clearTimeout(this._accumulationTimer);
+                    this._accumulationTimer = null;
+                }
+                // Show live feedback
                 if (this.onInterim) {
                     const preview = this.accumulatedText
                         ? this.accumulatedText + ' ' + transcript.trim()

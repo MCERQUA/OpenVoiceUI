@@ -29,5 +29,19 @@
     }
   ],
 
-  "requires_env": ["TWENTY_CRM_API_KEY"]
+  "requires_env": ["TWENTY_CRM_API_KEY"],
+  "credentials": [
+    {
+      "id": "twenty_crm",
+      "name": "Twenty CRM API Key",
+      "description": "API key for your Twenty CRM workspace",
+      "type": "api_key",
+      "group": "Services",
+      "env_var": "TWENTY_CRM_API_KEY",
+      "docs_url": "https://twenty.com/developers/section/core/getting-started",
+      "consumers": {
+        "openclaw": {"type": "env_var"}
+      }
+    }
+  ]
 }

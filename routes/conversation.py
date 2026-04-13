@@ -788,16 +788,26 @@ def _conversation_inner():
     if not user_message:
         return jsonify({'error': 'No message provided'}), 400
 
-    # Filter garbage STT fragments — punctuation-only, single short words, noise
+    # Filter garbage STT fragments — punctuation-only or single-character noise.
+    # Threshold is 1 meaningful char (filters "." or " " but lets "yo", "ok",
+    # "hi", "no", "ya" through — those are valid intentional one/two-letter
+    # acknowledgements that real users say).
     import re as _re
     _meaningful_chars = _re.sub(r'[^a-zA-Z0-9]', '', user_message)
-    if len(_meaningful_chars) < 3:
+    if len(_meaningful_chars) < 2:
         logger.info(f'### FILTERED garbage STT: "{user_message}" ({len(_meaningful_chars)} meaningful chars)')
-        # Return a no-op stream that ends cleanly — no fallback message shown
+        # Return a no-op stream in NDJSON format (same wire format the rest of
+        # this route uses — was previously SSE, which the client could not
+        # parse, leaving the UI stuck in "thinking" state forever).
         def _noop_stream():
-            yield "data: " + json.dumps({"type": "filtered", "reason": "garbage_stt"}) + "\n\n"
-            yield "data: " + json.dumps({"type": "text_done", "response": " "}) + "\n\n"
-        return Response(_noop_stream(), mimetype='text/event-stream')
+            yield json.dumps({'type': 'filtered', 'reason': 'garbage_stt'}) + '\n'
+            yield json.dumps({
+                'type': 'text_done',
+                'response': '',
+                'actions': [],
+                'timing': {},
+            }) + '\n'
+        return Response(_noop_stream(), mimetype='application/x-ndjson')
 
     # Input length guard (P7-T3 security audit)
     # Browser companion task loop sends page context (~5K) + prompt — allow 8K for those
@@ -1046,7 +1056,7 @@ def _conversation_inner():
             from routes.canvas import load_canvas_manifest
             _manifest = load_canvas_manifest()
             _page_ids = sorted(_manifest.get('pages', {}).keys())
-            _page_list = _cap_list(_page_ids, max_chars=1000)
+            _page_list = _cap_list(_page_ids, max_chars=5000)
         except Exception:
             _page_list = 'unknown'
         context_parts.append(f'[Canvas pages: {_page_list}]')
@@ -1584,15 +1594,17 @@ def _conversation_inner():
                                 yield json.dumps({'type': 'retrying'}) + '\n'
                                 time.sleep(2)
                                 # Re-send the message through the gateway.
-                                # If the first empty was suspiciously fast (< 500ms), the session
-                                # is likely dead (openclaw restarted, no state). Use a fresh
-                                # session key so the retry doesn't hit the same dead session.
+                                # Always retry on the SAME session key first. The gateway
+                                # may have been momentarily busy (queue flush, lane transition)
+                                # and the same key will work 2 seconds later with full context.
+                                # Switching to a recovery key here loses all conversation history
+                                # (the agent doesn't know what was just discussed).
+                                # Only the double-empty handler switches to a stable "recovery" key.
                                 _retry_key = _session_key
                                 if metrics.get('llm_inference_ms', 9999) < 500:
-                                    _retry_key = f"recovery-{int(time.time())}"
                                     logger.warning(
                                         f"### Fast empty ({metrics['llm_inference_ms']}ms) — "
-                                        f"session likely dead, retrying on key '{_retry_key}'"
+                                        f"retrying on same session key '{_retry_key}'"
                                     )
                                 retry_queue = queue.Queue()
                                 captured_actions.clear()
