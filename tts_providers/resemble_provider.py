@@ -47,6 +47,35 @@ STREAM_TIMEOUT = 30.0    # Max wait for full streaming response
 CONNECT_TIMEOUT = 10.0   # TCP connect timeout
 API_TIMEOUT = 15.0       # For voice listing / non-synthesis calls
 
+# Module-level shared HTTP client for synthesis requests.
+# Lazy-initialized on first use because httpx clients live for the process
+# lifetime and pool TCP connections — eliminating per-request TLS handshakes
+# and improving reliability under intermittent network conditions.
+# Set max_keepalive_connections high enough to handle parallel sentence TTS.
+_synth_client = None
+_synth_client_lock = None  # set on first init
+
+
+def _get_synth_client():
+    global _synth_client, _synth_client_lock
+    if _synth_client is not None:
+        return _synth_client
+    import threading as _th
+    if _synth_client_lock is None:
+        _synth_client_lock = _th.Lock()
+    with _synth_client_lock:
+        if _synth_client is None:
+            _synth_client = httpx.Client(
+                timeout=httpx.Timeout(STREAM_TIMEOUT, connect=CONNECT_TIMEOUT),
+                limits=httpx.Limits(
+                    max_keepalive_connections=20,
+                    max_connections=40,
+                    keepalive_expiry=60.0,
+                ),
+                http2=False,  # Resemble's stream endpoint uses HTTP/1.1
+            )
+    return _synth_client
+
 # Module-level voice cache — shared across all ResembleProvider instances.
 # list_providers() creates new instances each call, so instance-level cache
 # is lost. This persists across the process lifetime.
@@ -432,27 +461,53 @@ class ResembleProvider(TTSProvider):
         )
 
         try:
-            with httpx.Client(
-                timeout=httpx.Timeout(STREAM_TIMEOUT, connect=CONNECT_TIMEOUT)
-            ) as client:
-                resp = client.post(
-                    SYNTHESIS_URL,
-                    json=payload,
-                    headers=self._auth_headers(),
-                )
-                resp.raise_for_status()
-                audio_bytes = resp.content
+            client = _get_synth_client()
+            resp = client.post(
+                SYNTHESIS_URL,
+                json=payload,
+                headers=self._auth_headers(),
+            )
+            resp.raise_for_status()
+            audio_bytes = resp.content
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
-            body = e.response.text[:200]
-            raise RuntimeError(f"Resemble API error {status}: {body}")
-        except httpx.TimeoutException:
+            body = e.response.text[:500]
+            # Resemble's error docs say to capture request_id for support tickets.
+            # Their cluster returns x-request-id (lowercase) as a response header.
+            req_id = (
+                e.response.headers.get('x-request-id')
+                or e.response.headers.get('X-Request-ID')
+                or e.response.headers.get('cf-ray')  # cluster is fronted by Cloudflare
+                or 'unknown'
+            )
+            elapsed_ms = int((time.time() - t) * 1000)
+            logger.error(
+                f"[Resemble] API error {status} after {elapsed_ms}ms "
+                f"(request_id={req_id}, voice={voice_uuid[:12]}, "
+                f"text_len={len(text)}, model={model or 'default'}): {body}"
+            )
             raise RuntimeError(
-                f"Resemble API timeout after {STREAM_TIMEOUT}s"
+                f"Resemble API error {status} (request_id={req_id}): {body}"
+            )
+        except httpx.TimeoutException as e:
+            elapsed_ms = int((time.time() - t) * 1000)
+            logger.error(
+                f"[Resemble] Timeout after {elapsed_ms}ms "
+                f"(voice={voice_uuid[:12]}, text_len={len(text)}, "
+                f"model={model or 'default'}): {type(e).__name__}"
+            )
+            raise RuntimeError(
+                f"Resemble API timeout after {elapsed_ms}ms (limit {STREAM_TIMEOUT}s)"
             )
         except Exception as e:
-            raise RuntimeError(f"Resemble request failed: {e}")
+            elapsed_ms = int((time.time() - t) * 1000)
+            logger.error(
+                f"[Resemble] Request failed after {elapsed_ms}ms "
+                f"(voice={voice_uuid[:12]}, text_len={len(text)}): "
+                f"{type(e).__name__}: {e}"
+            )
+            raise RuntimeError(f"Resemble request failed: {type(e).__name__}: {e}")
 
         elapsed = int((time.time() - t) * 1000)
         logger.info(f"[Resemble] Generated {len(audio_bytes)} bytes in {elapsed}ms")
