@@ -1046,7 +1046,7 @@ def _conversation_inner():
             from routes.canvas import load_canvas_manifest
             _manifest = load_canvas_manifest()
             _page_ids = sorted(_manifest.get('pages', {}).keys())
-            _page_list = _cap_list(_page_ids, max_chars=1000)
+            _page_list = _cap_list(_page_ids, max_chars=5000)
         except Exception:
             _page_list = 'unknown'
         context_parts.append(f'[Canvas pages: {_page_list}]')
