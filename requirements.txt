@@ -37,6 +37,10 @@ cryptography==46.0.6
 # deepface>=0.0.93
 # tf-keras>=2.19.0
 
+# Docker SDK — used by vault service to restart openclaw container after
+# credential writes so new keys take effect without manual intervention.
+docker>=7.1.0
+
 # AI providers (optional — not required, agents handle their own API calls)
 # google-generativeai==0.8.6  # Unused — remove if still commented on next cleanup
 
