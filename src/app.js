@@ -1581,42 +1581,29 @@ initUpdateChecker();
             },
 
             async _notifyAgent(title) {
+                // Plays a canned TTS announcement only — no ghost LLM call.
+                // The server-side `completed_songs_queue` already has the event; on the
+                // NEXT real user turn, conversation.py injects it as a [SYSTEM] prefix so
+                // the agent has full context when the user says "yeah" / "play it".
+                const line = `Your song "${title}" is ready. Just say play it to hear it.`;
+                TranscriptPanel?.addMessage('system', `🎵 ${line}`);
+                ActionConsole?.addEntry('system', `🎵 Song ready: "${title}"`);
                 try {
                     const provider = window.voiceAgent?.selectedProvider || 'groq';
                     const voice = window.voiceAgent?.currentVoice || 'autumn';
-                    const sessionId = window._activeSessionId || `suno-${Date.now()}`;
-
-                    const resp = await fetch(`${CONFIG.serverUrl}/api/conversation`, {
+                    const resp = await fetch(`${CONFIG.serverUrl}/api/tts/generate`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            message: `__suno_complete__:${title}`,
-                            tts_provider: provider,
-                            voice: voice,
-                            session_id: sessionId,
-                            ui_context: {},
-                        }),
+                        body: JSON.stringify({ text: line, provider, voice }),
                     });
-                    if (!resp.ok) throw new Error('notify failed');
-                    const data = await resp.json();
-
-                    if (data.response) {
-                        TranscriptPanel?.addMessage('assistant', data.response);
-                        ActionConsole?.addEntry('system', `🎵 Agent: ${data.response.substring(0, 80)}`);
-                    }
-                    if (data.audio) {
-                        const binary = atob(data.audio);
-                        const bytes = new Uint8Array(binary.length);
-                        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                        const blob = new Blob([bytes], { type: 'audio/mpeg' });
-                        const url = URL.createObjectURL(blob);
-                        const audio = new Audio(url);
-                        audio.onended = () => URL.revokeObjectURL(url);
-                        audio.play().catch(() => {});
-                    }
+                    if (!resp.ok) throw new Error(`tts ${resp.status}`);
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const audio = new Audio(url);
+                    audio.onended = () => URL.revokeObjectURL(url);
+                    audio.play().catch(() => {});
                 } catch (e) {
-                    console.warn('[Suno] Agent notify failed, falling back to TTS:', e);
-                    this._speakCompletion(title);
+                    console.warn('[Suno] announce TTS failed:', e);
                 }
             },
         };
@@ -3694,8 +3681,18 @@ initUpdateChecker();
                     const escapeHtml = (str) => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
                     // Helper: strip canvas and music tags from display text
-                    const stripCanvasTags = (text) => {
+                    // Normalize sloppy `[ TAG:val ]` → `[TAG:val]` before any tag regex runs.
+                    // GLM sometimes emits stray whitespace that defeats every downstream
+                    // match (display strip + MUSIC_PLAY extract + canvas open).
+                    const normalizeActionTags = (text) => {
+                        if (!text) return text;
                         return text
+                            .replace(/\[\s+/g, '[')
+                            .replace(/\[([A-Z][A-Z0-9_]*)\s*:\s*([^\]]*?)\s*\]/g, '[$1:$2]')
+                            .replace(/\[([A-Z][A-Z0-9_]*)\s*\]/g, '[$1]');
+                    };
+                    const stripCanvasTags = (text) => {
+                        return normalizeActionTags(text)
                             .replace(/```html[\s\S]*?```/gi, '')  // complete html fences
                             .replace(/```[\s\S]*?```/g, '')        // complete generic fences
                             .replace(/```html[\s\S]*/gi, '')       // unclosed html fence (streaming)
@@ -3718,6 +3715,7 @@ initUpdateChecker();
 
                     // Helper: check for canvas/music commands in accumulated text
                     const checkCanvasInStream = async (text) => {
+                        text = normalizeActionTags(text);
                         // Check for [CANVAS_MENU]
                         if (/\[CANVAS_MENU\]/i.test(text) && !canvasCommandsProcessed.has('CANVAS_MENU')) {
                             canvasCommandsProcessed.add('CANVAS_MENU');
