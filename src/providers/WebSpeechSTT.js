@@ -299,43 +299,51 @@ class WebSpeechSTT {
      */
     pttRelease() {
         this._pttHolding = false;
-        this._micMuted = true;
+        // _micMuted is intentionally NOT set to true here.
+        //
+        // Chrome's SpeechRecognition only emits isFinal=true results at natural
+        // speech boundaries (pauses) or after recognition.stop() — and the post-
+        // stop final fires asynchronously. The onresult guard `if (_micMuted)
+        // return;` would block that final from being collected. So we leave the
+        // mic open until either (a) we've collected immediate text below, or
+        // (b) the 400ms delayed callback below fires (which gives Chrome enough
+        // time to deliver the post-stop final).
         if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
         if (this._pttReleaseTimer) { clearTimeout(this._pttReleaseTimer); this._pttReleaseTimer = null; }
 
-        // Check if Chrome already finalized text during the hold
+        // Fast path: Chrome already finalized text during the hold (long press
+        // with a natural pause). Send immediately and mute.
         const immediate = this.accumulatedText.trim();
         if (immediate && this.onResult) {
             console.log('PTT release — sending:', immediate);
+            this._micMuted = true;
             this.isProcessing = true;
             this.onResult(immediate);
             this.accumulatedText = '';
+            if (this.recognition) { try { this.recognition.stop(); } catch (e) {} }
+            return;
         }
 
-        // Stop recognition — Chrome finalizes any pending speech as isFinal
-        // (muted state prevents onend restart)
-        if (this.recognition) {
-            try { this.recognition.stop(); } catch (e) {}
-        }
+        // Slow path: nothing finalized yet (typical for short presses).
+        // Stop recognition to make Chrome flush its pending speech as a final
+        // result, then wait 400ms for that result to arrive via onresult.
+        // Crucially: _micMuted stays false during this window so onresult
+        // does not drop the final result.
+        if (this.recognition) { try { this.recognition.stop(); } catch (e) {} }
 
-        // If nothing was finalized during hold, wait for Chrome's post-stop results.
-        // Chrome fires onresult with isFinal=true when recognition.stop() is called,
-        // but the event is async. Give it time to arrive, then send.
-        if (!immediate) {
-            this._pttReleaseTimer = setTimeout(() => {
-                this._pttReleaseTimer = null;
-                if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
-                // Guard: if pttUnmute() already ran, don't poison isProcessing
-                if (!this._micMuted) return;
-                const text = this.accumulatedText.trim();
-                if (text && this.onResult) {
-                    console.log('PTT release (delayed) — sending:', text);
-                    this.isProcessing = true;
-                    this.onResult(text);
-                }
-                this.accumulatedText = '';
-            }, 400);
-        }
+        this._pttReleaseTimer = setTimeout(() => {
+            this._pttReleaseTimer = null;
+            // Now mute — the post-stop final has had its window.
+            this._micMuted = true;
+            if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+            const text = this.accumulatedText.trim();
+            if (text && this.onResult) {
+                console.log('PTT release (delayed) — sending:', text);
+                this.isProcessing = true;
+                this.onResult(text);
+            }
+            this.accumulatedText = '';
+        }, 400);
     }
 
     /**
