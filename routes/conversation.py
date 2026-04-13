@@ -788,16 +788,26 @@ def _conversation_inner():
     if not user_message:
         return jsonify({'error': 'No message provided'}), 400
 
-    # Filter garbage STT fragments — punctuation-only, single short words, noise
+    # Filter garbage STT fragments — punctuation-only or single-character noise.
+    # Threshold is 1 meaningful char (filters "." or " " but lets "yo", "ok",
+    # "hi", "no", "ya" through — those are valid intentional one/two-letter
+    # acknowledgements that real users say).
     import re as _re
     _meaningful_chars = _re.sub(r'[^a-zA-Z0-9]', '', user_message)
-    if len(_meaningful_chars) < 3:
+    if len(_meaningful_chars) < 2:
         logger.info(f'### FILTERED garbage STT: "{user_message}" ({len(_meaningful_chars)} meaningful chars)')
-        # Return a no-op stream that ends cleanly — no fallback message shown
+        # Return a no-op stream in NDJSON format (same wire format the rest of
+        # this route uses — was previously SSE, which the client could not
+        # parse, leaving the UI stuck in "thinking" state forever).
         def _noop_stream():
-            yield "data: " + json.dumps({"type": "filtered", "reason": "garbage_stt"}) + "\n\n"
-            yield "data: " + json.dumps({"type": "text_done", "response": " "}) + "\n\n"
-        return Response(_noop_stream(), mimetype='text/event-stream')
+            yield json.dumps({'type': 'filtered', 'reason': 'garbage_stt'}) + '\n'
+            yield json.dumps({
+                'type': 'text_done',
+                'response': '',
+                'actions': [],
+                'timing': {},
+            }) + '\n'
+        return Response(_noop_stream(), mimetype='application/x-ndjson')
 
     # Input length guard (P7-T3 security audit)
     # Browser companion task loop sends page context (~5K) + prompt — allow 8K for those
