@@ -388,6 +388,34 @@ runtime.
 If a secret lands in a commit, rotate it immediately and amend/rebase
 the commit out of history before pushing.
 
+## Parked / quarantined plugins
+
+Sometimes a plugin has known issues but we don't want to lose the code
+— we just want it out of `main`/`dev` until someone stabilizes it. The
+pattern we use:
+
+1. **`parked/<plugin-name>`** branch — a long-lived branch off `dev` (or
+   `main` for the plugin catalog repo) that keeps the plugin files
+   intact.
+2. **GitHub issue** on the repo documenting what breaks, what was tried,
+   and the acceptance criteria for un-parking.
+3. **Removal PR** — a small `chore/remove-<plugin>` PR deletes the
+   plugin from `dev`/`main` so the loader no longer sees it.
+4. **Draft PR** from `parked/<plugin>` back to `dev`/`main`, titled
+   `[PARKED] Re-add <plugin> when stable`, linking the issue. GitHub
+   blocks merge on draft PRs, so this can't be shipped by accident.
+5. Optional `do-not-merge` label on the draft PR as a second signal.
+
+**Rules for parked branches:**
+- Branch prefix **must** be `parked/*` — anything else is stale/WIP.
+- Do not delete `parked/*` branches when "cleaning up" the branch list.
+  They are intentional quarantine.
+- Fix work happens ON the parked branch. When the issue's acceptance
+  criteria are met, mark the draft PR ready, review, merge.
+- If a parked plugin is abandoned for good, close the draft PR with a
+  note and tag the branch with `archived/<plugin>-<date>` before
+  deletion.
+
 ## Anti-patterns
 
 - Pushing straight to `dev` without a feature branch — no review, no
