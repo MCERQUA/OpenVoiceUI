@@ -300,6 +300,12 @@ initUpdateChecker();
                     const activeProfile = this._profiles.find(p => p.id === activeId);
                     const agentId = activeProfile?.adapter_config?.agentId || null;
                     localStorage.setItem('gateway_agent_id', agentId || '');
+                    // Store the gateway_id so the Action Console can show which
+                    // backend gateway is handling conversations ("openclaw",
+                    // "hermes", etc.). Defaults to "openclaw" to match the
+                    // server-side conversation.py fallback.
+                    const gatewayId = activeProfile?.adapter_config?.gateway_id || 'openclaw';
+                    localStorage.setItem('gateway_id', gatewayId);
                     if (activeProfile) TranscriptPanel.agentName = activeProfile.name;
                     localStorage.setItem('active_profile_id', activeId);
 
@@ -3480,8 +3486,12 @@ initUpdateChecker();
                         this.callbacks.onListening();
                     }
                 } else {
-                    console.error('Failed to start voice input');
-                    this.callbacks.onError('Failed to start voice input');
+                    // stt.start() returning false is almost always "user muted their
+                    // mic before the call fully started" (common pattern for text-only
+                    // reply in a noisy room), NOT an actual device failure. Don't show
+                    // an error popup for this — the text input still works fine.
+                    console.log('Voice input not started (likely muted by user — text input still works)');
+                    ActionConsole.addEntry('system', 'Mic is muted — text input active');
                 }
                 this._startingSession = false;
             }
@@ -3666,7 +3676,13 @@ initUpdateChecker();
                     if (!response.ok) {
                         throw new Error(`API error: ${response.status}`);
                     }
-                    ActionConsole.addEntry('system', 'Connected to server — waiting for agent...');
+                    {
+                        const _gwId = localStorage.getItem('gateway_id') || 'openclaw';
+                        const _gwLabel = _gwId === 'hermes' ? 'Hermes' :
+                                         _gwId === 'openclaw' ? 'OpenClaw' :
+                                         _gwId;
+                        ActionConsole.addEntry('system', `Connected to ${_gwLabel} gateway — waiting for agent...`);
+                    }
 
                     // Stream mode: read NDJSON lines with real-time deltas
                     const reader = response.body.getReader();
@@ -4775,7 +4791,7 @@ initUpdateChecker();
                         console.log(`Clawdbot ${role}:`, text);
                     },
                     onError: (error) => {
-                        UIModule.showError(`Clawdbot error: ${error}`);
+                        UIModule.showError(`Agent error: ${error}`);
                         FaceModule.setMood('sad');
                         setTimeout(() => FaceModule.setMood('neutral'), 2000);
                     }
@@ -6151,7 +6167,7 @@ initUpdateChecker();
 
                     return { success: true, response: data.response };
                 } catch (error) {
-                    return { success: false, error: `Clawdbot error: ${error.message}` };
+                    return { success: false, error: `Agent error: ${error.message}` };
                 }
             }
 
@@ -8083,15 +8099,25 @@ initUpdateChecker();
                 for (const action of actions) {
                     if (action.type === 'tool') {
                         const phase = action.phase === 'result' ? '✓' : '→';
-                        // Build a readable detail line from the input parameters
+                        // Different gateways emit different action event shapes:
+                        //   OpenClaw: action.input (nested object) on start,
+                        //             action.result (string) on result,
+                        //             action.meta (summary) on result
+                        //   Hermes:   action.detail (flat string with command/target)
                         let detail = '';
                         if (action.phase === 'result') {
-                            // For results, show first meaningful line of output
-                            const raw = action.result || '';
-                            detail = raw.split('\n').filter(l => l.trim())[0]?.slice(0, 120) || raw.slice(0, 120);
+                            if (action.meta) {
+                                detail = String(action.meta).slice(0, 120);
+                            } else {
+                                const raw = action.result || '';
+                                detail = raw.split('\n').filter(l => l.trim())[0]?.slice(0, 120) || raw.slice(0, 120);
+                            }
+                        } else if (action.detail) {
+                            // Hermes format: flat string detail
+                            detail = String(action.detail).slice(0, 120);
                         } else if (action.input && typeof action.input === 'object' && Object.keys(action.input).length) {
+                            // OpenClaw format: nested input object
                             const inp = action.input;
-                            // Extract the most useful field for display
                             detail = inp.command || inp.path || inp.file_path || inp.filePath ||
                                      inp.query || inp.url || inp.pattern ||
                                      inp.oldText?.slice?.(0, 60) ||
