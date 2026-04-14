@@ -293,8 +293,11 @@ def upload_file():
     if file_size > _MAX_UPLOAD_BYTES:
         return jsonify({'error': 'File too large (100 MB max)'}), 413
 
-    # --- Save with UUID filename (no original name on disk) ---
-    safe_name = f"{uuid.uuid4().hex}{ext}"
+    # --- Save with original-stem prefix + short uuid suffix so the agent
+    #     can find files by the name the user uploaded them as. UUID suffix
+    #     prevents collisions when the same name is uploaded twice. ---
+    stem_safe = re.sub(r'[^A-Za-z0-9._-]+', '_', Path(original_name).stem)[:80].strip('._-') or 'file'
+    safe_name = f"{stem_safe}__{uuid.uuid4().hex[:8]}{ext}"
     dest = UPLOADS_DIR / safe_name
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     f.save(str(dest))
