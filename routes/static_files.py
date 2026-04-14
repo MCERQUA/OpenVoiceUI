@@ -131,8 +131,17 @@ def serve_sound(filepath):
 # Hard limit enforced before writing to disk (100 MB)
 _MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
-# Maximum characters returned to the AI as content_preview
-_MAX_PREVIEW_CHARS = 6000
+# Maximum characters returned to the AI as content_preview for text files.
+# Files at or below this threshold are inlined verbatim into the conversation.
+# Larger files set content_preview_truncated=True and the agent is directed to
+# use its Read tool on the saved path instead (which lives in a prunable
+# tool-result block rather than an un-prunable user message).
+_MAX_PREVIEW_CHARS = 50_000
+
+# Maximum characters for extracted text from binary documents (PDF/DOCX/XLSX/PPTX).
+# Binary extractors sanitize their own output, so they share this cap via
+# _sanitize_text below.
+_MAX_BINARY_PREVIEW_CHARS = 20_000
 
 # Only block executables — accept everything else (weird exports, unknown formats, etc.)
 _BLOCKED_EXTENSIONS = {
@@ -146,10 +155,24 @@ _CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
 
 def _sanitize_text(text: str) -> str:
-    """Strip control chars, collapse excessive blank lines, cap at _MAX_PREVIEW_CHARS."""
+    """Strip control chars, collapse excessive blank lines, cap at binary preview limit.
+    Used by PDF/DOCX/XLSX/PPTX extractors — they don't signal truncation back to
+    the upload handler so use the tighter cap."""
     text = _CTRL_RE.sub('', text)
     text = re.sub(r'\n{4,}', '\n\n\n', text)  # no more than 3 consecutive blank lines
-    return text[:_MAX_PREVIEW_CHARS].strip()
+    return text[:_MAX_BINARY_PREVIEW_CHARS].strip()
+
+
+def _read_text_preview(path: Path) -> tuple[str, bool]:
+    """Read a text file for inline preview. Returns (sanitized_text, truncated).
+    Never loads more than _MAX_PREVIEW_CHARS + 1 chars into memory, so large
+    uploads don't spike RSS."""
+    with open(path, 'r', errors='replace') as fh:
+        raw = fh.read(_MAX_PREVIEW_CHARS + 1)
+    truncated = len(raw) > _MAX_PREVIEW_CHARS
+    cleaned = _CTRL_RE.sub('', raw[:_MAX_PREVIEW_CHARS])
+    cleaned = re.sub(r'\n{4,}', '\n\n\n', cleaned)
+    return cleaned.strip(), truncated
 
 
 def _extract_pdf(path: Path) -> str:
@@ -284,6 +307,7 @@ def upload_file():
         'path': str(dest),
         'filename': safe_name,
         'url': f'/uploads/{safe_name}',
+        'file_size': file_size,
     }
 
     if is_image:
@@ -321,15 +345,17 @@ def upload_file():
                 )
 
         else:
-            # Plain text / code / CSV — read directly
+            # Plain text / code / CSV — stream the first _MAX_PREVIEW_CHARS only
             text_types = {'text/', 'application/json', 'application/xml', 'application/javascript'}
             if any(mime.startswith(t) for t in text_types) or ext in {
                 '.txt', '.md', '.csv', '.log',
                 '.py', '.js', '.ts', '.json', '.yaml', '.yml',
                 '.html', '.css',
             }:
-                raw = dest.read_text(errors='replace')
-                result['content_preview'] = _sanitize_text(raw)
+                preview, truncated = _read_text_preview(dest)
+                result['content_preview'] = preview
+                if truncated:
+                    result['content_preview_truncated'] = True
 
     except Exception as exc:
         logger.warning('Document extraction failed for %s: %s', original_name, exc)
