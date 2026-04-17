@@ -166,6 +166,9 @@ app.register_blueprint(greetings_bp)
 from routes.suno import suno_bp
 app.register_blueprint(suno_bp)
 
+from routes.airadio_bridge import airadio_bp
+app.register_blueprint(airadio_bp)
+
 from routes.vision import vision_bp
 app.register_blueprint(vision_bp)
 
