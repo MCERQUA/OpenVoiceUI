@@ -1212,10 +1212,140 @@ initUpdateChecker();
                 this.currentMetadata = null;
                 this.button.classList.remove('active');
                 this.panel.classList.remove('playing');
+                this.panel.classList.remove('external-mode');
+                this.panel.classList.remove('spotify-mode');
+                delete this.panel.dataset.provider;
+                const _embedSlot = document.getElementById('music-external-embed');
+                if (_embedSlot) { _embedSlot.innerHTML = ''; _embedSlot.style.display = 'none'; }
                 this._syncPlayButtons(false);
-                // Stop visualizer
                 VisualizerModule.stopAnimation();
                 this.closePanel();
+            },
+
+            // ── External embeds (SoundCloud + Bandcamp) ──────────────────
+
+            async playSoundCloud(trackUrl) {
+                console.log('[MusicModule] playSoundCloud:', trackUrl);
+                try { this.audio?.pause?.(); } catch {}
+                this.currentPlaylist = 'external';
+                this.isPlaying = true;
+                this.currentMetadata = { source: 'soundcloud', url: trackUrl, playlist: 'external' };
+
+                let title = trackUrl;
+                let artist = 'SoundCloud';
+                let embedHtml = null;
+                try {
+                    const resp = await fetch(`https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(trackUrl)}`);
+                    if (resp.ok) {
+                        const m = await resp.json();
+                        title = m.title || title;
+                        artist = m.author_name || artist;
+                        embedHtml = m.html || null;
+                        this.currentMetadata = { ...this.currentMetadata, title, artist, artwork: m.thumbnail_url, embedHtml };
+                    }
+                } catch (e) { console.warn('[MusicModule] SC oembed failed, using direct iframe:', e); }
+
+                this.currentTrack = title;
+                if (this.trackName) this.trackName.textContent = title;
+
+                const fallbackIframe = `<iframe width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(trackUrl)}&auto_play=true&visual=true&show_artwork=true"></iframe>`;
+                this._renderEmbed('soundcloud', embedHtml || fallbackIframe);
+
+                if (this.button) this.button.classList.add('active');
+                if (this.panel) {
+                    this.panel.classList.add('playing', 'external-mode');
+                    this.panel.dataset.provider = 'soundcloud';
+                }
+                this._syncPlayButtons(true);
+                if (this.panelState === 'closed') this.openPanel();
+                this._postExternalState('soundcloud', trackUrl, title, artist);
+            },
+
+            async playBandcamp(trackOrAlbumUrl) {
+                console.log('[MusicModule] playBandcamp:', trackOrAlbumUrl);
+                try { this.audio?.pause?.(); } catch {}
+                this.currentPlaylist = 'external';
+                this.isPlaying = true;
+                this.currentMetadata = { source: 'bandcamp', url: trackOrAlbumUrl, playlist: 'external' };
+
+                let title = trackOrAlbumUrl;
+                let artist = 'Bandcamp';
+                let embedHtml = null;
+                try {
+                    const r = await fetch(`${CONFIG.serverUrl}/api/music/bandcamp/resolve?url=${encodeURIComponent(trackOrAlbumUrl)}`).then(r => r.json());
+                    if (r && r.ok) {
+                        title = r.title || title;
+                        artist = r.artist || artist;
+                        embedHtml = r.embed_html || null;
+                        this.currentMetadata = { ...this.currentMetadata, title, artist, kind: r.kind, artwork: r.artwork, embedUrl: r.embed_url, embedHtml };
+                    }
+                } catch (e) { console.warn('[MusicModule] BC resolve failed:', e); }
+
+                this.currentTrack = title;
+                if (this.trackName) this.trackName.textContent = title;
+
+                if (!embedHtml) {
+                    embedHtml = `<div style="padding:12px;text-align:center;"><a href="${trackOrAlbumUrl}" target="_blank" rel="noopener" style="color:#3b82f6">Open on Bandcamp</a></div>`;
+                }
+                this._renderEmbed('bandcamp', embedHtml);
+
+                if (this.button) this.button.classList.add('active');
+                if (this.panel) {
+                    this.panel.classList.add('playing', 'external-mode');
+                    this.panel.dataset.provider = 'bandcamp';
+                }
+                this._syncPlayButtons(true);
+                if (this.panelState === 'closed') this.openPanel();
+                this._postExternalState('bandcamp', trackOrAlbumUrl, title, artist);
+            },
+
+            _renderEmbed(provider, iframeHtml) {
+                // Render the embed as a SEPARATE floating element attached to <body>, not inside
+                // the music panel. Music panel is bottom-anchored, so content appended inside it
+                // grows it upward and pushes everything above (chat, controls) up the screen.
+                // Instead, place the embed as its own fixed overlay sitting just above the
+                // music panel, centered, with z-index below the chat panel (9999) so chat
+                // still overlays it, but above the music panel (200) so it looks like it's
+                // popping out of the player.
+                let slot = document.getElementById('music-external-embed');
+                if (!slot) {
+                    slot = document.createElement('div');
+                    slot.id = 'music-external-embed';
+                    slot.style.cssText = [
+                        'position:fixed',
+                        'left:50%',
+                        'transform:translateX(-50%)',
+                        // Sit just above the music panel. Music panel is ~70-90px tall when
+                        // open. Use 80px — if the player grows, the iframe still has breathing
+                        // room and the user can scroll within it.
+                        'bottom:86px',
+                        'width:calc(100% - 128px)',
+                        'max-width:520px',
+                        'background:rgba(5, 10, 20, 0.97)',
+                        'border:1px solid rgba(0, 229, 255, 0.25)',
+                        'border-radius:12px 12px 0 0',
+                        'box-shadow:0 -4px 25px rgba(0,229,255,0.25)',
+                        'padding:8px',
+                        'z-index:201',
+                        'display:none',
+                    ].join(';');
+                    document.body.appendChild(slot);
+                }
+                slot.dataset.provider = provider;
+                slot.innerHTML = iframeHtml || '';
+                slot.style.display = iframeHtml ? 'block' : 'none';
+            },
+
+            async _postExternalState(provider, url, title, artist) {
+                try {
+                    const u = new URL(`${CONFIG.serverUrl}/api/music`);
+                    u.searchParams.set('action', 'external');
+                    u.searchParams.set('provider', provider);
+                    u.searchParams.set('url', url);
+                    if (title) u.searchParams.set('title', title);
+                    if (artist) u.searchParams.set('artist', artist);
+                    await fetch(u);
+                } catch (e) { console.warn('[MusicModule] external state sync failed:', e); }
             },
 
             togglePlay() {
@@ -2367,6 +2497,10 @@ initUpdateChecker();
                     music_stop:    ['■',    'music stopped'],
                     music_next:    ['▶▶',   'next track'],
                     spotify:       ['SPT',  d ? `"${d}"` : 'playing spotify'],
+                    soundcloud:    ['SC',   d ? `soundcloud: ${su(d)}` : 'playing soundcloud'],
+                    soundcloud_page: ['SC', d ? `sc page: ${su(d)}` : 'soundcloud page'],
+                    bandcamp:      ['BC',   d ? `bandcamp: ${su(d)}` : 'playing bandcamp'],
+                    bandcamp_page: ['BC',   d ? `bc page: ${su(d)}` : 'bandcamp page'],
                     sound:         ['SFX',  d || 'playing sound'],
                     register_face: ['FACE', d ? `registering ${d}` : 'registering face'],
                     sleep:         ['ZZZ',  'going to sleep'],
@@ -3726,6 +3860,10 @@ initUpdateChecker();
                             .replace(/\[SESSION_RESET\]/gi, '')
                             .replace(/\[SUNO_GENERATE:[^\]]*\]/gi, '')
                             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
+                            .replace(/\[SOUNDCLOUD:[^\]]*\]/gi, '')
+                            .replace(/\[SOUNDCLOUD_PAGE:[^\]]*\]/gi, '')
+                            .replace(/\[BANDCAMP:[^\]]*\]/gi, '')
+                            .replace(/\[BANDCAMP_PAGE:[^\]]*\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
@@ -3803,6 +3941,42 @@ initUpdateChecker();
                             ActionConsole.addEntry('system', `Spotify: "${spotifyTrack}"${spotifyArtist ? ` by ${spotifyArtist}` : ''}`);
                             AgentActivityChip.handleTag('spotify', spotifyTrack);
                             window.musicPlayer?.playSpotify(spotifyTrack, spotifyArtist);
+                        }
+                        // [SOUNDCLOUD:url] — play track in music player embed
+                        const soundcloudMatch = text.match(/\[SOUNDCLOUD:([^\]]+)\]/i);
+                        if (soundcloudMatch && !canvasCommandsProcessed.has('SOUNDCLOUD')) {
+                            canvasCommandsProcessed.add('SOUNDCLOUD');
+                            const scUrl = soundcloudMatch[1].trim();
+                            ActionConsole.addEntry('system', `SoundCloud: ${scUrl}`);
+                            AgentActivityChip.handleTag('soundcloud', scUrl);
+                            window.musicPlayer?.playSoundCloud(scUrl);
+                        }
+                        // [SOUNDCLOUD_PAGE:url] — open full-screen canvas page with the embed
+                        const soundcloudPageMatch = text.match(/\[SOUNDCLOUD_PAGE:([^\]]+)\]/i);
+                        if (soundcloudPageMatch && !canvasCommandsProcessed.has('SOUNDCLOUD_PAGE')) {
+                            canvasCommandsProcessed.add('SOUNDCLOUD_PAGE');
+                            const scUrl = soundcloudPageMatch[1].trim();
+                            ActionConsole.addEntry('system', `SoundCloud page: ${scUrl}`);
+                            AgentActivityChip.handleTag('soundcloud_page', scUrl);
+                            window.openEmbedCanvasPage?.('soundcloud', scUrl);
+                        }
+                        // [BANDCAMP:url] — play in music player embed
+                        const bandcampMatch = text.match(/\[BANDCAMP:([^\]]+)\]/i);
+                        if (bandcampMatch && !canvasCommandsProcessed.has('BANDCAMP')) {
+                            canvasCommandsProcessed.add('BANDCAMP');
+                            const bcUrl = bandcampMatch[1].trim();
+                            ActionConsole.addEntry('system', `Bandcamp: ${bcUrl}`);
+                            AgentActivityChip.handleTag('bandcamp', bcUrl);
+                            window.musicPlayer?.playBandcamp(bcUrl);
+                        }
+                        // [BANDCAMP_PAGE:url] — full-screen canvas page
+                        const bandcampPageMatch = text.match(/\[BANDCAMP_PAGE:([^\]]+)\]/i);
+                        if (bandcampPageMatch && !canvasCommandsProcessed.has('BANDCAMP_PAGE')) {
+                            canvasCommandsProcessed.add('BANDCAMP_PAGE');
+                            const bcUrl = bandcampPageMatch[1].trim();
+                            ActionConsole.addEntry('system', `Bandcamp page: ${bcUrl}`);
+                            AgentActivityChip.handleTag('bandcamp_page', bcUrl);
+                            window.openEmbedCanvasPage?.('bandcamp', bcUrl);
                         }
                         // Check for [REGISTER_FACE:name] — agent registers current camera frame
                         const registerFaceMatch = text.match(/\[REGISTER_FACE:([^\]]+)\]/i);
@@ -5307,6 +5481,10 @@ initUpdateChecker();
                             .replace(/\[SESSION_RESET\]/gi, '')
                             .replace(/\[SUNO_GENERATE:[^\]]*\]/gi, '')
                             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
+                            .replace(/\[SOUNDCLOUD:[^\]]*\]/gi, '')
+                            .replace(/\[SOUNDCLOUD_PAGE:[^\]]*\]/gi, '')
+                            .replace(/\[BANDCAMP:[^\]]*\]/gi, '')
+                            .replace(/\[BANDCAMP_PAGE:[^\]]*\]/gi, '')
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
@@ -5404,6 +5582,26 @@ initUpdateChecker();
                 const spotifyMatch = text.match(/\[SPOTIFY:([^|\]]+)(?:\|([^\]]+))?\]/i);
                 if (spotifyMatch) {
                     window.musicPlayer?.playSpotify(spotifyMatch[1].trim(), spotifyMatch[2]?.trim() || '');
+                }
+                // [SOUNDCLOUD:url]
+                const soundcloudMatch = text.match(/\[SOUNDCLOUD:([^\]]+)\]/i);
+                if (soundcloudMatch) {
+                    window.musicPlayer?.playSoundCloud(soundcloudMatch[1].trim());
+                }
+                // [SOUNDCLOUD_PAGE:url]
+                const soundcloudPageMatch = text.match(/\[SOUNDCLOUD_PAGE:([^\]]+)\]/i);
+                if (soundcloudPageMatch) {
+                    window.openEmbedCanvasPage?.('soundcloud', soundcloudPageMatch[1].trim());
+                }
+                // [BANDCAMP:url]
+                const bandcampMatch = text.match(/\[BANDCAMP:([^\]]+)\]/i);
+                if (bandcampMatch) {
+                    window.musicPlayer?.playBandcamp(bandcampMatch[1].trim());
+                }
+                // [BANDCAMP_PAGE:url]
+                const bandcampPageMatch = text.match(/\[BANDCAMP_PAGE:([^\]]+)\]/i);
+                if (bandcampPageMatch) {
+                    window.openEmbedCanvasPage?.('bandcamp', bandcampPageMatch[1].trim());
                 }
                 // [REGISTER_FACE:name]
                 const registerFaceMatch = text.match(/\[REGISTER_FACE:([^\]]+)\]/i);
@@ -6528,6 +6726,87 @@ initUpdateChecker();
             window.sunoModule = SunoModule;
             SunoModule.init();
 
+            // openEmbedCanvasPage — create a full-screen canvas page for a
+            // SoundCloud or Bandcamp track and route the UI to it.
+            window.openEmbedCanvasPage = async function openEmbedCanvasPage(provider, url) {
+                const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => (
+                    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]
+                ));
+                let meta = { title: url, artist: provider, artwork: '', embedHtml: '' };
+
+                try {
+                    if (provider === 'soundcloud') {
+                        // oEmbed direct from browser (CORS-enabled) — avoids server WAF
+                        const r = await fetch(`https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(url)}`);
+                        if (r.ok) {
+                            const oe = await r.json();
+                            meta.title = oe.title || url;
+                            meta.artist = oe.author_name || provider;
+                            meta.artwork = oe.thumbnail_url || '';
+                            meta.embedHtml = oe.html || '';
+                        }
+                    } else if (provider === 'bandcamp') {
+                        // Bandcamp has no oEmbed + page needs server-side fetch (no CORS)
+                        const r = await fetch(`${CONFIG.serverUrl}/api/music/bandcamp/resolve?url=${encodeURIComponent(url)}`).then(r => r.json());
+                        if (r && r.ok) {
+                            meta.title = r.title || url;
+                            meta.artist = r.artist || provider;
+                            meta.artwork = r.artwork || '';
+                            meta.embedHtml = r.embed_html || '';
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[openEmbedCanvasPage] resolve failed:', e);
+                }
+
+                const pageHtml = `<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>${esc(meta.title)}</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0a0a0b 0%,#111 100%);color:#e5e7eb;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px;}
+  .art{width:min(420px,92vw);aspect-ratio:1/1;object-fit:cover;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.55);background:#1a1a1c;}
+  h1{margin:22px 0 2px;font-size:22px;font-weight:600;text-align:center;max-width:92vw;overflow-wrap:anywhere}
+  .artist{color:#9ca3af;margin-bottom:22px;font-size:14px;}
+  .embed{width:min(640px,96vw)}
+  .embed iframe{width:100%;border:0;border-radius:8px;background:#1a1a1c;}
+  .open{display:inline-block;margin-top:20px;padding:10px 16px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:500;}
+  .open:hover{background:#2563eb;}
+  .provider{position:fixed;top:14px;right:14px;font-size:11px;padding:4px 10px;background:rgba(255,255,255,.08);border-radius:999px;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;}
+</style></head><body>
+<div class="provider">${esc(provider)}</div>
+${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
+<h1>${esc(meta.title) || '(untitled)'}</h1>
+<div class="artist">${esc(meta.artist)}</div>
+<div class="embed">${meta.embedHtml || `<a class="open" href="${esc(url)}" target="_blank" rel="noopener">Open on ${esc(provider)}</a>`}</div>
+</body></html>`;
+
+                const stamp = Date.now().toString(36);
+                const filename = `${provider}-${stamp}.html`;
+                const pageTitle = meta.title ? `${meta.title}` : `${provider} track`;
+
+                try {
+                    const saveRes = await fetch(`${CONFIG.serverUrl}/api/canvas/pages`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename, title: pageTitle, html: pageHtml }),
+                    }).then(r => r.json());
+
+                    if (saveRes && saveRes.filename) {
+                        try {
+                            await fetch(`${CONFIG.serverUrl}/api/canvas/manifest/sync`, { method: 'POST' });
+                            await window.CanvasMenu?.loadManifest?.();
+                        } catch {}
+                        const pageId = saveRes.page_id || saveRes.filename.replace(/\.html$/, '');
+                        window.CanvasControl?.showPage?.(pageId);
+                    }
+                } catch (e) {
+                    console.error('[openEmbedCanvasPage] save failed:', e);
+                }
+            };
+
             console.log('OpenVoiceUI initialized!');
             console.log('Mode:', activeMode);
             console.log('TTS Provider:', ProviderManager.selectedProvider);
@@ -6607,6 +6886,32 @@ initUpdateChecker();
                             break;
                         case 'close':
                             CanvasControl.hide();
+                            break;
+                        case 'play-external':
+                            // Canvas page asking the music player to play a SoundCloud/Bandcamp embed
+                            // event.data: { type, action: 'play-external', provider: 'soundcloud'|'bandcamp', url }
+                            {
+                                const prov = event.data.provider;
+                                const trackUrl = event.data.url;
+                                if (!trackUrl) break;
+                                if (prov === 'soundcloud') {
+                                    window.musicPlayer?.playSoundCloud(trackUrl);
+                                } else if (prov === 'bandcamp') {
+                                    window.musicPlayer?.playBandcamp(trackUrl);
+                                } else {
+                                    console.warn('[Canvas] play-external unknown provider:', prov);
+                                }
+                            }
+                            break;
+                        case 'open-embed-page':
+                            // Canvas page asking for a full-screen embed canvas page (same as [SOUNDCLOUD_PAGE:url])
+                            {
+                                const prov = event.data.provider;
+                                const trackUrl = event.data.url;
+                                if (trackUrl && (prov === 'soundcloud' || prov === 'bandcamp')) {
+                                    window.openEmbedCanvasPage?.(prov, trackUrl);
+                                }
+                            }
                             break;
                     }
                 });

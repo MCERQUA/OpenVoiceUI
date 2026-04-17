@@ -173,9 +173,19 @@ _VOICE_INSTRUCTIONS = (
     "After generation, the new song appears in [Available tracks:] by its title. "
     "Use [MUSIC_PLAY:song title] to play it — do NOT use exec/shell to find the file. "
 
-    # --- Spotify ---
-    "SPOTIFY: [SPOTIFY:song name] or [SPOTIFY:song name|artist name] — plays from Spotify. "
-    "Example: [SPOTIFY:Bohemian Rhapsody|Queen]. Only use when user specifically asks. "
+    # --- SoundCloud (real playback, no auth) ---
+    "SOUNDCLOUD: [SOUNDCLOUD:<full-track-url>] — embeds the track in the music player and plays it. "
+    "Always use with a full https://soundcloud.com/<user>/<slug> URL. NEVER invent URLs — get them from "
+    "CLIENT.md (if present) or run the `soundcloud` skill: "
+    "`python3 /mnt/shared-skills/soundcloud/scripts/find_track.py \"artist - track\" --json`. "
+    "For a full-screen embed page instead of the small player: [SOUNDCLOUD_PAGE:<url>]. "
+    "Default to this for any 'play <track>' request when the artist has SoundCloud presence. "
+
+    # --- Bandcamp (real playback, no auth) ---
+    "BANDCAMP: [BANDCAMP:<full-album-or-track-url>] — embeds the Bandcamp player in the music panel. "
+    "URL must match <artist>.bandcamp.com/album/<slug> or .../track/<slug>. NEVER invent URLs — "
+    "use the `bandcamp` skill: `python3 /mnt/shared-skills/bandcamp/scripts/find_track.py \"artist - album\" --json`. "
+    "For full-screen canvas page: [BANDCAMP_PAGE:<url>]. "
 
     # --- Facial expressions / mood ---
     "EXPRESSIONS: [MOOD:happy] [MOOD:sad] [MOOD:angry] [MOOD:surprised] [MOOD:thinking] [MOOD:neutral] — "
@@ -589,6 +599,10 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'\[MOOD:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[REGISTER_FACE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SPOTIFY:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[SOUNDCLOUD:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[SOUNDCLOUD_PAGE:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[BANDCAMP:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[BANDCAMP_PAGE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SOUND:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SESSION_RESET\]', '', text, flags=re.IGNORECASE)
 
@@ -1572,6 +1586,10 @@ def _conversation_inner():
                                     f"spoken text: {full_response.strip()[:60]}"
                                 )
                                 full_response = "Here you go. " + full_response
+                                # Also update TTS buffer so the downstream flush
+                                # at line ~1844 speaks "Here you go." instead of
+                                # firing TTS on the bare tag (which strips to "").
+                                _tts_buf = "Here you go."
 
                             metrics['llm_inference_ms'] = int((time.time() - t_llm_start) * 1000)
                             metrics['tool_count'] = sum(
