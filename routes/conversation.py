@@ -909,7 +909,15 @@ def _conversation_inner():
                 '  [FILL:selector:value]  — type into an input field\n'
                 '  [HIGHLIGHT:selector]   — draw a cyan outline around an element\n'
                 '  [READ_PAGE]            — request full page text (up to 15000 chars)\n'
-                '  [WAIT:3]               — wait 3 seconds (for page loads, animations)\n\n'
+                '  [WAIT:3]               — wait 3 seconds (for page loads, animations)\n'
+                '  [DOWNLOAD_IMAGE]       — download the largest visible image on the page (Facebook, Instagram, Reddit, etc.)\n'
+                '  [DOWNLOAD_IMAGE:selector] — download a specific image by CSS selector (e.g. img.profile-pic)\n\n'
+                '⚠️ DOWNLOADING IMAGES IS SUPPORTED. If the user says "download this image" / "save this photo" / '
+                '"grab that picture" — emit [DOWNLOAD_IMAGE] (no argument = largest visible image). '
+                'Never say "I don\'t have that capability" and NEVER tell the user to right-click — '
+                'the extension calls chrome.downloads.download() which works on every site. '
+                'Never use web_fetch, puppeteer, or any container-side tool to fetch images — those '
+                'use datacenter IPs and get blocked. The extension runs in the user\'s real browser.\n\n'
                 'CREATING CANVAS PAGES (to save collected data):\n'
                 '  You have full tool access (file_write, bash, etc.) through your agent runtime.\n'
                 '  To create a canvas page with collected data:\n'
@@ -1088,6 +1096,22 @@ def _conversation_inner():
                 _inter_sentence_gap_ms = _vc.inter_sentence_gap_ms
     except Exception:
         pass  # Profile system not available — skip gracefully
+
+    # Inject [CURRENT_USER: ...] so the agent knows WHO is actually logged in
+    # right now (regardless of which tenant account they're using). When Mike
+    # the developer pops into a client tenant to debug, the agent should treat
+    # him as a peer collaborator, not a client. See services/identity.py.
+    try:
+        from flask import g as _flask_g
+        from services.identity import get_current_user_tag as _get_current_user_tag
+        _clerk_uid = getattr(_flask_g, 'clerk_user_id', None)
+        _tenant = os.getenv('JAMBOT_TENANT') or os.getenv('TENANT_NAME') or None
+        _user_tag = _get_current_user_tag(_clerk_uid, _tenant)
+        if _user_tag:
+            context_parts.append(_user_tag)
+            logger.info(f'### CURRENT_USER injected: clerk_uid={_clerk_uid} tenant={_tenant}')
+    except Exception as _e:
+        logger.warning(f'CURRENT_USER injection failed (non-fatal): {_e}')
 
     # Inject voice assistant instructions so the agent knows about action tags.
     # This must be in-app (not workspace files) so it works out of the box.

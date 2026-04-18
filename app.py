@@ -16,7 +16,7 @@ server.py module-level decorators (@app.route, @sock.route) keep working.
 import logging
 import os
 
-from flask import Flask, jsonify, redirect, request
+from flask import Flask, g, jsonify, redirect, request
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -191,6 +191,10 @@ def create_app(config_override: dict = None):
                     return jsonify({'error': 'Unauthorized', 'code': 'auth_required'}), 401
                 # HTML page request — redirect to root (login gate)
                 return redirect('/')
+
+            # Stash for downstream routes (e.g. conversation.py reads g.clerk_user_id
+            # to inject a [CURRENT_USER: ...] tag into the gateway message context).
+            g.clerk_user_id = user_id
 
     # ── JSON error handler for 413 (file too large) ────────────────────────
     @app.errorhandler(413)

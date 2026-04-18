@@ -166,6 +166,9 @@ app.register_blueprint(greetings_bp)
 from routes.suno import suno_bp
 app.register_blueprint(suno_bp)
 
+from routes.airadio_bridge import airadio_bp
+app.register_blueprint(airadio_bp)
+
 from routes.vision import vision_bp
 app.register_blueprint(vision_bp)
 
@@ -207,6 +210,9 @@ app.register_blueprint(custom_faces_bp)
 
 from routes.vault import vault_bp
 app.register_blueprint(vault_bp)
+
+from routes.identity import identity_bp
+app.register_blueprint(identity_bp)
 
 from services.plugins import load_plugins
 load_plugins(app)
