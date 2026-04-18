@@ -857,7 +857,8 @@ def canvas_pages_proxy(path):
                         "https://api.anthropic.com https://api.cohere.ai "
                         "https://api.dataforseo.com https://sandbox.dataforseo.com; "
                     "worker-src blob:; "
-                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app https://midiviz.com"
+                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app https://midiviz.com "
+                        "https://w.soundcloud.com https://bandcamp.com https://*.bandcamp.com"
                 )
                 return resp
             else:

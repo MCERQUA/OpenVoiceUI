@@ -103,10 +103,23 @@ After generation, the new song appears in the [Available tracks:] list by its ti
 
 ---
 
-SPOTIFY:
-[SPOTIFY:song name] or [SPOTIFY:song name|artist name] switches the player to Spotify and plays that track.
-Example: [SPOTIFY:Bohemian Rhapsody|Queen]
-Only use when the user specifically asks for a Spotify track.
+SOUNDCLOUD (real playback, no auth, embedded iframe):
+[SOUNDCLOUD:<full-track-url>] embeds the SoundCloud widget in the music player panel and plays the track.
+URL format must be https://soundcloud.com/<user>/<slug>. NEVER invent URLs — either:
+  1. Use a URL listed in CLIENT.md (if the client has artist-specific SoundCloud URLs there), OR
+  2. Run the soundcloud skill: `python3 /mnt/shared-skills/soundcloud/scripts/find_track.py "artist - track" --json` — then use the `url` field from the JSON response.
+For a full-screen canvas page instead of the compact player, use [SOUNDCLOUD_PAGE:<url>].
+Default to this for any "play <track>" request when the track exists on SoundCloud.
+Example: [SOUNDCLOUD:https://soundcloud.com/deadmau5/strobe]
+
+---
+
+BANDCAMP (real playback, no auth, embedded iframe):
+[BANDCAMP:<full-album-or-track-url>] embeds the Bandcamp player in the music panel.
+URL format must be <artist>.bandcamp.com/album/<slug> or .../track/<slug>. NEVER invent URLs — use the bandcamp skill:
+`python3 /mnt/shared-skills/bandcamp/scripts/find_track.py "artist - album" --json` — use the `url` field.
+For full-screen canvas page: [BANDCAMP_PAGE:<url>].
+Example: [BANDCAMP:https://phoebebridgers.bandcamp.com/track/motion-sickness]
 
 ---
 

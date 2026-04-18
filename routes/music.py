@@ -14,10 +14,15 @@ Registers routes:
   PUT  /api/music/track/<playlist>/<filename>/metadata  (CRUD: update track metadata)
 """
 
+import html as _html
 import json
 import random
+import re
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -308,8 +313,38 @@ def handle_music():
         "playlist", current_music_state.get("current_playlist", "library")
     )
 
-    if playlist in ("library", "generated", "spotify"):
+    if playlist in ("library", "generated", "spotify", "external"):
         current_music_state["current_playlist"] = playlist
+
+    # ── EXTERNAL (SoundCloud / Bandcamp iframe embeds) ────────────────────
+    # Handle before get_music_files — external tracks have no local files
+    if action == "external":
+        provider = request.args.get("provider", "unknown")
+        url = request.args.get("url", "")
+        title = request.args.get("title", url)
+        artist = request.args.get("artist", provider)
+        current_music_state["current_playlist"] = "external"
+        current_music_state["playing"] = True
+        current_music_state["track_started_at"] = time.time()
+        external_track = {
+            "title": title,
+            "name": title,
+            "artist": artist,
+            "playlist": "external",
+            "source": provider,
+            "url": url,
+            "filename": None,
+        }
+        current_music_state["current_track"] = external_track
+        print(f"🎵 External mode ({provider}): '{title}' — {url}")
+        return jsonify({
+            "action": "external",
+            "provider": provider,
+            "track": external_track,
+            "playlist": "external",
+            "source": provider,
+            "response": f"Now streaming '{title}' from {provider}.",
+        })
 
     # ── SPOTIFY ───────────────────────────────────────────────────────────
     # Handle before get_music_files — Spotify has no local files
@@ -836,3 +871,132 @@ def update_track_metadata(playlist, filename):
     save_meta(metadata)
 
     return jsonify({"status": "updated", "filename": safe_filename, "playlist": playlist, "metadata": entry})
+
+
+# ---------------------------------------------------------------------------
+# External track resolvers (SoundCloud oEmbed, Bandcamp OG-meta)
+# ---------------------------------------------------------------------------
+
+_BC_URL_RE = re.compile(
+    r"^https?://([a-z0-9-]+)\.bandcamp\.com/(album|track)/([a-z0-9-]+)/?(?:\?.*)?$",
+    re.IGNORECASE,
+)
+_META_RE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\']([^"\']+)["\'][^>]*content=["\']([^"\']*)["\']',
+    re.IGNORECASE,
+)
+_BC_PROPS_RE = re.compile(
+    r'<meta\s+name=["\']bc-page-properties["\']\s+content=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+_BC_KIND_MAP = {"a": "album", "t": "track", "album": "album", "track": "track"}
+
+
+def _fetch_bc_page(url):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (OpenVoiceUI music-resolver/1.0)",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read(1_500_000).decode("utf-8", errors="replace")
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        return None
+
+
+def _parse_meta(page):
+    out = {}
+    for k, v in _META_RE.findall(page):
+        out.setdefault(k.lower(), _html.unescape(v))
+    return out
+
+
+def _parse_bc_props(page):
+    m = _BC_PROPS_RE.search(page)
+    if not m:
+        return None
+    try:
+        return json.loads(_html.unescape(m.group(1)))
+    except json.JSONDecodeError:
+        return None
+
+
+def _bc_embed(item_id, kind):
+    kind_key = _BC_KIND_MAP.get(kind, "track")
+    embed_url = (
+        f"https://bandcamp.com/EmbeddedPlayer/{kind_key}={item_id}/"
+        "size=large/bgcol=ffffff/linkcol=0687f5/tracklist=false/"
+        "artwork=small/transparent=true/"
+    )
+    iframe = (
+        f'<iframe style="border:0;width:100%;height:120px;" '
+        f'src="{embed_url}" seamless></iframe>'
+    )
+    return embed_url, iframe
+
+
+@music_bp.route("/api/music/bandcamp/resolve", methods=["GET"])
+def bandcamp_resolve():
+    """Resolve metadata for a known Bandcamp album/track URL."""
+    url = request.args.get("url", "").strip()
+    m = _BC_URL_RE.match(url)
+    if not m:
+        return jsonify({"ok": False, "error": "not a bandcamp track/album url"}), 400
+
+    kind = m.group(2).lower()
+    page = _fetch_bc_page(url)
+    if not page:
+        return jsonify({"ok": False, "error": "page fetch failed"}), 502
+
+    meta = _parse_meta(page)
+    props = _parse_bc_props(page) or {}
+    item_id = props.get("item_id")
+    item_type = _BC_KIND_MAP.get(props.get("item_type") or kind, kind)
+
+    result = {
+        "ok": True,
+        "url": url,
+        "kind": item_type,
+        "title": meta.get("og:title"),
+        "artist": meta.get("og:site_name") or meta.get("twitter:app:name:iphone"),
+        "artwork": meta.get("og:image"),
+        "description": meta.get("og:description"),
+        "provider": "Bandcamp",
+    }
+    if item_id:
+        embed_url, iframe = _bc_embed(int(item_id), item_type)
+        result["embed_url"] = embed_url
+        result["embed_html"] = iframe
+    return jsonify(result)
+
+
+@music_bp.route("/api/music/soundcloud/resolve", methods=["GET"])
+def soundcloud_resolve():
+    """Resolve metadata for a SoundCloud track URL via public oEmbed endpoint."""
+    url = request.args.get("url", "").strip()
+    if not url.startswith(("http://soundcloud.com", "https://soundcloud.com",
+                           "http://www.soundcloud.com", "https://www.soundcloud.com")):
+        return jsonify({"ok": False, "error": "not a soundcloud url"}), 400
+
+    params = urllib.parse.urlencode({"format": "json", "url": url})
+    try:
+        req = urllib.request.Request(
+            f"https://soundcloud.com/oembed?{params}",
+            headers={"User-Agent": "Mozilla/5.0 (OpenVoiceUI music-resolver/1.0)"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return jsonify({"ok": False, "error": f"oembed returned {e.code}"}), 502
+    except (urllib.error.URLError, json.JSONDecodeError) as e:
+        return jsonify({"ok": False, "error": f"oembed failed: {e}"}), 502
+
+    return jsonify({
+        "ok": True,
+        "url": url,
+        "title": data.get("title"),
+        "artist": data.get("author_name"),
+        "author_url": data.get("author_url"),
+        "artwork": data.get("thumbnail_url"),
+        "embed_html": data.get("html"),
+        "provider": "SoundCloud",
+    })
