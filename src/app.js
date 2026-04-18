@@ -7902,7 +7902,12 @@ initUpdateChecker();
                             this._pendingImagePath = result.path;
                             messageToSend = text || `What do you see in this image? (${result.original_name})`;
                         } else if (result.content_preview) {
-                            messageToSend = `[USER ATTACHED FILE: ${result.original_name}, saved at ${result.path}]\n--- File contents ---\n${result.content_preview}\n--- End file ---\n${text}`;
+                            const sizeKb = result.file_size ? ` (${(result.file_size / 1024).toFixed(1)} KB)` : '';
+                            if (result.content_preview_truncated) {
+                                messageToSend = `[USER ATTACHED FILE: ${result.original_name}${sizeKb}, saved at ${result.path}]\nFile is large — preview below is TRUNCATED. To read the full file, use your Read tool on the path above.\n--- File preview (truncated) ---\n${result.content_preview}\n--- End preview ---\n${text}`;
+                            } else {
+                                messageToSend = `[USER ATTACHED FILE: ${result.original_name}${sizeKb}, saved at ${result.path}]\n--- File contents ---\n${result.content_preview}\n--- End file ---\n${text}`;
+                            }
                         } else {
                             messageToSend = `[USER ATTACHED FILE: ${result.original_name}, saved at ${result.path}] ${text}`;
                         }

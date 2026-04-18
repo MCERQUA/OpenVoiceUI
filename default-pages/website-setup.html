@@ -108,26 +108,29 @@ textarea{resize:vertical;min-height:60px}
 .ai-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 /* ── Selectable Cards (Site Type) ── */
-.card-select{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.card-select{display:flex;flex-wrap:wrap;gap:6px}
 .sel-card{
-  background:var(--surface-2);border:1.5px solid var(--border);border-radius:var(--r-sm);
-  padding:12px;cursor:pointer;transition:all .15s;text-align:center;
+  background:var(--surface-2);border:1.5px solid var(--border);border-radius:var(--r-xs);
+  padding:6px 12px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:6px;
 }
 .sel-card:hover{border-color:var(--border-light);background:var(--surface-hover)}
 .sel-card.active{border-color:var(--brand);background:var(--brand-dim);box-shadow:0 0 12px var(--brand-glow)}
-.sel-card .ic{font-size:1.4rem;margin-bottom:4px}
-.sel-card .nm{font-size:.78rem;font-weight:600;color:var(--text)}
-.sel-card .desc{font-size:.65rem;color:var(--text-3);margin-top:2px}
+.sel-card .nm{font-size:.75rem;font-weight:600;color:var(--text)}
+.sel-card .desc{font-size:.62rem;color:var(--text-3)}
 
 /* ── Theme Dropdown ── */
-.theme-select{
-  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-xs);
-  padding:9px 12px;color:var(--text);font-size:.85rem;font-family:inherit;
-  outline:none;width:100%;cursor:pointer;appearance:none;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239498ab' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;background-position:right 12px center;
+.theme-list{
+  max-height:160px;overflow-y:auto;margin-top:6px;
+  border:1px solid var(--border);border-radius:var(--r-xs);background:var(--surface-2);
 }
-.theme-select:focus{border-color:var(--brand-border)}
+.theme-item{
+  padding:6px 10px;cursor:pointer;font-size:.72rem;color:var(--text-2);
+  display:flex;align-items:center;gap:8px;transition:background .1s;
+}
+.theme-item:hover{background:var(--surface-hover);color:var(--text)}
+.theme-item.active{background:var(--brand-dim);color:var(--brand-light);border-left:2px solid var(--brand)}
+.theme-item .t-swatches{display:flex;gap:2px;flex-shrink:0}
+.theme-item .t-sw{width:10px;height:10px;border-radius:2px}
 .swatch-bar{display:flex;height:20px;border-radius:4px;overflow:hidden;margin-top:6px}
 .swatch-bar>div{flex:1}
 .swatch-labels{display:flex;margin-top:2px}
@@ -137,7 +140,7 @@ textarea{resize:vertical;min-height:60px}
 .style-builder{display:flex;gap:14px;margin-top:12px}
 .style-preview-col{flex:1;min-width:0}
 .style-controls-col{width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:6px}
-@media(max-width:700px){.style-builder{flex-direction:column}.style-controls-col{width:100%}}
+@media(max-width:700px){.style-builder{flex-direction:column}.style-preview-col{order:-1}.style-controls-col{width:100%;order:1}}
 
 /* ── Live Preview ── */
 .preview-frame{
@@ -320,15 +323,9 @@ details[open] summary .arrow{transform:rotate(90deg)}
 .btn:hover{border-color:var(--border-light);background:var(--surface-hover)}
 .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 4px 12px rgba(59,130,246,.25)}
 .btn.primary:hover{background:#2563eb;box-shadow:0 6px 20px rgba(59,130,246,.35)}
+.btn.secondary{background:var(--surface-2);border-color:var(--border-light);color:var(--text)}
+.btn.secondary:hover{border-color:var(--brand);color:var(--brand-light)}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
-
-/* ── Field Validation Errors ── */
-.form-group.field-error input,
-.form-group.field-error textarea{border-color:var(--red) !important;box-shadow:0 0 8px var(--red-dim)}
-.form-group.field-error label{color:var(--red) !important}
-.card-select.field-error{outline:2px solid var(--red);outline-offset:2px;border-radius:var(--r-sm)}
-@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-4px)}40%,80%{transform:translateX(4px)}}
-.field-shake{animation:shake .4s ease}
 
 /* ── Toast ── */
 .toast{
@@ -339,21 +336,167 @@ details[open] summary .arrow{transform:rotate(90deg)}
 }
 .toast.on{transform:translateX(-50%) translateY(0)}
 
+/* ── Agent Fill Flash Animation ── */
+@keyframes agent-fill-flash{
+  0%{background:rgba(52,211,153,.22);border-color:var(--green);box-shadow:0 0 0 2px rgba(52,211,153,.12)}
+  65%{background:rgba(52,211,153,.07);border-color:var(--green-border)}
+  100%{background:var(--surface-2);border-color:var(--border);box-shadow:none}
+}
+.agent-filled{animation:agent-fill-flash 1.8s ease-out forwards!important}
+.agent-fill-banner{
+  display:none;position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:200;
+  background:var(--green-dim);border:1px solid var(--green-border);color:var(--green);
+  padding:6px 16px;border-radius:20px;font-size:.72rem;font-weight:600;
+  box-shadow:0 4px 16px rgba(0,0,0,.4);pointer-events:none;white-space:nowrap;
+}
+.agent-fill-banner.on{display:block;animation:agent-fill-flash 3s ease-out forwards}
+
 /* ── Responsive ── */
 @media(max-width:768px){
   .form-grid{grid-template-columns:1fr}
   .form-group.span-2{grid-column:auto}
-  .card-select{grid-template-columns:1fr 1fr}
+  .card-select{gap:5px}
   .theme-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
   .page-header{flex-wrap:wrap}
 }
 @media(max-width:480px){
-  .card-select{grid-template-columns:1fr}
+  .card-select{flex-direction:column}
   .theme-grid{grid-template-columns:1fr 1fr}
   .action-buttons{flex-direction:column;width:100%}
   .action-buttons .btn{justify-content:center}
   .action-bar{flex-direction:column;align-items:stretch}
 }
+
+/* ══════════════════════════════════════════
+   BUILD MONITOR PANEL
+═══════════════════════════════════════════ */
+#buildPanel{
+  position:fixed;left:0;right:0;z-index:90;
+  display:flex;flex-direction:column;
+  background:rgba(10,11,16,.97);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border-top:1px solid var(--border);
+  max-height:400px;
+  transform:translateY(calc(100% - 34px));
+  transition:transform .3s cubic-bezier(.4,0,.2,1);
+}
+#buildPanel.expanded{transform:translateY(0)}
+#buildPanel.bp-hidden{display:none}
+
+/* Tab handle */
+.bp-tab{
+  height:34px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;cursor:pointer;
+  border-bottom:1px solid var(--border);
+  background:rgba(20,22,32,.99);user-select:none;
+}
+.bp-tab:hover{background:rgba(28,30,44,.99)}
+.bp-tab-l{display:flex;align-items:center;gap:7px}
+.bp-tab-title{font-size:.65rem;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.07em}
+.bp-tab-info{font-size:.62rem;color:var(--text-3)}
+.bp-caret{font-size:.62rem;color:var(--text-3);transition:transform .25s;flex-shrink:0}
+#buildPanel.expanded .bp-caret{transform:rotate(180deg)}
+
+/* Panel body */
+.bp-body{flex:1;display:flex;overflow:hidden;min-height:0}
+
+/* Left: phases */
+.bp-phases{width:170px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;padding:6px 0}
+.bpp{display:flex;align-items:flex-start;gap:7px;padding:5px 9px;transition:background .15s}
+.bpp.cur{background:rgba(59,130,246,.07)}
+.bpp-icon{
+  width:17px;height:17px;border-radius:50%;flex-shrink:0;margin-top:1px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:.55rem;font-weight:700;
+  border:1.5px solid var(--border);color:var(--text-3);background:var(--surface);transition:all .3s;
+}
+.bpp-icon.running{border-color:var(--brand);color:var(--brand);animation:pulse 1.5s infinite}
+.bpp-icon.complete{border-color:var(--green);background:var(--green-dim);color:var(--green)}
+.bpp-icon.failed{border-color:var(--red);background:var(--red-dim);color:var(--red)}
+.bpp-label .pn{font-size:.66rem;font-weight:600;color:var(--text-2);line-height:1.2}
+.bpp-label .pm{font-size:.57rem;color:var(--text-3);margin-top:2px;line-height:1.3}
+.bpp.cur .pn{color:var(--brand-light)}
+
+/* Right content area */
+.bp-right{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+
+/* Stats strip */
+.bp-stats{
+  display:flex;gap:14px;padding:3px 10px;flex-shrink:0;
+  border-bottom:1px solid var(--border);background:rgba(20,21,29,.8);overflow-x:auto;
+}
+.bpst{font-size:.59rem;color:var(--text-3);white-space:nowrap}
+.bpst strong{color:var(--text);font-weight:600}
+.bpst.ok strong{color:var(--green)}
+.bpst.bad strong{color:var(--red)}
+
+/* Content tabs */
+.bp-ctabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto}
+.bp-ctab{
+  font-size:.6rem;font-weight:700;padding:5px 10px;
+  color:var(--text-3);cursor:pointer;border-bottom:2px solid transparent;
+  text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;transition:all .15s;flex-shrink:0;
+}
+.bp-ctab:hover{color:var(--text)}
+.bp-ctab.active{color:var(--brand-light);border-bottom-color:var(--brand)}
+
+/* Panes */
+.bp-pane{flex:1;overflow-y:auto;padding:7px 10px;display:none}
+.bp-pane.active{display:block}
+/* Console pane needs no padding and flex display so the wrap fills it */
+#bpPaneConsole{padding:0;overflow:hidden}
+#bpPaneConsole.active{display:flex;flex-direction:column}
+.bp-empty{font-size:.66rem;color:var(--text-3);padding:16px 0;text-align:center}
+
+/* Log entries */
+.le{display:flex;gap:7px;font-family:'Menlo','Consolas','Courier New',monospace;font-size:.62rem;line-height:1.5;padding:1px 0}
+.le .lt{color:var(--text-3);flex-shrink:0;font-size:.57rem;padding-top:.05em}
+.le .lm{color:var(--text-2)}
+.le.success .lm{color:var(--green)}
+.le.error .lt{color:var(--red)}.le.error .lm{color:var(--red)}
+.le.warn .lm{color:var(--amber)}
+.le.debug .lm{color:var(--text-3)}
+.le.phase .lt{color:var(--brand)}.le.phase .lm{color:var(--brand-light);font-weight:600}
+
+/* File entries */
+.fe{font-family:'Menlo','Consolas','Courier New',monospace;font-size:.62rem;padding:2px 0;color:var(--text-2);display:flex;align-items:center;gap:5px}
+.fe::before{content:'▸';color:var(--brand);font-size:.58rem;flex-shrink:0}
+
+/* Check entries */
+.ce{display:flex;align-items:flex-start;gap:7px;padding:5px 0;border-bottom:1px solid rgba(42,43,55,.5);font-size:.68rem}
+.ce:last-child{border-bottom:none}
+.ce .ci{flex-shrink:0;margin-top:.1em;font-size:.68rem}
+.ce .cn{color:var(--text);font-weight:500;font-size:.68rem}
+.ce .cd{color:var(--text-3);font-size:.59rem;margin-top:2px}
+
+/* Debug */
+.bp-debug{font-family:'Menlo','Consolas','Courier New',monospace;font-size:.57rem;color:var(--text-3);white-space:pre;overflow-x:auto;line-height:1.5}
+
+/* Live Console */
+.bp-console-wrap{display:flex;flex-direction:column;height:100%;overflow:hidden}
+.bp-console-hdr{
+  display:flex;align-items:center;gap:7px;padding:5px 10px;flex-shrink:0;
+  border-bottom:1px solid var(--border);background:rgba(16,17,25,.9);
+}
+.bp-console-hdr-title{font-size:.62rem;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em}
+.bp-console-dot{
+  width:7px;height:7px;border-radius:50%;background:#22c55e;flex-shrink:0;
+  animation:none;
+}
+.bp-console-dot.active{animation:blink-green 1.2s ease-in-out infinite}
+@keyframes blink-green{0%,100%{opacity:1;box-shadow:0 0 4px #22c55e}50%{opacity:.3;box-shadow:none}}
+.bp-console-status{font-size:.58rem;color:var(--text-3);margin-left:auto}
+#bpConsole{
+  flex:1;overflow-y:auto;overflow-x:hidden;padding:6px 10px;
+  font-family:'Menlo','Consolas','Courier New',monospace;font-size:.6rem;
+  line-height:1.6;color:#c8d3e6;white-space:pre-wrap;word-break:break-all;
+  background:rgba(6,7,12,.85);
+}
+#bpConsole .cline-dim{color:#4a5568}
+#bpConsole .cline-err{color:#f87171}
+#bpConsole .cline-warn{color:#fbbf24}
+#bpConsole .cline-ok{color:#4ade80}
+#bpConsole .cline-phase{color:#818cf8;font-weight:600}
 </style>
 </head>
 <body>
@@ -379,13 +522,11 @@ details[open] summary .arrow{transform:rotate(90deg)}
       <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div class="section-body open">
+      <p style="font-size:.68rem;color:var(--text-3);margin-bottom:10px;line-height:1.5">These must match your Google Business Profile exactly — same capitalization, punctuation, and prefixes.</p>
       <div class="form-grid">
         <div class="form-group">
           <label>Business Name *</label>
-          <div class="field-with-ai">
-            <input type="text" id="f-businessName" data-field="basics.businessName" placeholder="e.g. Acme Roofing">
-            <button class="ai-btn" onclick="aiEnhance('businessName',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Enhance</button>
-          </div>
+          <input type="text" id="f-businessName" data-field="basics.businessName" placeholder="e.g. Acme Roofing LLC">
         </div>
         <div class="form-group">
           <label>Domain</label>
@@ -393,10 +534,15 @@ details[open] summary .arrow{transform:rotate(90deg)}
         </div>
         <div class="form-group">
           <label>Industry / Niche *</label>
-          <div class="field-with-ai">
-            <input type="text" id="f-industry" data-field="basics.industry" placeholder="e.g. Residential Roofing">
-            <button class="ai-btn" onclick="aiSuggest('industry',event)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Suggest</button>
-          </div>
+          <input type="text" id="f-industry" data-field="basics.industry" placeholder="e.g. Residential Roofing">
+        </div>
+        <div class="form-group">
+          <label>Phone *</label>
+          <input type="tel" id="f-phone" data-field="basics.phone" placeholder="(555) 123-4567">
+        </div>
+        <div class="form-group span-2">
+          <label>Address *</label>
+          <input type="text" id="f-address" data-field="basics.address" placeholder="123 Main St, City, State ZIP">
         </div>
         <div class="form-group span-2">
           <label>One-Line Description * <span class="char-count" id="descCount">0/160</span></label>
@@ -411,18 +557,10 @@ details[open] summary .arrow{transform:rotate(90deg)}
         <div class="form-group span-2">
           <label>Site Type *</label>
           <div class="card-select" id="siteTypeCards">
-            <div class="sel-card" data-val="local-service" onclick="selectCard(this,'siteType')">
-              <div class="ic">&#128222;</div><div class="nm">Local Service</div><div class="desc">Contractor / local SEO</div>
-            </div>
-            <div class="sel-card" data-val="ecommerce" onclick="selectCard(this,'siteType')">
-              <div class="ic">&#128722;</div><div class="nm">E-Commerce</div><div class="desc">Merch / national + global SEO</div>
-            </div>
-            <div class="sel-card" data-val="portfolio" onclick="selectCard(this,'siteType')">
-              <div class="ic">&#128100;</div><div class="nm">Portfolio</div><div class="desc">Personal / author brand SEO</div>
-            </div>
-            <div class="sel-card" data-val="webapp" onclick="selectCard(this,'siteType')">
-              <div class="ic">&#128187;</div><div class="nm">Web App</div><div class="desc">SaaS / interactive tool</div>
-            </div>
+            <div class="sel-card" data-val="local-service" onclick="selectCard(this,'siteType')"><div class="nm">Local Service</div></div>
+            <div class="sel-card" data-val="ecommerce" onclick="selectCard(this,'siteType')"><div class="nm">E-Commerce</div></div>
+            <div class="sel-card" data-val="portfolio" onclick="selectCard(this,'siteType')"><div class="nm">Portfolio</div></div>
+            <div class="sel-card" data-val="webapp" onclick="selectCard(this,'siteType')"><div class="nm">Web App</div></div>
           </div>
         </div>
       </div>
@@ -439,26 +577,30 @@ details[open] summary .arrow{transform:rotate(90deg)}
     </div>
     <div class="section-body open">
 
-      <!-- Theme Dropdown + Color Pickers -->
-      <div class="form-grid">
-        <div class="form-group span-2">
-          <label>Color Theme</label>
-          <select class="theme-select" id="themeSelect" onchange="selectTheme(this.value)">
-            <option value="">-- Pick a theme --</option>
-          </select>
-          <div class="swatch-bar" id="swatchBar"><div></div><div></div><div></div><div></div></div>
-          <div class="swatch-labels"><span>Primary</span><span>Secondary</span><span>Accent</span><span>Background</span></div>
+      <!-- Selected Design Template (from Design Template Gallery) -->
+      <div id="selectedTemplateCard" style="display:none;margin-bottom:14px;background:linear-gradient(135deg,rgba(37,99,235,.08),rgba(37,99,235,.02));border:1px solid rgba(37,99,235,.35);border-radius:8px;padding:12px 14px">
+        <div style="display:flex;align-items:flex-start;gap:12px">
+          <div id="stTplPreview" style="flex:0 0 160px;height:100px;border-radius:6px;overflow:hidden;background:#0a0a0a;position:relative">
+            <iframe id="stTplFrame" style="width:400%;height:400%;transform:scale(.25);transform-origin:top left;border:0;pointer-events:none" sandbox="allow-same-origin"></iframe>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <span style="font-size:.65rem;font-weight:700;letter-spacing:.5px;color:#3b82f6;text-transform:uppercase">Selected Template</span>
+            </div>
+            <div id="stTplName" style="font-size:.95rem;font-weight:700;color:var(--text);margin-bottom:2px">—</div>
+            <div id="stTplDesc" style="font-size:.72rem;color:var(--text-dim);line-height:1.4;margin-bottom:8px">—</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button type="button" onclick="openDesignGallery()" style="background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:5px 10px;color:var(--text);font-size:.68rem;font-weight:600;cursor:pointer;font-family:inherit">Change template</button>
+              <button type="button" onclick="clearSelectedDesignTemplate()" style="background:transparent;border:1px solid var(--border);border-radius:4px;padding:5px 10px;color:var(--text-dim);font-size:.68rem;font-weight:600;cursor:pointer;font-family:inherit">Remove</button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Color Pickers (always visible) -->
-      <div style="margin-top:10px">
-        <div class="color-row">
-          <div class="color-pick"><label>Primary</label><input type="color" id="f-colorPrimary" value="#4F46E5" oninput="setCustomColor('primary',this.value)"></div>
-          <div class="color-pick"><label>Secondary</label><input type="color" id="f-colorSecondary" value="#0F172A" oninput="setCustomColor('secondary',this.value)"></div>
-          <div class="color-pick"><label>Accent</label><input type="color" id="f-colorAccent" value="#F59E0B" oninput="setCustomColor('accent',this.value)"></div>
-          <div class="color-pick"><label>Background</label><input type="color" id="f-colorBg" value="#F8FAFC" oninput="setCustomColor('background',this.value)"></div>
-        </div>
+      <!-- Empty state when no template selected -->
+      <div id="selectedTemplateEmpty" style="display:none;margin-bottom:14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:12px 14px;text-align:center">
+        <div style="font-size:.78rem;color:var(--text-dim);margin-bottom:6px">No design template selected — Stitch will generate page layouts using only the brand controls below.</div>
+        <button type="button" onclick="openDesignGallery()" style="background:var(--brand-dim);border:1px solid var(--brand-border);border-radius:4px;padding:6px 14px;color:var(--brand-light);font-size:.7rem;font-weight:600;cursor:pointer;font-family:inherit">Pick from Design Template Gallery</button>
       </div>
 
       <!-- Style Builder: Preview + Controls side by side -->
@@ -483,7 +625,37 @@ details[open] summary .arrow{transform:rotate(90deg)}
         </div>
         <div class="style-controls-col">
 
-          <!-- Fonts -->
+          <!-- Theme + Colors -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Color Theme</div>
+            <div class="swatch-bar" id="swatchBar"><div></div><div></div><div></div><div></div></div>
+            <div class="swatch-labels"><span>Primary</span><span>Secondary</span><span>Accent</span><span>Background</span></div>
+            <div class="theme-list" id="themeList"></div>
+            <div class="color-row" style="margin-top:8px">
+              <div class="color-pick"><label>Primary</label><input type="color" id="f-colorPrimary" value="#4F46E5" oninput="setCustomColor('primary',this.value)"></div>
+              <div class="color-pick"><label>Secondary</label><input type="color" id="f-colorSecondary" value="#0F172A" oninput="setCustomColor('secondary',this.value)"></div>
+              <div class="color-pick"><label>Accent</label><input type="color" id="f-colorAccent" value="#F59E0B" oninput="setCustomColor('accent',this.value)"></div>
+              <div class="color-pick"><label>Background</label><input type="color" id="f-colorBg" value="#F8FAFC" oninput="setCustomColor('background',this.value)"></div>
+            </div>
+            <div class="save-theme-row" style="display:flex;gap:6px;margin-top:8px;align-items:center">
+              <input type="text" id="customThemeName" placeholder="Theme name" style="flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:5px 8px;color:var(--text);font-size:.72rem;font-family:inherit;outline:none">
+              <button onclick="saveCustomTheme()" style="background:var(--brand-dim);border:1px solid var(--brand-border);border-radius:4px;padding:5px 10px;color:var(--brand-light);font-size:.68rem;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit">Save Theme</button>
+            </div>
+          </div>
+
+          <!-- Typeface Presets -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Typeface</div>
+            <div class="theme-list" id="typefaceList"></div>
+          </div>
+
+          <!-- Style Presets -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Style</div>
+            <div class="theme-list" id="styleList"></div>
+          </div>
+
+          <!-- Fonts (manual override) -->
           <div class="ctrl-group">
             <div class="ctrl-group-title">Typography</div>
             <div class="ctrl-row"><label>Headings</label><select id="f-fontHeading" onchange="setStyle('fontHeading',this.value)"><option value="system-ui, sans-serif">System Default</option><option value="'Inter', sans-serif">Inter</option><option value="'Poppins', sans-serif">Poppins</option><option value="'Montserrat', sans-serif">Montserrat</option><option value="'Playfair Display', serif">Playfair Display</option><option value="'Merriweather', serif">Merriweather</option><option value="'Roboto Slab', serif">Roboto Slab</option><option value="'Space Grotesk', sans-serif">Space Grotesk</option><option value="'DM Sans', sans-serif">DM Sans</option></select></div>
@@ -521,6 +693,13 @@ details[open] summary .arrow{transform:rotate(90deg)}
             <div class="ctrl-row"><label>Border</label><input type="range" id="f-cardBorder" min="0" max="4" value="1" oninput="setStyle('cardBorder',this.value)"><span class="range-val" id="cardBorderVal">1px</span></div>
             <div class="ctrl-row"><label>Transparency</label><input type="range" id="f-cardOpacity" min="50" max="100" value="100" oninput="setStyle('cardOpacity',this.value)"><span class="range-val" id="cardOpacityVal">100%</span></div>
             <div class="ctrl-row"><label>Glass</label><select id="f-cardGlass" onchange="setStyle('cardGlass',this.value)"><option value="none" selected>None</option><option value="light">Light</option><option value="heavy">Heavy</option></select></div>
+          </div>
+
+          <!-- Effect Colors -->
+          <div class="ctrl-group">
+            <div class="ctrl-group-title">Effect Colors</div>
+            <div class="ctrl-row"><label>Glow</label><input type="color" id="f-glowColor" value="#3B82F6" oninput="setStyle('glowColor',this.value)" style="width:32px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer;padding:1px"><span class="range-val" style="font-size:.6rem;cursor:pointer;color:var(--text-3)" onclick="setStyle('glowColor','');$('f-glowColor').value=getColors().primary;updatePreview()">reset</span></div>
+            <div class="ctrl-row"><label>Border</label><input type="color" id="f-borderColor" value="#2A2B37" oninput="setStyle('borderColor',this.value)" style="width:32px;height:24px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer;padding:1px"><span class="range-val" style="font-size:.6rem;cursor:pointer;color:var(--text-3)" onclick="setStyle('borderColor','');$('f-borderColor').value=getColors().secondary;updatePreview()">reset</span></div>
           </div>
 
           <!-- Page / Layout -->
@@ -566,11 +745,11 @@ details[open] summary .arrow{transform:rotate(90deg)}
   </div>
 </div>
 
-<!-- ═══════════ SECTION 4: KEY IMAGES ═══════════ -->
+<!-- ═══════════ SECTION 4: MEDIA ═══════════ -->
 <div class="section">
   <div class="section-card">
     <div class="section-header open" onclick="toggleSection(this)">
-      <h2>Key Images</h2>
+      <h2>Media</h2>
       <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
     </div>
     <div class="section-body open">
@@ -594,17 +773,17 @@ details[open] summary .arrow{transform:rotate(90deg)}
         </div>
       </div>
 
-      <details style="margin-top:12px">
-        <summary><span class="arrow">&#9654;</span> Add More Images</summary>
-        <div style="padding-top:10px">
-          <div class="drop-zone" id="bulkZone" onclick="document.getElementById('bulkFiles').click()">
-            <span class="dz-label">Drop additional images here</span>
-            <span class="dz-hint">Service photos, gallery images, backgrounds</span>
-            <input type="file" id="bulkFiles" accept="image/*" multiple onchange="handleBulkUpload(this.files)">
-          </div>
-          <div class="upload-grid" id="galleryGrid"></div>
+      <!-- Bulk Upload -->
+      <div style="margin-top:16px">
+        <label style="margin-bottom:4px;display:block">Bulk Upload — Images &amp; Video</label>
+        <p style="font-size:.62rem;color:var(--text-3);margin-bottom:8px">Drop everything you have — service photos, job site shots, testimonial videos, drone footage, before/after. All formats accepted. Images auto-convert to WebP during site build.</p>
+        <div class="drop-zone" id="bulkZone" onclick="document.getElementById('bulkFiles').click()" style="min-height:80px">
+          <span class="dz-label">Drop images and videos here</span>
+          <span class="dz-hint">JPG, PNG, HEIC, WebP, MP4, MOV, AVI — any format</span>
+          <input type="file" id="bulkFiles" accept="image/*,video/*" multiple onchange="handleBulkUpload(this.files)">
         </div>
-      </details>
+        <div class="upload-grid" id="galleryGrid"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -618,20 +797,50 @@ details[open] summary .arrow{transform:rotate(90deg)}
     </div>
     <div class="section-body open">
       <div class="form-grid">
-        <div class="form-group"><label>Phone</label><input type="tel" id="f-phone" data-field="basics.phone" placeholder="(555) 123-4567"></div>
         <div class="form-group"><label>Email</label><input type="email" id="f-email" data-field="basics.email" placeholder="info@business.com"></div>
-        <div class="form-group span-2"><label>Address</label><input type="text" id="f-address" data-field="basics.address" placeholder="123 Main St, City, State ZIP"></div>
+        <div class="form-group"><label>Google Business Profile URL</label><input type="url" id="f-gbpUrl" data-field="basics.gbpUrl" placeholder="https://g.page/your-business"></div>
         <div class="form-group span-2">
           <label>About the Business</label>
           <div class="field-with-ai">
             <textarea id="f-aboutBusiness" data-field="basics.about" rows="3" placeholder="What does the business do? History, mission, what makes it different..."></textarea>
-            <button class="ai-btn" onclick="aiGenerate('aboutBusiness',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <button class="ai-btn" onclick="aiGenerate('aboutBusiness',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+              <button class="ai-btn" onclick="aiEnhance('aboutBusiness',event)"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Enhance</button>
+            </div>
           </div>
         </div>
         <div class="form-group"><label>Owner / Contact Name</label><input type="text" id="f-ownerName" data-field="basics.ownerName" placeholder="e.g. John Smith"></div>
         <div class="form-group"><label>Years in Business</label><input type="text" id="f-yearsInBusiness" data-field="basics.yearsInBusiness" placeholder="e.g. 15"></div>
         <div class="form-group"><label>License / Certification</label><input type="text" id="f-license" data-field="basics.license" placeholder="e.g. ROC #123456, Licensed & Insured"></div>
-        <div class="form-group"><label>Google Business Profile URL</label><input type="url" id="f-gbpUrl" data-field="basics.gbpUrl" placeholder="https://g.page/your-business"></div>
+        <div class="form-group span-2">
+          <label>Hours of Operation</label>
+          <input type="text" id="f-hours" data-field="basics.hours" placeholder="e.g. Mon-Fri 7am-5pm, Sat 8am-2pm, Sun Closed">
+          <span style="font-size:.58rem;color:var(--text-3);margin-top:2px;display:block">Shows in footer, schema markup, and Google Business Profile</span>
+        </div>
+      </div>
+
+      <!-- Social Media Links -->
+      <label style="margin:14px 0 6px;display:block">Social Media Links</label>
+      <p style="font-size:.62rem;color:var(--text-3);margin-bottom:8px">These go in the header/footer of every page.</p>
+      <div class="form-grid">
+        <div class="form-group"><label>Facebook</label><input type="url" id="f-socialFacebook" data-field="basics.socials.facebook" placeholder="https://facebook.com/yourbiz"></div>
+        <div class="form-group"><label>Instagram</label><input type="url" id="f-socialInstagram" data-field="basics.socials.instagram" placeholder="https://instagram.com/yourbiz"></div>
+        <div class="form-group"><label>YouTube</label><input type="url" id="f-socialYoutube" data-field="basics.socials.youtube" placeholder="https://youtube.com/@yourbiz"></div>
+        <div class="form-group"><label>LinkedIn</label><input type="url" id="f-socialLinkedin" data-field="basics.socials.linkedin" placeholder="https://linkedin.com/company/yourbiz"></div>
+        <div class="form-group"><label>Yelp</label><input type="url" id="f-socialYelp" data-field="basics.socials.yelp" placeholder="https://yelp.com/biz/yourbiz"></div>
+        <div class="form-group"><label>TikTok</label><input type="url" id="f-socialTiktok" data-field="basics.socials.tiktok" placeholder="https://tiktok.com/@yourbiz"></div>
+        <div class="form-group"><label>X / Twitter</label><input type="url" id="f-socialTwitter" data-field="basics.socials.twitter" placeholder="https://x.com/yourbiz"></div>
+        <div class="form-group"><label>Nextdoor</label><input type="url" id="f-socialNextdoor" data-field="basics.socials.nextdoor" placeholder="https://nextdoor.com/pages/yourbiz"></div>
+      </div>
+
+      <!-- Unique Selling Points -->
+      <label style="margin:14px 0 6px;display:block">Unique Selling Points</label>
+      <p style="font-size:.62rem;color:var(--text-3);margin-bottom:8px">The "Why choose us" bullets — used in hero sections, CTAs, and service pages.</p>
+      <div class="field-with-ai">
+        <div class="chip-input-wrap" id="sellingPointsChips" onclick="this.querySelector('input').focus()">
+          <input type="text" class="chip-input" placeholder="e.g. 24/7 Emergency Service + Enter" onkeydown="chipKey(event,'sellingPoints')">
+        </div>
+        <button class="ai-btn" onclick="aiGenerate('sellingPoints',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
       </div>
     </div>
   </div>
@@ -688,7 +897,10 @@ details[open] summary .arrow{transform:rotate(90deg)}
         <label>Ideal Customer</label>
         <div class="field-with-ai">
           <textarea id="f-idealCustomer" data-field="targetAudience.idealCustomer" rows="3" placeholder="Who is the perfect customer? Age, profession, problem they're solving..."></textarea>
-          <button class="ai-btn" onclick="aiGenerate('idealCustomer',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <button class="ai-btn" onclick="aiGenerate('idealCustomer',event)"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 14v-4m9-5h-4M3 12h4m12.36-5.36l-2.83 2.83M6.47 17.53l-2.83 2.83m14.72 0l-2.83-2.83M6.47 6.47L3.64 3.64"/></svg>Generate</button>
+            <button class="ai-btn" onclick="aiEnhance('idealCustomer',event)"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Enhance</button>
+          </div>
         </div>
       </div>
 
@@ -749,6 +961,29 @@ details[open] summary .arrow{transform:rotate(90deg)}
 
       <label style="margin:14px 0 6px;display:block">Special Features</label>
       <div class="pill-row" id="featuresRow"></div>
+
+      <label style="margin:14px 0 4px;display:block">URL Structure</label>
+      <p style="font-size:.62rem;color:var(--text-3);margin-bottom:6px">How pages nest. Auto-set by site type, edit to customize.</p>
+      <input type="text" id="f-urlStructure" data-field="siteConfig.urlStructure" placeholder="e.g. /{service-area}/{service}/{sub-service}/" style="font-family:'IBM Plex Mono',monospace;font-size:.75rem">
+
+      <div id="localServiceNote" style="display:none;margin-top:14px;background:var(--brand-dim);border:1px solid var(--brand-border);border-radius:var(--r-xs);padding:10px 12px">
+        <div style="font-size:.72rem;font-weight:700;color:var(--brand-light);margin-bottom:6px">Local Service SEO Page Structure</div>
+        <div style="font-size:.65rem;color:var(--text-2);line-height:1.6">
+          <div style="margin-bottom:6px">Every service company website needs this structure for local SEO:</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:.62rem;background:var(--surface-2);padding:8px;border-radius:4px;margin-bottom:8px;line-height:1.8">
+            /services/ <span style="color:var(--text-3)">- top-level services list</span><br>
+            /services/roof-repair/ <span style="color:var(--text-3)">- individual service page</span><br>
+            /service-areas/ <span style="color:var(--text-3)">- all service areas list</span><br>
+            /service-areas/phoenix/ <span style="color:var(--text-3)">- area page (near-duplicate of services)</span><br>
+            /service-areas/phoenix/roof-repair/ <span style="color:var(--text-3)">- area + service combo</span><br>
+            /blog/ <span style="color:var(--text-3)">- blog index</span><br>
+            /faq/ <span style="color:var(--text-3)">- FAQ page</span>
+          </div>
+          <div style="font-size:.62rem;color:var(--text-3);line-height:1.6">
+            Each service area page should be a near-duplicate of the services page, re-worded specifically for that area. Each service under each area gets its own page with area-specific content. This creates <strong style="color:var(--text-2)">area x service</strong> unique pages for maximum local search coverage. Services also exist at the top level (not under any area) as the canonical version.
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -771,6 +1006,56 @@ details[open] summary .arrow{transform:rotate(90deg)}
 
 </div><!-- /container -->
 
+<!-- ═══════════ BUILD MONITOR PANEL ═══════════ -->
+<div id="buildPanel" class="bp-hidden">
+  <!-- Handle / tab -->
+  <div class="bp-tab" onclick="toggleBuildPanel()">
+    <div class="bp-tab-l">
+      <span class="save-dot" id="bpDot"></span>
+      <span class="bp-tab-title">Build Monitor</span>
+      <span class="bp-tab-info" id="bpTabInfo">No build active</span>
+    </div>
+    <span class="bp-caret" id="bpCaret">▲</span>
+  </div>
+  <!-- Body -->
+  <div class="bp-body">
+    <!-- Phase stepper (left) -->
+    <div class="bp-phases" id="bpPhases"></div>
+    <!-- Right: stats + tabs + panes -->
+    <div class="bp-right">
+      <div class="bp-stats">
+        <div class="bpst">Phase: <strong id="bpStPhase">—</strong></div>
+        <div class="bpst">Files: <strong id="bpStFiles">0</strong></div>
+        <div class="bpst ok">Passed: <strong id="bpStPass">0</strong></div>
+        <div class="bpst bad">Failed: <strong id="bpStFail">0</strong></div>
+        <div class="bpst">Elapsed: <strong id="bpStElapsed">—</strong></div>
+        <div class="bpst">Updated: <strong id="bpStUpdated">—</strong></div>
+      </div>
+      <div class="bp-ctabs">
+        <div class="bp-ctab active" onclick="bpTab('log',this)">Live Log</div>
+        <div class="bp-ctab" onclick="bpTab('console',this)">Live Output</div>
+        <div class="bp-ctab" onclick="bpTab('files',this)">Files Created</div>
+        <div class="bp-ctab" onclick="bpTab('checks',this)">Checks</div>
+        <div class="bp-ctab" onclick="bpTab('debug',this)">Debug</div>
+      </div>
+      <div class="bp-pane active" id="bpPaneLog"><div id="bpLog"><div class="bp-empty">Waiting for build to start…</div></div></div>
+      <div class="bp-pane" id="bpPaneConsole">
+        <div class="bp-console-wrap">
+          <div class="bp-console-hdr">
+            <div class="bp-console-dot" id="bpConsoleDot"></div>
+            <span class="bp-console-hdr-title">z-code Output</span>
+            <span class="bp-console-status" id="bpConsoleStatus">No log yet</span>
+          </div>
+          <div id="bpConsole"><span class="cline-dim">Waiting for build to start…</span></div>
+        </div>
+      </div>
+      <div class="bp-pane" id="bpPaneFiles"><div id="bpFiles"><div class="bp-empty">No files created yet.</div></div></div>
+      <div class="bp-pane" id="bpPaneChecks"><div id="bpChecks"><div class="bp-empty">No checks run yet.</div></div></div>
+      <div class="bp-pane" id="bpPaneDebug"><pre class="bp-debug" id="bpDebugPre">—</pre></div>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════ SECTION 9: ACTION BAR ═══════════ -->
 <div class="action-bar">
   <div class="save-indicator">
@@ -778,10 +1063,15 @@ details[open] summary .arrow{transform:rotate(90deg)}
     <span id="saveLabel">All changes saved</span>
   </div>
   <div class="action-buttons">
+    <button class="btn" onclick="resetForm()" title="Clear all fields and start over">Clear / Reset</button>
     <button class="btn" onclick="saveNow()">Save Draft</button>
-    <button class="btn primary" id="startResearchBtn" onclick="startResearch()">Start Research</button>
+    <button class="btn secondary" id="addToQueueBtn" disabled onclick="addToQueue()" title="Add to queue without starting immediately">+ Queue</button>
+    <button class="btn primary" id="startResearchBtn" disabled onclick="startResearch()">▶ Start</button>
   </div>
 </div>
+
+<!-- Agent Fill Banner -->
+<div class="agent-fill-banner" id="agentFillBanner">Agent is filling the form…</div>
 
 <!-- Toast -->
 <div class="toast" id="toast"></div>
@@ -808,18 +1098,23 @@ const THEMES = [
   {id:'slack',name:'Slack Aubergine',sub:'Collaboration, community',colors:['#4A154B','#1A1D21','#E01E5A','#FFFFFF']},
 ];
 
+// ── Custom Themes (user-saved, loaded from server) ──
+let customThemes=[];
+
 // ── Data Model ──
 let formData = {
-  basics:{businessName:'',domain:'',industry:'',description:'',phone:'',email:'',address:'',about:'',ownerName:'',yearsInBusiness:'',license:'',gbpUrl:''},
+  basics:{businessName:'',domain:'',industry:'',description:'',phone:'',email:'',address:'',about:'',ownerName:'',yearsInBusiness:'',license:'',gbpUrl:'',hours:'',socials:{facebook:'',instagram:'',youtube:'',linkedin:'',yelp:'',tiktok:'',twitter:'',nextdoor:''}},
+  sellingPoints:[],
   branding:{theme:'',customColors:{primary:'',secondary:'',accent:'',background:''},tone:'professional',logoUrl:'',faviconUrl:'',
     style:{
       fontHeading:'system-ui, sans-serif',fontBody:'system-ui, sans-serif',fontWeight:'bold',fontStyle:'none',
       navRadius:'12',navShadow:'sm',navGlow:'none',navOpacity:100,
       btnFill:'filled',btnRadius:'6',btnShadow:'none',btnGlow:'none',btnBorder:0,
       cardRadius:'12',cardShadow:'sm',cardGlow:'none',cardInnerGlow:'none',cardBorder:1,cardOpacity:100,cardGlass:'none',
-      pageWidth:'standard',spacing:'normal',animations:'subtle'
+      pageWidth:'standard',spacing:'normal',animations:'subtle',
+      glowColor:'',borderColor:''
     }},
-  siteConfig:{siteType:'',primaryCTA:'',pages:['home','about','services','contact'],specialFeatures:[]},
+  siteConfig:{siteType:'',primaryCTA:'',pages:['home','about','services','contact','blog','faq'],specialFeatures:[],urlStructure:''},
   targetAudience:{idealCustomer:'',geographicScope:'',targetMarkets:[],services:[],topics:[]},
   seo:{primaryKeywords:[],competitors:[],referenceSites:[]},
   images:{logo:{url:'',notes:''},hero:{url:'',notes:''},team:{url:'',notes:''},gallery:[]},
@@ -829,15 +1124,91 @@ let formData = {
 let saveTimer=null, isSaving=false;
 
 // ── Init ──
-function init(){
+async function init(){
+  await loadCustomThemes();
   renderThemeDropdown();
+  renderTypefaceList();
+  renderStyleList();
   renderPages();
   renderFeatures();
-  loadData();
+  await loadData();
+  await loadSelectedDesignTemplate();
+  renderThemeDropdown();
+  renderTypefaceList();
+  renderStyleList();
+  renderSelectedDesignTemplate();
   setupDragDrop();
   bindInputs();
-  // Defer preview render until after loadData populates formData
-  setTimeout(()=>{updateSwatchBar();updatePreview()},300);
+  setTimeout(()=>{updateSwatchBar();updatePreview()},100);
+  setTimeout(()=>checkExistingBuild(),400);
+}
+
+// ── Selected Design Template (from Design Template Gallery) ──
+async function loadSelectedDesignTemplate(){
+  // If we already have a designTemplate stored in formData (from a previous save), keep it.
+  // Then check selected-design-template.json — if newer or different, adopt it.
+  try{
+    const r=await authGet('/api/canvas/data/selected-design-template.json');
+    if(!r.ok)return;
+    const sel=await r.json().catch(()=>null);
+    // Bail on missing data, cleared markers, or anything without a real slug
+    if(!sel||sel.cleared||!sel.slug)return;
+    const cur=formData.branding&&formData.branding.designTemplate;
+    // Adopt new selection unless we already have the same slug
+    if(!cur||cur.slug!==sel.slug){
+      formData.branding.designTemplate={
+        slug:sel.slug,
+        name:sel.name||sel.slug,
+        category:sel.category||'',
+        description:sel.description||'',
+        previewUrl:sel.previewUrl||'',
+        previewDarkUrl:sel.previewDarkUrl||'',
+        designMd:sel.designMd||'',
+        selectedAt:sel.selectedAt||new Date().toISOString()
+      };
+      scheduleSave();
+    }
+  }catch(e){/* no selection yet — fine */}
+}
+
+function renderSelectedDesignTemplate(){
+  const card=$('selectedTemplateCard');
+  const empty=$('selectedTemplateEmpty');
+  if(!card||!empty)return;
+  const tpl=formData.branding&&formData.branding.designTemplate;
+  if(tpl&&tpl.slug){
+    card.style.display='';
+    empty.style.display='none';
+    const nameEl=$('stTplName');if(nameEl)nameEl.textContent=tpl.name||tpl.slug;
+    const descEl=$('stTplDesc');if(descEl)descEl.textContent=(tpl.category?tpl.category+' · ':'')+(tpl.description||'');
+    const frame=$('stTplFrame');
+    if(frame&&tpl.previewUrl)frame.src=tpl.previewUrl;
+    else if(frame)frame.src='about:blank';
+  }else{
+    card.style.display='none';
+    empty.style.display='';
+  }
+}
+
+async function clearSelectedDesignTemplate(){
+  if(!confirm('Remove selected template? You can pick another one anytime.'))return;
+  formData.branding.designTemplate=null;
+  // Also clear the server-side selection so a fresh visit doesn't re-load it
+  try{await authPost('/api/canvas/data/selected-design-template.json',{cleared:true,clearedAt:new Date().toISOString()})}catch(e){}
+  renderSelectedDesignTemplate();
+  scheduleSave();
+  toast('Template removed');
+}
+
+function openDesignGallery(){
+  // Use parent canvas bridge to navigate to the design template gallery.
+  try{
+    if(window.parent&&window.parent!==window){
+      window.parent.postMessage({type:'canvas-action',action:'navigate',page:'design-templates'},'*');
+      return;
+    }
+  }catch(e){}
+  window.location.href='/pages/design-templates.html';
 }
 
 // ── Section toggle ──
@@ -850,14 +1221,47 @@ function toggleSection(hdr){
 // ── Theme rendering ──
 // ── Theme dropdown + live preview ──
 function renderThemeDropdown(){
-  const sel=$('themeSelect');
-  sel.innerHTML='<option value="">-- Pick a theme --</option>'+
-    THEMES.map(t=>`<option value="${t.id}"${formData.branding.theme===t.id?' selected':''}>${t.name} — ${t.sub}</option>`).join('');
+  const list=$('themeList');
+  const esc=s=>s.replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+  // Built-in themes
+  let html=THEMES.map(t=>`<div class="theme-item${formData.branding.theme===t.id?' active':''}" data-theme="${t.id}" onclick="selectTheme('${t.id}')" onmouseenter="previewTheme('${t.id}')" onmouseleave="restoreTheme()"><span class="t-swatches"><span class="t-sw" style="background:${t.colors[0]}"></span><span class="t-sw" style="background:${t.colors[1]}"></span><span class="t-sw" style="background:${t.colors[2]}"></span><span class="t-sw" style="background:${t.colors[3]}"></span></span>${t.name}</div>`).join('');
+  // Custom saved themes
+  if(customThemes.length){
+    html+=`<div style="border-top:1px solid var(--border);margin:4px 0"></div>`;
+    html+=customThemes.map(t=>`<div class="theme-item${formData.branding.theme===t.id?' active':''}" data-theme="${esc(t.id)}" onclick="selectTheme('${esc(t.id)}')" onmouseenter="previewTheme('${esc(t.id)}')" onmouseleave="restoreTheme()"><span class="t-swatches"><span class="t-sw" style="background:${t.colors[0]}"></span><span class="t-sw" style="background:${t.colors[1]}"></span><span class="t-sw" style="background:${t.colors[2]}"></span><span class="t-sw" style="background:${t.colors[3]}"></span></span><span style="flex:1">${esc(t.name)}</span><span class="theme-del" onclick="event.stopPropagation();deleteCustomTheme('${esc(t.id)}')" title="Delete" style="color:var(--text-3);font-size:.65rem;cursor:pointer;padding:0 2px">&times;</span></div>`).join('');
+  }
+  list.innerHTML=html;
+}
+
+// Lookup from both built-in + custom
+function findTheme(id){return THEMES.find(x=>x.id===id)||customThemes.find(x=>x.id===id)}
+
+// Live preview on hover (no save)
+function previewTheme(id){
+  const t=findTheme(id);
+  const bar=$('swatchBar');
+  if(t){
+    bar.children[0].style.background=t.colors[0];
+    bar.children[1].style.background=t.colors[1];
+    bar.children[2].style.background=t.colors[2];
+    bar.children[3].style.background=t.colors[3];
+    const save={theme:formData.branding.theme,colors:{...formData.branding.customColors}};
+    formData.branding.theme=id;
+    formData.branding.customColors={primary:'',secondary:'',accent:'',background:''};
+    updatePreview();
+    formData.branding.theme=save.theme;
+    formData.branding.customColors=save.colors;
+  }
+}
+
+function restoreTheme(){
+  updateSwatchBar();
+  updatePreview();
 }
 
 function selectTheme(id){
   formData.branding.theme=id;
-  const t=THEMES.find(x=>x.id===id);
+  const t=findTheme(id);
   if(t){
     $('f-colorPrimary').value=t.colors[0];
     $('f-colorSecondary').value=t.colors[1];
@@ -867,12 +1271,153 @@ function selectTheme(id){
   }
   updateSwatchBar();
   updatePreview();
+  document.querySelectorAll('.theme-item').forEach(el=>el.classList.toggle('active',el.dataset.theme===id));
   scheduleSave();
+}
+
+// Save current color pickers as a new custom theme
+async function saveCustomTheme(){
+  const nameEl=$('customThemeName');
+  const name=nameEl.value.trim();
+  if(!name){nameEl.focus();return}
+  const id='custom-'+Date.now();
+  const colors=[$('f-colorPrimary').value,$('f-colorSecondary').value,$('f-colorAccent').value,$('f-colorBg').value];
+  customThemes.push({id,name,colors});
+  await saveCustomThemesFile();
+  formData.branding.theme=id;
+  formData.branding.customColors={primary:'',secondary:'',accent:'',background:''};
+  renderThemeDropdown();
+  updateSwatchBar();
+  updatePreview();
+  nameEl.value='';
+  scheduleSave();
+  toast('Theme "'+name+'" saved');
+}
+
+async function deleteCustomTheme(id){
+  customThemes=customThemes.filter(t=>t.id!==id);
+  await saveCustomThemesFile();
+  if(formData.branding.theme===id){formData.branding.theme='';scheduleSave()}
+  renderThemeDropdown();
+  updateSwatchBar();
+  updatePreview();
+}
+
+async function saveCustomThemesFile(){
+  try{await authPost('/api/canvas/data/custom-themes.json',customThemes)}catch(e){}
+}
+
+async function loadCustomThemes(){
+  try{
+    const r=await authGet('/api/canvas/data/custom-themes.json');
+    if(r.ok){const d=await r.json();if(Array.isArray(d))customThemes=d}
+  }catch(e){}
+}
+
+// ── Typeface Presets ──
+const TYPEFACES=[
+  {id:'modern-clean',name:'Modern Clean',heading:"'Inter', sans-serif",body:"'Inter', sans-serif",weight:'bold',style:'none'},
+  {id:'classic-editorial',name:'Classic Editorial',heading:"'Playfair Display', serif",body:"'Lato', sans-serif",weight:'bold',style:'none'},
+  {id:'tech-forward',name:'Tech Forward',heading:"'Space Grotesk', sans-serif",body:"'IBM Plex Sans', sans-serif",weight:'extra',style:'none'},
+  {id:'friendly-rounded',name:'Friendly Rounded',heading:"'Poppins', sans-serif",body:"'Nunito', sans-serif",weight:'bold',style:'none'},
+  {id:'bold-impact',name:'Bold Impact',heading:"'Montserrat', sans-serif",body:"'Open Sans', sans-serif",weight:'extra',style:'shadow'},
+  {id:'elegant-serif',name:'Elegant Serif',heading:"'Merriweather', serif",body:"'Lato', sans-serif",weight:'normal',style:'none'},
+  {id:'structured-slab',name:'Structured Slab',heading:"'Roboto Slab', serif",body:"'DM Sans', sans-serif",weight:'bold',style:'none'},
+  {id:'minimal-geometric',name:'Minimal Geometric',heading:"'DM Sans', sans-serif",body:"'DM Sans', sans-serif",weight:'light',style:'none'},
+  {id:'neon-glow',name:'Neon Glow',heading:"'Space Grotesk', sans-serif",body:"'Inter', sans-serif",weight:'extra',style:'glow'},
+  {id:'soft-outline',name:'Soft Outline',heading:"'Poppins', sans-serif",body:"'Open Sans', sans-serif",weight:'bold',style:'outline'},
+];
+
+function renderTypefaceList(){
+  const list=$('typefaceList');
+  const cur=formData.branding.style;
+  list.innerHTML=TYPEFACES.map(t=>{
+    const active=cur.fontHeading===t.heading&&cur.fontBody===t.body&&cur.fontWeight===t.weight&&cur.fontStyle===t.style;
+    return`<div class="theme-item${active?' active':''}" data-typeface="${t.id}" onclick="selectTypeface('${t.id}')" onmouseenter="previewTypeface('${t.id}')" onmouseleave="restoreTypeface()"><span style="font-family:${t.heading};font-size:.7rem;font-weight:700;color:var(--text);width:18px;text-align:center">Aa</span>${t.name}</div>`;
+  }).join('');
+}
+
+function previewTypeface(id){
+  const t=TYPEFACES.find(x=>x.id===id);if(!t)return;
+  const s=formData.branding.style;
+  const save={h:s.fontHeading,b:s.fontBody,w:s.fontWeight,st:s.fontStyle};
+  s.fontHeading=t.heading;s.fontBody=t.body;s.fontWeight=t.weight;s.fontStyle=t.style;
+  updatePreview();
+  s.fontHeading=save.h;s.fontBody=save.b;s.fontWeight=save.w;s.fontStyle=save.st;
+}
+function restoreTypeface(){updatePreview()}
+
+function selectTypeface(id){
+  const t=TYPEFACES.find(x=>x.id===id);if(!t)return;
+  const s=formData.branding.style;
+  s.fontHeading=t.heading;s.fontBody=t.body;s.fontWeight=t.weight;s.fontStyle=t.style;
+  $('f-fontHeading').value=t.heading;$('f-fontBody').value=t.body;
+  $('f-fontWeight').value=t.weight;$('f-fontStyle').value=t.style;
+  updatePreview();renderTypefaceList();scheduleSave();
+}
+
+// ── Style Presets ──
+const STYLES=[
+  {id:'clean-flat',name:'Clean Flat',vals:{navRadius:'0',navShadow:'none',navGlow:'none',navOpacity:100,btnFill:'filled',btnRadius:'6',btnShadow:'none',btnGlow:'none',btnBorder:0,cardRadius:'6',cardShadow:'none',cardGlow:'none',cardInnerGlow:'none',cardBorder:1,cardOpacity:100,cardGlass:'none',spacing:'normal',animations:'none'}},
+  {id:'soft-rounded',name:'Soft Rounded',vals:{navRadius:'12',navShadow:'sm',navGlow:'none',navOpacity:100,btnFill:'filled',btnRadius:'12',btnShadow:'sm',btnGlow:'none',btnBorder:0,cardRadius:'12',cardShadow:'sm',cardGlow:'none',cardInnerGlow:'none',cardBorder:0,cardOpacity:100,cardGlass:'none',spacing:'normal',animations:'subtle'}},
+  {id:'pill-buttons',name:'Pill Buttons',vals:{navRadius:'24',navShadow:'sm',navGlow:'none',navOpacity:100,btnFill:'filled',btnRadius:'50',btnShadow:'sm',btnGlow:'none',btnBorder:0,cardRadius:'20',cardShadow:'sm',cardGlow:'none',cardInnerGlow:'none',cardBorder:0,cardOpacity:100,cardGlass:'none',spacing:'normal',animations:'subtle'}},
+  {id:'glassmorphism',name:'Glassmorphism',vals:{navRadius:'12',navShadow:'sm',navGlow:'soft',navOpacity:80,btnFill:'outline',btnRadius:'12',btnShadow:'none',btnGlow:'soft',btnBorder:1,cardRadius:'12',cardShadow:'sm',cardGlow:'soft',cardInnerGlow:'soft',cardBorder:1,cardOpacity:75,cardGlass:'heavy',spacing:'airy',animations:'smooth'}},
+  {id:'brutalist',name:'Brutalist',vals:{navRadius:'0',navShadow:'none',navGlow:'none',navOpacity:100,btnFill:'outline',btnRadius:'0',btnShadow:'none',btnGlow:'none',btnBorder:3,cardRadius:'0',cardShadow:'none',cardGlow:'none',cardInnerGlow:'none',cardBorder:3,cardOpacity:100,cardGlass:'none',spacing:'tight',animations:'none'}},
+  {id:'elevated',name:'Elevated',vals:{navRadius:'6',navShadow:'lg',navGlow:'none',navOpacity:100,btnFill:'filled',btnRadius:'6',btnShadow:'lg',btnGlow:'none',btnBorder:0,cardRadius:'6',cardShadow:'lg',cardGlow:'none',cardInnerGlow:'none',cardBorder:0,cardOpacity:100,cardGlass:'none',spacing:'airy',animations:'subtle'}},
+  {id:'neumorphism',name:'Neumorphism',vals:{navRadius:'12',navShadow:'sm',navGlow:'none',navOpacity:100,btnFill:'ghost',btnRadius:'12',btnShadow:'sm',btnGlow:'none',btnBorder:0,cardRadius:'12',cardShadow:'sm',cardGlow:'none',cardInnerGlow:'soft',cardBorder:0,cardOpacity:100,cardGlass:'none',spacing:'normal',animations:'subtle'}},
+  {id:'neon-night',name:'Neon Night',vals:{navRadius:'6',navShadow:'none',navGlow:'bright',navOpacity:90,btnFill:'outline',btnRadius:'6',btnShadow:'none',btnGlow:'bright',btnBorder:1,cardRadius:'6',cardShadow:'none',cardGlow:'bright',cardInnerGlow:'none',cardBorder:1,cardOpacity:85,cardGlass:'light',spacing:'normal',animations:'smooth'}},
+  {id:'gradient-pop',name:'Gradient Pop',vals:{navRadius:'12',navShadow:'sm',navGlow:'none',navOpacity:100,btnFill:'gradient',btnRadius:'12',btnShadow:'sm',btnGlow:'none',btnBorder:0,cardRadius:'12',cardShadow:'sm',cardGlow:'none',cardInnerGlow:'none',cardBorder:0,cardOpacity:100,cardGlass:'none',spacing:'normal',animations:'playful'}},
+  {id:'spacious-minimal',name:'Spacious Minimal',vals:{navRadius:'0',navShadow:'none',navGlow:'none',navOpacity:100,btnFill:'ghost',btnRadius:'0',btnShadow:'none',btnGlow:'none',btnBorder:1,cardRadius:'0',cardShadow:'none',cardGlow:'none',cardInnerGlow:'none',cardBorder:1,cardOpacity:100,cardGlass:'none',spacing:'spacious',animations:'smooth'}},
+];
+
+function renderStyleList(){
+  const list=$('styleList');
+  const cur=formData.branding.style;
+  list.innerHTML=STYLES.map(s=>{
+    // Check if current style matches this preset
+    const active=Object.keys(s.vals).every(k=>String(cur[k])===String(s.vals[k]));
+    return`<div class="theme-item${active?' active':''}" data-style="${s.id}" onclick="selectStylePreset('${s.id}')" onmouseenter="previewStylePreset('${s.id}')" onmouseleave="restoreStylePreset()">${s.name}</div>`;
+  }).join('');
+}
+
+let _savedStyle=null;
+function previewStylePreset(id){
+  const s=STYLES.find(x=>x.id===id);if(!s)return;
+  const cur=formData.branding.style;
+  _savedStyle={};
+  for(const k in s.vals){_savedStyle[k]=cur[k];cur[k]=s.vals[k]}
+  updatePreview();
+}
+function restoreStylePreset(){
+  if(!_savedStyle)return;
+  const cur=formData.branding.style;
+  for(const k in _savedStyle)cur[k]=_savedStyle[k];
+  _savedStyle=null;
+  updatePreview();
+}
+function selectStylePreset(id){
+  _savedStyle=null; // don't restore
+  const s=STYLES.find(x=>x.id===id);if(!s)return;
+  const cur=formData.branding.style;
+  for(const k in s.vals)cur[k]=s.vals[k];
+  // Sync all the UI controls
+  const _sv=(elId,v)=>{const el=$(elId);if(el)el.value=v};
+  _sv('f-navRadius',cur.navRadius);_sv('f-navShadow',cur.navShadow);_sv('f-navGlow',cur.navGlow);
+  _sv('f-navOpacity',cur.navOpacity);$('navOpacityVal').textContent=cur.navOpacity+'%';
+  _sv('f-btnFill',cur.btnFill);_sv('f-btnRadius',cur.btnRadius);_sv('f-btnShadow',cur.btnShadow);_sv('f-btnGlow',cur.btnGlow);
+  _sv('f-btnBorder',cur.btnBorder);$('btnBorderVal').textContent=cur.btnBorder+'px';
+  _sv('f-cardRadius',cur.cardRadius);_sv('f-cardShadow',cur.cardShadow);_sv('f-cardGlow',cur.cardGlow);_sv('f-cardInnerGlow',cur.cardInnerGlow);
+  _sv('f-cardBorder',cur.cardBorder);$('cardBorderVal').textContent=cur.cardBorder+'px';
+  _sv('f-cardOpacity',cur.cardOpacity);$('cardOpacityVal').textContent=cur.cardOpacity+'%';
+  _sv('f-cardGlass',cur.cardGlass);_sv('f-spacing',cur.spacing);_sv('f-animations',cur.animations);
+  if(cur.glowColor)$('f-glowColor').value=cur.glowColor;
+  if(cur.borderColor)$('f-borderColor').value=cur.borderColor;
+  updatePreview();renderStyleList();scheduleSave();
 }
 
 function getColors(){
   const c=formData.branding.customColors;
-  const t=THEMES.find(x=>x.id===formData.branding.theme);
+  const t=findTheme(formData.branding.theme);
   return{
     primary:c.primary||t?.colors[0]||'#4F46E5',
     secondary:c.secondary||t?.colors[1]||'#0F172A',
@@ -1004,11 +1549,49 @@ function updatePreview(){
 }
 
 // ── Card selection (site type) ──
+// Site-type defaults — pages, features, url structure
+const SITE_TYPE_DEFAULTS={
+  'local-service':{
+    pages:['home','about','services','contact','blog','faq','service-areas','testimonials'],
+    features:['booking-form','map','gallery'],
+    urlStructure:'/{service-area}/{service}/{sub-service}/',
+  },
+  'ecommerce':{
+    pages:['home','about','contact','blog','faq','pricing'],
+    features:['e-commerce','newsletter','gallery','social-feed'],
+    urlStructure:'/shop/{category}/{product}/',
+  },
+  'portfolio':{
+    pages:['home','about','contact','blog','faq','portfolio','testimonials'],
+    features:['gallery','newsletter','social-feed'],
+    urlStructure:'/{category}/{project}/',
+  },
+  'webapp':{
+    pages:['home','about','contact','blog','faq','pricing'],
+    features:['newsletter','live-chat'],
+    urlStructure:'/app/{feature}/',
+  },
+};
+
 function selectCard(el,field){
   el.parentElement.querySelectorAll('.sel-card').forEach(c=>c.classList.remove('active'));
   el.classList.add('active');
-  el.parentElement.classList.remove('field-error','field-shake');
-  if(field==='siteType') formData.siteConfig.siteType=el.dataset.val;
+  if(field==='siteType'){
+    const val=el.dataset.val;
+    formData.siteConfig.siteType=val;
+    // Apply site-type defaults
+    const d=SITE_TYPE_DEFAULTS[val];
+    if(d){
+      formData.siteConfig.pages=[...d.pages];
+      formData.siteConfig.specialFeatures=[...d.features];
+      formData.siteConfig.urlStructure=d.urlStructure;
+      renderPages();renderFeatures();
+      if($('f-urlStructure'))$('f-urlStructure').value=d.urlStructure;
+    }
+    // Show/hide local service note
+    const note=$('localServiceNote');
+    if(note)note.style.display=val==='local-service'?'block':'none';
+  }
   scheduleSave();
   updateStatus();
 }
@@ -1065,6 +1648,7 @@ function chipKey(e,field){
   else if(field==='targetMarkets')arr=formData.targetAudience.targetMarkets;
   else if(field==='keywords')arr=formData.seo.primaryKeywords;
   else if(field==='topics')arr=formData.targetAudience.topics;
+  else if(field==='sellingPoints')arr=formData.sellingPoints;
   else return;
   if(!arr.includes(val)){arr.push(val);renderChips(field);scheduleSave()}
 }
@@ -1074,6 +1658,7 @@ function removeChip(field,idx){
   else if(field==='targetMarkets')arr=formData.targetAudience.targetMarkets;
   else if(field==='keywords')arr=formData.seo.primaryKeywords;
   else if(field==='topics')arr=formData.targetAudience.topics;
+  else if(field==='sellingPoints')arr=formData.sellingPoints;
   arr.splice(idx,1);renderChips(field);scheduleSave();
 }
 function renderChips(field){
@@ -1082,6 +1667,7 @@ function renderChips(field){
   else if(field==='targetMarkets'){arr=formData.targetAudience.targetMarkets;container=$('targetMarketsChips')}
   else if(field==='keywords'){arr=formData.seo.primaryKeywords;container=$('keywordsChips')}
   else if(field==='topics'){arr=formData.targetAudience.topics;container=$('topicsChips')}
+  else if(field==='sellingPoints'){arr=formData.sellingPoints;container=$('sellingPointsChips')}
   const input=container.querySelector('input');
   container.querySelectorAll('.chip').forEach(c=>c.remove());
   arr.forEach((v,i)=>{
@@ -1126,7 +1712,7 @@ function setCustomColor(which,val){
 }
 function resetColors(){
   formData.branding.customColors={primary:'',secondary:'',accent:'',background:''};
-  const t=THEMES.find(x=>x.id===formData.branding.theme);
+  const t=findTheme(formData.branding.theme);
   $('f-colorPrimary').value=t?.colors[0]||'#4F46E5';
   $('f-colorSecondary').value=t?.colors[1]||'#0F172A';
   $('f-colorAccent').value=t?.colors[2]||'#F59E0B';
@@ -1222,8 +1808,6 @@ function bindInputs(){
   document.querySelectorAll('[data-field]').forEach(el=>{
     el.addEventListener('input',()=>{
       setNestedVal(formData,el.dataset.field,el.value);
-      const g=el.closest('.form-group');
-      if(g)g.classList.remove('field-error','field-shake');
       scheduleSave();
       updateStatus();
     });
@@ -1249,41 +1833,24 @@ function updDescCount(){
 // ── Status badge ──
 function updateStatus(){
   const b=formData.basics;
-  const ready=b.businessName.trim()&&b.industry.trim()&&b.description.trim()&&formData.siteConfig.siteType;
+  const missing=[];
+  if(!b.businessName.trim())missing.push('Business Name');
+  if(!b.industry.trim())missing.push('Industry');
+  if(!b.description.trim())missing.push('Description');
+  if(!formData.siteConfig.siteType)missing.push('Site Type');
+  const ready=missing.length===0;
   const badge=$('statusBadge');
+  const btn=$('startResearchBtn');
+  const qbtn=$('addToQueueBtn');
   if(ready){
     badge.className='status-badge ready';badge.textContent='Ready';
+    btn.disabled=false;btn.title='Start the build pipeline';
+    if(qbtn)qbtn.disabled=false;
   }else{
-    badge.className='status-badge draft';badge.textContent='Draft';
+    badge.className='status-badge draft';badge.textContent='Draft — need: '+missing.join(', ');
+    btn.disabled=true;btn.title='Fill required: '+missing.join(', ');
+    if(qbtn){qbtn.disabled=true;qbtn.title=btn.title}
   }
-}
-
-function validateRequired(){
-  // Clear previous errors
-  document.querySelectorAll('.field-error').forEach(el=>el.classList.remove('field-error','field-shake'));
-  const errors=[];
-  const b=formData.basics;
-  if(!b.businessName.trim()){
-    const g=$('f-businessName').closest('.form-group');
-    g.classList.add('field-error','field-shake');errors.push(g);
-  }
-  if(!b.industry.trim()){
-    const g=$('f-industry').closest('.form-group');
-    g.classList.add('field-error','field-shake');errors.push(g);
-  }
-  if(!b.description.trim()){
-    const g=$('f-description').closest('.form-group');
-    g.classList.add('field-error','field-shake');errors.push(g);
-  }
-  if(!formData.siteConfig.siteType){
-    const cards=$('siteTypeCards');
-    cards.classList.add('field-error','field-shake');errors.push(cards);
-  }
-  if(errors.length){
-    errors[0].scrollIntoView({behavior:'smooth',block:'center'});
-    toast('Please fill in the highlighted required fields');
-  }
-  return errors.length===0;
 }
 
 // ── Auto-save ──
@@ -1291,7 +1858,7 @@ function scheduleSave(){
   clearTimeout(saveTimer);
   $('saveDot').className='save-dot saving';
   $('saveLabel').textContent='Saving...';
-  saveTimer=setTimeout(()=>doSave(),2000);
+  saveTimer=setTimeout(()=>doSave(),800);
 }
 
 async function doSave(){
@@ -1311,7 +1878,43 @@ async function doSave(){
   isSaving=false;
 }
 
-function saveNow(){clearTimeout(saveTimer);doSave()}
+// Save immediately when page is about to unload (iframe navigation, tab close)
+window.addEventListener('beforeunload',()=>{
+  if(saveTimer){
+    clearTimeout(saveTimer);
+    try{
+      // sendBeacon is the only reliable way to save during unload
+      navigator.sendBeacon('/api/canvas/data/website-setup.json',
+        new Blob([JSON.stringify(formData)],{type:'application/json'}));
+    }catch(e){}
+  }
+});
+// Also fire on pagehide (more reliable on mobile / some browsers)
+window.addEventListener('pagehide',()=>{
+  if(saveTimer){
+    clearTimeout(saveTimer);
+    try{
+      navigator.sendBeacon('/api/canvas/data/website-setup.json',
+        new Blob([JSON.stringify(formData)],{type:'application/json'}));
+    }catch(e){}
+  }
+});
+// Also save on visibility change (user switches tabs or minimizes)
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden&&saveTimer){clearTimeout(saveTimer);doSave()}
+});
+
+function saveNow(){
+  try{
+    clearTimeout(saveTimer);
+    doSave();
+    // Visible confirmation independent of the save indicator dot
+    toast('Saving...');
+  }catch(e){
+    try{toast('Save error: '+(e&&e.message?e.message:e))}catch(_){}
+    try{console.error('saveNow error',e)}catch(_){}
+  }
+}
 
 // ── Load data ──
 async function loadData(){
@@ -1335,7 +1938,17 @@ function mergeDeep(target,source){
   return out;
 }
 
+// Ensure array fields stay arrays even if agent sends comma-separated strings
+function sanitizeArrayFields(){
+  const ensure=(obj,key)=>{if(obj&&typeof obj[key]==='string')obj[key]=obj[key].split(',').map(s=>s.trim()).filter(Boolean)};
+  ensure(formData.seo,'primaryKeywords');ensure(formData.seo,'competitors');ensure(formData.seo,'referenceSites');
+  ensure(formData.targetAudience,'services');ensure(formData.targetAudience,'targetMarkets');ensure(formData.targetAudience,'topics');
+  ensure(formData.siteConfig,'pages');ensure(formData.siteConfig,'specialFeatures');
+  if(typeof formData.sellingPoints==='string')formData.sellingPoints=formData.sellingPoints.split(',').map(s=>s.trim()).filter(Boolean);
+}
+
 function populateUI(){
+  sanitizeArrayFields();
   // Text fields
   document.querySelectorAll('[data-field]').forEach(el=>{
     const v=getNestedVal(formData,el.dataset.field);
@@ -1348,11 +1961,12 @@ function populateUI(){
     document.querySelectorAll('#siteTypeCards .sel-card').forEach(c=>{
       c.classList.toggle('active',c.dataset.val===formData.siteConfig.siteType);
     });
+    const note=$('localServiceNote');
+    if(note)note.style.display=formData.siteConfig.siteType==='local-service'?'block':'none';
   }
 
-  // Theme dropdown
+  // Theme list
   renderThemeDropdown();
-  if(formData.branding.theme)$('themeSelect').value=formData.branding.theme;
 
   // Style controls — restore all values
   const st=formData.branding.style||{};
@@ -1368,6 +1982,8 @@ function populateUI(){
   _sv('f-cardOpacity',st.cardOpacity);if(st.cardOpacity!==undefined)$('cardOpacityVal').textContent=st.cardOpacity+'%';
   _sv('f-cardGlass',st.cardGlass);
   _sv('f-pageWidth',st.pageWidth);_sv('f-spacing',st.spacing);_sv('f-animations',st.animations);
+  if(st.glowColor)$('f-glowColor').value=st.glowColor;
+  if(st.borderColor)$('f-borderColor').value=st.borderColor;
 
   // Tone
   document.querySelectorAll('#tonePills .pill').forEach(p=>{
@@ -1387,11 +2003,15 @@ function populateUI(){
   if(formData.branding.customColors.accent)$('f-colorAccent').value=formData.branding.customColors.accent;
   if(formData.branding.customColors.background)$('f-colorBg').value=formData.branding.customColors.background;
 
+  // Selected design template
+  renderSelectedDesignTemplate();
+
   // Chips
   renderChips('services');
   renderChips('targetMarkets');
   renderChips('keywords');
   renderChips('topics');
+  renderChips('sellingPoints');
 
   // Pages & Features
   renderPages();
@@ -1586,60 +2206,629 @@ function applyAIResult(field,result){
   }
 }
 
-// ── Start Research ──
-async function startResearch(){
-  if(!validateRequired()) return;
-  await doSave();
-  // Build config.json for init-website.sh
-  const config={
-    business:{
-      name:formData.basics.businessName,
-      industry:formData.basics.industry,
-      description:formData.basics.description,
-      about:formData.basics.about,
-      owner:formData.basics.ownerName,
-      years_in_business:formData.basics.yearsInBusiness,
-      license:formData.basics.license,
-      target_markets:formData.targetAudience.targetMarkets,
-      services:formData.targetAudience.services,
-      topics:formData.targetAudience.topics,
-      competitors:formData.seo.competitors,
-      primary_keywords:formData.seo.primaryKeywords
-    },
-    website:{
-      domain:formData.basics.domain,
-      site_type:formData.siteConfig.siteType,
-      pages:formData.siteConfig.pages,
-      features:formData.siteConfig.specialFeatures
-    },
-    branding:{
-      theme:formData.branding.theme,
-      tone:formData.branding.tone,
-      colors:getColors(),
-      style:formData.branding.style,
-      logo:formData.images.logo.url
-    },
-    seo:{
-      keywords:formData.seo.primaryKeywords,
-      competitors:formData.seo.competitors,
-      reference_sites:formData.seo.referenceSites.map(r=>r.url)
-    },
-    contact:{
-      phone:formData.basics.phone,
-      email:formData.basics.email,
-      address:formData.basics.address
-    }
-  };
-  // Save research config
-  await authPost('/api/canvas/data/website-setup-config.json',config);
-  // Tell agent
-  const msg=`The website setup form for "${formData.basics.businessName}" has been saved to _data/website-setup.json. Config for autonomous research is at _data/website-setup-config.json. Please run the website research system: create the project folder structure, generate config.json from the saved data, and execute the 8 research tasks.`;
-  window.parent.postMessage({type:'canvas-action',action:'speak',text:msg},'*');
-  // Update status
-  $('statusBadge').className='status-badge running';
-  $('statusBadge').textContent='Research Running';
-  toast('Research request sent to AI agent');
+// ══════════════════════════════════════════
+// BUILD MONITOR PANEL
+// ══════════════════════════════════════════
+const BP_PHASES=['research','scaffold','design-system','stitch-pages','build-pages','quality-gate','deploy'];
+const BP_NAMES={'research':'Research','scaffold':'Scaffold','design-system':'Design System','stitch-pages':'Stitch Layouts','build-pages':'Build Pages','quality-gate':'Quality Gate','deploy':'Deploy'};
+const BP_ICONS={'not_started':'○','running':'◉','in_progress':'◉','building':'◉','complete':'✓','failed':'✗'};
+let _bpExpanded=false,_bpActiveTab='log',_elapsedTimer=null,_bpStartedAt=null;
+
+function showBuildPanel(){
+  const panel=$('buildPanel');
+  panel.classList.remove('bp-hidden');
+  if(!_bpExpanded){_bpExpanded=true;panel.classList.add('expanded')}
+  _positionPanel();
+  window.addEventListener('resize',_positionPanel,{passive:true});
 }
+function hideBuildPanel(){
+  const panel=$('buildPanel');
+  if(panel){panel.classList.add('bp-hidden');panel.classList.remove('expanded')}
+  _bpExpanded=false;
+  window.removeEventListener('resize',_positionPanel);
+}
+
+function _positionPanel(){
+  const bar=document.querySelector('.action-bar');
+  if(!bar||!$('buildPanel'))return;
+  $('buildPanel').style.bottom=bar.offsetHeight+'px';
+}
+
+function toggleBuildPanel(){
+  _bpExpanded=!_bpExpanded;
+  $('buildPanel').classList.toggle('expanded',_bpExpanded);
+}
+
+function bpTab(tab,el){
+  _bpActiveTab=tab;
+  document.querySelectorAll('.bp-ctab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.bp-pane').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  const m={log:'bpPaneLog',console:'bpPaneConsole',files:'bpPaneFiles',checks:'bpPaneChecks',debug:'bpPaneDebug'};
+  const p=$(m[tab]);if(p)p.classList.add('active');
+}
+
+function _startElapsed(startedAt){
+  if(_elapsedTimer)clearInterval(_elapsedTimer);
+  _bpStartedAt=new Date(startedAt);
+  _elapsedTimer=setInterval(()=>{
+    const s=Math.floor((Date.now()-_bpStartedAt)/1000);
+    const el=$('bpStElapsed');
+    if(el)el.textContent=Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+'s';
+  },1000);
+}
+function _stopElapsed(){if(_elapsedTimer){clearInterval(_elapsedTimer);_elapsedTimer=null}}
+
+function renderBuildProgress(s){
+  if(!s)return;
+  // Tab dot + info
+  const dot=$('bpDot'),info=$('bpTabInfo');
+  if(s.status==='running'||s.status==='queued'||s.status==='building'){
+    dot.className='save-dot saving';
+    info.textContent=s.currentPhase?BP_NAMES[s.currentPhase]+' running…':'Initializing…';
+    if(s.startedAt&&!_elapsedTimer)_startElapsed(s.startedAt);
+  }else if(s.status==='complete'){
+    dot.className='save-dot saved';
+    info.textContent='Build complete ✓';
+    _stopElapsed();
+    if(s.startedAt&&s.completedAt){
+      const t=Math.floor((new Date(s.completedAt)-new Date(s.startedAt))/1000);
+      const el=$('bpStElapsed');if(el)el.textContent=Math.floor(t/60)+'m '+String(t%60).padStart(2,'0')+'s';
+    }
+  }else if(s.status==='failed'){
+    dot.className='save-dot error';
+    info.textContent='Build failed'+(s.error&&s.error.message?' — '+s.error.message:'');
+    _stopElapsed();
+  }else{
+    dot.className='save-dot';
+    info.textContent=s.status||'Unknown status';
+  }
+
+  // Phase stepper
+  $('bpPhases').innerHTML=BP_PHASES.map(p=>{
+    const ph=s.phases&&s.phases[p]||{status:'not_started',message:null};
+    const cur=s.currentPhase===p;
+    const icls=ph.status==='not_started'?'':ph.status;
+    return `<div class="bpp${cur?' cur':''}">
+      <div class="bpp-icon ${icls}">${BP_ICONS[ph.status]||'○'}</div>
+      <div class="bpp-label">
+        <div class="pn">${BP_NAMES[p]}</div>
+        ${ph.message?`<div class="pm">${esc(ph.message)}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Stats strip
+  const files=s.filesCreated||[];
+  const checks=s.checks||[];
+  const passed=checks.filter(c=>c.status==='pass').length;
+  const failed=checks.filter(c=>c.status==='fail').length;
+  $('bpStPhase').textContent=s.currentPhase?BP_NAMES[s.currentPhase]:(s.status==='complete'?'Done':'—');
+  $('bpStFiles').textContent=files.length;
+  $('bpStPass').textContent=passed;
+  $('bpStFail').textContent=failed;
+  if(s.updatedAt)$('bpStUpdated').textContent=new Date(s.updatedAt).toTimeString().slice(0,8);
+
+  // Log pane
+  const log=s.log||[];
+  if(log.length){
+    $('bpLog').innerHTML=log.map(e=>{
+      const t=new Date(e.t).toTimeString().slice(0,8);
+      return `<div class="le ${e.type||'info'}"><span class="lt">${t}</span><span class="lm">${esc(e.msg)}</span></div>`;
+    }).join('');
+    if(_bpActiveTab==='log'){const lp=$('bpPaneLog');if(lp)lp.scrollTop=lp.scrollHeight}
+  }
+
+  // Files pane
+  if(files.length)$('bpFiles').innerHTML=files.map(f=>`<div class="fe">${esc(f)}</div>`).join('');
+
+  // Checks pane
+  if(checks.length){
+    $('bpChecks').innerHTML=checks.map(c=>{
+      const icon=c.status==='pass'?'✅':c.status==='fail'?'❌':'⏳';
+      return `<div class="ce"><span class="ci">${icon}</span><div><div class="cn">${esc(c.name)}</div>${c.detail?`<div class="cd">${esc(c.detail)}</div>`:''}</div></div>`;
+    }).join('');
+  }
+
+  // Debug pane
+  $('bpDebugPre').textContent=JSON.stringify(s,null,2);
+}
+
+async function checkExistingBuild(){
+  try{
+    const biz=formData.basics.businessName?formData.basics.businessName.trim():'';
+    if(!biz)return;
+    const project=biz.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    const r=await authGet('/api/canvas/data/builds/'+project+'-status.json');
+    if(!r.ok)return;
+    const txt=await r.text();
+    if(!txt||!txt.trim())return;
+    const s=JSON.parse(txt);
+    _buildProject=project;
+    showBuildPanel();
+    renderBuildProgress(s);
+    // Always do an initial log poll to populate the console (even for completed builds)
+    await pollBuildLog(project);
+    if(s.status==='building'||s.status==='running'||s.status==='queued'){
+      startBuildPolling(project);
+    }
+  }catch(e){}
+}
+
+// ── Start Research — triggers the automated build pipeline ──
+const PHASES=['research','scaffold','design-system','build-pages','quality-gate','deploy'];
+let _pollInterval=null;
+let _buildProject='';
+
+async function startResearch(){
+  await doSave();
+
+  // Derive project name from business name
+  const biz=formData.basics.businessName.trim();
+  if(!biz){toast('Business name is required');return}
+  const project=biz.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  _buildProject=project;
+
+  // Build the full intake object from formData
+  const intake={
+    businessName:biz,
+    industry:formData.basics.industry,
+    description:formData.basics.description,
+    about:formData.basics.about,
+    ownerName:formData.basics.ownerName,
+    yearsInBusiness:formData.basics.yearsInBusiness,
+    license:formData.basics.license,
+    domain:formData.basics.domain,
+    projectName:project,
+    siteType:formData.siteConfig.siteType,
+    pages:formData.siteConfig.pages||[],
+    features:formData.siteConfig.specialFeatures||[],
+    theme:formData.branding.theme,
+    tone:formData.branding.tone,
+    colors:getColors(),
+    style:formData.branding.style,
+    designTemplate:formData.branding.designTemplate||null,
+    logo:(formData.images&&formData.images.logo)?formData.images.logo.url:'',
+    primaryKeywords:formData.seo.primaryKeywords||[],
+    competitors:formData.seo.competitors||[],
+    referenceSites:Array.isArray(formData.seo.referenceSites)?(formData.seo.referenceSites).map(r=>r.url):[],
+    services:formData.targetAudience.services||[],
+    targetMarkets:formData.targetAudience.targetMarkets||[],
+    topics:formData.targetAudience.topics||[],
+    idealCustomer:formData.targetAudience.idealCustomer,
+    geographicScope:formData.targetAudience.geographicScope,
+    sellingPoints:formData.sellingPoints||[],
+    urlStructure:formData.siteConfig.urlStructure,
+    phone:formData.basics.phone,
+    email:formData.basics.email,
+    address:formData.basics.address,
+    hours:formData.basics.hours,
+    gbpUrl:formData.basics.gbpUrl,
+    socials:formData.basics.socials,
+    notes:formData.notes,
+    heroImage:(formData.images&&formData.images.hero)?formData.images.hero.url:'',
+    teamImage:(formData.images&&formData.images.team)?formData.images.team.url:'',
+    gallery:(formData.images&&formData.images.gallery)||[],
+    createdAt:new Date().toISOString()
+  };
+
+  try{
+    // Save all build files via canvas data API (writes to canvas-pages/_data/)
+    const status={
+      projectName:project,
+      status:'queued',
+      startedAt:new Date().toISOString(),
+      updatedAt:new Date().toISOString(),
+      completedAt:null,
+      error:null,
+      currentPhase:null,
+      phases:{
+        'research':{status:'not_started',message:null},
+        'scaffold':{status:'not_started',message:null},
+        'design-system':{status:'not_started',message:null},
+        'stitch-pages':{status:'not_started',message:null},
+        'build-pages':{status:'not_started',message:null},
+        'quality-gate':{status:'not_started',message:null},
+        'deploy':{status:'not_started',message:null}
+      },
+      devUrl:'https://dev-test-dev.jam-bot.com'
+    };
+
+    await authPost('/api/canvas/data/builds/'+project+'-intake.json',intake);
+    await authPost('/api/canvas/data/builds/'+project+'-status.json',status);
+
+    // Write initial console event so the feed shows something IMMEDIATELY on click
+    const initEvents=[
+      {ts:new Date().toISOString(),type:'watcher',msg:'Build triggered for: '+biz},
+      {ts:new Date().toISOString(),type:'watcher',msg:'Waiting for watcher to pick up trigger (up to 2s)…'}
+    ];
+    await authPost('/api/canvas/data/builds/'+project+'-console-events.json',initEvents);
+
+    // Write trigger file — the VPS watcher picks this up within 2s
+    await authPost('/api/canvas/data/builds/'+project+'-trigger.json',{project:project,triggeredAt:new Date().toISOString()});
+
+    // Start polling for progress
+    startBuildPolling(project);
+
+    // Show build monitor panel
+    showBuildPanel();
+    renderBuildProgress(status);
+
+    // Update UI
+    $('statusBadge').className='status-badge running';
+    $('statusBadge').textContent='Building...';
+    $('startResearchBtn').disabled=true;
+    $('startResearchBtn').textContent='Build Running...';
+    toast('Build pipeline started — research phase beginning');
+
+  }catch(e){
+    toast('Failed to start build: '+e.message);
+    $('statusBadge').className='status-badge error';
+    $('statusBadge').textContent='Error';
+  }
+}
+
+// ── Add to Queue (no trigger — queued but not started) ──
+async function addToQueue(){
+  await doSave();
+  const biz=formData.basics.businessName.trim();
+  if(!biz){toast('Business name is required');return}
+  const project=biz.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  _buildProject=project;
+
+  // Build intake (same as startResearch)
+  const intake={
+    businessName:biz,industry:formData.basics.industry,description:formData.basics.description,
+    about:formData.basics.about,ownerName:formData.basics.ownerName,yearsInBusiness:formData.basics.yearsInBusiness,
+    license:formData.basics.license,domain:formData.basics.domain,projectName:project,
+    siteType:formData.siteConfig.siteType,pages:formData.siteConfig.pages||[],
+    features:formData.siteConfig.specialFeatures||[],theme:formData.branding.theme,
+    tone:formData.branding.tone,colors:getColors(),style:formData.branding.style,
+    designTemplate:formData.branding.designTemplate||null,
+    logo:formData.images.logo.url,primaryKeywords:formData.seo.primaryKeywords||[],
+    competitors:formData.seo.competitors||[],referenceSites:(formData.seo.referenceSites||[]).map(r=>r.url),
+    services:formData.targetAudience.services||[],targetMarkets:formData.targetAudience.targetMarkets||[],
+    topics:formData.targetAudience.topics||[],idealCustomer:formData.targetAudience.idealCustomer,
+    geographicScope:formData.targetAudience.geographicScope,sellingPoints:formData.sellingPoints||[],
+    urlStructure:formData.siteConfig.urlStructure,phone:formData.basics.phone,email:formData.basics.email,
+    address:formData.basics.address,hours:formData.basics.hours,gbpUrl:formData.basics.gbpUrl,
+    socials:formData.basics.socials,notes:formData.notes,heroImage:(formData.images&&formData.images.hero)?formData.images.hero.url:'',
+    teamImage:(formData.images&&formData.images.team)?formData.images.team.url:'',gallery:(formData.images&&formData.images.gallery)||[],
+    createdAt:new Date().toISOString()
+  };
+  const status={
+    projectName:project,status:'queued',startedAt:new Date().toISOString(),
+    updatedAt:new Date().toISOString(),completedAt:null,error:null,currentPhase:null,
+    phases:{research:{status:'not_started',message:null},scaffold:{status:'not_started',message:null},
+      'design-system':{status:'not_started',message:null},'stitch-pages':{status:'not_started',message:null},
+      'build-pages':{status:'not_started',message:null},
+      'quality-gate':{status:'not_started',message:null},deploy:{status:'not_started',message:null}},
+    devUrl:'https://dev-test-dev.jam-bot.com'
+  };
+
+  try{
+    await authPost('/api/canvas/data/builds/'+project+'-intake.json',intake);
+    await authPost('/api/canvas/data/builds/'+project+'-status.json',status);
+    // No trigger file — added to queue without starting
+    $('statusBadge').className='status-badge draft';
+    $('statusBadge').textContent='Queued';
+    toast('"'+biz+'" added to queue — open Website Queue to run it');
+  }catch(e){
+    toast('Failed to queue: '+e.message);
+  }
+}
+
+// ── Reset / Clear form ──
+// NOTE: kept synchronous on purpose — inline onclick handlers invoke this and
+// we need the confirm + local UI reset to always run even if the server POST
+// fails or auth is missing.
+function resetForm(){
+  try{
+    if(!confirm('Clear all fields and start a new project?'))return;
+    // Reset data
+    formData=JSON.parse(JSON.stringify(_defaultFormData()));
+    // Clear build state
+    _buildProject='';
+    _consoleLastLineCount=0;
+    if(_pollInterval){clearInterval(_pollInterval);_pollInterval=null}
+    if(saveTimer){clearTimeout(saveTimer);saveTimer=null}
+    // Re-populate UI
+    populateUI();
+    // Reset header
+    $('statusBadge').className='status-badge draft';$('statusBadge').textContent='Draft';
+    $('startResearchBtn').disabled=true;$('startResearchBtn').textContent='▶ Start';
+    const qbtn=$('addToQueueBtn');if(qbtn)qbtn.disabled=true;
+    // Hide build panel
+    hideBuildPanel();
+    toast('Form cleared');
+    // Fire-and-forget server persistence so a failed POST never blocks the visible reset
+    _persistReset();
+  }catch(e){
+    // Surface anything that goes wrong so we never end up with a silent no-op button
+    try{toast('Reset error: '+(e&&e.message?e.message:e))}catch(_){}
+    try{console.error('resetForm error',e)}catch(_){}
+  }
+}
+
+function _persistReset(){
+  // Persist the cleared state to the server so it survives a reload.
+  // Without this, the server still has the old draft and loadData() restores it.
+  Promise.resolve().then(async()=>{
+    try{
+      await authPost('/api/canvas/data/website-setup.json',formData);
+      await authPost('/api/canvas/data/selected-design-template.json',{cleared:true,clearedAt:new Date().toISOString()});
+      $('saveDot').className='save-dot saved';
+      $('saveLabel').textContent='All changes saved';
+    }catch(e){
+      $('saveDot').className='save-dot error';
+      $('saveLabel').textContent='Reset save failed (local reset still applied)';
+    }
+  });
+}
+
+function _defaultFormData(){
+  return {
+    basics:{businessName:'',industry:'',description:'',about:'',ownerName:'',yearsInBusiness:'',
+      license:'',domain:'',phone:'',email:'',address:'',hours:'',gbpUrl:'',
+      socials:{facebook:'',instagram:'',youtube:'',linkedin:'',yelp:'',tiktok:''}},
+    branding:{theme:'professional-dark',tone:'professional',style:'modern',customColors:{primary:'#6366f1',secondary:'#8b5cf6',accent:'#06b6d4',background:'#ffffff'},designTemplate:null},
+    siteConfig:{siteType:'',pages:['home','about','services','contact'],primaryCTA:'Get a Free Quote',specialFeatures:[],urlStructure:''},
+    targetAudience:{services:[],targetMarkets:[],topics:[],idealCustomer:'',geographicScope:'local'},
+    seo:{primaryKeywords:[],competitors:[],referenceSites:[]},
+    sellingPoints:[],images:{logo:{url:''},hero:{url:''},team:{url:''},gallery:[]},notes:''
+  };
+}
+
+// ── Build Progress Polling ──
+let _consolePollActive=false;
+let _consoleLastLineCount=0;
+
+function _classifyLine(line){
+  const l=line.toLowerCase();
+  if(/error|failed|exception|fatal/.test(l))return 'cline-err';
+  if(/warn|warning/.test(l))return 'cline-warn';
+  if(/phase [0-9]|starting:|spawning agent:|=== build|complete|success|deployed/.test(l))return 'cline-phase';
+  if(/writing:|editing:|done|saved|created|wrote|passed|ok/.test(l))return 'cline-ok';
+  if(/searching:/.test(l))return 'cline-warn';
+  if(/^$/.test(line.trim()))return 'cline-dim';
+  return '';
+}
+
+function _fmtWatcherEvent(e){
+  switch(e.type){
+    case 'watcher': return '→ '+e.msg;
+    case 'phase':   return '▶ '+e.msg;
+    case 'ok':      return e.msg;
+    case 'zcode':   return '⚙ '+e.msg;
+    case 'error':   return '✗ '+e.msg;
+    case 'complete':return '✓ '+e.msg;
+    default:        return e.msg;
+  }
+}
+
+function _classifyWatcherLine(e){
+  switch(e.type){
+    case 'error':   return 'cline-err';
+    case 'phase':   return 'cline-phase';
+    case 'ok':      return 'cline-ok';
+    case 'complete':return 'cline-ok';
+    case 'zcode':   return 'cline-warn';
+    default:        return '';
+  }
+}
+
+async function pollBuildLog(project){
+  try{
+    const console_el=$('bpConsole');
+    const status_el=$('bpConsoleStatus');
+    if(!console_el)return;
+
+    // Fetch watcher events (available instantly from click 0)
+    let watcherLines=[];
+    try{
+      const rw=await authGet('/api/canvas/data/builds/'+project+'-console-events.json');
+      if(rw.ok){
+        const txt=await rw.text();
+        if(txt&&txt.trim()&&txt.trim()!=='[]'){
+          const evts=JSON.parse(txt);
+          if(Array.isArray(evts)){
+            watcherLines=evts.map(e=>({
+              cls:_classifyWatcherLine(e),
+              text:(e.ts?'['+e.ts.slice(11,19)+'] ':'')+_fmtWatcherEvent(e)
+            }));
+          }
+        }
+      }
+    }catch(ew){}
+
+    // Fetch z-code session events (available after z-code starts, synced every 10s)
+    let zcodeLines=[];
+    try{
+      const rz=await authGet('/api/canvas/build-log/'+project);
+      if(rz.ok){
+        const j=await rz.json();
+        if(j.status==='ok'&&j.lines&&j.lines.length){
+          zcodeLines=j.lines.map(l=>({cls:_classifyLine(l),text:l}));
+        }
+      }
+    }catch(ez){}
+
+    // Combine: watcher events first (they're earliest), then z-code events
+    const allLines=[...watcherLines,...zcodeLines];
+    const totalCount=allLines.length;
+
+    if(totalCount!==_consoleLastLineCount){
+      _consoleLastLineCount=totalCount;
+      if(allLines.length===0){
+        if(watcherLines.length===0){
+          console_el.innerHTML='<span class="cline-dim">Waiting for build to start…</span>';
+        }
+      }else{
+        const html=allLines.map(({cls,text})=>
+          '<span'+(cls?' class="'+cls+'"':'')+'>'+esc(text)+'</span>'
+        ).join('\n');
+        console_el.innerHTML=html;
+        if(_bpActiveTab==='console'){
+          console_el.scrollTop=console_el.scrollHeight;
+        }else{
+          const nb=console_el.scrollHeight-console_el.scrollTop-console_el.clientHeight<80;
+          if(nb)console_el.scrollTop=console_el.scrollHeight;
+        }
+      }
+    }
+
+    if(status_el){
+      if(totalCount>0) status_el.textContent=totalCount+' events';
+      else status_el.textContent='Waiting…';
+    }
+  }catch(e){}
+}
+
+function _setConsoleDotActive(active){
+  const dot=$('bpConsoleDot');
+  if(dot)dot.classList.toggle('active',active);
+}
+
+function startBuildPolling(project){
+  if(_pollInterval){clearInterval(_pollInterval);_pollInterval=null}
+  _consolePollActive=true;
+  _consoleLastLineCount=0;
+  _setConsoleDotActive(true);
+  // Switch to console tab so user sees live events immediately
+  const consoleTabBtn=document.querySelector('[onclick*="bpTab(\'console\'"]');
+  if(consoleTabBtn) bpTab('console',consoleTabBtn);
+  // First poll immediately so console shows "Waiting…" right away
+  pollBuildLog(project);
+  _pollInterval=setInterval(async()=>{
+    try{
+      // Poll status JSON
+      const r=await authGet('/api/canvas/data/builds/'+project+'-status.json');
+      if(!r.ok)return;
+      const txt=await r.text();
+      if(!txt||!txt.trim())return;
+      const s=JSON.parse(txt);
+      // Update build monitor panel
+      renderBuildProgress(s);
+      // Poll live console log
+      await pollBuildLog(project);
+      // Update status badge
+      const badge=$('statusBadge');
+      const btn=$('startResearchBtn');
+      if(s.status==='complete'){
+        badge.className='status-badge ready';badge.textContent='Complete';
+        btn.disabled=false;btn.textContent='View Site';
+        btn.onclick=()=>window.parent.postMessage({type:'canvas-action',action:'open-url',url:s.devUrl||'https://dev-test-dev.jam-bot.com'},'*');
+        clearInterval(_pollInterval);_pollInterval=null;
+        _setConsoleDotActive(false);
+        // Final log poll to show last output
+        setTimeout(()=>pollBuildLog(project),1500);
+        toast('Website built and deployed!');
+      }else if(s.status==='failed'){
+        badge.className='status-badge error';badge.textContent='Failed';
+        btn.disabled=false;btn.textContent='Retry Build';
+        btn.onclick=()=>{startResearch()};
+        clearInterval(_pollInterval);_pollInterval=null;
+        _setConsoleDotActive(false);
+        setTimeout(()=>pollBuildLog(project),1500);
+        toast('Build failed: '+(s.error?s.error.message:'unknown error'));
+      }else if(s.currentPhase){
+        const names={research:'Researching...',scaffold:'Scaffolding...',
+          'design-system':'Designing...','build-pages':'Building pages...',
+          'quality-gate':'Quality check...','deploy':'Deploying...'};
+        badge.className='status-badge running';
+        badge.textContent=names[s.currentPhase]||'Building...';
+      }
+    }catch(e){}
+  },2000);
+}
+
+// ══════════════════════════════════════════
+// AGENT SECRETARY — polls for form-fill commands
+// Agent writes to /api/canvas/data/website-setup-cmd.json
+// Canvas picks it up within ~3 seconds, flashes filled fields
+// ══════════════════════════════════════════
+let _lastAgentCmdTs=null;
+
+async function pollAgentFill(){
+  try{
+    const r=await authGet('/api/canvas/data/website-setup-cmd.json');
+    if(!r.ok)return;
+    const txt=await r.text();
+    if(!txt||!txt.trim())return;
+    const cmd=JSON.parse(txt);
+    if(!cmd._ts||cmd._ts===_lastAgentCmdTs)return;
+    if(cmd._processed)return;
+    _lastAgentCmdTs=cmd._ts;
+    if(!cmd.data)return;
+
+    // Replace or merge agent data into formData and repopulate UI
+    if(cmd._mode==='replace'){
+      // Full replace — wipe all fields, then set new data
+      const fresh={basics:{businessName:'',domain:'',industry:'',description:'',phone:'',email:'',address:'',about:'',ownerName:'',yearsInBusiness:'',license:'',gbpUrl:'',hours:'',socials:{facebook:'',instagram:'',youtube:'',linkedin:'',yelp:'',tiktok:'',twitter:'',nextdoor:''}},targetAudience:{idealCustomer:'',geographicScope:'',services:[],targetMarkets:[],topics:[]},branding:{theme:'',tone:''},siteConfig:{siteType:'',primaryCTA:'',pages:['home','about','services','contact','blog','faq'],specialFeatures:[],urlStructure:''},seo:{primaryKeywords:''},sellingPoints:[],notes:''};
+      formData=mergeDeep(fresh,cmd.data);
+    }else{
+      formData=mergeDeep(formData,cmd.data);
+    }
+    populateUI();
+    _flashAgentFields(cmd.data);
+    scheduleSave();
+
+    // Mark processed so we don't re-apply on next poll
+    await authPost('/api/canvas/data/website-setup-cmd.json',{...cmd,_processed:true});
+
+    const n=_countFilledFields(cmd.data);
+    _showAgentBanner('Agent filled '+n+' field'+(n!==1?'s':''));
+  }catch(e){}
+}
+
+function _flashAgentFields(data){
+  // Collect dot-paths that have actual values
+  const paths=new Set();
+  function collect(obj,pfx){
+    for(const k of Object.keys(obj)){
+      const p=pfx?pfx+'.'+k:k;
+      const v=obj[k];
+      if(v===null||v===undefined)continue;
+      if(typeof v==='object'&&!Array.isArray(v))collect(v,p);
+      else paths.add(p);
+    }
+  }
+  collect(data,'');
+  // Flash matching form fields
+  document.querySelectorAll('[data-field]').forEach(el=>{
+    if(paths.has(el.dataset.field)){
+      el.classList.remove('agent-filled');
+      void el.offsetWidth; // reflow
+      el.classList.add('agent-filled');
+    }
+  });
+}
+
+function _countFilledFields(data){
+  let n=0;
+  function count(obj){
+    for(const v of Object.values(obj)){
+      if(v===null||v===undefined)continue;
+      if(typeof v==='object'&&!Array.isArray(v))count(v);
+      else if(Array.isArray(v)){if(v.length)n++}
+      else if(v!=='')n++;
+    }
+  }
+  count(data);
+  return n;
+}
+
+let _bannerTimer;
+function _showAgentBanner(msg){
+  const b=$('agentFillBanner');
+  b.textContent=msg;
+  b.classList.add('on');
+  clearTimeout(_bannerTimer);
+  _bannerTimer=setTimeout(()=>b.classList.remove('on'),3000);
+}
+
+// Start polling for agent commands (every 3 seconds)
+setInterval(pollAgentFill,3000);
 
 // ── Toast ──
 let toastTimer;

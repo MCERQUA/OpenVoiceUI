@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Design Template Gallery</title>
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #121418;
+    --panel-2: #171a20;
+    --border: #262a33;
+    --border-2: #323744;
+    --text: #e4e7ec;
+    --muted: #8b909c;
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --success: #10b981;
+    --danger: #ef4444;
+    --code-bg: #0f1114;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .app {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  /* ---------- HEADER ---------- */
+  .hdr {
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .hdr-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .hdr-top h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: #fff;
+  }
+  .hdr p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+    max-width: 720px;
+  }
+  .hdr code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: var(--accent-hover);
+  }
+  #btnAdd {
+    flex-shrink: 0;
+    height: 38px;
+    padding: 0 16px;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: none;
+  }
+  #btnAdd.visible { display: inline-flex; align-items: center; }
+  #btnAdd:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+  /* ---------- CONTROLS ---------- */
+  .controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .search {
+    display: flex;
+    gap: 8px;
+  }
+  .search input {
+    flex: 1;
+    height: 44px;
+    padding: 0 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 16px;
+    outline: none;
+  }
+  .search input:focus { border-color: var(--accent); }
+  .cats {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .cats::-webkit-scrollbar { display: none; }
+  .cat-btn {
+    flex-shrink: 0;
+    height: 36px;
+    padding: 0 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .cat-btn:hover { color: var(--text); border-color: var(--border-2); }
+  .cat-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  /* ---------- GRID ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, 1fr); gap: 14px; } }
+  @media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 1400px) { .grid { grid-template-columns: repeat(4, 1fr); } }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    flex-direction: column;
+  }
+  .card:hover {
+    border-color: var(--border-2);
+    transform: translateY(-1px);
+  }
+  .card:active { transform: translateY(0); }
+
+  .thumb {
+    position: relative;
+    aspect-ratio: 16 / 10;
+    background: #fff;
+    overflow: hidden;
+  }
+  .thumb iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 400%;
+    height: 400%;
+    border: 0;
+    transform: scale(0.25);
+    transform-origin: top left;
+    pointer-events: none;
+  }
+  .thumb-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-2);
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .thumb-shade {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, transparent 60%, rgba(0,0,0,0.4) 100%);
+    pointer-events: none;
+  }
+  .thumb-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .thumb-new {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: var(--success);
+    color: #fff;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 700;
+  }
+
+  .card-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+  }
+  .card-desc {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.4;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 32px;
+  }
+
+  /* ---------- VOTE ---------- */
+  .vote-row {
+    display: flex;
+    gap: 6px;
+    margin-top: auto;
+  }
+  .vote-btn {
+    flex: 1;
+    height: 32px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.15s;
+  }
+  .vote-btn:hover { border-color: var(--border-2); color: var(--text); }
+  .vote-btn.active-up {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: var(--success);
+    color: var(--success);
+  }
+  .vote-btn.active-down {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+  .vote-btn svg { width: 14px; height: 14px; }
+  .vote-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .score-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(4px);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .score-badge.positive { color: #34d399; }
+  .score-badge.negative { color: #f87171; }
+
+  /* ---------- MODAL ---------- */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+    display: none;
+  }
+  .modal-backdrop.open { display: block; }
+  .modal {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+  }
+  @media (min-width: 768px) {
+    .modal-backdrop { padding: 20px; }
+    .modal {
+      position: relative;
+      max-width: 1200px;
+      margin: 0 auto;
+      height: 100%;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+  }
+
+  .modal-hdr {
+    flex-shrink: 0;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .modal-title { flex: 1; min-width: 0; }
+  .modal-title h2 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .modal-title p {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .modal-close {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 18px;
+    cursor: pointer;
+  }
+
+  .modal-tools {
+    flex-shrink: 0;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    background: var(--panel);
+  }
+  .btn {
+    height: 38px;
+    padding: 0 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent-hover); }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+  .btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
+  .btn.danger:hover { background: var(--danger); color: #fff; }
+
+  .modal-body {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    background: #fff;
+  }
+  .modal-body.dark { background: #0a0a0a; }
+  .modal-body iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+  }
+  .modal-md {
+    display: none;
+    padding: 20px;
+    overflow-y: auto;
+    background: var(--code-bg);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .modal-body.md-view .modal-md { display: block; }
+  .modal-body.md-view iframe { display: none; }
+
+  /* ---------- UPLOAD MODAL ---------- */
+  .upload-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 150;
+    display: none;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .upload-modal.open { display: flex; align-items: flex-start; justify-content: center; }
+  .upload-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    width: 100%;
+    max-width: 640px;
+    margin-top: 20px;
+    margin-bottom: 20px;
+  }
+  .upload-card h2 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    color: #fff;
+  }
+  .upload-card .sub {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .field {
+    margin-bottom: 14px;
+  }
+  .field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+  .field input[type=text],
+  .field select,
+  .field textarea {
+    width: 100%;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+    padding: 10px 12px;
+    outline: none;
+    font-family: inherit;
+  }
+  .field input:focus,
+  .field select:focus,
+  .field textarea:focus { border-color: var(--accent); }
+  .field textarea {
+    min-height: 220px;
+    resize: vertical;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .field .hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .upload-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 18px;
+  }
+  .upload-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 540px) { .upload-grid { grid-template-columns: 1fr; } }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--success);
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 200;
+    transition: transform 0.3s;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    max-width: 90vw;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.error { background: var(--danger); }
+
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+    grid-column: 1 / -1;
+  }
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--muted);
+  }
+  .count { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="hdr">
+    <div class="hdr-top">
+      <h1>Design Template Gallery</h1>
+      <button id="btnAdd" type="button">+ Upload Template</button>
+    </div>
+    <p>
+      Shared global library of professional <code>DESIGN.md</code> templates for Claude Code &amp; Stitch.
+      Drop one into any project to generate pixel-perfect UI matching that brand's design system.
+      Tap any card to preview, view raw markdown, or copy.
+    </p>
+  </header>
+
+  <div class="controls">
+    <div class="search">
+      <input id="search" type="search" placeholder="Search brands..." autocomplete="off" />
+    </div>
+    <div class="cats" id="cats"></div>
+  </div>
+
+  <div class="count" id="count"></div>
+  <div class="grid" id="grid">
+    <div class="loading">Loading templates...</div>
+  </div>
+</div>
+
+<!-- PREVIEW MODAL -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">
+        <h2 id="mTitle">—</h2>
+        <p id="mDesc">—</p>
+      </div>
+      <button class="modal-close" id="mClose" aria-label="Close">×</button>
+    </div>
+    <div class="modal-tools">
+      <button class="btn active" id="mViewLight" data-view="light">Light preview</button>
+      <button class="btn" id="mViewDark" data-view="dark">Dark preview</button>
+      <button class="btn" id="mViewMd" data-view="md">DESIGN.md</button>
+      <span style="flex:1"></span>
+      <button class="btn danger" id="mDelete" style="display:none">Delete</button>
+      <button class="btn primary" id="mCopy">Copy DESIGN.md</button>
+      <button class="btn primary" id="mBuild" style="background:#2563eb;border-color:#1d4ed8">▶ Build as Website</button>
+    </div>
+    <div class="modal-body" id="mBody">
+      <iframe id="mFrame" sandbox="allow-same-origin" title="Design preview"></iframe>
+      <pre class="modal-md" id="mMd"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- UPLOAD MODAL -->
+<div class="upload-modal" id="uploadModal">
+  <div class="upload-card">
+    <h2>Upload new template</h2>
+    <p class="sub">Add a new DESIGN.md to the shared global library. Visible to all clients immediately.</p>
+
+    <div class="upload-grid">
+      <div class="field">
+        <label>Slug (URL-safe, lowercase)</label>
+        <input type="text" id="fSlug" placeholder="e.g. acme-corp" maxlength="60" />
+        <div class="hint">Letters, numbers, . _ - only</div>
+      </div>
+      <div class="field">
+        <label>Display name</label>
+        <input type="text" id="fName" placeholder="e.g. Acme Corp" maxlength="80" />
+      </div>
+    </div>
+
+    <div class="upload-grid">
+      <div class="field">
+        <label>Category</label>
+        <select id="fCategory"></select>
+      </div>
+      <div class="field">
+        <label>Short description</label>
+        <input type="text" id="fDesc" placeholder="One-line summary" maxlength="160" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>DESIGN.md content</label>
+      <textarea id="fDesignMd" placeholder="# Design System Inspired by ..."></textarea>
+      <div class="hint">Paste the full markdown or drag a file below.</div>
+    </div>
+
+    <div class="field">
+      <label>Optional: upload files instead</label>
+      <input type="file" id="fFileMd" accept=".md,text/markdown,text/plain" />
+      <div class="hint">DESIGN.md file — will replace the textarea content</div>
+    </div>
+
+    <div class="upload-grid">
+      <div class="field">
+        <label>Preview light (optional HTML file)</label>
+        <input type="file" id="fFileLight" accept=".html,.htm,text/html" />
+      </div>
+      <div class="field">
+        <label>Preview dark (optional HTML file)</label>
+        <input type="file" id="fFileDark" accept=".html,.htm,text/html" />
+      </div>
+    </div>
+
+    <div class="upload-actions">
+      <button class="btn" id="btnCancelUpload">Cancel</button>
+      <button class="btn primary" id="btnSaveUpload">Save template</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">Copied</div>
+
+<script>
+(() => {
+  const API = '/design-md-api/api/design-md';
+  const gridEl = document.getElementById('grid');
+  const catsEl = document.getElementById('cats');
+  const searchEl = document.getElementById('search');
+  const countEl = document.getElementById('count');
+  const modalEl = document.getElementById('modal');
+  const mTitle = document.getElementById('mTitle');
+  const mDesc = document.getElementById('mDesc');
+  const mFrame = document.getElementById('mFrame');
+  const mMd = document.getElementById('mMd');
+  const mBody = document.getElementById('mBody');
+  const mClose = document.getElementById('mClose');
+  const mCopy = document.getElementById('mCopy');
+  const mDelete = document.getElementById('mDelete');
+  const mBuild = document.getElementById('mBuild');
+  const toast = document.getElementById('toast');
+  const btnAdd = document.getElementById('btnAdd');
+  const uploadModal = document.getElementById('uploadModal');
+  const btnCancel = document.getElementById('btnCancelUpload');
+  const btnSave = document.getElementById('btnSaveUpload');
+  const fSlug = document.getElementById('fSlug');
+  const fName = document.getElementById('fName');
+  const fCategory = document.getElementById('fCategory');
+  const fDesc = document.getElementById('fDesc');
+  const fDesignMd = document.getElementById('fDesignMd');
+  const fFileMd = document.getElementById('fFileMd');
+  const fFileLight = document.getElementById('fFileLight');
+  const fFileDark = document.getElementById('fFileDark');
+
+  const viewBtns = {
+    light: document.getElementById('mViewLight'),
+    dark: document.getElementById('mViewDark'),
+    md: document.getElementById('mViewMd'),
+  };
+
+  let allTemplates = [];
+  let categories = {};
+  let activeCat = 'all';
+  let searchQ = '';
+  let currentTpl = null;
+  let currentMd = '';
+  let isAdmin = false;
+  let viewerUserId = null;
+  let previewLightText = '';
+  let previewDarkText = '';
+
+  function showToast(msg, error) {
+    toast.textContent = msg;
+    toast.classList.toggle('error', !!error);
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2200);
+  }
+
+  function authHeaders() {
+    const h = {};
+    if (window._canvasAuthToken) {
+      h['Authorization'] = 'Bearer ' + window._canvasAuthToken;
+    }
+    return h;
+  }
+
+  async function refreshTemplates() {
+    try {
+      const r = await fetch(`${API}/templates?t=${Date.now()}`, { headers: authHeaders() });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      allTemplates = data.templates || [];
+      categories = data.categories || {};
+      viewerUserId = data.viewer_user_id || null;
+      isAdmin = !!data.viewer_is_admin;
+      btnAdd.classList.toggle('visible', isAdmin);
+      if (isAdmin) mDelete.style.display = '';
+      renderCats();
+      render();
+    } catch (err) {
+      gridEl.innerHTML = `<div class="empty">Failed to load templates: ${err.message}</div>`;
+    }
+  }
+
+  // (admin + viewer state are populated from /templates response)
+
+  function render() {
+    const q = searchQ.toLowerCase();
+    const filtered = allTemplates.filter(t => {
+      if (activeCat !== 'all' && t.category !== activeCat) return false;
+      if (q) {
+        const hay = (t.display_name + ' ' + t.description + ' ' + t.category + ' ' + t.slug).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    countEl.textContent = `${filtered.length} of ${allTemplates.length} templates`;
+
+    if (filtered.length === 0) {
+      gridEl.innerHTML = '<div class="empty">No templates match your filters.</div>';
+      return;
+    }
+
+    gridEl.innerHTML = '';
+    filtered.forEach(tpl => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.slug = tpl.slug;
+      const catLabel = categories[tpl.category] || tpl.category;
+      const previewHtml = tpl.has_light
+        ? `<iframe loading="lazy" src="${API}/${encodeURIComponent(tpl.slug)}/preview.htm" sandbox="allow-same-origin" title="${tpl.display_name} preview"></iframe>`
+        : `<div class="thumb-empty">No preview</div>`;
+      const newBadge = tpl.uploaded_at ? '<div class="thumb-new">New</div>' : '';
+      const v = tpl.votes || {up: 0, down: 0, score: 0, mine: 0};
+      const scoreBadge = v.score !== 0
+        ? `<div class="score-badge ${v.score > 0 ? 'positive' : 'negative'}">${v.score > 0 ? '+' : ''}${v.score}</div>`
+        : '';
+      card.innerHTML = `
+        <div class="thumb">
+          ${previewHtml}
+          <div class="thumb-shade"></div>
+          <div class="thumb-badge">${catLabel}</div>
+          ${scoreBadge}
+          ${newBadge}
+        </div>
+        <div class="card-body">
+          <h3 class="card-title">${tpl.display_name}</h3>
+          <p class="card-desc">${tpl.description || '—'}</p>
+          <div class="vote-row" data-slug="${tpl.slug}">
+            <button class="vote-btn ${v.mine === 1 ? 'active-up' : ''}" data-value="1" aria-label="Thumbs up">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H7a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11l3.45-6.89a1 1 0 0 1 1 0Z"/></svg>
+              <span class="up-count">${v.up}</span>
+            </button>
+            <button class="vote-btn ${v.mine === -1 ? 'active-down' : ''}" data-value="-1" aria-label="Thumbs down">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H17a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11l-3.45 6.89a1 1 0 0 1-1 0Z"/></svg>
+              <span class="down-count">${v.down}</span>
+            </button>
+          </div>
+        </div>
+      `;
+      // Card click opens modal EXCEPT when clicking vote buttons
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.vote-row')) return;
+        openModal(tpl);
+      });
+      // Vote handlers
+      card.querySelectorAll('.vote-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const value = parseInt(btn.dataset.value, 10);
+          await castVote(tpl, value, btn);
+        });
+      });
+      gridEl.appendChild(card);
+    });
+  }
+
+  async function castVote(tpl, value, clickedBtn) {
+    if (!viewerUserId) {
+      showToast('Sign in to vote', true);
+      return;
+    }
+    // Toggle off if clicking the already-active button
+    const currentMine = tpl.votes?.mine || 0;
+    const newValue = currentMine === value ? 0 : value;
+
+    // Disable both buttons briefly
+    const row = clickedBtn.closest('.vote-row');
+    row.querySelectorAll('.vote-btn').forEach(b => b.disabled = true);
+
+    try {
+      const r = await fetch(`${API}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ slug: tpl.slug, value: newValue }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || ('HTTP ' + r.status));
+      }
+      const data = await r.json();
+      tpl.votes = data.votes;
+      // Re-sort and re-render to reflect new position
+      allTemplates.sort((a, b) => {
+        const sa = (a.votes?.score || 0);
+        const sb = (b.votes?.score || 0);
+        if (sa !== sb) return sb - sa;
+        if (a.category !== b.category) return a.category.localeCompare(b.category);
+        return a.display_name.localeCompare(b.display_name);
+      });
+      render();
+    } catch (err) {
+      showToast('Vote failed: ' + err.message, true);
+      row.querySelectorAll('.vote-btn').forEach(b => b.disabled = false);
+    }
+  }
+
+  function renderCats() {
+    catsEl.innerHTML = '';
+    const all = document.createElement('button');
+    all.className = 'cat-btn' + (activeCat === 'all' ? ' active' : '');
+    all.textContent = `All (${allTemplates.length})`;
+    all.addEventListener('click', () => setCat('all', all));
+    catsEl.appendChild(all);
+
+    const counts = {};
+    allTemplates.forEach(t => { counts[t.category] = (counts[t.category] || 0) + 1; });
+
+    Object.entries(categories).forEach(([key, label]) => {
+      if (!counts[key]) return;
+      const btn = document.createElement('button');
+      btn.className = 'cat-btn' + (activeCat === key ? ' active' : '');
+      btn.textContent = `${label} (${counts[key]})`;
+      btn.addEventListener('click', () => setCat(key, btn));
+      catsEl.appendChild(btn);
+    });
+
+    // Populate upload form category dropdown too
+    fCategory.innerHTML = '';
+    Object.entries(categories).forEach(([key, label]) => {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = label;
+      fCategory.appendChild(opt);
+    });
+    const otherOpt = document.createElement('option');
+    otherOpt.value = 'other';
+    otherOpt.textContent = 'Other';
+    fCategory.appendChild(otherOpt);
+  }
+
+  function setCat(cat, btn) {
+    activeCat = cat;
+    catsEl.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    render();
+  }
+
+  async function openModal(tpl) {
+    currentTpl = tpl;
+    mTitle.textContent = tpl.display_name;
+    mDesc.textContent = (categories[tpl.category] || tpl.category) + ' · ' + (tpl.description || '');
+    mDelete.style.display = isAdmin ? '' : 'none';
+    setView(tpl.has_light ? 'light' : 'md');
+    modalEl.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    try {
+      const r = await fetch(`${API}/${encodeURIComponent(tpl.slug)}/DESIGN.md`, { headers: authHeaders() });
+      currentMd = r.ok ? await r.text() : '(failed to load DESIGN.md)';
+    } catch (e) {
+      currentMd = '(failed to load DESIGN.md)';
+    }
+    mMd.textContent = currentMd;
+  }
+
+  function closeModal() {
+    modalEl.classList.remove('open');
+    document.body.style.overflow = '';
+    mFrame.src = 'about:blank';
+    currentTpl = null;
+  }
+
+  function setView(view) {
+    Object.keys(viewBtns).forEach(k => viewBtns[k].classList.toggle('active', k === view));
+    if (!currentTpl) return;
+    if (view === 'md') {
+      mBody.classList.add('md-view');
+    } else {
+      mBody.classList.remove('md-view');
+      mBody.classList.toggle('dark', view === 'dark');
+      const file = view === 'dark' ? 'preview-dark.htm' : 'preview.htm';
+      mFrame.src = `${API}/${encodeURIComponent(currentTpl.slug)}/${file}`;
+    }
+  }
+
+  mClose.addEventListener('click', closeModal);
+  modalEl.addEventListener('click', e => { if (e.target === modalEl) closeModal(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (uploadModal.classList.contains('open')) closeUpload();
+      else closeModal();
+    }
+  });
+
+  Object.entries(viewBtns).forEach(([view, btn]) => {
+    btn.addEventListener('click', () => setView(view));
+  });
+
+  mCopy.addEventListener('click', async () => {
+    if (!currentMd) return;
+    try {
+      await navigator.clipboard.writeText(currentMd);
+      showToast('DESIGN.md copied to clipboard');
+    } catch (e) {
+      showToast('Copy failed', true);
+    }
+  });
+
+  mBuild.addEventListener('click', async () => {
+    if (!currentTpl || !currentMd) {
+      showToast('Template not loaded yet', true);
+      return;
+    }
+    mBuild.disabled = true;
+    const original = mBuild.textContent;
+    mBuild.textContent = 'Saving...';
+    try {
+      const payload = {
+        slug: currentTpl.slug,
+        name: currentTpl.display_name,
+        category: currentTpl.category || '',
+        description: currentTpl.description || '',
+        previewUrl: currentTpl.has_light
+          ? `${API}/${encodeURIComponent(currentTpl.slug)}/preview.htm`
+          : '',
+        previewDarkUrl: currentTpl.has_dark
+          ? `${API}/${encodeURIComponent(currentTpl.slug)}/preview-dark.htm`
+          : '',
+        designMd: currentMd,
+        selectedAt: new Date().toISOString(),
+      };
+      const r = await fetch('/api/canvas/data/selected-design-template.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      showToast('Template selected — opening Website Setup');
+      closeModal();
+      // Use parent canvas bridge to navigate; falls back to direct nav if not in iframe.
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'canvas-action',
+            action: 'navigate',
+            page: 'website-setup',
+          }, '*');
+        } else {
+          window.location.href = '/pages/website-setup.html?template=' + encodeURIComponent(currentTpl.slug);
+        }
+      } catch (e) {
+        window.location.href = '/pages/website-setup.html?template=' + encodeURIComponent(currentTpl.slug);
+      }
+    } catch (err) {
+      showToast('Save failed: ' + err.message, true);
+      mBuild.disabled = false;
+      mBuild.textContent = original;
+    }
+  });
+
+  mDelete.addEventListener('click', async () => {
+    if (!currentTpl || !isAdmin) return;
+    if (!confirm(`Delete template "${currentTpl.display_name}"? It will be archived server-side.`)) return;
+    try {
+      const r = await fetch(`${API}/${encodeURIComponent(currentTpl.slug)}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      showToast('Template deleted');
+      closeModal();
+      refreshTemplates();
+    } catch (err) {
+      showToast('Delete failed: ' + err.message, true);
+    }
+  });
+
+  searchEl.addEventListener('input', e => { searchQ = e.target.value; render(); });
+
+  // ---------- UPLOAD FLOW ----------
+  function openUpload() {
+    fSlug.value = '';
+    fName.value = '';
+    fDesc.value = '';
+    fDesignMd.value = '';
+    fFileMd.value = '';
+    fFileLight.value = '';
+    fFileDark.value = '';
+    previewLightText = '';
+    previewDarkText = '';
+    uploadModal.classList.add('open');
+  }
+  function closeUpload() { uploadModal.classList.remove('open'); }
+
+  btnAdd.addEventListener('click', openUpload);
+  btnCancel.addEventListener('click', closeUpload);
+  uploadModal.addEventListener('click', e => { if (e.target === uploadModal) closeUpload(); });
+
+  fFileMd.addEventListener('change', async () => {
+    const f = fFileMd.files[0];
+    if (!f) return;
+    fDesignMd.value = await f.text();
+  });
+  fFileLight.addEventListener('change', async () => {
+    const f = fFileLight.files[0];
+    previewLightText = f ? await f.text() : '';
+  });
+  fFileDark.addEventListener('change', async () => {
+    const f = fFileDark.files[0];
+    previewDarkText = f ? await f.text() : '';
+  });
+
+  btnSave.addEventListener('click', async () => {
+    const slug = fSlug.value.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{0,60}$/.test(slug)) {
+      showToast('Slug must be lowercase alphanumeric, . _ -', true);
+      return;
+    }
+    if (!fName.value.trim()) { showToast('Display name required', true); return; }
+    if (!fDesignMd.value.trim()) { showToast('DESIGN.md content required', true); return; }
+
+    btnSave.disabled = true;
+    btnSave.textContent = 'Uploading...';
+    try {
+      const r = await fetch(`${API}/upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          slug,
+          display_name: fName.value.trim(),
+          category: fCategory.value,
+          description: fDesc.value.trim(),
+          design_md: fDesignMd.value,
+          preview_light: previewLightText,
+          preview_dark: previewDarkText,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+      showToast('Template uploaded');
+      closeUpload();
+      await refreshTemplates();
+    } catch (err) {
+      showToast('Upload failed: ' + err.message, true);
+    } finally {
+      btnSave.disabled = false;
+      btnSave.textContent = 'Save template';
+    }
+  });
+
+  // ---------- INIT ----------
+  // Wait briefly for parent to push auth token, then fetch
+  setTimeout(() => { refreshTemplates(); }, 200);
+})();
+</script>
+</body>
+</html>
