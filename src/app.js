@@ -976,6 +976,10 @@ initUpdateChecker();
                     return;
                 }
 
+                // Crossfading into a local track — dismiss any SC/BC embed first
+                this._clearExternalEmbed();
+                if (this.currentPlaylist === 'external') this.currentPlaylist = 'library';
+
                 this.crossfadeInProgress = true;
                 const outgoing = this.activeAudio === 1 ? this.audio1 : this.audio2;
                 const incoming = this.activeAudio === 1 ? this.audio2 : this.audio1;
@@ -1141,6 +1145,11 @@ initUpdateChecker();
             _playId: 0,
 
             async play(trackName) {
+                // Switching to library/generated — tear down any SC/BC external embed
+                // that may still be on-screen from a prior [SOUNDCLOUD:...] / [BANDCAMP:...]
+                this._clearExternalEmbed();
+                if (this.currentPlaylist === 'external') this.currentPlaylist = 'library';
+
                 const playId = ++this._playId;
                 try {
                     const url = new URL(`${CONFIG.serverUrl}/api/music`);
@@ -1212,11 +1221,8 @@ initUpdateChecker();
                 this.currentMetadata = null;
                 this.button.classList.remove('active');
                 this.panel.classList.remove('playing');
-                this.panel.classList.remove('external-mode');
                 this.panel.classList.remove('spotify-mode');
-                delete this.panel.dataset.provider;
-                const _embedSlot = document.getElementById('music-external-embed');
-                if (_embedSlot) { _embedSlot.innerHTML = ''; _embedSlot.style.display = 'none'; }
+                this._clearExternalEmbed();
                 this._syncPlayButtons(false);
                 VisualizerModule.stopAnimation();
                 this.closePanel();
@@ -1307,17 +1313,14 @@ initUpdateChecker();
                 // music panel, centered, with z-index below the chat panel (9999) so chat
                 // still overlays it, but above the music panel (200) so it looks like it's
                 // popping out of the player.
-                let slot = document.getElementById('music-external-embed');
-                if (!slot) {
-                    slot = document.createElement('div');
-                    slot.id = 'music-external-embed';
-                    slot.style.cssText = [
+                let wrap = document.getElementById('music-external-embed');
+                if (!wrap) {
+                    wrap = document.createElement('div');
+                    wrap.id = 'music-external-embed';
+                    wrap.style.cssText = [
                         'position:fixed',
                         'left:50%',
                         'transform:translateX(-50%)',
-                        // Sit just above the music panel. Music panel is ~70-90px tall when
-                        // open. Use 80px — if the player grows, the iframe still has breathing
-                        // room and the user can scroll within it.
                         'bottom:86px',
                         'width:calc(100% - 128px)',
                         'max-width:520px',
@@ -1325,15 +1328,58 @@ initUpdateChecker();
                         'border:1px solid rgba(0, 229, 255, 0.25)',
                         'border-radius:12px 12px 0 0',
                         'box-shadow:0 -4px 25px rgba(0,229,255,0.25)',
-                        'padding:8px',
+                        'padding:8px 8px 8px 8px',
                         'z-index:201',
                         'display:none',
                     ].join(';');
-                    document.body.appendChild(slot);
+
+                    // Close button (top-right) — user can dismiss without stopping playback
+                    const closeBtn = document.createElement('button');
+                    closeBtn.type = 'button';
+                    closeBtn.setAttribute('aria-label', 'Close embed');
+                    closeBtn.textContent = '×';
+                    closeBtn.style.cssText = [
+                        'position:absolute',
+                        'top:4px',
+                        'right:6px',
+                        'width:24px',
+                        'height:24px',
+                        'border:none',
+                        'background:rgba(0,0,0,.4)',
+                        'color:#e2e8f0',
+                        'font-size:18px',
+                        'line-height:1',
+                        'border-radius:50%',
+                        'cursor:pointer',
+                        'z-index:1',
+                    ].join(';');
+                    closeBtn.addEventListener('click', () => this._clearExternalEmbed());
+                    wrap.appendChild(closeBtn);
+
+                    // Inner content slot (iframe lives here)
+                    const slot = document.createElement('div');
+                    slot.className = 'embed-content';
+                    wrap.appendChild(slot);
+
+                    document.body.appendChild(wrap);
                 }
-                slot.dataset.provider = provider;
-                slot.innerHTML = iframeHtml || '';
-                slot.style.display = iframeHtml ? 'block' : 'none';
+                wrap.dataset.provider = provider;
+                const slot = wrap.querySelector('.embed-content');
+                if (slot) slot.innerHTML = iframeHtml || '';
+                wrap.style.display = iframeHtml ? 'block' : 'none';
+            },
+
+            _clearExternalEmbed() {
+                const wrap = document.getElementById('music-external-embed');
+                if (wrap) {
+                    const slot = wrap.querySelector('.embed-content');
+                    if (slot) slot.innerHTML = '';  // Stops iframe audio
+                    wrap.style.display = 'none';
+                }
+                if (this.panel) {
+                    this.panel.classList.remove('external-mode');
+                    delete this.panel.dataset.provider;
+                }
             },
 
             async _postExternalState(provider, url, title, artist) {
