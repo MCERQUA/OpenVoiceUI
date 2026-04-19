@@ -31,6 +31,47 @@ from urllib.parse import urlparse
 import requests as http_requests
 from flask import Blueprint, jsonify, request
 
+
+def _trigger_song_tagger(audio_path):
+    """
+    Kick off the shared song-tagger service in a background thread so it
+    doesn't delay the Suno callback response. Silently no-ops when the
+    service isn't reachable (e.g. dev deployments without it).
+
+    The shared service reads the file directly from /mnt/clients/... via
+    its read-only bind mount, so we pass the audio_path as-seen-from-host.
+    Inside the OVU container, save_path lives at /app/runtime/generated_music;
+    we translate to the host path using the username + known layout.
+    """
+    url = os.getenv("SONG_TAGGER_URL", "http://song-tagger:8770").rstrip("/")
+    # Translate container path → host path. The shared service mounts
+    # /mnt/clients:/mnt/clients:ro, and this OVU container knows which user
+    # it belongs to via the JAMBOT_USER env var.
+    tenant = (os.getenv("JAMBOT_TENANT") or os.getenv("JAMBOT_USER") or os.getenv("CLIENT_USERNAME") or "").strip()
+    p = Path(str(audio_path))
+    host_path = None
+    if tenant:
+        # /app/runtime/generated_music/X.mp3 → /mnt/clients/<tenant>/openvoiceui/generated_music/X.mp3
+        # /app/runtime/music/X.mp3          → /mnt/clients/<tenant>/openvoiceui/music/X.mp3
+        parts = p.parts
+        if len(parts) >= 4 and parts[1] == "app" and parts[2] == "runtime":
+            host_path = Path("/mnt/clients") / tenant / "openvoiceui" / Path(*parts[3:])
+    if host_path is None:
+        host_path = p  # fall back to whatever was passed
+
+    def _run():
+        try:
+            http_requests.post(
+                f"{url}/tag",
+                json={"path": str(host_path)},
+                timeout=180,
+            )
+            logger.info(f"song-tagger requested: {host_path.name}")
+        except Exception as exc:
+            logger.info(f"song-tagger call failed (service unreachable?): {exc}")
+
+    threading.Thread(target=_run, daemon=True).start()
+
 # ---------------------------------------------------------------------------
 # Paths & config
 # ---------------------------------------------------------------------------
@@ -617,6 +658,16 @@ def suno_callback():
                                         break
 
                                 _add_song_to_metadata(filename, song_title, prompt, style, duration, song_id)
+
+                                # Auto-classify the track with song-tagger (CLAP) so
+                                # downstream consumers (AI-Radio push, canvas UI, etc.)
+                                # have genre/mood/energy metadata ready without a second
+                                # user turn. Fire-and-forget — tagger takes ~15s and
+                                # runs at nice 19 / idle IO so it won't block anything.
+                                try:
+                                    _trigger_song_tagger(save_path)
+                                except Exception as tag_exc:
+                                    logger.info(f'song-tagger auto-trigger skipped: {tag_exc}')
 
                                 completed_songs_queue.append({
                                     'song_id': song_id,
