@@ -8,12 +8,17 @@
  */
 import { inject } from './ui/AppShell.js';
 import { initUpdateChecker } from './ui/UpdateBanner.js';
+import { connectAiradio } from './shell/airadio-bridge.js';
 
 // Inject the application DOM structure before any module accesses the DOM
 inject();
 
 // Start update checker (non-blocking, runs after app loads)
 initUpdateChecker();
+
+// Wire the AI-Radio tag dispatcher — listens for cmd:airadio on eventBus
+// and POSTs to /api/airadio/* endpoints. Idempotent; survives mode switches.
+connectAiradio();
 
         import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js?v=3';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
@@ -60,6 +65,21 @@ initUpdateChecker();
                 }
             }
             return url;
+        }
+
+        // Route abort/interject calls to the active gateway's namespace.
+        // When gateway_id=hermes, we MUST call /api/hermes/* because hermes
+        // has its own mid-flight pipeline (separate active_runs dict,
+        // stream_to_queue state, etc.). Calling /api/conversation/* goes
+        // through gateway_manager which defaults to openclaw and returns
+        // False — leaving the hermes run hanging and the actions feed
+        // frozen. Openclaw mode continues to use /api/conversation/*.
+        // Action is one of: 'abort' | 'steer' | 'interject'.
+        function convPath(action) {
+            const gid = localStorage.getItem('gateway_id') || 'openclaw';
+            return gid === 'hermes'
+                ? `/api/hermes/${action}`
+                : `/api/conversation/${action}`;
         }
 
         // ===== PROVIDER MANAGER =====
@@ -1239,23 +1259,24 @@ initUpdateChecker();
 
                 let title = trackUrl;
                 let artist = 'SoundCloud';
-                let embedHtml = null;
+                // Fetch oEmbed for metadata only (title/artist/artwork).
+                // ALWAYS use our own iframe URL below so auto_play=true is set —
+                // oEmbed's default html omits auto_play, which looks like "nothing happened".
                 try {
                     const resp = await fetch(`https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(trackUrl)}`);
                     if (resp.ok) {
                         const m = await resp.json();
                         title = m.title || title;
                         artist = m.author_name || artist;
-                        embedHtml = m.html || null;
-                        this.currentMetadata = { ...this.currentMetadata, title, artist, artwork: m.thumbnail_url, embedHtml };
+                        this.currentMetadata = { ...this.currentMetadata, title, artist, artwork: m.thumbnail_url };
                     }
-                } catch (e) { console.warn('[MusicModule] SC oembed failed, using direct iframe:', e); }
+                } catch (e) { console.warn('[MusicModule] SC oembed metadata failed:', e); }
 
                 this.currentTrack = title;
                 if (this.trackName) this.trackName.textContent = title;
 
-                const fallbackIframe = `<iframe width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(trackUrl)}&auto_play=true&visual=true&show_artwork=true"></iframe>`;
-                this._renderEmbed('soundcloud', embedHtml || fallbackIframe);
+                const embedIframe = `<iframe width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(trackUrl)}&auto_play=true&visual=true&show_artwork=true&show_comments=false"></iframe>`;
+                this._renderEmbed('soundcloud', embedIframe);
 
                 if (this.button) this.button.classList.add('active');
                 if (this.panel) {
@@ -3363,6 +3384,13 @@ initUpdateChecker();
                 this.isConnected = false;
                 this.isConnecting = false;
                 this._fetchAbortController = null;
+                // Flag set when the current stream has already emitted its text_done
+                // frame. A new message arriving after text_done should NOT route to
+                // /api/conversation/interject — the run is effectively finished and
+                // a steer on a closed turn poisons the session. Reset on every new
+                // fetch. Checked in sendMessage() to fall through to the normal
+                // fresh-request path instead of interject.
+                this._textDoneReceived = false;
 
                 // Use shared STT instance instead of creating a new one
                 // This prevents conflicts with VoiceConversation's STT
@@ -3678,7 +3706,7 @@ initUpdateChecker();
                     this._fetchAbortController = null;
                     // Tell server to abort the openclaw run (fire-and-forget)
                     console.warn('⛔ ABORT source: stopVoiceInput');
-                    fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                    fetch(`${this.config.serverUrl}${convPath('abort')}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ source: 'stopVoiceInput' }),
@@ -3737,12 +3765,29 @@ initUpdateChecker();
                 //     next tool boundary (messages.queue.mode=steer).  The existing
                 //     streaming fetch continues receiving the steered output.
                 if (this._fetchAbortController) {
-                    if (this._ttsPlaying) {
+                    if (this._textDoneReceived) {
+                        // Race-window guard: the server has already emitted text_done,
+                        // meaning the agent's turn is effectively over — the fetch is
+                        // just flushing tail events (metrics, TTS). Interjecting here
+                        // would steer into a closed openclaw turn (active_run still
+                        // set) and poison the session. Treat this as a fresh message
+                        // instead: abort the tail, then fall through to the normal
+                        // sendMessage path.
+                        console.warn(`↩ POST-TEXT_DONE message — treating as fresh request: "${text.substring(0,30)}"`);
+                        this._fetchAbortController.abort();
+                        this._fetchAbortController = null;
+                        fetch(`${this.config.serverUrl}${convPath('abort')}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: 'post-text_done-refresh', text: text.substring(0, 50) }),
+                        }).catch(() => {});
+                        this.stopAudio();
+                    } else if (this._ttsPlaying) {
                         // Agent already responded, TTS playing → ABORT
                         this._fetchAbortController.abort();
                         this._fetchAbortController = null;
                         console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (TTS playing, new msg: "${text.substring(0,30)}")`);
-                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                        fetch(`${this.config.serverUrl}${convPath('abort')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ source: 'clawdbot-sendMessage', text: text.substring(0, 50) }),
@@ -3752,7 +3797,7 @@ initUpdateChecker();
                         // Agent working silently → INTERJECT (smart routing)
                         // Server classifies as context/steer/fast_lane and routes accordingly
                         console.log(`🔀 INTERJECT: "${text.substring(0,50)}" into active run`);
-                        fetch(`${this.config.serverUrl}/api/conversation/interject`, {
+                        fetch(`${this.config.serverUrl}${convPath('interject')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ message: text, source: 'clawdbot-sendMessage' }),
@@ -3826,6 +3871,7 @@ initUpdateChecker();
 
                     const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
                     this._fetchAbortController = new AbortController();
+                    this._textDoneReceived = false;  // new stream — reset the race-window guard
                     const response = await fetch(`${this.config.serverUrl}/api/conversation?stream=1`, {
                         method: 'POST',
                         signal: this._fetchAbortController.signal,
@@ -3914,6 +3960,7 @@ initUpdateChecker();
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SOUND:[^\]]*\]/gi, '')
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
                             .trim();
                     };
 
@@ -3987,6 +4034,19 @@ initUpdateChecker();
                             ActionConsole.addEntry('system', `Spotify: "${spotifyTrack}"${spotifyArtist ? ` by ${spotifyArtist}` : ''}`);
                             AgentActivityChip.handleTag('spotify', spotifyTrack);
                             window.musicPlayer?.playSpotify(spotifyTrack, spotifyArtist);
+                        }
+                        // [AIRADIO_*] — dispatch each unique tag once; bridge maps verb→endpoint
+                        const _airadioRe = /\[AIRADIO_([A-Z_]+)(?::([^\]]*))?\]/gi;
+                        let _airadioMatch;
+                        while ((_airadioMatch = _airadioRe.exec(text)) !== null) {
+                            const verb = _airadioMatch[1].toUpperCase();
+                            const data = (_airadioMatch[2] || '').trim();
+                            const key = `AIRADIO:${verb}:${data}`;
+                            if (canvasCommandsProcessed.has(key)) continue;
+                            canvasCommandsProcessed.add(key);
+                            ActionConsole.addEntry('system', `AI-Radio: ${verb}${data ? ` (${data})` : ''}`);
+                            AgentActivityChip.handleTag('airadio', `${verb}${data ? `: ${data}` : ''}`);
+                            window.airadioDispatch?.(verb, data);
                         }
                         // [SOUNDCLOUD:url] — play track in music player embed
                         const soundcloudMatch = text.match(/\[SOUNDCLOUD:([^\]]+)\]/i);
@@ -4172,6 +4232,10 @@ initUpdateChecker();
                                     this._wasAgentic = true;
                                     StatusModule.update('thinking', `WORKING... ${secs}s`);
                                     AgentActivityChip.show('⏳', `Working... ${secs}s`);
+                                    // Refresh the transcript thinking indicator so the
+                                    // elapsed-time subtitle ticks even between tool_start
+                                    // events (one tool can run 5-20s and we were static).
+                                    TranscriptPanel.updateThinkingElapsed?.('still working');
                                 }
 
                                 // Queued: openclaw is busy, message will be processed after current run
@@ -4192,9 +4256,41 @@ initUpdateChecker();
                                     }
                                 }
 
-                                // Server retrying empty response — keep stream alive, no fallback
+                                // Server retrying empty response — keep stream alive, no fallback.
+                                // Cascades can run 3-8s; one-shot filler leaves the user
+                                // hanging. Use a recurring interval that speaks progressively
+                                // longer acknowledgements via the browser's SpeechSynthesis
+                                // API, with increasing wait times, until real audio arrives.
+                                // Canceled in text_done/audio handlers below.
                                 if (data.type === 'retrying') {
                                     console.log('[Conversation] Server retrying empty response — waiting for result...');
+                                    if (!this._cascadeFillerTimer) {
+                                        const fillerPhrases = [
+                                            'one moment',
+                                            'still working on it',
+                                            'almost there',
+                                            'hang tight',
+                                        ];
+                                        let fillerIdx = 0;
+                                        const speakFiller = () => {
+                                            if (!this._cascadeFillerTimer) return;
+                                            if ('speechSynthesis' in window) {
+                                                try {
+                                                    const u = new SpeechSynthesisUtterance(fillerPhrases[Math.min(fillerIdx, fillerPhrases.length - 1)]);
+                                                    u.rate = 1.1;
+                                                    u.volume = 0.6;
+                                                    window.speechSynthesis.speak(u);
+                                                    console.log(`[Cascade] filler ${fillerIdx + 1}: "${fillerPhrases[Math.min(fillerIdx, fillerPhrases.length - 1)]}"`);
+                                                } catch (_) {}
+                                            }
+                                            fillerIdx++;
+                                            // Space subsequent fillers further apart so we don't
+                                            // chatter over ourselves
+                                            const next = Math.min(4000 + fillerIdx * 500, 6000);
+                                            this._cascadeFillerTimer = setTimeout(speakFiller, next);
+                                        };
+                                        this._cascadeFillerTimer = setTimeout(speakFiller, 2000);
+                                    }
                                     continue;
                                 }
 
@@ -4217,7 +4313,14 @@ initUpdateChecker();
                                     // Process canvas commands from interim response
                                     this.handleCanvasCommands(cleanedInterim, canvasCommandsProcessed);
 
-                                    if (data.actions) ActionConsole.processActions(data.actions);
+                                    // NOTE: data.actions intentionally NOT re-processed here —
+                                    // every action already rendered via live type:'action'
+                                    // stream events. Re-processing would duplicate every
+                                    // tool call in the action panel. Also important during
+                                    // cascade refires (empty-final retry, steer-recovery):
+                                    // the captured_actions server-side may be cleared/refilled
+                                    // which would cause the final text_done summary to show
+                                    // partial state.
                                     ActionConsole.addEntry('system', 'Background tasks running — waiting for results...');
 
                                     // Reset streaming state for sub-agent result phase
@@ -4236,6 +4339,20 @@ initUpdateChecker();
 
                                 // Text done: full response finalized
                                 if (data.type === 'text_done') {
+                                    // Mark the run as finished-from-server so a
+                                    // follow-up sendMessage won't mistakenly route
+                                    // through /interject (which would steer into a
+                                    // closed turn and poison the session).
+                                    this._textDoneReceived = true;
+                                    // Cancel any pending cascade filler TTS so it
+                                    // doesn't speak over the real response.
+                                    if (this._cascadeFillerTimer) {
+                                        clearTimeout(this._cascadeFillerTimer);
+                                        this._cascadeFillerTimer = null;
+                                        if ('speechSynthesis' in window) {
+                                            try { window.speechSynthesis.cancel(); } catch (_) {}
+                                        }
+                                    }
                                     const fullResponse = data.response || streamingText;
                                     const cleanedResponse = this.stripReasoningTokens(fullResponse);
                                     const displayText = stripCanvasTags(cleanedResponse);
@@ -4259,11 +4376,15 @@ initUpdateChecker();
                                             reader.cancel();
                                             return;
                                         }
-                                        console.warn('[text_done] Empty response — showing fallback');
-                                        const fallback = "Sorry, I couldn't process that. Could you try again?";
-                                        TranscriptPanel.finalizeStreaming(fallback);
-                                        ActionConsole.addEntry('error', 'Empty response from agent');
-                                        // Don't send fallback to TTS — just re-enable mic
+                                        // Cascade exhausted — every recovery layer failed.
+                                        // Do NOT inject "Sorry, I couldn't process that" into
+                                        // the transcript: it pollutes conversation history and
+                                        // most users just need to retry naturally. Log in the
+                                        // action console (for debugging / transparency) and
+                                        // silently re-enable the mic so the user can re-speak.
+                                        console.warn('[text_done] Empty response after full cascade — silent resume');
+                                        TranscriptPanel.finalizeStreaming(null);
+                                        ActionConsole.addEntry('error', 'No response from agent after recovery — mic re-enabled, please retry');
                                         reader.cancel();
                                         return;
                                     }
@@ -4299,7 +4420,7 @@ initUpdateChecker();
                                     TranscriptPanel.finalizeStreaming(displayText);
 
                                     this._wasAgentic = false;
-                                    if (data.actions) ActionConsole.processActions(data.actions);
+                                    // data.actions not re-processed here — see text_interim for rationale
                                     ActionConsole.addEntry('system', `Response complete (${fullResponse?.length || 0} chars, LLM: ${data.timing?.llm_ms}ms)`);
                                     AgentActivityChip.show('✅', 'Done');
                                     AgentActivityChip.hide(1500);
@@ -4308,6 +4429,14 @@ initUpdateChecker();
 
                                 // Audio: TTS ready to play
                                 if (data.type === 'audio') {
+                                    // Cancel any cascade filler — real TTS is about to speak
+                                    if (this._cascadeFillerTimer) {
+                                        clearTimeout(this._cascadeFillerTimer);
+                                        this._cascadeFillerTimer = null;
+                                    }
+                                    if ('speechSynthesis' in window) {
+                                        try { window.speechSynthesis.cancel(); } catch (_) {}
+                                    }
                                     if (data.audio) {
                                         console.log(`TTS ready (${data.timing?.tts_ms}ms, total: ${data.timing?.total_ms}ms)`);
                                         ActionConsole.addEntry('tts', `Playing TTS (TTS: ${data.timing?.tts_ms}ms)`);
@@ -5360,6 +5489,7 @@ initUpdateChecker();
                             .replace(/\[MUSIC_NEXT\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
                             .trim();
                         this.callbacks.onTranscript(displayText, false);
                         TranscriptPanel.addMessage('assistant', displayText);
@@ -5414,7 +5544,7 @@ initUpdateChecker();
                         this._fetchAbortController.abort();
                         this._fetchAbortController = null;
                         console.warn(`⛔ ABORT source: VoiceConversation.handleUserTranscript (TTS playing)`);
-                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                        fetch(`${this.config.serverUrl}${convPath('abort')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ source: 'voice-handleUserTranscript', text: transcript.substring(0, 50) }),
@@ -5423,7 +5553,7 @@ initUpdateChecker();
                     } else {
                         // Agent working silently → INTERJECT (smart routing)
                         console.log(`🔀 INTERJECT: "${transcript.substring(0,50)}" into active run`);
-                        fetch(`${this.config.serverUrl}/api/conversation/interject`, {
+                        fetch(`${this.config.serverUrl}${convPath('interject')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ message: transcript, source: 'voice-handleUserTranscript' }),
@@ -5534,6 +5664,7 @@ initUpdateChecker();
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
                             .trim();
 
                         this.callbacks.onTranscript(displayText, false);
@@ -5680,6 +5811,20 @@ initUpdateChecker();
                 if (/\[SLEEP\]/i.test(text)) {
                     console.log('[Sleep] Agent requested sleep — will disconnect after audio');
                     window._sleepAfterResponse = true;
+                }
+                // [AIRADIO_*] — final-pass dispatch. Each unique (verb,data) fires once.
+                {
+                    const _seen = new Set();
+                    const _re = /\[AIRADIO_([A-Z_]+)(?::([^\]]*))?\]/gi;
+                    let _m;
+                    while ((_m = _re.exec(text)) !== null) {
+                        const v = _m[1].toUpperCase();
+                        const d = (_m[2] || '').trim();
+                        const k = `${v}:${d}`;
+                        if (_seen.has(k)) continue;
+                        _seen.add(k);
+                        window.airadioDispatch?.(v, d);
+                    }
                 }
                 // HTML canvas page
                 const htmlMatch =
@@ -8126,9 +8271,17 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 this.removeThinking();
                 const msg = document.createElement('div');
                 msg.className = 'tp-msg assistant tp-thinking';
-                msg.innerHTML = `<div class="tp-meta">${this.agentName}</div><div class="tp-dots"><span></span><span></span><span></span></div>`;
+                // Keep the animated dots visible ALWAYS and put tool/status text
+                // as a separate subtitle line that updates without killing the
+                // animation. Earlier implementation replaced dots.textContent on
+                // every tool_start, producing static text that was easy to
+                // misread as "frozen".
+                msg.innerHTML = `<div class="tp-meta">${this.agentName}</div>` +
+                                `<div class="tp-dots"><span></span><span></span><span></span></div>` +
+                                `<div class="tp-tool-status" style="font-size:0.85em;opacity:0.75;margin-top:4px"></div>`;
                 this.messages.appendChild(msg);
                 this.messages.scrollTop = this.messages.scrollHeight;
+                this._thinkingStartedAt = Date.now();
                 if (!this.isVisible && this.unreadDot) {
                     this.unreadDot.style.display = 'block';
                 }
@@ -8142,9 +8295,31 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
 
             showToolStatus(toolName) {
                 const existing = this.messages?.querySelector('.tp-thinking');
-                if (existing) {
-                    const dots = existing.querySelector('.tp-dots');
-                    if (dots) dots.textContent = `using tool: ${toolName}…`;
+                if (!existing) return;
+                // Preserve the animated dots — update ONLY the subtitle line.
+                // With elapsed time the user sees a live counter even while
+                // one tool is churning (so it doesn't feel frozen between
+                // discrete tool_start events).
+                const status = existing.querySelector('.tp-tool-status');
+                if (status) {
+                    const elapsed = this._thinkingStartedAt
+                        ? Math.floor((Date.now() - this._thinkingStartedAt) / 1000)
+                        : 0;
+                    status.textContent = `using ${toolName} · ${elapsed}s`;
+                }
+            },
+
+            // Called by heartbeat events — refreshes the elapsed counter even
+            // between tool_start events so the user sees a live clock.
+            updateThinkingElapsed(label) {
+                const existing = this.messages?.querySelector('.tp-thinking');
+                if (!existing) return;
+                const status = existing.querySelector('.tp-tool-status');
+                if (status) {
+                    const elapsed = this._thinkingStartedAt
+                        ? Math.floor((Date.now() - this._thinkingStartedAt) / 1000)
+                        : 0;
+                    status.textContent = label ? `${label} · ${elapsed}s` : `${elapsed}s`;
                 }
             },
 
@@ -9207,7 +9382,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                         // Tell server to abort the openclaw run (fire-and-forget)
                         console.warn('⛔ ABORT source: PTT interrupt');
                         const serverUrl = cm.config?.serverUrl || '';
-                        fetch(`${serverUrl}/api/conversation/abort`, {
+                        fetch(`${serverUrl}${convPath('abort')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ source: 'ptt-interrupt' }),

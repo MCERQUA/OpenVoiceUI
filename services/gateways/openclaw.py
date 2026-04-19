@@ -1052,10 +1052,16 @@ class GatewayConnection:
                             logger.info("### SUBAGENT detected via captured_actions (late detection)")
                         continue
                     else:
-                        logger.warning("### chat.final with no text (no subagent)")
+                        # MiniMax-M2.7-highspeed reliably produces "chat.final
+                        # with no text" in a subset of turns (15+ events in a
+                        # 30-min window observed). openclaw's server-side
+                        # model-fallback only triggers on timeout (300s), not
+                        # on empty-final — so the user turn dies silently.
+                        # Signal the caller to retry chat.send once more; a
+                        # second MiniMax attempt usually returns real text.
+                        logger.warning("### chat.final with no text (no subagent) — signaling retry")
                         await self._send_abort(sub.run_id or chat_id, session_key, "empty-response")
-                        event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
-                        return
+                        return 'empty-final'
 
         logger.warning(f"[GW] hard timeout. collected_text ({len(collected_text)} chars): {repr(collected_text[:200])}")
         if collected_text:
@@ -1107,10 +1113,42 @@ class GatewayConnection:
             logger.info(f"### Sending chat message (agent={agent_id or 'main'}): {message[:100]}")
             await self._dispatcher.send(ws, chat_request)
             _cleanup_ids = []
-            await self._stream_events(
+            result = await self._stream_events(
                 sub, event_queue, session_key,
                 captured_actions, agent_id=agent_id,
                 _cleanup_ids=_cleanup_ids)
+            # Retry once on MiniMax empty-final (see the _stream_events comment
+            # for context). We skip the full abort-before-send dance on the
+            # retry since the original run was already aborted inside
+            # _stream_events; just re-subscribe and re-issue chat.send.
+            if result == 'empty-final':
+                self._dispatcher.unsubscribe(chat_id)
+                retry_chat_id = str(uuid.uuid4())
+                retry_sub = self._dispatcher.subscribe(retry_chat_id, session_key)
+                try:
+                    retry_request = {
+                        "type": "req",
+                        "id": f"chat-{retry_chat_id}",
+                        "method": "chat.send",
+                        "params": {
+                            "message": full_message,
+                            "sessionKey": session_key,
+                            "idempotencyKey": retry_chat_id,
+                        },
+                    }
+                    logger.warning(f"### EMPTY-FINAL RETRY: re-sending chat.send (chat_id={retry_chat_id[:8]})")
+                    await self._dispatcher.send(ws, retry_request)
+                    retry_result = await self._stream_events(
+                        retry_sub, event_queue, session_key,
+                        captured_actions, agent_id=agent_id,
+                        _cleanup_ids=_cleanup_ids,
+                    )
+                    if retry_result == 'empty-final':
+                        logger.error("### EMPTY-FINAL RETRY FAILED: both attempts empty — emitting null text_done")
+                        event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
+                finally:
+                    self._dispatcher.unsubscribe(retry_chat_id)
+                return  # skip the outer unsubscribe (already done above)
         finally:
             self._dispatcher.unsubscribe(chat_id)
             for _cid in _cleanup_ids:
