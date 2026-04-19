@@ -173,9 +173,19 @@ _VOICE_INSTRUCTIONS = (
     "After generation, the new song appears in [Available tracks:] by its title. "
     "Use [MUSIC_PLAY:song title] to play it — do NOT use exec/shell to find the file. "
 
-    # --- Spotify ---
-    "SPOTIFY: [SPOTIFY:song name] or [SPOTIFY:song name|artist name] — plays from Spotify. "
-    "Example: [SPOTIFY:Bohemian Rhapsody|Queen]. Only use when user specifically asks. "
+    # --- SoundCloud (real playback, no auth) ---
+    "SOUNDCLOUD: [SOUNDCLOUD:<full-track-url>] — embeds the track in the music player and plays it. "
+    "Always use with a full https://soundcloud.com/<user>/<slug> URL. NEVER invent URLs — get them from "
+    "CLIENT.md (if present) or run the `soundcloud` skill: "
+    "`python3 /mnt/shared-skills/soundcloud/scripts/find_track.py \"artist - track\" --json`. "
+    "For a full-screen embed page instead of the small player: [SOUNDCLOUD_PAGE:<url>]. "
+    "Default to this for any 'play <track>' request when the artist has SoundCloud presence. "
+
+    # --- Bandcamp (real playback, no auth) ---
+    "BANDCAMP: [BANDCAMP:<full-album-or-track-url>] — embeds the Bandcamp player in the music panel. "
+    "URL must match <artist>.bandcamp.com/album/<slug> or .../track/<slug>. NEVER invent URLs — "
+    "use the `bandcamp` skill: `python3 /mnt/shared-skills/bandcamp/scripts/find_track.py \"artist - album\" --json`. "
+    "For full-screen canvas page: [BANDCAMP_PAGE:<url>]. "
 
     # --- Facial expressions / mood ---
     "EXPRESSIONS: [MOOD:happy] [MOOD:sad] [MOOD:angry] [MOOD:surprised] [MOOD:thinking] [MOOD:neutral] — "
@@ -395,6 +405,113 @@ def bump_voice_session() -> str:
 
 
 _recovery_entered_at: float = 0
+_recovery_last_activity_at: float = 0
+_recovery_last_exited_at: float = 0
+
+#: Context-replay prime — injected into the FIRST request on the recovery
+#: session so the fresh openclaw session has memory of the conversation that
+#: was poisoned. Cleared after one consume via :func:`consume_recovery_prime`.
+_recovery_context_prime: str | None = None
+
+#: Most recent steer/interject message per session key, with timestamp.
+#: When a user speaks mid-inference the interject is delivered fire-and-forget
+#: — if the in-flight LLM turn then returns empty, the steer is effectively
+#: lost. The empty-response handler consults this map and, if a steer landed
+#: within the last 30s on this session, re-fires it as a fresh conversation
+#: turn so the user's correction actually reaches the agent.
+#: Format: ``{session_key: (epoch_ts: float, message: str)}``
+_recent_steer_by_session: dict = {}
+
+
+def record_recent_steer(session_key: str, message: str) -> None:
+    """Record that a steer was just injected into ``session_key``.
+
+    Called from the steer / interject HTTP routes. Enables the empty-response
+    recovery path to re-fire the steer as a fresh turn if the current LLM
+    call collapses to zero chars (a common failure mode when a steer lands
+    mid-inference and GLM cannot reconcile the branched context).
+    """
+    _recent_steer_by_session[session_key] = (time.time(), message)
+
+
+def consume_recent_steer(session_key: str, max_age_s: float = 30.0) -> str | None:
+    """Return and clear the most recent steer for ``session_key`` if it is
+    younger than ``max_age_s``. Returns ``None`` if there is no recent steer.
+    """
+    entry = _recent_steer_by_session.get(session_key)
+    if not entry:
+        return None
+    ts, msg = entry
+    if time.time() - ts > max_age_s:
+        _recent_steer_by_session.pop(session_key, None)
+        return None
+    _recent_steer_by_session.pop(session_key, None)
+    return msg
+
+
+def _build_recovery_prime(max_turns: int = 6) -> str | None:
+    """Build a compressed history summary from the most recent DB turns so a
+    fresh recovery session doesn't lose context.
+
+    Reads the last ``max_turns`` user+assistant rows from ``conversation_log``
+    (session_id='default') and renders them as a bracketed SYSTEM note that
+    the agent can parse. Returns ``None`` if no rows are available or the
+    query fails — callers should handle ``None`` gracefully.
+    """
+    try:
+        from services.paths import DB_PATH
+        import sqlite3
+        with sqlite3.connect(str(DB_PATH), timeout=2.0) as _c:
+            _c.row_factory = sqlite3.Row
+            # NOTE: most rows land with session_id IS NULL (the main
+            # conversation route passes a per-request session_id that is
+            # usually None) — only the steer/interject routes explicitly
+            # write session_id='default'. Include both so the prime
+            # reflects the actual recent conversation.
+            rows = _c.execute(
+                'SELECT role, message FROM conversation_log '
+                "WHERE session_id = 'default' OR session_id IS NULL "
+                'ORDER BY id DESC LIMIT ?',
+                (max_turns,),
+            ).fetchall()
+        if not rows:
+            return None
+        rows = list(reversed(rows))  # oldest first
+        lines = []
+        for r in rows:
+            role = r['role']
+            msg = (r['message'] or '').strip().replace('\n', ' ')
+            if len(msg) > 280:
+                msg = msg[:280] + '…'
+            lines.append(f'{role}: {msg}')
+        body = '\n'.join(lines)
+        # The prime is deliberately phrased as background context, NOT as a
+        # "session was reset" notice. Earlier wording caused the model to
+        # respond like it was starting a new conversation ("Here's what I've
+        # got:", "Let me check..." etc.) because "[SESSION_RECOVERED]" reads
+        # as a break. Now it's just framed as recent conversation history
+        # plus a directive to pick up the thread naturally.
+        return (
+            '[RECENT CONTEXT — these are the most recent turns between you '
+            'and the user. Treat them as ongoing conversation. Do not '
+            'acknowledge a reset, do not re-greet, do not summarize what you '
+            "just did. Pick up exactly where you left off — if the last user "
+            'message asked a question or interrupted work you had started, '
+            'answer that specific question or continue that specific work '
+            'right now.]\n'
+            f'{body}\n\n'
+        )
+    except Exception as _e:
+        logger.warning(f'### _build_recovery_prime failed: {_e}')
+        return None
+
+
+def consume_recovery_prime() -> str | None:
+    """Return the recovery context prime once and clear it."""
+    global _recovery_context_prime
+    p = _recovery_context_prime
+    _recovery_context_prime = None
+    return p
 
 
 def _enter_session_recovery():
@@ -403,41 +520,105 @@ def _enter_session_recovery():
     poisoned state. The recovery key is cleared on the first successful
     (non-empty, non-fallback) response.
 
+    Also builds a context-replay prime from recent DB history so the fresh
+    session doesn't lose the thread of conversation. Without this prime the
+    agent behaves like a brand-new conversation and users experience
+    'context lost' after a recovery.
+
     IMPORTANT: Uses a STABLE key ('recovery') not a timestamped one.
     Timestamped keys (recovery-<epoch>) created a new openclaw session
     every time, piling up zombie sessions that never got cleaned.
     A stable key reuses the same recovery session each time."""
-    global _session_recovery_key, _recovery_entered_at
-    # Cooldown: don't thrash recovery keys from rapid start/stop cycles
+    global _session_recovery_key, _recovery_entered_at, _recovery_last_activity_at, _recovery_context_prime
+    # Cooldown: prevent re-entering recovery within 10s of a previous SUCCESSFUL
+    # exit. Pre-Fix-F this was measured against _recovery_entered_at which
+    # double-dutied as "last activity" after activity bumping was added —
+    # result: recovery blocked itself for the full duration of a productive
+    # recovery turn, and any subsequent poisoning on main became unrecoverable.
+    # Using the last-exited timestamp means recoveries can re-fire immediately
+    # after a successful one, which is exactly what a repeatedly-poisoned main
+    # session requires.
     now = time.time()
-    if now - _recovery_entered_at < 30:
-        logger.info('### SESSION RECOVERY: skipping — cooldown active (entered <30s ago)')
+    if _recovery_last_exited_at > 0 and now - _recovery_last_exited_at < 10:
+        logger.info(
+            '### SESSION RECOVERY: skipping — cooldown active '
+            f'({int(now - _recovery_last_exited_at)}s since last exit, <10s)'
+        )
         return
     _recovery_entered_at = now
-    _session_recovery_key = 'recovery'
-    logger.warning(f'### SESSION RECOVERY: switching to key "{_session_recovery_key}" to escape poisoned session')
+    _recovery_last_activity_at = now
+    # Use a timestamped recovery key so if recovery ITSELF poisons later
+    # we can spin up a new recovery-<epoch> session cleanly. Earlier code
+    # used a fixed 'recovery' key and was prone to piling up zombie
+    # sessions — but that failure mode only happens when we thrash
+    # recovery entries rapidly. With the last-exited cooldown we only
+    # enter recovery when main is genuinely broken, so a new session per
+    # poisoning event is appropriate.
+    _session_recovery_key = f'recovery-{int(now)}'
+    # Pull 30 turns instead of 6 — complex multi-turn icon/canvas work easily
+    # exceeds 6 turns and the agent was losing all context after recovery.
+    _recovery_context_prime = _build_recovery_prime(max_turns=30)
+    logger.warning(
+        f'### SESSION RECOVERY: switching to key "{_session_recovery_key}" '
+        f'(prime={"yes" if _recovery_context_prime else "no"}, '
+        f'prime_chars={len(_recovery_context_prime) if _recovery_context_prime else 0}) '
+        f'to escape poisoned session'
+    )
 
 
 def _exit_session_recovery():
     """Clear the recovery key after a successful response.
     Next request goes back to the stable key (cache-warm path).
-    Also resets the double-empty circuit breaker."""
-    global _session_recovery_key, _double_empty_restart_count
+    Also resets the double-empty circuit breaker and records the exit
+    timestamp so :func:`_enter_session_recovery` can cooldown against it
+    (prevents thrash, but ALLOWS re-entry when main gets re-poisoned)."""
+    global _session_recovery_key, _double_empty_restart_count, _recovery_last_exited_at
     if _session_recovery_key is not None:
         old_recovery = _session_recovery_key
         _session_recovery_key = None
         _double_empty_restart_count = 0
+        _recovery_last_exited_at = time.time()
         stable = get_voice_session_key()
         logger.info(f'### SESSION RECOVERY CLEARED: "{old_recovery}" → back to stable key "{stable}"')
 
 
+#: Idle-timeout cap for a recovery session. Bumped from 60s (too aggressive —
+#: single recovery turns with multiple tools easily exceed 60s) to 10 min.
+#: The happy-path exit is :func:`_exit_session_recovery`, which fires on the
+#: first successful non-empty response; this cap is only a safety net for
+#: genuinely stuck recoveries.
+_RECOVERY_IDLE_TIMEOUT_S: float = 600.0
+
+
+def bump_recovery_activity() -> None:
+    """Called when we see proof-of-life on the recovery session — reset the
+    idle timer so a productive multi-tool recovery turn doesn't get kicked
+    out mid-work. Invoked from the streaming event pump on any gateway
+    event while :data:`_session_recovery_key` is set.
+
+    Separate from ``_recovery_entered_at`` (first-entered timestamp) and
+    ``_recovery_last_exited_at`` (cooldown basis) so recovery lifecycle
+    bookkeeping doesn't collide.
+    """
+    global _recovery_last_activity_at
+    if _session_recovery_key is not None:
+        _recovery_last_activity_at = time.time()
+
+
 def _check_recovery_timeout():
-    """Auto-clear stale recovery keys. If recovery has been active for >60s
-    without a successful response, the recovery key itself may be stuck.
-    Fall back to stable key."""
-    global _session_recovery_key, _recovery_entered_at
-    if _session_recovery_key is not None and time.time() - _recovery_entered_at > 60:
-        logger.warning(f'### SESSION RECOVERY TIMEOUT: "{_session_recovery_key}" active for >60s — clearing')
+    """Auto-clear stale recovery keys. Only fires if the recovery session has
+    been idle (no gateway events) longer than :data:`_RECOVERY_IDLE_TIMEOUT_S`.
+    The normal exit path is :func:`_exit_session_recovery` on first success.
+    """
+    global _session_recovery_key
+    if _session_recovery_key is None:
+        return
+    idle_for = time.time() - max(_recovery_last_activity_at, _recovery_entered_at)
+    if idle_for > _RECOVERY_IDLE_TIMEOUT_S:
+        logger.warning(
+            f'### SESSION RECOVERY TIMEOUT: "{_session_recovery_key}" '
+            f'idle for >{int(_RECOVERY_IDLE_TIMEOUT_S)}s — clearing'
+        )
         _session_recovery_key = None
 
 
@@ -586,9 +767,14 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'\[MUSIC_NEXT\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SUNO_GENERATE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SLEEP\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[MOOD:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[REGISTER_FACE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SPOTIFY:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[SOUNDCLOUD:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[SOUNDCLOUD_PAGE:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[BANDCAMP:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[BANDCAMP_PAGE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SOUND:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SESSION_RESET\]', '', text, flags=re.IGNORECASE)
 
@@ -1198,8 +1384,20 @@ def _conversation_inner():
             except Exception:
                 pass
 
+            # ── Session-recovery context prime ────────────────────────
+            # After a double-empty that flipped us to the 'recovery' key,
+            # prepend a compressed history summary to the very FIRST request
+            # so the fresh openclaw session has memory of the prior turns.
+            _recovery_prime = consume_recovery_prime()
+            if _recovery_prime:
+                logger.info(f'### Injecting session-recovery prime ({len(_recovery_prime)} chars)')
+
             def _run_gateway():
-                _msg = _recovery_prefix + message_with_context if _recovery_prefix else message_with_context
+                _msg = message_with_context
+                if _recovery_prefix:
+                    _msg = _recovery_prefix + _msg
+                if _recovery_prime:
+                    _msg = _recovery_prime + _msg
                 gateway_manager.stream_to_queue(
                     event_queue, _msg, _session_key, captured_actions,
                     gateway_id=gateway_id,
@@ -1378,6 +1576,12 @@ def _conversation_inner():
                                 break
                             yield json.dumps({'type': 'heartbeat', 'elapsed': elapsed}) + '\n'
                             continue
+
+                        # Proof-of-life on the recovery session — reset the idle
+                        # timer so a productive multi-tool recovery turn isn't
+                        # kicked out mid-work by the elapsed-time check.
+                        if _session_recovery_key is not None:
+                            bump_recovery_activity()
 
                         if evt['type'] == 'handshake':
                             metrics['handshake_ms'] = evt['ms']
@@ -1572,6 +1776,10 @@ def _conversation_inner():
                                     f"spoken text: {full_response.strip()[:60]}"
                                 )
                                 full_response = "Here you go. " + full_response
+                                # Also update TTS buffer so the downstream flush
+                                # at line ~1844 speaks "Here you go." instead of
+                                # firing TTS on the bare tag (which strips to "").
+                                _tts_buf = "Here you go."
 
                             metrics['llm_inference_ms'] = int((time.time() - t_llm_start) * 1000)
                             metrics['tool_count'] = sum(
@@ -1595,9 +1803,159 @@ def _conversation_inner():
                                 f"(tokens~{_est_input}in/{_est_output}out)"
                             )
 
-                            # ── Clear recovery mode on successful gateway response ──
+                            # ── Recovery is STICKY ──────────────────────────
+                            # We used to call _exit_session_recovery() on the
+                            # first successful response so the next request
+                            # went back to `main`. In practice `main` stayed
+                            # poisoned (openclaw server-side session state
+                            # persists on disk and doesn't self-heal when the
+                            # WS reconnects) so every subsequent request
+                            # bounced through the recovery cascade again —
+                            # good for reliability, bad for 3-5s-per-message
+                            # latency.
+                            #
+                            # Keep the timestamped recovery key as the new
+                            # stable session for the process lifetime. If the
+                            # recovery session itself poisons later, the
+                            # double-empty handler will spin up a fresh
+                            # recovery-<newepoch>. Only manual /api/conversation/reset
+                            # exits recovery now.
                             if full_response and full_response.strip() and _session_recovery_key is not None:
-                                _exit_session_recovery()
+                                bump_recovery_activity()
+
+                            # ── Uncommitted tool-promise detection ────────────
+                            # If the assistant said "let me build X" / "I'll write Y"
+                            # but emitted ZERO tool_use blocks, the turn ended on
+                            # an unfulfilled promise. This poisons the next turn —
+                            # a follow-up user message layered on top of an open
+                            # intent causes empty responses on GLM-4.7.
+                            #
+                            # Auto-continue: send a "continue — actually perform
+                            # that work" steer and re-enter the event loop so the
+                            # agent completes the promise on THIS turn.
+                            #
+                            # Gated: only fires when
+                            #   - response was non-empty
+                            #   - tool_count == 0  (nothing was actually done)
+                            #   - llm_ms > 1000    (filter out instant degenerate empties — those go to the empty-retry branch below)
+                            #   - not already continued this turn (avoids loops)
+                            #
+                            # NOTE: no upper bound on llm_ms. A genuine uncommitted
+                            # promise after 50s is just as broken as after 5s — the
+                            # agent still left work undone and the session still
+                            # ends on an open intent. Previously gated at <30s and
+                            # we missed a real case at 49s.
+                            #
+                            # Regex allows the committing verb anywhere within 80
+                            # chars of the "I'll / let me" opener, so compound
+                            # phrasing like "I'll mark the ones and add a button"
+                            # still catches `add` (the mid-sentence verb).
+                            _promise_re = re.compile(
+                                r"\b(?:let me|i'?ll|i am going to|i'?m going to|i will|i'?m about to|gonna|going to)\b"
+                                r".{0,80}?"
+                                r"\b(?:write|build|create|update|save|add|edit|run|fetch|generate|make|"
+                                r"set up|put together|pull|grab|load|open|check|look|query|send|post|commit|push|"
+                                r"refactor|deploy|install|rebuild|restart|scaffold|configure|"
+                                r"mark|highlight|tag|label|link|embed|include|list|draft|prepare|"
+                                r"implement|modify|append|remove|delete|clean|organize|sort|render|"
+                                r"test|publish|upload|download|compile|parse|extract|apply|assign|"
+                                r"wire|hook|bind|attach|register|inject|populate|fill|insert|replace|"
+                                r"rename|move|copy|merge|split|style|design|format|export|import|"
+                                r"patch|fix|revert|rollback|scaffold|bootstrap|finalize|finish)"
+                                r"\b",
+                                re.IGNORECASE,
+                            )
+                            if (
+                                full_response
+                                and full_response.strip()
+                                and metrics.get('tool_count', 0) == 0
+                                and metrics.get('llm_inference_ms', 0) > 1000
+                                and not getattr(stream_response, '_continued', False)
+                                and _promise_re.search(full_response)
+                            ):
+                                stream_response._continued = True
+                                logger.warning(
+                                    f'### UNCOMMITTED PROMISE detected: '
+                                    f'{full_response.strip()[:100]!r} '
+                                    f'(tool_count=0, ms={metrics.get("llm_inference_ms")}) '
+                                    f'— auto-continuing'
+                                )
+                                # Keep the client alive while we re-prompt
+                                yield json.dumps({'type': 'retrying'}) + '\n'
+                                # Preserve partial text as a TTS sentence so the
+                                # user hears the assistant's intent while the
+                                # follow-up tool turn runs
+                                _continue_msg = (
+                                    '[SYSTEM: You said you would do something ("'
+                                    + full_response.strip()[:160]
+                                    + '") but did not call any tool. Actually perform the '
+                                    'work now, using the appropriate tools. Do not just '
+                                    'describe it again.]'
+                                )
+                                retry_queue = queue.Queue()
+                                captured_actions.clear()
+                                # Reset accumulators so we don't double-count prior text
+                                full_response = ''
+                                def _continue_gateway():
+                                    gateway_manager.stream_to_queue(
+                                        retry_queue, _continue_msg,
+                                        _session_key, captured_actions,
+                                        gateway_id=gateway_id,
+                                        agent_id=agent_id,
+                                    )
+                                continue_thread = threading.Thread(
+                                    target=_continue_gateway, daemon=True,
+                                )
+                                t_llm_start = time.time()
+                                continue_thread.start()
+                                event_queue = retry_queue
+                                logger.info('### AUTO-CONTINUE: sent promise-completion steer')
+                                continue  # back to event loop — text_done NOT sent yet
+
+                            # ── Empty after recent steer → auto-refire steer ──
+                            # If an interject/steer landed on this session
+                            # within the last 30s and the current LLM turn
+                            # collapsed to zero chars, the steer was lost in
+                            # the branched context. Re-fire the steered
+                            # message as a fresh turn so the user's actual
+                            # correction reaches the agent. Covers ALL empty
+                            # cases (fast empty and timeout empty) — a lost
+                            # steer is a bigger UX failure than a slow LLM.
+                            _is_empty_pre = not full_response or not full_response.strip()
+                            if _is_empty_pre and not getattr(stream_response, '_steer_refired', False):
+                                _steer_msg = consume_recent_steer(_session_key, max_age_s=30.0)
+                                if _steer_msg:
+                                    stream_response._steer_refired = True
+                                    logger.warning(
+                                        f'### STEER-RECOVERY: empty response after recent steer '
+                                        f'({len(_steer_msg)} chars) on session={_session_key} '
+                                        f'— re-firing steered message as fresh turn'
+                                    )
+                                    yield json.dumps({'type': 'retrying'}) + '\n'
+                                    # No sleep — the original `time.sleep(1)` was
+                                    # paranoia leftover from early debugging. Every
+                                    # second of artificial delay is a second of dead
+                                    # silence for the user; the gateway's own internal
+                                    # ordering is already sufficient.
+                                    retry_queue = queue.Queue()
+                                    captured_actions.clear()
+                                    full_response = ''
+                                    _refire_msg = (context_prefix or '') + _steer_msg
+                                    def _refire_gateway():
+                                        gateway_manager.stream_to_queue(
+                                            retry_queue, _refire_msg,
+                                            _session_key, captured_actions,
+                                            gateway_id=gateway_id,
+                                            agent_id=agent_id,
+                                        )
+                                    refire_thread = threading.Thread(
+                                        target=_refire_gateway, daemon=True,
+                                    )
+                                    t_llm_start = time.time()
+                                    refire_thread.start()
+                                    event_queue = retry_queue
+                                    logger.info('### STEER-RECOVERY: re-sent steered message to gateway')
+                                    continue  # text_done NOT sent yet
 
                             # ── Retry once on instant empty response ──
                             # IMPORTANT: check BEFORE yielding text_done.
@@ -1616,7 +1974,11 @@ def _conversation_inner():
                                 )
                                 # Tell the client to wait — don't show fallback
                                 yield json.dumps({'type': 'retrying'}) + '\n'
-                                time.sleep(2)
+                                # No sleep — the original `time.sleep(2)` was to let
+                                # Z.AI "settle" between attempts but empirically every
+                                # second here is pure dead silence for the user. The
+                                # gateway's abort-before-send already ensures state is
+                                # clean; additional delay just hurts UX.
                                 # Re-send the message through the gateway.
                                 # Always retry on the SAME session key first. The gateway
                                 # may have been momentarily busy (queue flush, lane transition)
@@ -2093,6 +2455,12 @@ def conversation_steer():
 
     steered = gateway_manager.send_steer(message, session_key)
 
+    # Record for the empty-response recovery path — if the current LLM turn
+    # collapses to zero chars (steer-mid-inference failure mode), the
+    # streaming handler will re-fire this message as a fresh turn.
+    if steered:
+        record_recent_steer(session_key, message)
+
     logger.info(
         f"### STEER request session={session_key} steered={steered} "
         f"source={source} text={message!r}"
@@ -2148,6 +2516,8 @@ def conversation_interject():
         # We still send via steer because the message needs to reach the session,
         # but OpenClaw's collect mode will hold it until the current turn completes.
         steered = gateway_manager.send_steer(message, session_key)
+        if steered:
+            record_recent_steer(session_key, message)
         action = 'queued'
         logger.info(
             f"### INTERJECT [context] session={session_key} action={action} "
@@ -2156,6 +2526,8 @@ def conversation_interject():
     elif lane == 'steer':
         # Inject at next tool boundary — skip remaining tools
         steered = gateway_manager.send_steer(message, session_key)
+        if steered:
+            record_recent_steer(session_key, message)
         action = 'steered'
         logger.info(
             f"### INTERJECT [steer] session={session_key} action={action} "
@@ -2311,6 +2683,155 @@ def tts_providers_list():
     except Exception as e:
         logger.error(f'Failed to list TTS providers: {e}')
         return jsonify({'error': f'Failed to list providers: {e}'}), 500
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/tts/default-provider
+# ---------------------------------------------------------------------------
+# Widget/agent can set the default TTS provider. Writes to
+# tts_providers/providers_config.json so the change survives restart.
+# Validates that the provider is registered AND active — we don't let a
+# caller point the default at something that will fail on first /generate.
+
+@conversation_bp.route('/api/tts/default-provider', methods=['PUT', 'POST'])
+def tts_set_default_provider():
+    """Set the default TTS provider written into providers_config.json.
+
+    Accepts both PUT (semantically correct for "replace current value") and
+    POST (agents using OpenAPI-generic tooling often default to POST).
+
+    Body: {"provider": "<provider_id>"} — must be an ID from the registered
+    set AND have status=active in the config.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        provider_id = (data.get('provider') or '').strip()
+        if not provider_id:
+            return jsonify({'ok': False, 'error': 'provider is required'}), 400
+
+        # Verify it's in the known registry. Using list_providers gives us the
+        # same view the GET endpoint exposes — single source of truth.
+        providers = list_providers(include_inactive=True)
+        provider_ids = {p.get('provider_id') for p in providers}
+        if provider_id not in provider_ids:
+            return jsonify({
+                'ok': False,
+                'error': f'unknown provider: {provider_id}',
+                'available': sorted(provider_ids),
+            }), 400
+
+        # Reject providers whose status is NOT active — avoids setting the
+        # default to something we know will fail downstream.
+        target = next((p for p in providers if p.get('provider_id') == provider_id), None)
+        if target and target.get('status') not in (None, 'active'):
+            return jsonify({
+                'ok': False,
+                'error': (f'provider {provider_id} is not active '
+                          f'(status={target.get("status")})'),
+            }), 400
+
+        config_path = (Path(__file__).parent.parent
+                       / 'tts_providers' / 'providers_config.json')
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+        except Exception as e:
+            return jsonify({'ok': False, 'error': f'failed to read config: {e}'}), 500
+
+        old_default = config.get('default_provider')
+        config['default_provider'] = provider_id
+        config['last_updated'] = time.strftime('%Y-%m-%d')
+
+        # Atomic write: write to temp, rename into place. Keeps readers from
+        # ever seeing a half-written config.
+        tmp_path = config_path.with_suffix('.json.tmp')
+        try:
+            with open(tmp_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            os.replace(tmp_path, config_path)
+        except Exception as e:
+            return jsonify({'ok': False, 'error': f'failed to write config: {e}'}), 500
+
+        logger.info(
+            f'TTS default provider changed: {old_default} → {provider_id}'
+        )
+        return jsonify({
+            'ok': True,
+            'provider': provider_id,
+            'previous': old_default,
+        })
+    except Exception as e:
+        logger.error(f'tts_set_default_provider failed: {e}')
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/tts/default-voice
+# ---------------------------------------------------------------------------
+# Sets the preferred voice for a provider. Providers_config.json keeps a
+# per-provider `voices` array whose FIRST element is the effective default.
+# We move the requested voice to the front (creating the entry if it's a
+# valid voice we know about from /api/tts/voices).
+
+@conversation_bp.route('/api/tts/default-voice', methods=['PUT', 'POST'])
+def tts_set_default_voice():
+    """Set the default voice for a given TTS provider.
+
+    Body: {"provider": "<provider_id>", "voice": "<voice_id>"}
+    If provider is omitted, uses the current default_provider.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        voice = (data.get('voice') or '').strip()
+        if not voice:
+            return jsonify({'ok': False, 'error': 'voice is required'}), 400
+
+        config_path = (Path(__file__).parent.parent
+                       / 'tts_providers' / 'providers_config.json')
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+        except Exception as e:
+            return jsonify({'ok': False, 'error': f'failed to read config: {e}'}), 500
+
+        provider_id = (data.get('provider') or config.get('default_provider') or '').strip()
+        if not provider_id:
+            return jsonify({'ok': False, 'error': 'provider is required'}), 400
+
+        pconfig = config.get('providers', {}).get(provider_id)
+        if not pconfig:
+            return jsonify({
+                'ok': False,
+                'error': f'unknown provider in config: {provider_id}',
+            }), 400
+
+        voices = list(pconfig.get('voices') or [])
+        # Move the requested voice to front; add if missing.
+        if voice in voices:
+            voices.remove(voice)
+        voices.insert(0, voice)
+        pconfig['voices'] = voices
+        config['last_updated'] = time.strftime('%Y-%m-%d')
+
+        tmp_path = config_path.with_suffix('.json.tmp')
+        try:
+            with open(tmp_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            os.replace(tmp_path, config_path)
+        except Exception as e:
+            return jsonify({'ok': False, 'error': f'failed to write config: {e}'}), 500
+
+        logger.info(f'TTS default voice for {provider_id} → {voice}')
+        return jsonify({
+            'ok': True,
+            'provider': provider_id,
+            'voice': voice,
+            'voices': voices,
+        })
+    except Exception as e:
+        logger.error(f'tts_set_default_voice failed: {e}')
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
 
 # ---------------------------------------------------------------------------
 # POST /api/tts/generate

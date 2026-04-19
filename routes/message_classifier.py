@@ -37,6 +37,10 @@ _STEER_PATTERNS = [
     # Direct negation / correction openers
     r'\bno\b',                          # "no, don't do that"
     r'\bnope\b',
+    r'\bnaw\b',                         # "naw, I want X instead"
+    r'\bnah\b',
+    r'\bnuh[\s-]?uh\b',                 # "nuh-uh" / "nuh uh"
+    r'\buh[\s-]?uh\b',                  # "uh-uh" (rejection)
     r'\bwait\b',                        # "wait, stop"
     r'\bhold on\b',
     r'\bhold up\b',
@@ -90,6 +94,19 @@ _STEER_PATTERNS = [
     r'\bdifferent approach\b',
     r'\buse a different\b',
     r'\buse another\b',
+    # Scope refinement / narrowing — "X only", "just X", "not Y"
+    # These are corrections of in-flight work: must steer, not queue
+    r'\bonly\s+\w+.*\b(?:not|don\'?t|no)\b',       # "only X, not Y"
+    r'\b(?:not|don\'?t include|no)\s+(?:the\s+|any\s+|other\s+|any other\s+)',  # "not the others", "not any other"
+    r'\bjust\s+(?:the|that|these|those)\s+\w+',    # "just the X"
+    r'\bonly\s+(?:the|that|these|those|from)\s+\w+',  # "only the X", "only from"
+    # "X only" at end of sentence / before punctuation / before "not"
+    r'\b\w+\s+only\s*(?:[.,!?]|$|\s+not\b)',       # "emails only.", "joshai only not"
+    r'\bexclude\s+(?:the|any|other)\b',            # "exclude the others"
+    r'\bleave out\s+\w+',                          # "leave out Y"
+    r'\bwithout\s+(?:the|any|other)\s+\w+',        # "without the others"
+    r'\bfilter\s+(?:out|to|down)\b',               # "filter out Y", "filter to X"
+    r'\bnarrow\s+(?:it|down|to)\b',                # "narrow it down"
 ]
 
 # Pre-compiled steer regex — any match = steer

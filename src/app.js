@@ -8,12 +8,17 @@
  */
 import { inject } from './ui/AppShell.js';
 import { initUpdateChecker } from './ui/UpdateBanner.js';
+import { connectAiradio } from './shell/airadio-bridge.js';
 
 // Inject the application DOM structure before any module accesses the DOM
 inject();
 
 // Start update checker (non-blocking, runs after app loads)
 initUpdateChecker();
+
+// Wire the AI-Radio tag dispatcher — listens for cmd:airadio on eventBus
+// and POSTs to /api/airadio/* endpoints. Idempotent; survives mode switches.
+connectAiradio();
 
         import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js?v=3';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
@@ -60,6 +65,21 @@ initUpdateChecker();
                 }
             }
             return url;
+        }
+
+        // Route abort/interject calls to the active gateway's namespace.
+        // When gateway_id=hermes, we MUST call /api/hermes/* because hermes
+        // has its own mid-flight pipeline (separate active_runs dict,
+        // stream_to_queue state, etc.). Calling /api/conversation/* goes
+        // through gateway_manager which defaults to openclaw and returns
+        // False — leaving the hermes run hanging and the actions feed
+        // frozen. Openclaw mode continues to use /api/conversation/*.
+        // Action is one of: 'abort' | 'steer' | 'interject'.
+        function convPath(action) {
+            const gid = localStorage.getItem('gateway_id') || 'openclaw';
+            return gid === 'hermes'
+                ? `/api/hermes/${action}`
+                : `/api/conversation/${action}`;
         }
 
         // ===== PROVIDER MANAGER =====
@@ -976,6 +996,10 @@ initUpdateChecker();
                     return;
                 }
 
+                // Crossfading into a local track — dismiss any SC/BC embed first
+                this._clearExternalEmbed();
+                if (this.currentPlaylist === 'external') this.currentPlaylist = 'library';
+
                 this.crossfadeInProgress = true;
                 const outgoing = this.activeAudio === 1 ? this.audio1 : this.audio2;
                 const incoming = this.activeAudio === 1 ? this.audio2 : this.audio1;
@@ -1141,6 +1165,11 @@ initUpdateChecker();
             _playId: 0,
 
             async play(trackName) {
+                // Switching to library/generated — tear down any SC/BC external embed
+                // that may still be on-screen from a prior [SOUNDCLOUD:...] / [BANDCAMP:...]
+                this._clearExternalEmbed();
+                if (this.currentPlaylist === 'external') this.currentPlaylist = 'library';
+
                 const playId = ++this._playId;
                 try {
                     const url = new URL(`${CONFIG.serverUrl}/api/music`);
@@ -1212,10 +1241,178 @@ initUpdateChecker();
                 this.currentMetadata = null;
                 this.button.classList.remove('active');
                 this.panel.classList.remove('playing');
+                this.panel.classList.remove('spotify-mode');
+                this._clearExternalEmbed();
                 this._syncPlayButtons(false);
-                // Stop visualizer
                 VisualizerModule.stopAnimation();
                 this.closePanel();
+            },
+
+            // ── External embeds (SoundCloud + Bandcamp) ──────────────────
+
+            async playSoundCloud(trackUrl) {
+                console.log('[MusicModule] playSoundCloud:', trackUrl);
+                try { this.audio?.pause?.(); } catch {}
+                this.currentPlaylist = 'external';
+                this.isPlaying = true;
+                this.currentMetadata = { source: 'soundcloud', url: trackUrl, playlist: 'external' };
+
+                let title = trackUrl;
+                let artist = 'SoundCloud';
+                // Fetch oEmbed for metadata only (title/artist/artwork).
+                // ALWAYS use our own iframe URL below so auto_play=true is set —
+                // oEmbed's default html omits auto_play, which looks like "nothing happened".
+                try {
+                    const resp = await fetch(`https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(trackUrl)}`);
+                    if (resp.ok) {
+                        const m = await resp.json();
+                        title = m.title || title;
+                        artist = m.author_name || artist;
+                        this.currentMetadata = { ...this.currentMetadata, title, artist, artwork: m.thumbnail_url };
+                    }
+                } catch (e) { console.warn('[MusicModule] SC oembed metadata failed:', e); }
+
+                this.currentTrack = title;
+                if (this.trackName) this.trackName.textContent = title;
+
+                const embedIframe = `<iframe width="100%" height="166" scrolling="no" frameborder="no" allow="autoplay" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(trackUrl)}&auto_play=true&visual=true&show_artwork=true&show_comments=false"></iframe>`;
+                this._renderEmbed('soundcloud', embedIframe);
+
+                if (this.button) this.button.classList.add('active');
+                if (this.panel) {
+                    this.panel.classList.add('playing', 'external-mode');
+                    this.panel.dataset.provider = 'soundcloud';
+                }
+                this._syncPlayButtons(true);
+                if (this.panelState === 'closed') this.openPanel();
+                this._postExternalState('soundcloud', trackUrl, title, artist);
+            },
+
+            async playBandcamp(trackOrAlbumUrl) {
+                console.log('[MusicModule] playBandcamp:', trackOrAlbumUrl);
+                try { this.audio?.pause?.(); } catch {}
+                this.currentPlaylist = 'external';
+                this.isPlaying = true;
+                this.currentMetadata = { source: 'bandcamp', url: trackOrAlbumUrl, playlist: 'external' };
+
+                let title = trackOrAlbumUrl;
+                let artist = 'Bandcamp';
+                let embedHtml = null;
+                try {
+                    const r = await fetch(`${CONFIG.serverUrl}/api/music/bandcamp/resolve?url=${encodeURIComponent(trackOrAlbumUrl)}`).then(r => r.json());
+                    if (r && r.ok) {
+                        title = r.title || title;
+                        artist = r.artist || artist;
+                        embedHtml = r.embed_html || null;
+                        this.currentMetadata = { ...this.currentMetadata, title, artist, kind: r.kind, artwork: r.artwork, embedUrl: r.embed_url, embedHtml };
+                    }
+                } catch (e) { console.warn('[MusicModule] BC resolve failed:', e); }
+
+                this.currentTrack = title;
+                if (this.trackName) this.trackName.textContent = title;
+
+                if (!embedHtml) {
+                    embedHtml = `<div style="padding:12px;text-align:center;"><a href="${trackOrAlbumUrl}" target="_blank" rel="noopener" style="color:#3b82f6">Open on Bandcamp</a></div>`;
+                }
+                this._renderEmbed('bandcamp', embedHtml);
+
+                if (this.button) this.button.classList.add('active');
+                if (this.panel) {
+                    this.panel.classList.add('playing', 'external-mode');
+                    this.panel.dataset.provider = 'bandcamp';
+                }
+                this._syncPlayButtons(true);
+                if (this.panelState === 'closed') this.openPanel();
+                this._postExternalState('bandcamp', trackOrAlbumUrl, title, artist);
+            },
+
+            _renderEmbed(provider, iframeHtml) {
+                // Render the embed as a SEPARATE floating element attached to <body>, not inside
+                // the music panel. Music panel is bottom-anchored, so content appended inside it
+                // grows it upward and pushes everything above (chat, controls) up the screen.
+                // Instead, place the embed as its own fixed overlay sitting just above the
+                // music panel, centered, with z-index below the chat panel (9999) so chat
+                // still overlays it, but above the music panel (200) so it looks like it's
+                // popping out of the player.
+                let wrap = document.getElementById('music-external-embed');
+                if (!wrap) {
+                    wrap = document.createElement('div');
+                    wrap.id = 'music-external-embed';
+                    wrap.style.cssText = [
+                        'position:fixed',
+                        'left:50%',
+                        'transform:translateX(-50%)',
+                        'bottom:86px',
+                        'width:calc(100% - 128px)',
+                        'max-width:520px',
+                        'background:rgba(5, 10, 20, 0.97)',
+                        'border:1px solid rgba(0, 229, 255, 0.25)',
+                        'border-radius:12px 12px 0 0',
+                        'box-shadow:0 -4px 25px rgba(0,229,255,0.25)',
+                        'padding:8px 8px 8px 8px',
+                        'z-index:201',
+                        'display:none',
+                    ].join(';');
+
+                    // Close button (top-right) — user can dismiss without stopping playback
+                    const closeBtn = document.createElement('button');
+                    closeBtn.type = 'button';
+                    closeBtn.setAttribute('aria-label', 'Close embed');
+                    closeBtn.textContent = '×';
+                    closeBtn.style.cssText = [
+                        'position:absolute',
+                        'top:4px',
+                        'right:6px',
+                        'width:24px',
+                        'height:24px',
+                        'border:none',
+                        'background:rgba(0,0,0,.4)',
+                        'color:#e2e8f0',
+                        'font-size:18px',
+                        'line-height:1',
+                        'border-radius:50%',
+                        'cursor:pointer',
+                        'z-index:1',
+                    ].join(';');
+                    closeBtn.addEventListener('click', () => this._clearExternalEmbed());
+                    wrap.appendChild(closeBtn);
+
+                    // Inner content slot (iframe lives here)
+                    const slot = document.createElement('div');
+                    slot.className = 'embed-content';
+                    wrap.appendChild(slot);
+
+                    document.body.appendChild(wrap);
+                }
+                wrap.dataset.provider = provider;
+                const slot = wrap.querySelector('.embed-content');
+                if (slot) slot.innerHTML = iframeHtml || '';
+                wrap.style.display = iframeHtml ? 'block' : 'none';
+            },
+
+            _clearExternalEmbed() {
+                const wrap = document.getElementById('music-external-embed');
+                if (wrap) {
+                    const slot = wrap.querySelector('.embed-content');
+                    if (slot) slot.innerHTML = '';  // Stops iframe audio
+                    wrap.style.display = 'none';
+                }
+                if (this.panel) {
+                    this.panel.classList.remove('external-mode');
+                    delete this.panel.dataset.provider;
+                }
+            },
+
+            async _postExternalState(provider, url, title, artist) {
+                try {
+                    const u = new URL(`${CONFIG.serverUrl}/api/music`);
+                    u.searchParams.set('action', 'external');
+                    u.searchParams.set('provider', provider);
+                    u.searchParams.set('url', url);
+                    if (title) u.searchParams.set('title', title);
+                    if (artist) u.searchParams.set('artist', artist);
+                    await fetch(u);
+                } catch (e) { console.warn('[MusicModule] external state sync failed:', e); }
             },
 
             togglePlay() {
@@ -2367,6 +2564,10 @@ initUpdateChecker();
                     music_stop:    ['■',    'music stopped'],
                     music_next:    ['▶▶',   'next track'],
                     spotify:       ['SPT',  d ? `"${d}"` : 'playing spotify'],
+                    soundcloud:    ['SC',   d ? `soundcloud: ${su(d)}` : 'playing soundcloud'],
+                    soundcloud_page: ['SC', d ? `sc page: ${su(d)}` : 'soundcloud page'],
+                    bandcamp:      ['BC',   d ? `bandcamp: ${su(d)}` : 'playing bandcamp'],
+                    bandcamp_page: ['BC',   d ? `bc page: ${su(d)}` : 'bandcamp page'],
                     sound:         ['SFX',  d || 'playing sound'],
                     register_face: ['FACE', d ? `registering ${d}` : 'registering face'],
                     sleep:         ['ZZZ',  'going to sleep'],
@@ -3183,6 +3384,13 @@ initUpdateChecker();
                 this.isConnected = false;
                 this.isConnecting = false;
                 this._fetchAbortController = null;
+                // Flag set when the current stream has already emitted its text_done
+                // frame. A new message arriving after text_done should NOT route to
+                // /api/conversation/interject — the run is effectively finished and
+                // a steer on a closed turn poisons the session. Reset on every new
+                // fetch. Checked in sendMessage() to fall through to the normal
+                // fresh-request path instead of interject.
+                this._textDoneReceived = false;
 
                 // Use shared STT instance instead of creating a new one
                 // This prevents conflicts with VoiceConversation's STT
@@ -3498,7 +3706,7 @@ initUpdateChecker();
                     this._fetchAbortController = null;
                     // Tell server to abort the openclaw run (fire-and-forget)
                     console.warn('⛔ ABORT source: stopVoiceInput');
-                    fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                    fetch(`${this.config.serverUrl}${convPath('abort')}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ source: 'stopVoiceInput' }),
@@ -3557,12 +3765,29 @@ initUpdateChecker();
                 //     next tool boundary (messages.queue.mode=steer).  The existing
                 //     streaming fetch continues receiving the steered output.
                 if (this._fetchAbortController) {
-                    if (this._ttsPlaying) {
+                    if (this._textDoneReceived) {
+                        // Race-window guard: the server has already emitted text_done,
+                        // meaning the agent's turn is effectively over — the fetch is
+                        // just flushing tail events (metrics, TTS). Interjecting here
+                        // would steer into a closed openclaw turn (active_run still
+                        // set) and poison the session. Treat this as a fresh message
+                        // instead: abort the tail, then fall through to the normal
+                        // sendMessage path.
+                        console.warn(`↩ POST-TEXT_DONE message — treating as fresh request: "${text.substring(0,30)}"`);
+                        this._fetchAbortController.abort();
+                        this._fetchAbortController = null;
+                        fetch(`${this.config.serverUrl}${convPath('abort')}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ source: 'post-text_done-refresh', text: text.substring(0, 50) }),
+                        }).catch(() => {});
+                        this.stopAudio();
+                    } else if (this._ttsPlaying) {
                         // Agent already responded, TTS playing → ABORT
                         this._fetchAbortController.abort();
                         this._fetchAbortController = null;
                         console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (TTS playing, new msg: "${text.substring(0,30)}")`);
-                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                        fetch(`${this.config.serverUrl}${convPath('abort')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ source: 'clawdbot-sendMessage', text: text.substring(0, 50) }),
@@ -3572,7 +3797,7 @@ initUpdateChecker();
                         // Agent working silently → INTERJECT (smart routing)
                         // Server classifies as context/steer/fast_lane and routes accordingly
                         console.log(`🔀 INTERJECT: "${text.substring(0,50)}" into active run`);
-                        fetch(`${this.config.serverUrl}/api/conversation/interject`, {
+                        fetch(`${this.config.serverUrl}${convPath('interject')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ message: text, source: 'clawdbot-sendMessage' }),
@@ -3646,6 +3871,7 @@ initUpdateChecker();
 
                     const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
                     this._fetchAbortController = new AbortController();
+                    this._textDoneReceived = false;  // new stream — reset the race-window guard
                     const response = await fetch(`${this.config.serverUrl}/api/conversation?stream=1`, {
                         method: 'POST',
                         signal: this._fetchAbortController.signal,
@@ -3726,10 +3952,15 @@ initUpdateChecker();
                             .replace(/\[SESSION_RESET\]/gi, '')
                             .replace(/\[SUNO_GENERATE:[^\]]*\]/gi, '')
                             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
+                            .replace(/\[SOUNDCLOUD:[^\]]*\]/gi, '')
+                            .replace(/\[SOUNDCLOUD_PAGE:[^\]]*\]/gi, '')
+                            .replace(/\[BANDCAMP:[^\]]*\]/gi, '')
+                            .replace(/\[BANDCAMP_PAGE:[^\]]*\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SOUND:[^\]]*\]/gi, '')
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
                             .trim();
                     };
 
@@ -3803,6 +4034,55 @@ initUpdateChecker();
                             ActionConsole.addEntry('system', `Spotify: "${spotifyTrack}"${spotifyArtist ? ` by ${spotifyArtist}` : ''}`);
                             AgentActivityChip.handleTag('spotify', spotifyTrack);
                             window.musicPlayer?.playSpotify(spotifyTrack, spotifyArtist);
+                        }
+                        // [AIRADIO_*] — dispatch each unique tag once; bridge maps verb→endpoint
+                        const _airadioRe = /\[AIRADIO_([A-Z_]+)(?::([^\]]*))?\]/gi;
+                        let _airadioMatch;
+                        while ((_airadioMatch = _airadioRe.exec(text)) !== null) {
+                            const verb = _airadioMatch[1].toUpperCase();
+                            const data = (_airadioMatch[2] || '').trim();
+                            const key = `AIRADIO:${verb}:${data}`;
+                            if (canvasCommandsProcessed.has(key)) continue;
+                            canvasCommandsProcessed.add(key);
+                            ActionConsole.addEntry('system', `AI-Radio: ${verb}${data ? ` (${data})` : ''}`);
+                            AgentActivityChip.handleTag('airadio', `${verb}${data ? `: ${data}` : ''}`);
+                            window.airadioDispatch?.(verb, data);
+                        }
+                        // [SOUNDCLOUD:url] — play track in music player embed
+                        const soundcloudMatch = text.match(/\[SOUNDCLOUD:([^\]]+)\]/i);
+                        if (soundcloudMatch && !canvasCommandsProcessed.has('SOUNDCLOUD')) {
+                            canvasCommandsProcessed.add('SOUNDCLOUD');
+                            const scUrl = soundcloudMatch[1].trim();
+                            ActionConsole.addEntry('system', `SoundCloud: ${scUrl}`);
+                            AgentActivityChip.handleTag('soundcloud', scUrl);
+                            window.musicPlayer?.playSoundCloud(scUrl);
+                        }
+                        // [SOUNDCLOUD_PAGE:url] — open full-screen canvas page with the embed
+                        const soundcloudPageMatch = text.match(/\[SOUNDCLOUD_PAGE:([^\]]+)\]/i);
+                        if (soundcloudPageMatch && !canvasCommandsProcessed.has('SOUNDCLOUD_PAGE')) {
+                            canvasCommandsProcessed.add('SOUNDCLOUD_PAGE');
+                            const scUrl = soundcloudPageMatch[1].trim();
+                            ActionConsole.addEntry('system', `SoundCloud page: ${scUrl}`);
+                            AgentActivityChip.handleTag('soundcloud_page', scUrl);
+                            window.openEmbedCanvasPage?.('soundcloud', scUrl);
+                        }
+                        // [BANDCAMP:url] — play in music player embed
+                        const bandcampMatch = text.match(/\[BANDCAMP:([^\]]+)\]/i);
+                        if (bandcampMatch && !canvasCommandsProcessed.has('BANDCAMP')) {
+                            canvasCommandsProcessed.add('BANDCAMP');
+                            const bcUrl = bandcampMatch[1].trim();
+                            ActionConsole.addEntry('system', `Bandcamp: ${bcUrl}`);
+                            AgentActivityChip.handleTag('bandcamp', bcUrl);
+                            window.musicPlayer?.playBandcamp(bcUrl);
+                        }
+                        // [BANDCAMP_PAGE:url] — full-screen canvas page
+                        const bandcampPageMatch = text.match(/\[BANDCAMP_PAGE:([^\]]+)\]/i);
+                        if (bandcampPageMatch && !canvasCommandsProcessed.has('BANDCAMP_PAGE')) {
+                            canvasCommandsProcessed.add('BANDCAMP_PAGE');
+                            const bcUrl = bandcampPageMatch[1].trim();
+                            ActionConsole.addEntry('system', `Bandcamp page: ${bcUrl}`);
+                            AgentActivityChip.handleTag('bandcamp_page', bcUrl);
+                            window.openEmbedCanvasPage?.('bandcamp', bcUrl);
                         }
                         // Check for [REGISTER_FACE:name] — agent registers current camera frame
                         const registerFaceMatch = text.match(/\[REGISTER_FACE:([^\]]+)\]/i);
@@ -3952,6 +4232,10 @@ initUpdateChecker();
                                     this._wasAgentic = true;
                                     StatusModule.update('thinking', `WORKING... ${secs}s`);
                                     AgentActivityChip.show('⏳', `Working... ${secs}s`);
+                                    // Refresh the transcript thinking indicator so the
+                                    // elapsed-time subtitle ticks even between tool_start
+                                    // events (one tool can run 5-20s and we were static).
+                                    TranscriptPanel.updateThinkingElapsed?.('still working');
                                 }
 
                                 // Queued: openclaw is busy, message will be processed after current run
@@ -3972,9 +4256,41 @@ initUpdateChecker();
                                     }
                                 }
 
-                                // Server retrying empty response — keep stream alive, no fallback
+                                // Server retrying empty response — keep stream alive, no fallback.
+                                // Cascades can run 3-8s; one-shot filler leaves the user
+                                // hanging. Use a recurring interval that speaks progressively
+                                // longer acknowledgements via the browser's SpeechSynthesis
+                                // API, with increasing wait times, until real audio arrives.
+                                // Canceled in text_done/audio handlers below.
                                 if (data.type === 'retrying') {
                                     console.log('[Conversation] Server retrying empty response — waiting for result...');
+                                    if (!this._cascadeFillerTimer) {
+                                        const fillerPhrases = [
+                                            'one moment',
+                                            'still working on it',
+                                            'almost there',
+                                            'hang tight',
+                                        ];
+                                        let fillerIdx = 0;
+                                        const speakFiller = () => {
+                                            if (!this._cascadeFillerTimer) return;
+                                            if ('speechSynthesis' in window) {
+                                                try {
+                                                    const u = new SpeechSynthesisUtterance(fillerPhrases[Math.min(fillerIdx, fillerPhrases.length - 1)]);
+                                                    u.rate = 1.1;
+                                                    u.volume = 0.6;
+                                                    window.speechSynthesis.speak(u);
+                                                    console.log(`[Cascade] filler ${fillerIdx + 1}: "${fillerPhrases[Math.min(fillerIdx, fillerPhrases.length - 1)]}"`);
+                                                } catch (_) {}
+                                            }
+                                            fillerIdx++;
+                                            // Space subsequent fillers further apart so we don't
+                                            // chatter over ourselves
+                                            const next = Math.min(4000 + fillerIdx * 500, 6000);
+                                            this._cascadeFillerTimer = setTimeout(speakFiller, next);
+                                        };
+                                        this._cascadeFillerTimer = setTimeout(speakFiller, 2000);
+                                    }
                                     continue;
                                 }
 
@@ -3997,7 +4313,14 @@ initUpdateChecker();
                                     // Process canvas commands from interim response
                                     this.handleCanvasCommands(cleanedInterim, canvasCommandsProcessed);
 
-                                    if (data.actions) ActionConsole.processActions(data.actions);
+                                    // NOTE: data.actions intentionally NOT re-processed here —
+                                    // every action already rendered via live type:'action'
+                                    // stream events. Re-processing would duplicate every
+                                    // tool call in the action panel. Also important during
+                                    // cascade refires (empty-final retry, steer-recovery):
+                                    // the captured_actions server-side may be cleared/refilled
+                                    // which would cause the final text_done summary to show
+                                    // partial state.
                                     ActionConsole.addEntry('system', 'Background tasks running — waiting for results...');
 
                                     // Reset streaming state for sub-agent result phase
@@ -4016,6 +4339,20 @@ initUpdateChecker();
 
                                 // Text done: full response finalized
                                 if (data.type === 'text_done') {
+                                    // Mark the run as finished-from-server so a
+                                    // follow-up sendMessage won't mistakenly route
+                                    // through /interject (which would steer into a
+                                    // closed turn and poison the session).
+                                    this._textDoneReceived = true;
+                                    // Cancel any pending cascade filler TTS so it
+                                    // doesn't speak over the real response.
+                                    if (this._cascadeFillerTimer) {
+                                        clearTimeout(this._cascadeFillerTimer);
+                                        this._cascadeFillerTimer = null;
+                                        if ('speechSynthesis' in window) {
+                                            try { window.speechSynthesis.cancel(); } catch (_) {}
+                                        }
+                                    }
                                     const fullResponse = data.response || streamingText;
                                     const cleanedResponse = this.stripReasoningTokens(fullResponse);
                                     const displayText = stripCanvasTags(cleanedResponse);
@@ -4039,11 +4376,15 @@ initUpdateChecker();
                                             reader.cancel();
                                             return;
                                         }
-                                        console.warn('[text_done] Empty response — showing fallback');
-                                        const fallback = "Sorry, I couldn't process that. Could you try again?";
-                                        TranscriptPanel.finalizeStreaming(fallback);
-                                        ActionConsole.addEntry('error', 'Empty response from agent');
-                                        // Don't send fallback to TTS — just re-enable mic
+                                        // Cascade exhausted — every recovery layer failed.
+                                        // Do NOT inject "Sorry, I couldn't process that" into
+                                        // the transcript: it pollutes conversation history and
+                                        // most users just need to retry naturally. Log in the
+                                        // action console (for debugging / transparency) and
+                                        // silently re-enable the mic so the user can re-speak.
+                                        console.warn('[text_done] Empty response after full cascade — silent resume');
+                                        TranscriptPanel.finalizeStreaming(null);
+                                        ActionConsole.addEntry('error', 'No response from agent after recovery — mic re-enabled, please retry');
                                         reader.cancel();
                                         return;
                                     }
@@ -4079,7 +4420,7 @@ initUpdateChecker();
                                     TranscriptPanel.finalizeStreaming(displayText);
 
                                     this._wasAgentic = false;
-                                    if (data.actions) ActionConsole.processActions(data.actions);
+                                    // data.actions not re-processed here — see text_interim for rationale
                                     ActionConsole.addEntry('system', `Response complete (${fullResponse?.length || 0} chars, LLM: ${data.timing?.llm_ms}ms)`);
                                     AgentActivityChip.show('✅', 'Done');
                                     AgentActivityChip.hide(1500);
@@ -4088,6 +4429,14 @@ initUpdateChecker();
 
                                 // Audio: TTS ready to play
                                 if (data.type === 'audio') {
+                                    // Cancel any cascade filler — real TTS is about to speak
+                                    if (this._cascadeFillerTimer) {
+                                        clearTimeout(this._cascadeFillerTimer);
+                                        this._cascadeFillerTimer = null;
+                                    }
+                                    if ('speechSynthesis' in window) {
+                                        try { window.speechSynthesis.cancel(); } catch (_) {}
+                                    }
                                     if (data.audio) {
                                         console.log(`TTS ready (${data.timing?.tts_ms}ms, total: ${data.timing?.total_ms}ms)`);
                                         ActionConsole.addEntry('tts', `Playing TTS (TTS: ${data.timing?.tts_ms}ms)`);
@@ -5140,6 +5489,7 @@ initUpdateChecker();
                             .replace(/\[MUSIC_NEXT\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
                             .trim();
                         this.callbacks.onTranscript(displayText, false);
                         TranscriptPanel.addMessage('assistant', displayText);
@@ -5194,7 +5544,7 @@ initUpdateChecker();
                         this._fetchAbortController.abort();
                         this._fetchAbortController = null;
                         console.warn(`⛔ ABORT source: VoiceConversation.handleUserTranscript (TTS playing)`);
-                        fetch(`${this.config.serverUrl}/api/conversation/abort`, {
+                        fetch(`${this.config.serverUrl}${convPath('abort')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ source: 'voice-handleUserTranscript', text: transcript.substring(0, 50) }),
@@ -5203,7 +5553,7 @@ initUpdateChecker();
                     } else {
                         // Agent working silently → INTERJECT (smart routing)
                         console.log(`🔀 INTERJECT: "${transcript.substring(0,50)}" into active run`);
-                        fetch(`${this.config.serverUrl}/api/conversation/interject`, {
+                        fetch(`${this.config.serverUrl}${convPath('interject')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ message: transcript, source: 'voice-handleUserTranscript' }),
@@ -5307,9 +5657,14 @@ initUpdateChecker();
                             .replace(/\[SESSION_RESET\]/gi, '')
                             .replace(/\[SUNO_GENERATE:[^\]]*\]/gi, '')
                             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
+                            .replace(/\[SOUNDCLOUD:[^\]]*\]/gi, '')
+                            .replace(/\[SOUNDCLOUD_PAGE:[^\]]*\]/gi, '')
+                            .replace(/\[BANDCAMP:[^\]]*\]/gi, '')
+                            .replace(/\[BANDCAMP_PAGE:[^\]]*\]/gi, '')
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
                             .trim();
 
                         this.callbacks.onTranscript(displayText, false);
@@ -5405,6 +5760,26 @@ initUpdateChecker();
                 if (spotifyMatch) {
                     window.musicPlayer?.playSpotify(spotifyMatch[1].trim(), spotifyMatch[2]?.trim() || '');
                 }
+                // [SOUNDCLOUD:url]
+                const soundcloudMatch = text.match(/\[SOUNDCLOUD:([^\]]+)\]/i);
+                if (soundcloudMatch) {
+                    window.musicPlayer?.playSoundCloud(soundcloudMatch[1].trim());
+                }
+                // [SOUNDCLOUD_PAGE:url]
+                const soundcloudPageMatch = text.match(/\[SOUNDCLOUD_PAGE:([^\]]+)\]/i);
+                if (soundcloudPageMatch) {
+                    window.openEmbedCanvasPage?.('soundcloud', soundcloudPageMatch[1].trim());
+                }
+                // [BANDCAMP:url]
+                const bandcampMatch = text.match(/\[BANDCAMP:([^\]]+)\]/i);
+                if (bandcampMatch) {
+                    window.musicPlayer?.playBandcamp(bandcampMatch[1].trim());
+                }
+                // [BANDCAMP_PAGE:url]
+                const bandcampPageMatch = text.match(/\[BANDCAMP_PAGE:([^\]]+)\]/i);
+                if (bandcampPageMatch) {
+                    window.openEmbedCanvasPage?.('bandcamp', bandcampPageMatch[1].trim());
+                }
                 // [REGISTER_FACE:name]
                 const registerFaceMatch = text.match(/\[REGISTER_FACE:([^\]]+)\]/i);
                 if (registerFaceMatch) {
@@ -5436,6 +5811,20 @@ initUpdateChecker();
                 if (/\[SLEEP\]/i.test(text)) {
                     console.log('[Sleep] Agent requested sleep — will disconnect after audio');
                     window._sleepAfterResponse = true;
+                }
+                // [AIRADIO_*] — final-pass dispatch. Each unique (verb,data) fires once.
+                {
+                    const _seen = new Set();
+                    const _re = /\[AIRADIO_([A-Z_]+)(?::([^\]]*))?\]/gi;
+                    let _m;
+                    while ((_m = _re.exec(text)) !== null) {
+                        const v = _m[1].toUpperCase();
+                        const d = (_m[2] || '').trim();
+                        const k = `${v}:${d}`;
+                        if (_seen.has(k)) continue;
+                        _seen.add(k);
+                        window.airadioDispatch?.(v, d);
+                    }
                 }
                 // HTML canvas page
                 const htmlMatch =
@@ -6528,6 +6917,87 @@ initUpdateChecker();
             window.sunoModule = SunoModule;
             SunoModule.init();
 
+            // openEmbedCanvasPage — create a full-screen canvas page for a
+            // SoundCloud or Bandcamp track and route the UI to it.
+            window.openEmbedCanvasPage = async function openEmbedCanvasPage(provider, url) {
+                const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => (
+                    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]
+                ));
+                let meta = { title: url, artist: provider, artwork: '', embedHtml: '' };
+
+                try {
+                    if (provider === 'soundcloud') {
+                        // oEmbed direct from browser (CORS-enabled) — avoids server WAF
+                        const r = await fetch(`https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(url)}`);
+                        if (r.ok) {
+                            const oe = await r.json();
+                            meta.title = oe.title || url;
+                            meta.artist = oe.author_name || provider;
+                            meta.artwork = oe.thumbnail_url || '';
+                            meta.embedHtml = oe.html || '';
+                        }
+                    } else if (provider === 'bandcamp') {
+                        // Bandcamp has no oEmbed + page needs server-side fetch (no CORS)
+                        const r = await fetch(`${CONFIG.serverUrl}/api/music/bandcamp/resolve?url=${encodeURIComponent(url)}`).then(r => r.json());
+                        if (r && r.ok) {
+                            meta.title = r.title || url;
+                            meta.artist = r.artist || provider;
+                            meta.artwork = r.artwork || '';
+                            meta.embedHtml = r.embed_html || '';
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[openEmbedCanvasPage] resolve failed:', e);
+                }
+
+                const pageHtml = `<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>${esc(meta.title)}</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0a0a0b 0%,#111 100%);color:#e5e7eb;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px;}
+  .art{width:min(420px,92vw);aspect-ratio:1/1;object-fit:cover;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.55);background:#1a1a1c;}
+  h1{margin:22px 0 2px;font-size:22px;font-weight:600;text-align:center;max-width:92vw;overflow-wrap:anywhere}
+  .artist{color:#9ca3af;margin-bottom:22px;font-size:14px;}
+  .embed{width:min(640px,96vw)}
+  .embed iframe{width:100%;border:0;border-radius:8px;background:#1a1a1c;}
+  .open{display:inline-block;margin-top:20px;padding:10px 16px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:500;}
+  .open:hover{background:#2563eb;}
+  .provider{position:fixed;top:14px;right:14px;font-size:11px;padding:4px 10px;background:rgba(255,255,255,.08);border-radius:999px;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;}
+</style></head><body>
+<div class="provider">${esc(provider)}</div>
+${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
+<h1>${esc(meta.title) || '(untitled)'}</h1>
+<div class="artist">${esc(meta.artist)}</div>
+<div class="embed">${meta.embedHtml || `<a class="open" href="${esc(url)}" target="_blank" rel="noopener">Open on ${esc(provider)}</a>`}</div>
+</body></html>`;
+
+                const stamp = Date.now().toString(36);
+                const filename = `${provider}-${stamp}.html`;
+                const pageTitle = meta.title ? `${meta.title}` : `${provider} track`;
+
+                try {
+                    const saveRes = await fetch(`${CONFIG.serverUrl}/api/canvas/pages`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename, title: pageTitle, html: pageHtml }),
+                    }).then(r => r.json());
+
+                    if (saveRes && saveRes.filename) {
+                        try {
+                            await fetch(`${CONFIG.serverUrl}/api/canvas/manifest/sync`, { method: 'POST' });
+                            await window.CanvasMenu?.loadManifest?.();
+                        } catch {}
+                        const pageId = saveRes.page_id || saveRes.filename.replace(/\.html$/, '');
+                        window.CanvasControl?.showPage?.(pageId);
+                    }
+                } catch (e) {
+                    console.error('[openEmbedCanvasPage] save failed:', e);
+                }
+            };
+
             console.log('OpenVoiceUI initialized!');
             console.log('Mode:', activeMode);
             console.log('TTS Provider:', ProviderManager.selectedProvider);
@@ -6607,6 +7077,32 @@ initUpdateChecker();
                             break;
                         case 'close':
                             CanvasControl.hide();
+                            break;
+                        case 'play-external':
+                            // Canvas page asking the music player to play a SoundCloud/Bandcamp embed
+                            // event.data: { type, action: 'play-external', provider: 'soundcloud'|'bandcamp', url }
+                            {
+                                const prov = event.data.provider;
+                                const trackUrl = event.data.url;
+                                if (!trackUrl) break;
+                                if (prov === 'soundcloud') {
+                                    window.musicPlayer?.playSoundCloud(trackUrl);
+                                } else if (prov === 'bandcamp') {
+                                    window.musicPlayer?.playBandcamp(trackUrl);
+                                } else {
+                                    console.warn('[Canvas] play-external unknown provider:', prov);
+                                }
+                            }
+                            break;
+                        case 'open-embed-page':
+                            // Canvas page asking for a full-screen embed canvas page (same as [SOUNDCLOUD_PAGE:url])
+                            {
+                                const prov = event.data.provider;
+                                const trackUrl = event.data.url;
+                                if (trackUrl && (prov === 'soundcloud' || prov === 'bandcamp')) {
+                                    window.openEmbedCanvasPage?.(prov, trackUrl);
+                                }
+                            }
                             break;
                     }
                 });
@@ -7775,9 +8271,17 @@ initUpdateChecker();
                 this.removeThinking();
                 const msg = document.createElement('div');
                 msg.className = 'tp-msg assistant tp-thinking';
-                msg.innerHTML = `<div class="tp-meta">${this.agentName}</div><div class="tp-dots"><span></span><span></span><span></span></div>`;
+                // Keep the animated dots visible ALWAYS and put tool/status text
+                // as a separate subtitle line that updates without killing the
+                // animation. Earlier implementation replaced dots.textContent on
+                // every tool_start, producing static text that was easy to
+                // misread as "frozen".
+                msg.innerHTML = `<div class="tp-meta">${this.agentName}</div>` +
+                                `<div class="tp-dots"><span></span><span></span><span></span></div>` +
+                                `<div class="tp-tool-status" style="font-size:0.85em;opacity:0.75;margin-top:4px"></div>`;
                 this.messages.appendChild(msg);
                 this.messages.scrollTop = this.messages.scrollHeight;
+                this._thinkingStartedAt = Date.now();
                 if (!this.isVisible && this.unreadDot) {
                     this.unreadDot.style.display = 'block';
                 }
@@ -7791,9 +8295,31 @@ initUpdateChecker();
 
             showToolStatus(toolName) {
                 const existing = this.messages?.querySelector('.tp-thinking');
-                if (existing) {
-                    const dots = existing.querySelector('.tp-dots');
-                    if (dots) dots.textContent = `using tool: ${toolName}…`;
+                if (!existing) return;
+                // Preserve the animated dots — update ONLY the subtitle line.
+                // With elapsed time the user sees a live counter even while
+                // one tool is churning (so it doesn't feel frozen between
+                // discrete tool_start events).
+                const status = existing.querySelector('.tp-tool-status');
+                if (status) {
+                    const elapsed = this._thinkingStartedAt
+                        ? Math.floor((Date.now() - this._thinkingStartedAt) / 1000)
+                        : 0;
+                    status.textContent = `using ${toolName} · ${elapsed}s`;
+                }
+            },
+
+            // Called by heartbeat events — refreshes the elapsed counter even
+            // between tool_start events so the user sees a live clock.
+            updateThinkingElapsed(label) {
+                const existing = this.messages?.querySelector('.tp-thinking');
+                if (!existing) return;
+                const status = existing.querySelector('.tp-tool-status');
+                if (status) {
+                    const elapsed = this._thinkingStartedAt
+                        ? Math.floor((Date.now() - this._thinkingStartedAt) / 1000)
+                        : 0;
+                    status.textContent = label ? `${label} · ${elapsed}s` : `${elapsed}s`;
                 }
             },
 
@@ -8856,7 +9382,7 @@ initUpdateChecker();
                         // Tell server to abort the openclaw run (fire-and-forget)
                         console.warn('⛔ ABORT source: PTT interrupt');
                         const serverUrl = cm.config?.serverUrl || '';
-                        fetch(`${serverUrl}/api/conversation/abort`, {
+                        fetch(`${serverUrl}${convPath('abort')}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ source: 'ptt-interrupt' }),
