@@ -130,6 +130,10 @@ def create_app(config_override: dict = None):
             '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
             '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
             '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
+            '/desktop/v1/',   # Desktop plugin APIs (ovui-core, desktop-native) —
+                              # called by KDE plasmoids running inside webtop-ubuntu-os,
+                              # which don't carry Clerk JWTs. Bridge-backed writes
+                              # are auth'd via OVUI_BRIDGE_AUTH_TOKEN between webtop ↔ bun.
         )
         _PUBLIC_EXACT = {
             '/',           # main page — hosts the Clerk login gate itself

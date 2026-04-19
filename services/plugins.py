@@ -60,6 +60,77 @@ PROVISION_TIMEOUT = 120
 _remote_registry_cache: Optional[List[dict]] = None
 _remote_registry_age: float = 0
 
+# ─── ovui-bridge plasmoid install (Cycle 6 Phase 0) ─────────────────────
+# When a plugin ships a plasmoid/ subdir, we POST it to ovui-bridge so KDE
+# Plasma picks it up as a real desktop widget. Bridge + bun live on the
+# jambot-ubuntu-os network for the ubuntu-os tenant; env override lets
+# other deployments point elsewhere. Missing env → skip silently; plugin
+# loads fine without the plasmoid.
+OVUI_BRIDGE_URL = os.getenv("OVUI_BRIDGE_URL", "http://webtop-ubuntu-os:8090")
+OVUI_BRIDGE_AUTH_TOKEN = os.getenv("OVUI_BRIDGE_AUTH_TOKEN", "").strip()
+OVUI_BRIDGE_TIMEOUT = int(os.getenv("OVUI_BRIDGE_TIMEOUT", "20"))
+
+
+def _zip_plasmoid_dir(plasmoid_dir: Path) -> BytesIO:
+    """Zip the plasmoid/ subtree in-memory. Preserves the directory structure
+    relative to plasmoid_dir itself (metadata.desktop, contents/, icons/).
+    """
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(plasmoid_dir):
+            for f in files:
+                full = Path(root) / f
+                arc = str(full.relative_to(plasmoid_dir))
+                zf.write(full, arc)
+    buf.seek(0)
+    return buf
+
+
+def _install_plasmoid_via_bridge(plugin_id: str, plasmoid_dir: Path) -> None:
+    """Fire-and-forget POST to ovui-bridge /api/install-plasmoid.
+
+    Never fails plugin load — logs warning on any error (unreachable bridge,
+    auth failure, extract error). The plugin's server routes still register
+    and the canvas page still loads; just the desktop widget won't appear.
+    """
+    if not OVUI_BRIDGE_AUTH_TOKEN:
+        logger.info(
+            f"[Plugin:{plugin_id}] plasmoid/ dir present but "
+            f"OVUI_BRIDGE_AUTH_TOKEN not set - skipping bridge install"
+        )
+        return
+    try:
+        zip_buf = _zip_plasmoid_dir(plasmoid_dir)
+        resp = requests.post(
+            f"{OVUI_BRIDGE_URL}/api/install-plasmoid",
+            headers={"Authorization": f"Bearer {OVUI_BRIDGE_AUTH_TOKEN}"},
+            files={"plasmoid": ("plasmoid.zip", zip_buf, "application/zip")},
+            data={"plugin_id": plugin_id},
+            timeout=OVUI_BRIDGE_TIMEOUT,
+        )
+        if resp.ok:
+            try:
+                body = resp.json()
+            except ValueError:
+                body = {}
+            logger.info(
+                f"[Plugin:{plugin_id}] plasmoid installed via bridge: "
+                f"{body.get('installed_at', OVUI_BRIDGE_URL)}"
+            )
+        else:
+            logger.warning(
+                f"[Plugin:{plugin_id}] bridge install-plasmoid HTTP {resp.status_code}: "
+                f"{resp.text[:300]}"
+            )
+    except requests.ConnectionError as e:
+        logger.warning(
+            f"[Plugin:{plugin_id}] bridge unreachable at {OVUI_BRIDGE_URL}: {e}"
+        )
+    except Exception as e:  # noqa: BLE001 - never fail plugin load
+        logger.warning(
+            f"[Plugin:{plugin_id}] plasmoid install unexpected error: {e}"
+        )
+
 
 def _get_provision_url() -> str:
     """Get the provisioning service URL, auto-detecting the Docker gateway IP."""
@@ -554,6 +625,14 @@ def load_plugins(app):
                         logger.info(f"[Plugin:{plugin_id}] Deployed {lore_count} lore files to {lore_dest}")
                 else:
                     logger.info(f"[Plugin:{plugin_id}] Lore available at /app/plugins/{plugin_id}/lore/ (workspace not writable)")
+
+            # ── Install plasmoid/ subdir into KDE via ovui-bridge ──
+            # Cycle 6 Phase 0: any plugin that ships a plasmoid/ subdir gets
+            # its widget auto-pushed to the webtop KDE session. Never fails
+            # plugin load; just logs a warning if the bridge isn't reachable.
+            plasmoid_dir = plugin_dir / "plasmoid"
+            if plasmoid_dir.is_dir():
+                _install_plasmoid_via_bridge(plugin_id, plasmoid_dir)
 
             _registry[plugin_id] = manifest
             count += 1
