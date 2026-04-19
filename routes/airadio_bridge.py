@@ -26,13 +26,14 @@ Endpoints registered:
   GET   /api/airadio/library
 """
 
+import json
 import logging
 import mimetypes
 import os
 from pathlib import Path
 
 import requests as http_requests
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g as flask_g, jsonify, request
 
 from services.paths import (
     GENERATED_MUSIC_DIR,
@@ -59,6 +60,99 @@ AIRADIO_USER_KEY = os.environ.get("AIRADIO_USER_KEY", "")
 AIRADIO_AGENT_KEY = os.environ.get("AIRADIO_AGENT_KEY", "")
 AIRADIO_JAMBOT_USER = os.environ.get("AIRADIO_JAMBOT_USER", "")
 AIRADIO_TIMEOUT = int(os.environ.get("AIRADIO_TIMEOUT", "30"))
+
+# Per-Clerk-user key map — maps JamBot Clerk user_ids to their personal
+# aia_sk_ keys so the bridge can route pushes to the logged-in user's
+# AI-Radio account (not the container's tenant-shared account).
+# Shape:
+#   {
+#     "user_3AJG...ysplR": { "aia_sk": "aia_sk_...", "username": "mikecerqua" },
+#     ...
+#   }
+# File is re-read on every request (cheap) so admin can add users without
+# restarting any container.
+AIRADIO_USER_KEYS_PATH = os.environ.get(
+    "AIRADIO_USER_KEYS_PATH", "/app/data/airadio-user-keys.json"
+)
+
+# AI-Radio Genre table uses a foreign-key from Song.genreSlug → Genre.slug.
+# Only these slugs are accepted; anything else causes a P2003 FK violation.
+# Keep synced with the seed in the airadio repo.
+_AIRADIO_VALID_GENRES = {
+    "ambient", "classical", "country", "electronic", "folk", "hip-hop",
+    "instrumental", "jazz", "lofi", "pop", "reggae", "rnb", "rock",
+}
+
+# CLAP song-tagger label → AI-Radio genre slug. Keep aligned with
+# song-tagger/vocabularies.json genre axis.
+_TAGGER_GENRE_TO_SLUG = {
+    "rock": "rock", "indie rock": "rock", "alternative rock": "rock",
+    "punk rock": "rock", "heavy metal": "rock",
+    "pop": "pop", "disco": "pop",
+    "jazz": "jazz", "blues": "jazz",
+    "classical": "classical", "orchestral": "classical",
+    "cinematic soundtrack": "classical",
+    "country": "country", "bluegrass": "country", "americana": "country",
+    "folk": "folk",
+    "hip hop": "hip-hop", "rap": "hip-hop", "trap": "hip-hop",
+    "rhythm and blues": "rnb", "neo soul": "rnb", "classic soul": "rnb",
+    "funk": "rnb", "gospel": "rnb",
+    "electronic dance": "electronic", "house music": "electronic",
+    "techno": "electronic", "trance": "electronic", "drum and bass": "electronic",
+    "synthwave": "electronic", "vaporwave": "electronic",
+    "ambient": "ambient", "chillout": "ambient", "downtempo": "ambient",
+    "lo-fi beats": "lofi",
+    "reggae": "reggae", "ska": "reggae",
+}
+
+
+_SONG_TAGGER_URL = os.environ.get("SONG_TAGGER_URL", "http://song-tagger:8770").rstrip("/")
+_SONG_TAGGER_TIMEOUT = float(os.environ.get("SONG_TAGGER_TIMEOUT", "180"))
+
+
+def _container_to_host_path(audio_path: Path) -> Path:
+    """
+    Translate a container-view path (/app/runtime/...) to the equivalent
+    host-view path (/mnt/clients/<tenant>/openvoiceui/...). The shared
+    song-tagger service reads files via its /mnt/clients bind mount — it
+    can't see /app/runtime, so callers must pass host paths.
+    """
+    tenant = (os.getenv("JAMBOT_TENANT") or os.getenv("JAMBOT_USER") or os.getenv("CLIENT_USERNAME") or "").strip()
+    parts = audio_path.parts
+    if tenant and len(parts) >= 4 and parts[1] == "app" and parts[2] == "runtime":
+        return Path("/mnt/clients") / tenant / "openvoiceui" / Path(*parts[3:])
+    return audio_path
+
+
+def _load_song_tagger_result(audio_path: Path) -> dict:
+    """
+    Ask the shared song-tagger service for this file's tag JSON. The
+    service caches in its own bind-mounted tags volume, so repeat calls
+    are effectively free. Returns {} on any failure (service down, file
+    not accessible, model still loading).
+
+    The path sent is the HOST path, which the service can read via its
+    /mnt/clients:ro mount. Inside this container the file lives at
+    /app/runtime/..., which the service can NOT see.
+    """
+    host_path = _container_to_host_path(audio_path)
+    try:
+        resp = http_requests.post(
+            f"{_SONG_TAGGER_URL}/tag",
+            json={"path": str(host_path)},
+            timeout=_SONG_TAGGER_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            body = resp.json()
+            if body.get("ok"):
+                return body.get("tag") or {}
+        else:
+            logger.info(
+                "song-tagger returned HTTP %s for %s", resp.status_code, host_path.name
+            )
+    except Exception as exc:
+        logger.info("song-tagger unreachable for %s: %s", host_path.name, exc)
+    return {}
 
 # ---------------------------------------------------------------------------
 # Whitelisted local directories for set-image (security: NO arbitrary paths)
@@ -123,19 +217,64 @@ def _bridge_not_configured_response():
     )
 
 
+def _load_user_key_map() -> dict:
+    """Return the clerk_uid → { aia_sk, username } map, or {} on any error."""
+    try:
+        with open(AIRADIO_USER_KEYS_PATH, "r") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        logger.warning("airadio user-key map load failed: %s", exc)
+        return {}
+
+
+def _resolve_request_user_key() -> str:
+    """
+    Pick the aia_sk_ key for the current request.
+
+    Priority:
+      1. Logged-in Clerk user has a personal key in the user-key map
+         (resolves "Mike on bhb's dashboard pushes to Mike's AI-Radio")
+      2. Container env AIRADIO_USER_KEY (tenant-scoped aia_sk_ key)
+      3. Empty string → caller falls back to legacy AIRADIO_AGENT_KEY path
+    """
+    try:
+        clerk_uid = getattr(flask_g, "clerk_user_id", None)
+    except RuntimeError:
+        # Not inside a request context (shouldn't happen on real calls)
+        clerk_uid = None
+
+    if clerk_uid:
+        entry = _load_user_key_map().get(clerk_uid) or {}
+        personal_key = (entry.get("aia_sk") or "").strip()
+        if personal_key:
+            logger.info(
+                "airadio: routing to personal key for clerk_uid=%s (user=%s)",
+                clerk_uid, entry.get("username") or "?",
+            )
+            return personal_key
+
+    return AIRADIO_USER_KEY
+
+
 def _agent_headers() -> dict:
     """
     Auth headers attached to every outbound AI-Radio call.
 
-    Preferred path: Authorization: Bearer aia_sk_* (per-user key from the
-    AI-Radio settings page). Identity is embedded in the key.
+    Preferred path: Authorization: Bearer aia_sk_* (per-user key).
+    The key is resolved per-request so the logged-in Clerk user's personal
+    aia_sk_ is used when present, regardless of which tenant subdomain
+    they happen to be browsing.
 
     Legacy fallback: X-JamBot-Agent-Key + X-JamBot-User (platform-shared
     secret + subdomain-as-user). Retained so existing clients keep working
     during migration.
     """
-    if AIRADIO_USER_KEY:
-        return {"Authorization": f"Bearer {AIRADIO_USER_KEY}"}
+    user_key = _resolve_request_user_key()
+    if user_key:
+        return {"Authorization": f"Bearer {user_key}"}
     return {
         "X-JamBot-Agent-Key": AIRADIO_AGENT_KEY,
         "X-JamBot-User": AIRADIO_JAMBOT_USER,
@@ -321,20 +460,63 @@ def _stream_song(local_path: Path, fields: dict):
     """
     POST a song file to AI-Radio's /api/agent/push-song as multipart/form-data.
 
-    `fields` is a dict of metadata fields (title, source, etc.) that travel
-    alongside the audio bytes. AI-Radio dedupes via the `sourceHash` it
-    computes server-side.
+    AI-Radio expects two specific fields:
+      audio : File
+      meta  : JSON string { title, artist?, genre?, duration?, isPublic?,
+                            sunoId?, sourceHash?, cover? }
+
+    The `fields` dict we receive here is the OVU-side shape (title, source,
+    playlist, artist, genre, description, duration, sunoId). We drop the
+    OVU-only keys (source, playlist, description) and coerce duration to int.
     """
     mime, _ = mimetypes.guess_type(str(local_path))
     if not mime:
         mime = "audio/mpeg"
+
+    meta = {}
+    if fields:
+        if fields.get("title"):
+            meta["title"] = str(fields["title"])[:200]
+        if fields.get("artist"):
+            meta["artist"] = str(fields["artist"])[:200]
+        raw_genre = str(fields.get("genre") or "").strip().lower()
+        # Map common aliases → valid slugs, then drop anything that still
+        # isn't in the allowlist. Sending an unknown slug causes P2003.
+        _genre_alias = {
+            "hip hop": "hip-hop", "hiphop": "hip-hop",
+            "lo-fi": "lofi", "lo fi": "lofi",
+            "r&b": "rnb", "r and b": "rnb", "rhythm and blues": "rnb",
+            "electronica": "electronic", "edm": "electronic",
+        }
+        raw_genre = _genre_alias.get(raw_genre, raw_genre)
+        if raw_genre in _AIRADIO_VALID_GENRES:
+            meta["genre"] = raw_genre
+        dur = fields.get("duration")
+        if dur is not None:
+            try:
+                meta["duration"] = max(int(float(dur)), 0)
+            except (TypeError, ValueError):
+                pass
+        if fields.get("sunoId"):
+            meta["sunoId"] = str(fields["sunoId"])[:200]
+        if fields.get("sourceHash"):
+            meta["sourceHash"] = str(fields["sourceHash"])[:128]
+        if fields.get("isPublic") is not None:
+            meta["isPublic"] = bool(fields["isPublic"])
+        if fields.get("cover"):
+            meta["cover"] = str(fields["cover"])
+
+    # Title is required — fall back to file stem if somehow missing.
+    if "title" not in meta:
+        meta["title"] = local_path.stem
+
     with open(local_path, "rb") as fh:
-        files = {"file": (local_path.name, fh, mime)}
+        files = {"audio": (local_path.name, fh, mime)}
         return _airadio_call(
             "POST",
             "/api/agent/push-song",
             files=files,
-            data=fields or None,
+            data={"meta": json.dumps(meta)},
         )
 
 
@@ -358,31 +540,84 @@ def _stream_image(local_path: Path, fields: dict):
 # ---------------------------------------------------------------------------
 
 
+def _resolve_song_by_query(query: str, preferred_playlist: str = None):
+    """
+    Resolve a title/filename query against both playlists (generated first,
+    then library). Does exact match on filename first, then fuzzy substring
+    match against filename/title. Returns (Path, metadata_dict, playlist_name)
+    or (None, None, None).
+
+    Voice tags emit titles like "Ubuntu (You Bun Too)" — not filenames — so
+    callers can't know the sanitised on-disk name ("ubuntu-you-bun-too.mp3").
+    """
+    if not query:
+        return None, None, None
+
+    q_norm = query.strip().lower()
+    _quote_map = str.maketrans({'\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"'})
+    q_norm = q_norm.translate(_quote_map)
+
+    order = ["generated", "library"]
+    if preferred_playlist in order:
+        order = [preferred_playlist] + [p for p in order if p != preferred_playlist]
+
+    for pl in order:
+        # Exact filename shortcut (preserves existing behavior for callers
+        # who already pass a filename).
+        path, meta = _resolve_local_song(query, pl)
+        if path is not None:
+            return path, meta, pl
+
+        # Fuzzy title/filename match against metadata.
+        meta_map = (load_generated_music_metadata() if pl == "generated"
+                    else load_music_metadata())
+        base_dir = GENERATED_MUSIC_DIR if pl == "generated" else MUSIC_DIR
+
+        for fname, m in (meta_map or {}).items():
+            t_title = str(m.get("title", "")).lower().translate(_quote_map)
+            t_file = fname.lower()
+            if q_norm and (q_norm in t_title or q_norm in t_file):
+                path, meta2 = _resolve_local_song(fname, pl)
+                if path is not None:
+                    return path, meta2, pl
+
+    return None, None, None
+
+
 @airadio_bp.route("/api/airadio/push-song", methods=["POST"])
 def push_song():
     """
     Push a single song from MUSIC_DIR (library) or GENERATED_MUSIC_DIR
     (generated) to AI-Radio.
 
-    Body: { "filename": "...", "playlist": "library"|"generated",
-            "title": optional, "cover_path": optional local image path }
+    Body: { "filename": "...", "title": optional track title,
+            "playlist": "library"|"generated"|"auto" (default auto),
+            "cover_path": optional local image path }
+
+    Either `filename` or `title` must be provided. When `playlist` is
+    unspecified or "auto", both playlists are searched (generated first).
     """
     if not _bridge_configured():
         return _bridge_not_configured_response()
 
     body = request.get_json(silent=True) or {}
     filename = body.get("filename")
-    playlist = body.get("playlist", "library")
     title = body.get("title")
+    playlist = body.get("playlist") or "auto"
     cover_path = body.get("cover_path")
 
-    local_path, meta = _resolve_local_song(filename, playlist)
+    # Voice tags pass a title (not a filename). Fuzzy-resolve across both
+    # playlists. Fall back to the legacy exact-filename lookup if the caller
+    # explicitly asked for a playlist and passed a filename.
+    query = filename or title
+    preferred = playlist if playlist in ("generated", "library") else None
+    local_path, meta, playlist = _resolve_song_by_query(query, preferred)
     if local_path is None:
         return jsonify({
             "ok": False,
             "error": {
                 "code": "NOT_FOUND",
-                "message": f"Song '{filename}' not found in '{playlist}' playlist",
+                "message": f"Song '{query}' not found in generated or library playlists",
             },
         }), 404
 
@@ -401,6 +636,27 @@ def push_song():
     ):
         if meta and meta.get(src_key) is not None:
             fields[dst_key] = str(meta[src_key])
+
+    # Overlay song-tagger classification when available. Walk the tagger's
+    # ranked genre list (CLAP returns top-5) and pick the first one that
+    # maps to AI-Radio's 13-slug allowlist. The #1 label is sometimes an
+    # un-mappable niche ("bossa nova", "world music", "experimental") —
+    # dropping down to #2/#3 usually lands on a valid slug.
+    tagger = _load_song_tagger_result(local_path)
+    if tagger:
+        ranked = ((tagger.get("axes") or {}).get("genre") or [])
+        # Fallback when ranked list is empty: try top.genre
+        if not ranked:
+            top_g = ((tagger.get("top") or {}).get("genre") or "")
+            ranked = [{"label": top_g, "score": 1.0}] if top_g else []
+        for entry in ranked:
+            label = str(entry.get("label", "")).strip().lower()
+            mapped = _TAGGER_GENRE_TO_SLUG.get(label)
+            if mapped:
+                fields["genre"] = mapped
+                print(f"🏷️  song-tagger genre: '{label}' → '{mapped}' "
+                      f"(score={entry.get('score', 0):.2f})")
+                break
 
     print(f"📻 push-song: {local_path.name} → AI-Radio (playlist={playlist})")
     result = _stream_song(local_path, fields)

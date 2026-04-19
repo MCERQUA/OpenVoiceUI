@@ -440,6 +440,7 @@ export class VoiceSession {
             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
             .replace(/\[SOUND:[^\]]*\]/gi, '')
             .replace(/\[CANVAS_SCREENSHOT\]/gi, '')
+            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
             .trim();
     }
 
@@ -515,6 +516,20 @@ export class VoiceSession {
         if (/\[SLEEP\]/i.test(text) && !seen.has('SLEEP')) {
             seen.add('SLEEP');
             eventBus.emit('cmd:sleep', {});
+        }
+
+        // AI-Radio tags — generic `[AIRADIO_<VERB>(?::data)?]`.
+        // Emitted once per unique (verb, data) pair; shell/airadio-bridge.js
+        // routes to the correct /api/airadio/* endpoint.
+        const airadioRe = /\[AIRADIO_([A-Z_]+)(?::([^\]]*))?\]/gi;
+        let airadioMatch;
+        while ((airadioMatch = airadioRe.exec(text)) !== null) {
+            const verb = airadioMatch[1].toUpperCase();
+            const data = (airadioMatch[2] || '').trim();
+            const key = `AIRADIO:${verb}:${data}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            eventBus.emit('cmd:airadio', { verb, data });
         }
     }
 
