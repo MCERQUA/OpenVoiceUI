@@ -15,10 +15,21 @@ import shutil
 import threading
 import time
 from datetime import datetime
+import mimetypes
 from pathlib import Path
 
 import requests as http_requests
 from flask import Blueprint, Response, jsonify, redirect, request, send_file
+
+# 3D asset MIME types — without these, send_file falls back to
+# application/octet-stream which (combined with X-Content-Type-Options:nosniff)
+# makes browsers download .glb instead of letting <model-viewer> load it inline.
+mimetypes.add_type('model/gltf-binary', '.glb')
+mimetypes.add_type('model/gltf+json', '.gltf')
+mimetypes.add_type('model/vnd.usdz+zip', '.usdz')
+mimetypes.add_type('model/obj', '.obj')
+mimetypes.add_type('model/stl', '.stl')
+mimetypes.add_type('application/octet-stream', '.fbx')  # no registered model/* for FBX
 
 from services.canvas_versioning import (
     list_versions,
