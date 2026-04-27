@@ -44,6 +44,14 @@ _PROVIDERS = {
     'elevenlabs': ElevenLabsProvider,
 }
 
+# qwen3-local: residential-laptop GPU TTS via SSH tunnel — only register when configured
+if os.getenv('QWEN_TTS_LOCAL_URL'):
+    try:
+        from .qwen3_local_provider import Qwen3LocalProvider
+        _PROVIDERS['qwen3-local'] = Qwen3LocalProvider
+    except ImportError:
+        pass
+
 def _load_config() -> Dict[str, Any]:
     """Load providers configuration from JSON file."""
     config_path = os.path.join(os.path.dirname(__file__), 'providers_config.json')
