@@ -33,7 +33,7 @@
   },
 
   "stt": {
-    "provider": "deepgram",
+    "provider": "webspeech",
     "language": "en-US",
     "silence_timeout_ms": 3500,
     "continuous": true,
