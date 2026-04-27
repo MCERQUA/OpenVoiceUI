@@ -2999,7 +2999,7 @@ def tts_clone_voice():
             }), 400
 
         # --- Validate provider ---
-        clone_providers = ('qwen3', 'elevenlabs', 'resemble')
+        clone_providers = ('qwen3', 'qwen3-local', 'elevenlabs', 'resemble')
         if provider_id not in clone_providers:
             return jsonify({
                 'error': f'Voice cloning not supported for provider "{provider_id}". '
@@ -3018,7 +3018,18 @@ def tts_clone_voice():
             f"url={audio_url[:80] if audio_url else 'N/A'}"
         )
 
-        if provider_id == 'qwen3':
+        if provider_id == 'qwen3-local':
+            if not save_path:
+                return jsonify({
+                    'error': 'qwen3-local requires audio file upload (multipart form)'
+                }), 400
+            result = provider.clone_voice(
+                audio_path=str(save_path),
+                name=name,
+                reference_text=reference_text or '',
+            )
+
+        elif provider_id == 'qwen3':
             if not audio_url:
                 return jsonify({'error': 'Qwen3 requires audio_url'}), 400
             result = provider.clone_voice(
