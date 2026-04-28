@@ -4256,41 +4256,12 @@ connectAiradio();
                                     }
                                 }
 
-                                // Server retrying empty response — keep stream alive, no fallback.
-                                // Cascades can run 3-8s; one-shot filler leaves the user
-                                // hanging. Use a recurring interval that speaks progressively
-                                // longer acknowledgements via the browser's SpeechSynthesis
-                                // API, with increasing wait times, until real audio arrives.
-                                // Canceled in text_done/audio handlers below.
+                                // Server retrying empty response — visual indicator only,
+                                // no audio filler (browser SpeechSynthesis sounds robotic
+                                // and violates the "no canned responses" rule).
                                 if (data.type === 'retrying') {
                                     console.log('[Conversation] Server retrying empty response — waiting for result...');
-                                    if (!this._cascadeFillerTimer) {
-                                        const fillerPhrases = [
-                                            'one moment',
-                                            'still working on it',
-                                            'almost there',
-                                            'hang tight',
-                                        ];
-                                        let fillerIdx = 0;
-                                        const speakFiller = () => {
-                                            if (!this._cascadeFillerTimer) return;
-                                            if ('speechSynthesis' in window) {
-                                                try {
-                                                    const u = new SpeechSynthesisUtterance(fillerPhrases[Math.min(fillerIdx, fillerPhrases.length - 1)]);
-                                                    u.rate = 1.1;
-                                                    u.volume = 0.6;
-                                                    window.speechSynthesis.speak(u);
-                                                    console.log(`[Cascade] filler ${fillerIdx + 1}: "${fillerPhrases[Math.min(fillerIdx, fillerPhrases.length - 1)]}"`);
-                                                } catch (_) {}
-                                            }
-                                            fillerIdx++;
-                                            // Space subsequent fillers further apart so we don't
-                                            // chatter over ourselves
-                                            const next = Math.min(4000 + fillerIdx * 500, 6000);
-                                            this._cascadeFillerTimer = setTimeout(speakFiller, next);
-                                        };
-                                        this._cascadeFillerTimer = setTimeout(speakFiller, 2000);
-                                    }
+                                    StatusModule.update('thinking', 'RETRYING...');
                                     continue;
                                 }
 
@@ -4344,15 +4315,6 @@ connectAiradio();
                                     // through /interject (which would steer into a
                                     // closed turn and poison the session).
                                     this._textDoneReceived = true;
-                                    // Cancel any pending cascade filler TTS so it
-                                    // doesn't speak over the real response.
-                                    if (this._cascadeFillerTimer) {
-                                        clearTimeout(this._cascadeFillerTimer);
-                                        this._cascadeFillerTimer = null;
-                                        if ('speechSynthesis' in window) {
-                                            try { window.speechSynthesis.cancel(); } catch (_) {}
-                                        }
-                                    }
                                     const fullResponse = data.response || streamingText;
                                     const cleanedResponse = this.stripReasoningTokens(fullResponse);
                                     const displayText = stripCanvasTags(cleanedResponse);
@@ -4429,14 +4391,6 @@ connectAiradio();
 
                                 // Audio: TTS ready to play
                                 if (data.type === 'audio') {
-                                    // Cancel any cascade filler — real TTS is about to speak
-                                    if (this._cascadeFillerTimer) {
-                                        clearTimeout(this._cascadeFillerTimer);
-                                        this._cascadeFillerTimer = null;
-                                    }
-                                    if ('speechSynthesis' in window) {
-                                        try { window.speechSynthesis.cancel(); } catch (_) {}
-                                    }
                                     if (data.audio) {
                                         console.log(`TTS ready (${data.timing?.tts_ms}ms, total: ${data.timing?.total_ms}ms)`);
                                         ActionConsole.addEntry('tts', `Playing TTS (TTS: ${data.timing?.tts_ms}ms)`);
