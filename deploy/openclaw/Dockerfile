@@ -16,7 +16,7 @@ ENV PATH=$PNPM_HOME:$PATH
 RUN mkdir -p $PNPM_HOME
 
 # OpenClaw version — pinned to the version tested with this OpenVoiceUI release.
-# Override at build time: docker compose build --build-arg OPENCLAW_VERSION=2026.3.7
+# Override at build time: docker compose build --build-arg OPENCLAW_VERSION=2026.3.24
 ARG OPENCLAW_VERSION=2026.3.24
 RUN pnpm add -g openclaw@${OPENCLAW_VERSION} && pnpm approve-builds -g
 
