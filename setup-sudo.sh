@@ -14,7 +14,7 @@ EMAIL="your@email.com"           # ← EDIT: for Let's Encrypt notifications
 SERVICE_NAME="openvoiceui"
 RUN_USER="${SUDO_USER:-$(whoami)}"
 WWW_DIR="/var/www/${SERVICE_NAME}"          # canvas pages + any web assets
-OPENCLAW_TESTED_VERSION="2026.3.13"        # pinned: the openclaw version tested with this release
+OPENCLAW_TESTED_VERSION="2026.3.24"        # pinned: the openclaw version tested with this release
 # ────────────────────────────────────────────────────────────────────────────
 
 # Guard: refuse to run with placeholder values
