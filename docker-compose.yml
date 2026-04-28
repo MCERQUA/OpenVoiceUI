@@ -3,11 +3,20 @@ services:
     build:
       context: deploy/openclaw
       args:
-        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.13}
-        CODING_CLI: ${CODING_CLI:-none}
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.24}
+        CODING_CLI: ${CODING_CLI:-pi}
     volumes:
       - openclaw-data:/root/.openclaw
+      # Dual-mount pattern: both paths resolve to the same volume so agents
+      # can't put files in the wrong place — both paths are the right place.
+      - canvas-pages:/app/runtime/canvas-pages
       - canvas-pages:/root/.openclaw/workspace/canvas-pages
+      - uploads:/app/runtime/uploads
+      - uploads:/root/.openclaw/workspace/uploads
+      - generated-music:/app/runtime/generated_music
+      - generated-music:/root/.openclaw/workspace/generated_music
+      - music:/app/runtime/music
+      - music:/root/.openclaw/workspace/music
     ports:
       - "18791:18791"
       - "${PORT:-5001}:${PORT:-5001}"
@@ -40,6 +49,9 @@ services:
     volumes:
       - openvoiceui-runtime:/app/runtime
       - canvas-pages:/app/runtime/canvas-pages
+      - uploads:/app/runtime/uploads
+      - generated-music:/app/runtime/generated_music
+      - music:/app/runtime/music
     depends_on:
       openclaw:
         condition: service_healthy
@@ -57,3 +69,6 @@ volumes:
   openclaw-data:
   openvoiceui-runtime:
   canvas-pages:
+  uploads:
+  generated-music:
+  music:

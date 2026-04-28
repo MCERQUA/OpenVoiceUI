@@ -1022,10 +1022,17 @@ async function fetchManifest(forceSync) {
     // Detect new pages
     const currentIds = Object.keys(PAGES);
     if (knownPages.length === 0) {
-      // First run — seed knownPages AND add all pages to desktop
-      // Users expect to see their pages. Empty desktop is confusing.
+      // First run — seed knownPages (all pages discoverable) but only put
+      // a curated default set on the desktop. Without this, all 197+ pages
+      // flood the desktop on first load or after a state reset.
+      const DEFAULT_DESKTOP = [
+        'voice-studio', 'music-library', 'crm', 'crm-kanban',
+        'nightly-reflections', 'usage-costs', 'terminal', 'file-explorer',
+        'game-library', 'openclaw-dashboard', 'system-ops-v2', 'live-monitor',
+        'song-tagger', 'upload-center', 'hermes',
+      ];
       knownPages = currentIds.slice();
-      desktopPages = currentIds.slice();
+      desktopPages = DEFAULT_DESKTOP.filter(id => currentIds.includes(id));
       saveState();
     } else {
       const newFound = currentIds.filter(id => !knownPages.includes(id));

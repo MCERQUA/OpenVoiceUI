@@ -44,6 +44,7 @@ _PROVIDERS = {
     'elevenlabs': ElevenLabsProvider,
 }
 
+
 def _load_config() -> Dict[str, Any]:
     """Load providers configuration from JSON file."""
     config_path = os.path.join(os.path.dirname(__file__), 'providers_config.json')

@@ -2431,7 +2431,7 @@ async function startResearch(){
         'quality-gate':{status:'not_started',message:null},
         'deploy':{status:'not_started',message:null}
       },
-      devUrl:'https://dev-test-dev.jam-bot.com'
+      devUrl:''
     };
 
     await authPost('/api/canvas/data/builds/'+project+'-intake.json',intake);
@@ -2503,7 +2503,7 @@ async function addToQueue(){
       'design-system':{status:'not_started',message:null},'stitch-pages':{status:'not_started',message:null},
       'build-pages':{status:'not_started',message:null},
       'quality-gate':{status:'not_started',message:null},deploy:{status:'not_started',message:null}},
-    devUrl:'https://dev-test-dev.jam-bot.com'
+    devUrl:''
   };
 
   try{
@@ -2717,7 +2717,7 @@ function startBuildPolling(project){
       if(s.status==='complete'){
         badge.className='status-badge ready';badge.textContent='Complete';
         btn.disabled=false;btn.textContent='View Site';
-        btn.onclick=()=>window.parent.postMessage({type:'canvas-action',action:'open-url',url:s.devUrl||'https://dev-test-dev.jam-bot.com'},'*');
+        btn.onclick=()=>window.parent.postMessage({type:'canvas-action',action:'open-url',url:s.devUrl||window.location.origin},'*');
         clearInterval(_pollInterval);_pollInterval=null;
         _setConsoleDotActive(false);
         // Final log poll to show last output

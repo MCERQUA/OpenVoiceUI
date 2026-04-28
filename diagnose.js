@@ -82,9 +82,9 @@ check("openclaw.json structure", () => {
   if (!config.gateway?.auth?.token) issues.push("missing gateway.auth.token");
   if (!config.gateway?.controlUi?.dangerouslyDisableDeviceAuth) issues.push("missing dangerouslyDisableDeviceAuth");
   if (!config.agents?.defaults?.thinkingDefault) issues.push("missing thinkingDefault");
-  if (!config.agents?.defaults?.model) issues.push("missing default model");
   if (issues.length) throw new Error(issues.join(", "));
-  return `model=${config.agents.defaults.model}`;
+  const model = config.agents.defaults.model || "(auto-select from available providers)";
+  return `model=${model}`;
 });
 
 // --- 4. Device identity consistency ---

@@ -120,6 +120,7 @@ def create_app(config_override: dict = None):
             '/plugins/',      # Plugin static assets — face scripts, CSS, previews
             '/api/chat',      # LLM proxy (Groq) — used by canvas pages for inline AI
             '/api/tts/',      # TTS provider list — loaded before Clerk init
+            '/api/stt/',      # STT endpoints (Deepgram token, Groq, local) — mic audio only, no secrets exposed
             '/api/theme',     # theme config — loaded before Clerk init
             '/api/music',     # music track list — loaded before Clerk init
             '/api/faces',     # face list — loaded before Clerk init

@@ -9,4 +9,11 @@ services:
       - .env
     volumes:
       - ./openclaw-data:/root/.openclaw
+      - canvas-pages:/app/runtime/canvas-pages
       - canvas-pages:/root/.openclaw/workspace/canvas-pages
+      - uploads:/app/runtime/uploads
+      - uploads:/root/.openclaw/workspace/uploads
+      - generated-music:/app/runtime/generated_music
+      - generated-music:/root/.openclaw/workspace/generated_music
+      - music:/app/runtime/music
+      - music:/root/.openclaw/workspace/music
