@@ -656,7 +656,7 @@ body {
     <label class="form-label" style="margin-bottom:10px;">Select Platforms</label>
     <div class="platforms-grid" id="platformsGrid">
 
-      <div class="platform-card" data-provider="qwen3-local" onclick="togglePlatform(this)">
+      <div class="platform-card" data-provider="qwen3-local" onclick="togglePlatform(this)" style="display:none">
         <div class="platform-check">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
@@ -980,6 +980,7 @@ body {
               txt.textContent = 'Available';
               txt.style.color = 'var(--green)';
               card.classList.remove('unavailable');
+              card.style.display = ''; // reveal self-hosted cards when live
             } else {
               dot.classList.add('err');
               dot.classList.remove('ok');
@@ -987,6 +988,8 @@ body {
               txt.style.color = 'var(--text-dim)';
               card.classList.add('unavailable');
               card.classList.remove('selected');
+              // hide self-hosted providers when offline — no point showing them
+              if (pid === 'qwen3-local') card.style.display = 'none';
             }
           }
         });
