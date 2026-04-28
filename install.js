@@ -55,10 +55,10 @@ module.exports = {
           },
           {
             key: "DEEPGRAM_API_KEY",
-            title: "[REQUIRED] Deepgram API Key — Speech-to-Text",
-            description: "Free tier at console.deepgram.com — powers voice recognition",
+            title: "Deepgram API Key — Speech-to-Text (optional — browser mic works without it)",
+            description: "Free tier at console.deepgram.com — higher quality STT. Leave blank to use browser's built-in speech recognition.",
             placeholder: "",
-            required: true,
+            required: false,
           },
 
           // ═══════════════════════════════════════════════════════════

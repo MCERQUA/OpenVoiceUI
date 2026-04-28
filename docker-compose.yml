@@ -3,8 +3,8 @@ services:
     build:
       context: deploy/openclaw
       args:
-        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-2026.3.13}
-        CODING_CLI: ${CODING_CLI:-none}
+        OPENCLAW_VERSION: ${OPENCLAW_VERSION:-latest}
+        CODING_CLI: ${CODING_CLI:-pi}
     volumes:
       - openclaw-data:/root/.openclaw
       # Dual-mount pattern: both paths resolve to the same volume so agents
