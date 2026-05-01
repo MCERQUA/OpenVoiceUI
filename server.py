@@ -169,6 +169,9 @@ app.register_blueprint(suno_bp)
 from routes.airadio_bridge import airadio_bp
 app.register_blueprint(airadio_bp)
 
+from routes.song_tagger import song_tagger_bp
+app.register_blueprint(song_tagger_bp)
+
 from routes.vision import vision_bp
 app.register_blueprint(vision_bp)
 

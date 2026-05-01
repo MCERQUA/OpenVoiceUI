@@ -1720,6 +1720,10 @@ def _conversation_inner():
                                 elif _res_i.get('audio'):
                                     yield _audio_event(_res_i['audio'], _chunks_sent)
                                     _chunks_sent += 1
+                                    # Reset silence clock — agent already spoke, don't
+                                    # fire "one moment" status TTS right after interim.
+                                    _last_audio_time = time.time()
+                                    _status_tts_count += 1  # suppress first status fire
                             _tts_pending = []
                             _tts_buf = ''
 

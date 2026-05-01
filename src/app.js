@@ -5791,6 +5791,11 @@ connectAiradio();
             }
 
             async playTTS(audioBase64) {
+                // Skip if user is in text mode
+                if (window.TranscriptPanel?.textMode) {
+                    console.log('[VoiceConversation] Skipping TTS — text mode active');
+                    return;
+                }
                 // Stop any currently playing audio — only one TTS plays at a time
                 this.stopAudio();
                 this.callbacks.onSpeaking();
