@@ -1968,14 +1968,35 @@ def _conversation_inner():
                             # result never reaches it.
                             # Instead: yield {'type':'retrying'} to keep the
                             # client alive, then swap the event queue.
-                            _is_empty = not full_response or not full_response.strip()
+                            #
+                            # Bare "NO" / "YES" (with optional trailing punctuation)
+                            # is treated as a DEGENERATE response — same class of
+                            # broken-LLM output as empty. Confirmed in the wild:
+                            # MiniMax / GLM occasionally emit a 2-char "NO" reply
+                            # to normal user turns (sometimes after the empty-retry
+                            # itself fires). Speaking that to a customer is
+                            # unacceptable, so we route it through the same retry
+                            # → double-empty → graceful-fallback path. A real
+                            # voice answer should always elaborate beyond bare
+                            # YES/NO; the voice-system-prompt instructs the agent
+                            # accordingly.
+                            _resp_stripped = (full_response or '').strip()
+                            _resp_norm = _resp_stripped.upper().rstrip('.!?')
+                            _is_degenerate = _resp_norm in ('NO', 'YES')
+                            _is_empty = (not full_response or not _resp_stripped) or _is_degenerate
                             if _is_empty and metrics.get('llm_inference_ms', 9999) < 5000 \
                                     and not getattr(stream_response, '_retried', False):
                                 stream_response._retried = True
                                 logger.warning(
-                                    f"### EMPTY RESPONSE in {metrics['llm_inference_ms']}ms "
+                                    f"### {'DEGENERATE' if _is_degenerate else 'EMPTY'} RESPONSE "
+                                    f"({_resp_stripped!r} in {metrics['llm_inference_ms']}ms) "
                                     f"— retrying once (client kept alive via 'retrying' event)"
                                 )
+                                # Wipe any TTS buffer that may already hold "NO"
+                                # so the bare token is never spoken to the user.
+                                if _is_degenerate:
+                                    _tts_buf = ''
+                                    _tts_pending.clear()
                                 # Tell the client to wait — don't show fallback
                                 yield json.dumps({'type': 'retrying'}) + '\n'
                                 # No sleep — the original `time.sleep(2)` was to let
@@ -2117,6 +2138,26 @@ def _conversation_inner():
                                     f"### TIMEOUT EMPTY ({metrics['llm_inference_ms']}ms) — "
                                     f"graceful fallback, no session recovery"
                                 )
+
+                            # ── Final safety net: bare "NO" / "YES" must NEVER reach the user ──
+                            # Catches any degenerate single-token response that slipped past
+                            # the retry path above (slow-degenerate 5s–30s, or a retry that
+                            # itself returned bare NO/YES). A real voice answer always
+                            # elaborates; bare YES/NO is broken-LLM output.
+                            _final_norm = (full_response or '').strip().upper().rstrip('.!?')
+                            if _final_norm in ('NO', 'YES') and not user_message.startswith('__'):
+                                logger.warning(
+                                    f"### DEGENERATE FINAL ({metrics.get('llm_inference_ms')}ms) "
+                                    f"response={full_response!r} — replacing with graceful fallback"
+                                )
+                                full_response = (
+                                    "Sorry, my brain glitched for a second. "
+                                    "Could you say that again?"
+                                )
+                                metrics['fallback_used'] = 1
+                                # Wipe TTS buffer so the bare token isn't spoken
+                                _tts_buf = ''
+                                _tts_pending.clear()
 
                             yield json.dumps({
                                 'type': 'text_done',
