@@ -29,7 +29,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, make_response, request
+from flask import Blueprint, Response, g, jsonify, make_response, request
 
 from routes.canvas import canvas_context, update_canvas_context, CANVAS_PAGES_DIR
 from routes.transcripts import save_conversation_turn
@@ -951,6 +951,10 @@ def _conversation_inner():
     session_id = data.get('session_id', 'default')
     ui_context = data.get('ui_context', {})
     identified_person = data.get('identified_person') or None
+    # Capture Clerk user id from request middleware (set by app.py auth check)
+    # so it can be persisted in the transcript JSON for The Office to attribute
+    # turns correctly. Fail-open: missing g.clerk_user_id → None.
+    _clerk_user_id = getattr(g, 'clerk_user_id', None)
     agent_id = data.get('agent_id') or None  # e.g. 'default'; None = default 'main'
     gateway_id = data.get('gateway_id') or None  # plugin gateway id; None = 'openclaw'
     # Fall back to active profile's adapter_config.gateway_id
@@ -2261,6 +2265,7 @@ def _conversation_inner():
                                         duration_ms=metrics.get('total_ms'),
                                         actions=captured_actions,
                                         identified_person=identified_person,
+                                        clerk_user_id=_clerk_user_id,
                                     )
                                 break
 
@@ -2296,6 +2301,7 @@ def _conversation_inner():
                                     duration_ms=metrics.get('total_ms'),
                                     actions=captured_actions,
                                     identified_person=identified_person,
+                                    clerk_user_id=_clerk_user_id,
                                 )
                             break
 
@@ -2411,6 +2417,7 @@ def _conversation_inner():
             duration_ms=metrics.get('total_ms'),
             actions=captured_actions,
             identified_person=identified_person,
+            clerk_user_id=_clerk_user_id,
         )
 
     response_data = {'response': ai_response, 'user_said': user_message}
