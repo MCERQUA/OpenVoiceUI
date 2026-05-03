@@ -136,6 +136,7 @@ def save_conversation_turn(
     duration_ms: int = None,
     actions: list = None,
     identified_person: dict = None,
+    clerk_user_id: str = None,
 ) -> 'str | None':
     """Save one conversation turn as a JSON transcript file.
 
@@ -179,6 +180,7 @@ def save_conversation_turn(
             'assistant': ai_response,
             'tools': tools,
             'identified_person': identified_person,
+            'clerk_user_id': clerk_user_id,
             'word_count': {'user': user_words, 'assistant': ai_words},
         }
 
