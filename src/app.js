@@ -1654,6 +1654,12 @@ connectAiradio();
             activeJobId: null,
             pollInterval: null,
             statusEl: null,
+            // Dedup guard — any prompt fired in the last DEDUP_WINDOW_MS is ignored.
+            // The agent's [SUNO_GENERATE:...] tag gets re-parsed on every streaming
+            // chunk + final pass + secondary handler; without this guard a single
+            // intent fires the paid API 30+ times in one second.
+            _recentPrompts: new Map(),
+            _DEDUP_WINDOW_MS: 60000,
 
             init() {
                 // Create a status banner element for generation feedback
@@ -1681,6 +1687,17 @@ connectAiradio();
             },
 
             async generate(prompt) {
+                // Dedup: drop repeat fires of the same prompt within the window
+                const now = Date.now();
+                for (const [k, t] of this._recentPrompts) {
+                    if (now - t > this._DEDUP_WINDOW_MS) this._recentPrompts.delete(k);
+                }
+                if (this._recentPrompts.has(prompt)) {
+                    console.warn('[Suno] dedup: dropping repeat generate for prompt:', prompt.substring(0, 80));
+                    return;
+                }
+                this._recentPrompts.set(prompt, now);
+
                 console.log('[Suno] Generating:', prompt);
                 this._showStatus('🎵 Suno: submitting song request...');
 
