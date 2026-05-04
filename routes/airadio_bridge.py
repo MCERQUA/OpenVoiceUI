@@ -508,13 +508,21 @@ def push_song():
 
     local_path, meta = _resolve_local_song(filename, playlist)
     if local_path is None:
-        return jsonify({
-            "ok": False,
-            "error": {
-                "code": "NOT_FOUND",
-                "message": f"Song '{filename}' not found in '{playlist}' playlist",
-            },
-        }), 404
+        # Auto-detect: if not found in the stated dir, try the other one.
+        # The JS bridge never sends a playlist param, so it always defaults to
+        # "library" — but most agent-pushed songs live in "generated".
+        alt_playlist = "generated" if playlist == "library" else "library"
+        local_path, meta = _resolve_local_song(filename, alt_playlist)
+        if local_path is not None:
+            playlist = alt_playlist
+        else:
+            return jsonify({
+                "ok": False,
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": f"Song '{filename}' not found in library or generated playlist",
+                },
+            }), 404
 
     fields = {
         "title": title or (meta or {}).get("title") or local_path.stem,

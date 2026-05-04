@@ -29,7 +29,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, make_response, request
+from flask import Blueprint, Response, g, jsonify, make_response, request
 
 from routes.canvas import canvas_context, update_canvas_context, CANVAS_PAGES_DIR
 from routes.transcripts import save_conversation_turn
@@ -951,6 +951,10 @@ def _conversation_inner():
     session_id = data.get('session_id', 'default')
     ui_context = data.get('ui_context', {})
     identified_person = data.get('identified_person') or None
+    # Capture Clerk user id from request middleware (set by app.py auth check)
+    # so it can be persisted in the transcript JSON for The Office to attribute
+    # turns correctly. Fail-open: missing g.clerk_user_id → None.
+    _clerk_user_id = getattr(g, 'clerk_user_id', None)
     agent_id = data.get('agent_id') or None  # e.g. 'default'; None = default 'main'
     gateway_id = data.get('gateway_id') or None  # plugin gateway id; None = 'openclaw'
     # Fall back to active profile's adapter_config.gateway_id
@@ -1720,6 +1724,10 @@ def _conversation_inner():
                                 elif _res_i.get('audio'):
                                     yield _audio_event(_res_i['audio'], _chunks_sent)
                                     _chunks_sent += 1
+                                    # Reset silence clock — agent already spoke, don't
+                                    # fire "one moment" status TTS right after interim.
+                                    _last_audio_time = time.time()
+                                    _status_tts_count += 1  # suppress first status fire
                             _tts_pending = []
                             _tts_buf = ''
 
@@ -1964,14 +1972,35 @@ def _conversation_inner():
                             # result never reaches it.
                             # Instead: yield {'type':'retrying'} to keep the
                             # client alive, then swap the event queue.
-                            _is_empty = not full_response or not full_response.strip()
+                            #
+                            # Bare "NO" / "YES" (with optional trailing punctuation)
+                            # is treated as a DEGENERATE response — same class of
+                            # broken-LLM output as empty. Confirmed in the wild:
+                            # MiniMax / GLM occasionally emit a 2-char "NO" reply
+                            # to normal user turns (sometimes after the empty-retry
+                            # itself fires). Speaking that to a customer is
+                            # unacceptable, so we route it through the same retry
+                            # → double-empty → graceful-fallback path. A real
+                            # voice answer should always elaborate beyond bare
+                            # YES/NO; the voice-system-prompt instructs the agent
+                            # accordingly.
+                            _resp_stripped = (full_response or '').strip()
+                            _resp_norm = _resp_stripped.upper().rstrip('.!?')
+                            _is_degenerate = _resp_norm in ('NO', 'YES')
+                            _is_empty = (not full_response or not _resp_stripped) or _is_degenerate
                             if _is_empty and metrics.get('llm_inference_ms', 9999) < 5000 \
                                     and not getattr(stream_response, '_retried', False):
                                 stream_response._retried = True
                                 logger.warning(
-                                    f"### EMPTY RESPONSE in {metrics['llm_inference_ms']}ms "
+                                    f"### {'DEGENERATE' if _is_degenerate else 'EMPTY'} RESPONSE "
+                                    f"({_resp_stripped!r} in {metrics['llm_inference_ms']}ms) "
                                     f"— retrying once (client kept alive via 'retrying' event)"
                                 )
+                                # Wipe any TTS buffer that may already hold "NO"
+                                # so the bare token is never spoken to the user.
+                                if _is_degenerate:
+                                    _tts_buf = ''
+                                    _tts_pending.clear()
                                 # Tell the client to wait — don't show fallback
                                 yield json.dumps({'type': 'retrying'}) + '\n'
                                 # No sleep — the original `time.sleep(2)` was to let
@@ -2114,6 +2143,26 @@ def _conversation_inner():
                                     f"graceful fallback, no session recovery"
                                 )
 
+                            # ── Final safety net: bare "NO" / "YES" must NEVER reach the user ──
+                            # Catches any degenerate single-token response that slipped past
+                            # the retry path above (slow-degenerate 5s–30s, or a retry that
+                            # itself returned bare NO/YES). A real voice answer always
+                            # elaborates; bare YES/NO is broken-LLM output.
+                            _final_norm = (full_response or '').strip().upper().rstrip('.!?')
+                            if _final_norm in ('NO', 'YES') and not user_message.startswith('__'):
+                                logger.warning(
+                                    f"### DEGENERATE FINAL ({metrics.get('llm_inference_ms')}ms) "
+                                    f"response={full_response!r} — replacing with graceful fallback"
+                                )
+                                full_response = (
+                                    "Sorry, my brain glitched for a second. "
+                                    "Could you say that again?"
+                                )
+                                metrics['fallback_used'] = 1
+                                # Wipe TTS buffer so the bare token isn't spoken
+                                _tts_buf = ''
+                                _tts_pending.clear()
+
                             yield json.dumps({
                                 'type': 'text_done',
                                 'response': full_response,
@@ -2216,6 +2265,7 @@ def _conversation_inner():
                                         duration_ms=metrics.get('total_ms'),
                                         actions=captured_actions,
                                         identified_person=identified_person,
+                                        clerk_user_id=_clerk_user_id,
                                     )
                                 break
 
@@ -2251,6 +2301,7 @@ def _conversation_inner():
                                     duration_ms=metrics.get('total_ms'),
                                     actions=captured_actions,
                                     identified_person=identified_person,
+                                    clerk_user_id=_clerk_user_id,
                                 )
                             break
 
@@ -2366,6 +2417,7 @@ def _conversation_inner():
             duration_ms=metrics.get('total_ms'),
             actions=captured_actions,
             identified_person=identified_person,
+            clerk_user_id=_clerk_user_id,
         )
 
     response_data = {'response': ai_response, 'user_said': user_message}
@@ -2999,7 +3051,7 @@ def tts_clone_voice():
             }), 400
 
         # --- Validate provider ---
-        clone_providers = ('qwen3', 'elevenlabs', 'resemble')
+        clone_providers = ('qwen3', 'qwen3-local', 'elevenlabs', 'resemble')
         if provider_id not in clone_providers:
             return jsonify({
                 'error': f'Voice cloning not supported for provider "{provider_id}". '
@@ -3023,6 +3075,17 @@ def tts_clone_voice():
                 return jsonify({'error': 'Qwen3 requires audio_url'}), 400
             result = provider.clone_voice(
                 audio_url=audio_url,
+                name=name,
+                reference_text=reference_text,
+            )
+
+        elif provider_id == 'qwen3-local':
+            if not save_path:
+                return jsonify({
+                    'error': 'qwen3-local requires audio file upload (multipart form)'
+                }), 400
+            result = provider.clone_voice(
+                audio_path=str(save_path),
                 name=name,
                 reference_text=reference_text,
             )

@@ -363,6 +363,7 @@ body {
   width: 0%;
 }
 .clone-row-fill.qwen3 { background: var(--cyan); }
+.clone-row-fill.qwen3-local { background: #7c3aed; }
 .clone-row-fill.elevenlabs { background: var(--green); }
 .clone-row-fill.resemble { background: var(--orange); }
 .clone-row-status { font-size: 11px; color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
@@ -654,6 +655,19 @@ body {
 
     <label class="form-label" style="margin-bottom:10px;">Select Platforms</label>
     <div class="platforms-grid" id="platformsGrid">
+
+      <div class="platform-card" data-provider="qwen3-local" onclick="togglePlatform(this)" style="display:none">
+        <div class="platform-check">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div class="platform-name">Qwen3 Local</div>
+        <div class="platform-sub">RTX GPU · Free</div>
+        <div class="platform-time">~10-20 seconds</div>
+        <div class="platform-status" id="status-qwen3-local">
+          <span class="status-dot" id="dot-qwen3-local"></span>
+          <span id="statusText-qwen3-local">Checking...</span>
+        </div>
+      </div>
 
       <div class="platform-card" data-provider="qwen3" onclick="togglePlatform(this)">
         <div class="platform-check">
@@ -954,7 +968,7 @@ body {
       if (Array.isArray(providers)) {
         providers.forEach(function(p) {
           var pid = p.provider_id || p.name || '';
-          if (pid === 'qwen3' || pid === 'elevenlabs' || pid === 'resemble') {
+          if (pid === 'qwen3' || pid === 'qwen3-local' || pid === 'elevenlabs' || pid === 'resemble') {
             var available = p.status === 'active';
             providerStatus[pid] = available;
             var dot = $('dot-' + pid);
@@ -966,6 +980,7 @@ body {
               txt.textContent = 'Available';
               txt.style.color = 'var(--green)';
               card.classList.remove('unavailable');
+              card.style.display = ''; // reveal self-hosted cards when live
             } else {
               dot.classList.add('err');
               dot.classList.remove('ok');
@@ -973,6 +988,8 @@ body {
               txt.style.color = 'var(--text-dim)';
               card.classList.add('unavailable');
               card.classList.remove('selected');
+              // hide self-hosted providers when offline — no point showing them
+              if (pid === 'qwen3-local') card.style.display = 'none';
             }
           }
         });
@@ -987,7 +1004,7 @@ body {
       updateCloneButton();
     }).catch(function() {
       // If providers endpoint fails, assume qwen3 is available (it has been working)
-      ['qwen3', 'elevenlabs', 'resemble'].forEach(function(pid) {
+      ['qwen3', 'qwen3-local', 'elevenlabs', 'resemble'].forEach(function(pid) {
         $('statusText-' + pid).textContent = 'Unknown';
         $('dot-' + pid).classList.add('err');
       });
@@ -1037,12 +1054,12 @@ body {
   };
 
   function platformLabel(pid) {
-    var labels = { qwen3: 'Qwen3', elevenlabs: 'ElevenLabs', resemble: 'Resemble' };
+    var labels = { 'qwen3-local': 'Qwen3 Local', qwen3: 'Qwen3', elevenlabs: 'ElevenLabs', resemble: 'Resemble' };
     return labels[pid] || pid;
   }
 
   function estimatedTime(pid) {
-    var times = { qwen3: 40000, elevenlabs: 12000, resemble: 180000 };
+    var times = { 'qwen3-local': 15000, qwen3: 40000, elevenlabs: 12000, resemble: 180000 };
     return times[pid] || 60000;
   }
 

@@ -169,6 +169,12 @@ app.register_blueprint(suno_bp)
 from routes.airadio_bridge import airadio_bp
 app.register_blueprint(airadio_bp)
 
+try:
+    from routes.song_tagger import song_tagger_bp
+    app.register_blueprint(song_tagger_bp)
+except ImportError:
+    pass
+
 from routes.vision import vision_bp
 app.register_blueprint(vision_bp)
 
@@ -1257,6 +1263,11 @@ def web_search():
 @app.route("/api/usage/<user_id>", methods=["GET"])
 def check_usage(user_id):
     """Return the current month's usage for a user."""
+    # Clerk-authenticated users may only query their own usage.
+    # Internal agent calls (X-Agent-Key, no g.clerk_user_id) are trusted.
+    authenticated_user = g.get('clerk_user_id')
+    if authenticated_user and authenticated_user != user_id:
+        return jsonify({'error': 'Unauthorized', 'code': 'user_mismatch'}), 403
     if user_id in UNLIMITED_USERS:
         return jsonify({
             "user_id": user_id,
@@ -1279,6 +1290,9 @@ def check_usage(user_id):
 @app.route("/api/usage/<user_id>/increment", methods=["POST"])
 def track_usage(user_id):
     """Increment usage count for a user (called after each agent response)."""
+    authenticated_user = g.get('clerk_user_id')
+    if authenticated_user and authenticated_user != user_id:
+        return jsonify({'error': 'Unauthorized', 'code': 'user_mismatch'}), 403
     if user_id in UNLIMITED_USERS:
         increment_usage(user_id)
         return jsonify({
