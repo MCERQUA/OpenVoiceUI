@@ -16,7 +16,7 @@ python-dotenv==1.2.2
 psutil==7.2.2
 
 # Image processing (icon generation, uploads)
-Pillow>=10.0.0
+Pillow>=12.2.0
 PyYAML>=6.0
 
 # Speech-to-text (optional — adds ~200MB for onnxruntime + ctranslate2)
