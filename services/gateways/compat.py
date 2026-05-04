@@ -24,7 +24,7 @@ PROTOCOL_MIN = 3
 PROTOCOL_MAX = 5  # forward-compatible — OpenClaw ignores unsupported maxes
 
 # Version this code was tested against (for warning logs).
-OPENCLAW_TESTED_VERSION = "2026.3.13"
+OPENCLAW_TESTED_VERSION = "2026.5.2"
 OPENCLAW_MIN_VERSION = "2026.3.1"
 
 
