@@ -3,7 +3,7 @@
 # Without it, those file types still upload successfully — the AI just can't read their contents.
 #
 # Install: pip install -r requirements-docs.txt
-pypdf>=4.0.0
+pypdf>=6.10.2
 python-docx>=1.1.0
 openpyxl>=3.1.5
 python-pptx>=1.0.2
