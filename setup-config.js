@@ -64,7 +64,7 @@ const openclawConfig = {
     },
     list: [{ id: "main", default: true, workspace: "/root/.openclaw/workspace" }],
   },
-  // Plugins configured by individual plugin installers (e.g., ByteRover memory)
+  // Plugins configured by individual plugin installers
 };
 
 fs.mkdirSync("openclaw-data/workspace", { recursive: true });
