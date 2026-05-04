@@ -272,7 +272,6 @@ OpenVoiceUI has a plugin system for community-built extensions. Plugins can incl
 | **Hermes Agent** | Gateway | Self-improving AI agent with auto-generated skills, deep memory search, and autonomous tasks. Adds OpenClaw+Hermes hybrid and Hermes-only modes |
 | **SEO Platform** | Canvas Page | Full SEO dashboard powered by DataForSEO — keyword research, rank tracking, backlink analysis, site audits, AI visibility, and local SEO |
 | **Twenty CRM** | Canvas Page | Connect to a Twenty CRM instance for contact, company, deal, and task management with embedded CRM view and setup wizard |
-| **ByteRover Long-Term Memory** | Context Engine | Persistent long-term memory that curates conversation knowledge every turn into a human-readable markdown knowledge base |
 
 **Build your own.** Face packs, canvas pages, workflow dashboards, gateway adapters ([template](plugins/README.md)), or STT/TTS adapters ([template](src/adapters/_template.js)). See the [plugins repo](https://github.com/MCERQUA/openvoiceui-plugins) for submission guidelines.
 
