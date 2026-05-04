@@ -1364,6 +1364,86 @@ def _conversation_inner():
 
     _gateway_message_with_suno = _suno_prefix + _gateway_message if _suno_prefix else _gateway_message
     message_with_context = context_prefix + _gateway_message_with_suno if context_prefix else _gateway_message_with_suno
+
+    # === Phase A POC for issue #94: dual-write UI state to workspace file ===
+    # Write the same per-turn state we just concatenated into the user message
+    # to <WORKSPACE_DIR>/Agent/UI_STATE.md so the OpenClaw bootstrap loader can
+    # pick it up as system-prompt context on the next turn. Phase A keeps the
+    # legacy prefix injection above ALONGSIDE this writer — once we verify the
+    # agent reliably reads UI_STATE.md, Phase B removes the prefix.
+    #
+    # Fail-open: any write error logs a warning and the legacy prefix carries
+    # the state through unchanged. Per-tenant docker-compose change required:
+    # OVU side mount of /app/runtime/workspace/Agent must be :rw.
+    try:
+        from services.ui_state import render_ui_state, write_ui_state
+        _canvas_open = None
+        _canvas_closed = False
+        if ui_context.get('canvasVisible') and ui_context.get('canvasDisplayed'):
+            _canvas_open = (ui_context['canvasDisplayed']
+                            .replace('/pages/', '')
+                            .replace('.html', '')
+                            .replace('-', ' '))
+        elif not ui_context.get('canvasVisible'):
+            _canvas_closed = True
+        _music_playing_name = None
+        _music_paused_last = None
+        if _srv_playing and _srv_track:
+            _music_playing_name = _srv_track.get('title') or _srv_track.get('name', 'unknown')
+        elif _srv_track:
+            _music_paused_last = _srv_track.get('title') or _srv_track.get('name', 'unknown')
+        elif ui_context.get('musicPlaying'):
+            _music_playing_name = ui_context.get('musicTrack', 'unknown')
+        try:
+            from routes.music import get_music_files as _get_mf
+            _ui_lib = [t.get('title') or t.get('name', '') for t in _get_mf('library')]
+            _ui_gen = [t.get('title') or t.get('name', '') for t in _get_mf('generated')]
+            _ui_lib = [n for n in _ui_lib if n][:50]
+            _ui_gen = [n for n in _ui_gen if n][:50]
+        except Exception:
+            _ui_lib, _ui_gen = [], []
+        try:
+            from routes.canvas import load_canvas_manifest as _lcm
+            _ui_pages = sorted(_lcm().get('pages', {}).keys())[:50]
+        except Exception:
+            _ui_pages = []
+        _ui_suno = []
+        try:
+            from routes.suno import completed_songs_queue as _csq
+            if _csq:
+                _ui_suno = [s.get('title', 'Unknown') for s in _csq[-3:]]
+        except Exception:
+            pass
+        _ui_office = None
+        _ui_user = _user_tag if '_user_tag' in dir() else None
+        if _ui_user and '\n[OFFICE_BRIEFING:' in _ui_user:
+            _ui_user, _, _rest = _ui_user.partition('\n[OFFICE_BRIEFING: ')
+            _ui_office = _rest.rstrip(']') if _rest.endswith(']') else _rest
+        _ui_md = render_ui_state(
+            canvas_open=_canvas_open,
+            canvas_closed=_canvas_closed,
+            canvas_menu_open=bool(ui_context.get('canvasMenuOpen')),
+            canvas_errors=ui_context.get('canvasErrors') or None,
+            music_playing=_music_playing_name,
+            music_paused_last=_music_paused_last,
+            available_library_tracks=_ui_lib or None,
+            available_generated_tracks=_ui_gen or None,
+            available_canvas_pages=_ui_pages or None,
+            suno_recently_finished=_ui_suno or None,
+            user_tag=_ui_user,
+            office_briefing=_ui_office,
+        )
+        if write_ui_state(_ui_md):
+            logger.info(
+                '### UI_STATE.md written: canvas=%s music=%s tracks_lib=%d tracks_gen=%d',
+                _canvas_open or ('CLOSED' if _canvas_closed else 'unknown'),
+                _music_playing_name or 'none',
+                len(_ui_lib), len(_ui_gen),
+            )
+    except Exception as _ui_state_err:
+        logger.warning('UI_STATE.md dual-write failed (non-fatal): %s', _ui_state_err)
+    # === end Phase A POC ===
+
     ai_response = None
     captured_actions = []
 
