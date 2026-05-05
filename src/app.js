@@ -1686,6 +1686,52 @@ connectAiradio();
                 if (this.statusEl) this.statusEl.style.display = 'none';
             },
 
+            async generateJingle(brand, style, gender, instrumental) {
+                // Dedup on the brand+style+gender+instrumental combo
+                const now = Date.now();
+                const dedupKey = `JINGLE|${brand}|${style}|${gender}|${instrumental}`;
+                for (const [k, t] of this._recentPrompts) {
+                    if (now - t > this._DEDUP_WINDOW_MS) this._recentPrompts.delete(k);
+                }
+                if (this._recentPrompts.has(dedupKey)) {
+                    console.warn('[Suno] dedup: dropping repeat jingle for', dedupKey);
+                    return;
+                }
+                this._recentPrompts.set(dedupKey, now);
+
+                console.log('[Suno] Generating jingle:', { brand, style, gender, instrumental });
+                this._showStatus(`🎵 Jingle: cooking "${brand}" (~45-60s)...`);
+
+                try {
+                    const resp = await fetch(`${CONFIG.serverUrl}/api/suno`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'jingle',
+                            brand: brand,
+                            style: style || '',
+                            vocal_gender: gender || 'm',
+                            instrumental: !!instrumental,
+                        }),
+                    });
+                    const data = await resp.json();
+                    if (data.action === 'generating' && data.job_id) {
+                        this.activeJobId = data.job_id;
+                        this._startPolling(data.job_id);
+                    } else {
+                        const err = data.response || 'unknown error';
+                        ActionConsole?.addEntry('error', `🎵 Jingle failed to start: ${err}`);
+                        this._showStatus(`🎵 Jingle: ${err}`);
+                        setTimeout(() => this._hideStatus(), 5000);
+                    }
+                } catch (err) {
+                    console.error('[Suno] jingle error:', err);
+                    ActionConsole?.addEntry('error', `🎵 Jingle: connection error — ${err.message || err}`);
+                    this._showStatus('🎵 Jingle: connection error');
+                    setTimeout(() => this._hideStatus(), 4000);
+                }
+            },
+
             async generate(prompt) {
                 // Dedup: drop repeat fires of the same prompt within the window
                 const now = Date.now();
@@ -1727,7 +1773,9 @@ connectAiradio();
                         this._showStatus('🎵 Suno: cooking your track (~45s)...');
                         this._startPolling(data.job_id);
                     } else {
-                        this._showStatus(`🎵 Suno: ${data.response || 'Error starting generation'}`);
+                        const err = data.response || 'Error starting generation';
+                        ActionConsole?.addEntry('error', `🎵 Suno failed to start: ${err}`);
+                        this._showStatus(`🎵 Suno: ${err}`);
                         setTimeout(() => this._hideStatus(), 5000);
                     }
                 } catch (err) {
@@ -1754,6 +1802,12 @@ connectAiradio();
                         if (data.action === 'complete' || data.status === 'complete') {
                             this._stopPolling();
                             this._onComplete(data);
+                        } else if (data.action === 'failed' || data.status === 'failed') {
+                            this._stopPolling();
+                            const reason = data.reason || data.response || 'unknown error';
+                            ActionConsole?.addEntry('error', `🎵 Suno generation failed: ${reason}`);
+                            this._showStatus(`🎵 Suno failed: ${reason}`);
+                            setTimeout(() => this._hideStatus(), 8000);
                         } else if (data.status === 'not_found' || data.status === 'no_jobs') {
                             this._stopPolling();
                             this._hideStatus();
@@ -4038,9 +4092,34 @@ connectAiradio();
                         }
                         [...text.matchAll(/\[SUNO_GENERATE:([^\]]+)\]/gi)].forEach(m => {
                             const sunoPrompt = m[1].trim();
+                            const key = `SUNO:${sunoPrompt}`;
+                            if (canvasCommandsProcessed.has(key)) return;
+                            canvasCommandsProcessed.add(key);
                             ActionConsole?.addEntry('system', `🎵 Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
                             AgentActivityChip?.handleTag('suno', sunoPrompt);
                             window.sunoModule?.generate(sunoPrompt);
+                        });
+                        // [JINGLE_GENERATE:brand|style|gender|instrumental|repeat] — short logo jingle (10-15s)
+                        // Parts: brand (required), style (preset key or freetext), gender (m|f),
+                        //        instrumental (true|false), repeat (1|2|3 — how many times brand is sung)
+                        [...text.matchAll(/\[JINGLE_GENERATE:([^\]]+)\]/gi)].forEach(m => {
+                            const raw = m[1].trim();
+                            const key = `JINGLE:${raw}`;
+                            if (canvasCommandsProcessed.has(key)) return;
+                            canvasCommandsProcessed.add(key);
+                            const parts = raw.split('|').map(s => s.trim());
+                            const brand = parts[0] || '';
+                            const style = parts[1] || '';
+                            const gender = (parts[2] || 'm').toLowerCase();
+                            const instrumental = (parts[3] || '').toLowerCase() === 'true';
+                            const repeat = parseInt(parts[4], 10) || 2;
+                            if (!brand) {
+                                ActionConsole?.addEntry('error', `🎵 Jingle: missing brand name`);
+                                return;
+                            }
+                            ActionConsole?.addEntry('system', `🎵 Jingle: "${brand}" (${style || 'random style'}${instrumental ? ', instrumental' : ', ' + (gender === 'f' ? 'female' : 'male')}${repeat !== 2 ? `, ${repeat}×` : ''})`);
+                            AgentActivityChip?.handleTag('suno', `${brand} jingle`);
+                            window.sunoModule?.generateJingle(brand, style, gender, instrumental, repeat);
                         });
                         // Check for [SPOTIFY:track name|artist] — switches player to Spotify mode
                         const spotifyMatch = text.match(/\[SPOTIFY:([^|\]]+)(?:\|([^\]]+))?\]/i);

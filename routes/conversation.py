@@ -1249,6 +1249,20 @@ def _conversation_inner():
         except Exception:
             pass
 
+        # Recently FAILED Suno generations — agent must tell user something went wrong
+        try:
+            from routes.suno import failed_songs_queue
+            if failed_songs_queue:
+                _failed = failed_songs_queue[-3:]
+                _failed_lines = []
+                for f in _failed:
+                    label = f.get('brand') or f.get('title') or 'a track'
+                    reason = f.get('reason', 'unknown error')
+                    _failed_lines.append(f'{label!r} — {reason}')
+                context_parts.append(f'[Suno generation FAILED: {"; ".join(_failed_lines)} — apologize to user and offer to try again]')
+        except Exception:
+            pass
+
         # Available canvas pages (agent needs IDs for [CANVAS:page-id])
         try:
             from routes.canvas import load_canvas_manifest
@@ -1269,6 +1283,7 @@ def _conversation_inner():
     _min_sentence_chars = 40  # default — prevents choppy short TTS fragments
     _parallel_sentences = True  # default — fire all TTS in parallel threads
     _inter_sentence_gap_ms = 0  # default — no gap between audio chunks
+    _prof = None  # default — referenced again in __session_start__ greeting branch below
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
@@ -1320,11 +1335,36 @@ def _conversation_inner():
     # Replace the legacy __session_start__ sentinel with a natural-language greeting
     # prompt so the LLM produces a real greeting instead of a system sentinel ("NO").
     # user_message is kept as-is so the sentinel suppression logic still works.
+    #
+    # If the active profile defines a verbatim conversation.greeting, the LLM is
+    # instructed to say it EXACTLY — no improvisation, no "Welcome back, ready
+    # when you are" drift. This makes the on-screen greeting deterministic across
+    # restarts. Profiles without a greeting fall back to the open-ended prompt.
     if user_message == '__session_start__':
         logger.info(f"### CALL_START session={session_id}")
         _face = identified_person or {}
         _face_name = _face.get('name', '') if _face.get('name', '') != 'unknown' else ''
-        if _face_name:
+        _profile_greeting = ''
+        try:
+            if _prof and getattr(_prof, 'conversation', None):
+                _profile_greeting = (getattr(_prof.conversation, 'greeting', '') or '').strip()
+        except Exception:
+            _profile_greeting = ''
+        if _profile_greeting:
+            if _face_name:
+                _gateway_message = (
+                    f'A new voice session has just started. The person in front of the camera '
+                    f'has been identified as {_face_name}. Say EXACTLY this sentence as your '
+                    f'entire response — do not add or remove anything, do not rephrase, do not '
+                    f'append qualifiers: "{_profile_greeting}"'
+                )
+            else:
+                _gateway_message = (
+                    f'A new voice session has just started. Say EXACTLY this sentence as your '
+                    f'entire response — do not add or remove anything, do not rephrase, do not '
+                    f'append qualifiers: "{_profile_greeting}"'
+                )
+        elif _face_name:
             _gateway_message = (
                 f'A new voice session has just started. The person in front of the camera '
                 f'has been identified as {_face_name}. Greet them by name — '

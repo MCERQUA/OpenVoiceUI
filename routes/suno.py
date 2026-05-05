@@ -59,9 +59,41 @@ SUNO_CALLBACK_URL = (
 
 suno_jobs: dict = {}  # job_id -> {status, prompt, title, style, created_at, task_id, ...}
 completed_songs_queue: list = []  # [{song_id, title, job_id, completed_at, url}, ...]
+failed_songs_queue: list = []     # [{job_id, kind, brand, reason, failed_at}, ...]
 _suno_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Jingle style presets — proven 2026-05-05. The recipe is:
+#   customMode: false
+#   instrumental: false
+#   model: V5
+#   prompt: "<brand> vocal logo jingle, <STYLE_DESCRIPTOR>, [Intro"
+# The truncated "[Intro" (no closing bracket) signals "this is just an intro"
+# so Suno renders ~10-15s instead of a full song.
+# ---------------------------------------------------------------------------
+JINGLE_STYLE_PRESETS = {
+    # `keyword` = 1-3 word adjective inserted before "vocal logo jingle" in v4 recipe.
+    # Minimal style signal that adds variety without lengthening the prompt enough
+    # to break the truncated `, [Intro` short-form trigger.
+    'rock':          {'keyword': 'rock'},
+    'country':       {'keyword': 'country'},
+    'cinematic':     {'keyword': 'cinematic trailer'},
+    'gospel':        {'keyword': 'gospel'},
+    'lofi-hiphop':   {'keyword': 'lo-fi hip hop'},
+    'jazz':          {'keyword': 'jazz'},
+    'edm':           {'keyword': 'EDM festival'},
+    'bluegrass':     {'keyword': 'bluegrass'},
+    'synthwave':     {'keyword': '80s synthwave'},
+    'latin':         {'keyword': 'Latin bossa'},
+    'reggae':        {'keyword': 'reggae'},
+    'gritty-blues':  {'keyword': 'delta blues'},
+    'orchestral':    {'keyword': 'epic orchestral'},
+    'punk':          {'keyword': 'punk rock'},
+    'rnb':           {'keyword': 'R&B'},
+}
+_JINGLE_GENDER_WORD = {'m': 'male', 'f': 'female'}
 
 
 def _is_safe_download_url(url: str) -> bool:
@@ -113,10 +145,15 @@ def _save_generated_metadata(metadata: dict) -> None:
 
 
 def _add_song_to_metadata(filename: str, title: str, prompt: str, style: str,
-                          duration: float = 0, song_id: str = '') -> None:
-    """Write a new song entry to generated_metadata.json in the format music.py expects."""
+                          duration: float = 0, song_id: str = '',
+                          kind: str = 'song', extra: dict = None) -> None:
+    """Write a new song entry to generated_metadata.json in the format music.py expects.
+
+    `kind` is 'song' (full track) or 'jingle' (10-15s logo jingle). `extra` is merged
+    into the entry — used by jingles to record brand, style_key, vocal_gender.
+    """
     metadata = _load_generated_metadata()
-    metadata[filename] = {
+    entry = {
         'title': title,
         'artist': 'Clawdbot AI',
         'description': prompt[:200] if prompt else 'AI-generated track',
@@ -129,7 +166,11 @@ def _add_song_to_metadata(filename: str, title: str, prompt: str, style: str,
         'made_by': 'Clawdbot',
         'created_date': datetime.now().strftime('%Y-%m-%d'),
         'suno_id': song_id,
+        'kind': kind,
     }
+    if extra:
+        entry.update(extra)
+    metadata[filename] = entry
     _save_generated_metadata(metadata)
 
 
@@ -218,6 +259,19 @@ def handle_suno():
         elif action == 'generate':
             return _action_generate(_q, body)
 
+        elif action == 'jingle':
+            return _action_jingle(_q, body)
+
+        elif action == 'list_jingles':
+            return _action_list_jingles()
+
+        elif action == 'jingle_styles':
+            return jsonify({
+                'action': 'jingle_styles',
+                'styles': sorted(JINGLE_STYLE_PRESETS.keys()),
+                'previews': {k: v['keyword'] for k, v in JINGLE_STYLE_PRESETS.items()},
+            })
+
         elif action == 'status':
             return _action_status(_q('job_id') or _q('song_id'))
 
@@ -225,7 +279,7 @@ def handle_suno():
             return _action_credits()
 
         else:
-            return jsonify({'action': 'error', 'response': f"Unknown action '{action}'. Use: generate, status, list, credits"})
+            return jsonify({'action': 'error', 'response': f"Unknown action '{action}'. Use: generate, jingle, list_jingles, jingle_styles, status, list, credits"})
 
     except Exception as exc:
         logger.exception('Suno endpoint error')
@@ -294,7 +348,7 @@ def _action_generate(_q, body: dict):
             'prompt': song_prompt,
             'customMode': True,
             'instrumental': instrumental,
-            'model': 'V5',
+            'model': 'V5_5',
             'vocalGender': vocal_gender,
             'negativeTags': 'low quality, mumbling, distorted, off-key',
             'style': style or 'Catchy, Radio-friendly, Professional',
@@ -306,7 +360,7 @@ def _action_generate(_q, body: dict):
             'prompt': song_prompt,
             'customMode': False,
             'instrumental': instrumental,
-            'model': 'V5',
+            'model': 'V5_5',
             'vocalGender': vocal_gender,
         }
 
@@ -351,6 +405,183 @@ def _action_generate(_q, body: dict):
 
     except http_requests.RequestException as exc:
         return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_jingle(_q, body: dict):
+    """Generate a 10-15 second vocal-logo jingle of a brand name.
+
+    Uses the proven recipe (2026-05-05): customMode=false, instrumental=false,
+    model=V5, prompt ending in literal `, [Intro` (truncated half-tag) — that
+    suffix tells Suno "this is just an intro" so it stops at ~10-15s instead of
+    rendering a full song.
+
+    Inputs:
+      brand          — required, the brand/company name to be sung
+      style          — preset key (see JINGLE_STYLE_PRESETS) OR freetext descriptor.
+                       Random preset chosen if omitted.
+      vocal_gender   — m | f (default m). Ignored if instrumental=true.
+      instrumental   — true to render the jingle as an instrumental audio-logo.
+    """
+    import random
+    brand = (_q('brand') or body.get('brand', '')).strip()
+    if not brand:
+        return jsonify({'action': 'error', 'response': "Need a brand/company name to sing."})
+
+    style_in = (_q('style') or body.get('style', '')).strip()
+    vocal_gender = (_q('vocal_gender') or body.get('vocal_gender', 'm')).lower()
+    if vocal_gender not in ('m', 'f'):
+        vocal_gender = 'm'
+
+    instrumental_raw = _q('instrumental') or body.get('instrumental', False)
+    if isinstance(instrumental_raw, bool):
+        instrumental = instrumental_raw
+    else:
+        instrumental = str(instrumental_raw).lower() in ('true', '1', 'yes')
+
+    # repeat = how many times the brand is sung (1 = shorter ~8-12s, 2 = ~12-15s, default 2)
+    repeat_raw = _q('repeat') or body.get('repeat', 2)
+    try:
+        repeat = max(1, min(3, int(repeat_raw)))
+    except (TypeError, ValueError):
+        repeat = 2
+
+    # Resolve style: preset key, freetext, random preset, or BARE (no style at all).
+    # `bare` flag forces zero style insertion — produces shortest-possible output.
+    bare_raw = _q('bare') or body.get('bare', False)
+    bare = bool(bare_raw) if isinstance(bare_raw, bool) else str(bare_raw).lower() in ('true', '1', 'yes')
+    style_key = ''
+    if bare:
+        style_in = ''  # force empty so style_keyword resolves to ''
+    elif style_in and style_in.lower() in JINGLE_STYLE_PRESETS:
+        style_key = style_in.lower()
+    elif not style_in:
+        style_key = random.choice(list(JINGLE_STYLE_PRESETS.keys()))
+
+    # Resolve short style keyword (1-3 words). For freetext, use as-is but trim hard.
+    if style_key:
+        style_keyword = JINGLE_STYLE_PRESETS[style_key]['keyword']
+    else:
+        # freetext — strip to first ~3 words to keep the prompt minimal
+        style_keyword = ' '.join(style_in.split()[:3]) if style_in else ''
+    style_descriptor = style_keyword  # for metadata logging
+
+    # Recipe v4 (2026-05-05): minimalist — matches Mike's verified-working pattern from
+    # 2026-05-05 with a single short style keyword inserted before "vocal logo jingle".
+    # The truncated `, [Intro` (no closing bracket) signals "this is just an intro" so
+    # Suno renders 10-15s instead of a full song. Recipe history:
+    #   v1 — multi-clause style descriptor → 30-141s (too long, descriptor inflated output)
+    #   v2 — customMode=true skeleton lyrics → 531 refunded (lyrics too short)
+    #   v3 — customMode=false with inline [Intro]...[End] block → 400 malformed
+    #   v4 — minimal keyword + Mike's exact `, [Intro` truncation
+    negative_tags = 'verse, chorus, full song, long intro, padding, extended outro, lengthy, repeat hook, second verse'
+    # v5 uses model V5 (not V5.5) — V5.5 tends to render fuller/longer outputs;
+    # V5 hits the 10-15s short-form sweet spot more reliably with the truncated
+    # `, [Intro` trick.
+    if instrumental:
+        kw_phrase = f'{style_keyword} ' if style_keyword else ''
+        jingle_prompt = f'{brand} {kw_phrase}instrumental audio logo, [Intro'
+        request_body = {
+            'prompt': jingle_prompt,
+            'customMode': False,
+            'instrumental': True,
+            'model': 'V5',
+            'negativeTags': negative_tags + ', vocals, lyrics, singing',
+        }
+    else:
+        kw_phrase = f'{style_keyword} ' if style_keyword else ''
+        jingle_prompt = f'{brand} {kw_phrase}vocal logo jingle, [Intro'
+        request_body = {
+            'prompt': jingle_prompt,
+            'customMode': False,
+            'instrumental': False,
+            'model': 'V5',
+            'vocalGender': vocal_gender,
+            'negativeTags': negative_tags,
+        }
+
+    if SUNO_CALLBACK_URL:
+        request_body['callBackUrl'] = SUNO_CALLBACK_URL
+
+    logger.info(f'Suno jingle: brand={brand!r} style_key={style_key!r} '
+                f'gender={vocal_gender} instrumental={instrumental} repeat={repeat} '
+                f'prompt={jingle_prompt[:120]!r}')
+
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}/api/v1/generate',
+            headers={'Authorization': f'Bearer {SUNO_API_KEY}', 'Content-Type': 'application/json'},
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno jingle API response: {resp.status_code} {resp.text[:300]}')
+
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+
+        data = resp.json()
+        if data.get('code') != 200 or not data.get('data', {}).get('taskId'):
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+
+        task_id = data['data']['taskId']
+        job_id = str(uuid.uuid4())
+        suno_jobs[job_id] = {
+            'status': 'generating',
+            'prompt': jingle_prompt,
+            'title': f'{brand} Jingle',
+            'style': style_descriptor,
+            'task_id': task_id,
+            'created_at': time.time(),
+            'kind': 'jingle',
+            'brand': brand,
+            'style_key': style_key,
+            'vocal_gender': vocal_gender,
+            'instrumental': instrumental,
+            'repeat': repeat,
+        }
+        return jsonify({
+            'action': 'generating',
+            'job_id': job_id,
+            'task_id': task_id,
+            'kind': 'jingle',
+            'brand': brand,
+            'style_key': style_key,
+            'response': f"Cooking your '{brand}' jingle ({style_key or 'custom'}) — ready in ~45-60s.",
+            'estimated_seconds': 45,
+        })
+
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_list_jingles():
+    """Return only generations tagged kind=jingle, newest first."""
+    metadata = _load_generated_metadata()
+    jingles = []
+    for f in sorted(GENERATED_MUSIC_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if f.suffix.lower() not in {'.mp3', '.wav', '.ogg', '.m4a'}:
+            continue
+        meta = metadata.get(f.name, {})
+        if meta.get('kind') != 'jingle':
+            continue
+        jingles.append({
+            'filename': f.name,
+            'title': meta.get('title', f.stem),
+            'brand': meta.get('brand', ''),
+            'style_key': meta.get('style_key', ''),
+            'vocal_gender': meta.get('vocal_gender', ''),
+            'instrumental': meta.get('instrumental', False),
+            'duration_seconds': meta.get('duration_seconds', 0),
+            'created_date': meta.get('created_date', ''),
+            'description': meta.get('description', ''),
+            'url': f'/generated_music/{f.name}',
+            'size_bytes': f.stat().st_size,
+        })
+    return jsonify({
+        'action': 'list_jingles',
+        'count': len(jingles),
+        'jingles': jingles,
+        'response': f'Got {len(jingles)} jingles in the vault.',
+    })
 
 
 def _action_status(job_id: str):
@@ -453,7 +684,20 @@ def _action_status(job_id: str):
                                 logger.warning(f'Suno download failed: {audio_resp.status_code}')
                                 continue
 
-                        # Save metadata
+                        # Save metadata — propagate jingle fields if this was a jingle job
+                        kind = job.get('kind', 'song')
+                        extra = {}
+                        if kind == 'jingle':
+                            extra = {
+                                'brand': job.get('brand', ''),
+                                'style_key': job.get('style_key', ''),
+                                'vocal_gender': job.get('vocal_gender', ''),
+                                'instrumental': job.get('instrumental', False),
+                            }
+                        # Capture lyrics from Suno response if present
+                        song_lyrics = song.get('prompt', '') or song.get('lyrics', '')
+                        if song_lyrics:
+                            extra['lyrics'] = song_lyrics
                         _add_song_to_metadata(
                             filename=filename,
                             title=song_title,
@@ -461,6 +705,8 @@ def _action_status(job_id: str):
                             style=job.get('style', ''),
                             duration=duration,
                             song_id=song_id,
+                            kind=kind,
+                            extra=extra,
                         )
 
                         # Update job
@@ -475,9 +721,11 @@ def _action_status(job_id: str):
                             'filename': filename,
                             'title': song_title,
                             'job_id': job_id,
+                            'kind': kind,
                             'url': f'/generated_music/{filename}',
                             'completed_at': datetime.now().isoformat(),
                             'prompt': job.get('prompt', ''),
+                            'lyrics': song_lyrics,
                         })
 
                         return jsonify({
@@ -500,7 +748,27 @@ def _action_status(job_id: str):
                         'response': f'Still cooking ({gen_status})...',
                     })
                 else:
-                    return jsonify({'action': 'status', 'status': gen_status.lower(), 'response': f'Status: {gen_status}'})
+                    # Anything not in (SUCCESS, PENDING, TEXT_SUCCESS, FIRST_SUCCESS) is a failure
+                    reason = status_data.get('errorMessage') or status_data.get('msg') or gen_status or 'generation failed'
+                    job['status'] = 'failed'
+                    job['error'] = reason
+                    failed_songs_queue.append({
+                        'job_id': job_id,
+                        'task_id': task_id,
+                        'kind': job.get('kind', 'song'),
+                        'brand': job.get('brand', ''),
+                        'title': job.get('title', ''),
+                        'reason': reason,
+                        'failed_at': datetime.now().isoformat(),
+                    })
+                    logger.warning(f'Suno job {job_id} failed: {reason}')
+                    return jsonify({
+                        'action': 'failed',
+                        'status': 'failed',
+                        'job_id': job_id,
+                        'reason': reason,
+                        'response': f"Suno couldn't make the song: {reason}",
+                    })
 
     except Exception as exc:
         logger.warning(f'Suno status poll error: {exc}')
@@ -555,6 +823,30 @@ def suno_callback():
             callback_type = data.get('data', {}).get('callbackType', '')
             task_id = data.get('data', {}).get('taskId', '')
 
+            # Failure callback — surface to user + agent
+            if callback_type == 'error':
+                reason = data.get('data', {}).get('errorMessage') or data.get('msg') or 'Suno reported an error'
+                _job_id = None
+                _job = None
+                for jid, job in suno_jobs.items():
+                    if job.get('task_id') == task_id:
+                        _job_id = jid
+                        _job = job
+                        job['status'] = 'failed'
+                        job['error'] = reason
+                        break
+                failed_songs_queue.append({
+                    'job_id': _job_id or task_id,
+                    'task_id': task_id,
+                    'kind': (_job or {}).get('kind', 'song'),
+                    'brand': (_job or {}).get('brand', ''),
+                    'title': (_job or {}).get('title', ''),
+                    'reason': reason,
+                    'failed_at': datetime.now().isoformat(),
+                })
+                logger.warning(f'Suno callback reported error for task {task_id}: {reason}')
+                return jsonify({'status': 'ok'})
+
             # sunoapi.org sends: "text" (lyrics ready), "first"/"second" (audio ready), "complete"
             # Only process 'complete' to avoid duplicates (first/second are partial deliveries
             # of the same songs that appear again in complete).
@@ -606,6 +898,8 @@ def suno_callback():
                                 prompt = ''
                                 style = ''
                                 job_id = None
+                                kind = 'song'
+                                extra = {}
                                 for jid, job in suno_jobs.items():
                                     if job.get('task_id') == task_id:
                                         job['status'] = 'complete'
@@ -614,18 +908,35 @@ def suno_callback():
                                         prompt = job.get('prompt', '')
                                         style = job.get('style', '')
                                         job_id = jid
+                                        kind = job.get('kind', 'song')
+                                        if kind == 'jingle':
+                                            extra = {
+                                                'brand': job.get('brand', ''),
+                                                'style_key': job.get('style_key', ''),
+                                                'vocal_gender': job.get('vocal_gender', ''),
+                                                'instrumental': job.get('instrumental', False),
+                                            }
                                         break
 
-                                _add_song_to_metadata(filename, song_title, prompt, style, duration, song_id)
+                                # Capture lyrics from Suno response (description-mode jingles
+                                # have Suno-written lyrics; custom-mode songs have provided lyrics)
+                                song_lyrics = song.get('prompt', '') or song.get('lyrics', '')
+                                if song_lyrics:
+                                    extra['lyrics'] = song_lyrics
+
+                                _add_song_to_metadata(filename, song_title, prompt, style,
+                                                      duration, song_id, kind=kind, extra=extra)
 
                                 completed_songs_queue.append({
                                     'song_id': song_id,
                                     'filename': filename,
                                     'title': song_title,
                                     'job_id': job_id or task_id,
+                                    'kind': kind,
                                     'url': f'/generated_music/{filename}',
                                     'completed_at': datetime.now().isoformat(),
                                     'prompt': prompt,
+                                    'lyrics': song_lyrics,
                                 })
                         except Exception as exc:
                             logger.warning(f'Callback download error: {exc}')
@@ -662,6 +973,27 @@ def suno_completed():
     if completed_songs_queue:
         return jsonify({'has_completed': True, 'songs': completed_songs_queue, 'count': len(completed_songs_queue)})
     return jsonify({'has_completed': False, 'songs': [], 'count': 0})
+
+
+@suno_bp.route('/api/suno/failed', methods=['GET', 'POST'])
+def suno_failed():
+    """
+    GET  — Returns failed Suno jobs waiting for notification.
+    POST — Clears specific job (or all) from the failed queue after UI showed it.
+    """
+    global failed_songs_queue
+
+    if request.method == 'POST':
+        job_id = request.args.get('job_id') or (request.get_json(silent=True) or {}).get('job_id')
+        if job_id:
+            failed_songs_queue = [f for f in failed_songs_queue if f.get('job_id') != job_id]
+        else:
+            failed_songs_queue = []
+        return jsonify({'status': 'ok', 'cleared': True})
+
+    if failed_songs_queue:
+        return jsonify({'has_failed': True, 'failures': failed_songs_queue, 'count': len(failed_songs_queue)})
+    return jsonify({'has_failed': False, 'failures': [], 'count': 0})
 
 
 @suno_bp.route('/api/suno/song/<filename>', methods=['DELETE'])
