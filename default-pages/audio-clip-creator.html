@@ -272,6 +272,23 @@
         <textarea id="textInput" placeholder="Paste a letter, write a script, or dictate a passage..." maxlength="8000"></textarea>
         <div class="charcount" id="charCount">0 / 8000</div>
 
+        <div class="row" style="margin-top: 8px;">
+            <button class="btn secondary" id="aiGenerateBtn" type="button">AI Generate</button>
+            <button class="btn secondary" id="aiEnhanceBtn" type="button" disabled>AI Enhance</button>
+            <button class="btn secondary" id="aiUndoBtn" type="button" style="display:none;">Undo AI change</button>
+        </div>
+
+        <!-- AI Generate panel (hidden until clicked) -->
+        <div id="aiPanel" style="display:none; margin-top:10px; padding:12px; background:#0b1220; border:1px solid rgba(59,130,246,0.3); border-radius:8px;">
+            <label for="aiBrief" id="aiPanelLabel" style="margin-top:0;">Describe what you want</label>
+            <textarea id="aiBrief" rows="2" placeholder="e.g. a polite voicemail asking the customer to call back about the invoice"></textarea>
+            <div class="row" style="margin-top:8px;">
+                <button class="btn" id="aiSubmitBtn" type="button">Write it</button>
+                <button class="btn secondary" id="aiCancelBtn" type="button">Cancel</button>
+                <span id="aiStatus" style="font-size:0.85rem; color:#94a3b8;"></span>
+            </div>
+        </div>
+
         <label style="margin-top: 14px;">Voice</label>
         <div id="voicesContainer"><p style="color:#64748b;font-size:0.85rem">Loading voices…</p></div>
 
@@ -349,11 +366,95 @@ const VOICE_GENDER = {
 };
 
 // ── Char counter ──
-$('textInput').addEventListener('input', e => {
-    const n = e.target.value.length;
+function updateCharCount() {
+    const n = $('textInput').value.length;
     const el = $('charCount');
     el.textContent = `${n} / 8000`;
     el.classList.toggle('warn', n > 7500);
+    $('aiEnhanceBtn').disabled = n === 0;
+}
+$('textInput').addEventListener('input', updateCharCount);
+
+// ── AI Generate / Enhance ──
+let _previousText = null;       // for undo after an AI change
+let _aiMode = null;             // 'generate' or 'enhance'
+
+const GEN_PROMPT_PREFIX = `You are writing text that will be narrated as audio. Output ONLY the narration text — no preamble, no titles, no headings, no markdown, no bullet points, no quotation marks around the whole thing. Use natural spoken-language sentence rhythms. Keep numbers as words (e.g. "seven thousand dollars" not "$7,000"). The user wants:\n\n`;
+
+const ENHANCE_PROMPT_PREFIX = `Polish the following text so it sounds natural when read aloud as audio narration. Keep the original meaning and tone. Spell out numbers as words (e.g. "seven thousand dollars" not "$7,000"). Output ONLY the rewritten text — no preamble, no commentary, no quotation marks around the whole thing.\n\nText to polish:\n\n`;
+
+function openAiPanel(mode) {
+    _aiMode = mode;
+    $('aiPanel').style.display = 'block';
+    $('aiStatus').textContent = '';
+    if (mode === 'generate') {
+        $('aiPanelLabel').textContent = 'Describe what you want';
+        $('aiBrief').placeholder = 'e.g. a polite voicemail asking the customer to call back about the invoice';
+        $('aiBrief').value = '';
+        $('aiBrief').focus();
+        $('aiSubmitBtn').textContent = 'Write it';
+    } else {
+        $('aiPanelLabel').textContent = 'Optional: extra direction (leave blank to just polish)';
+        $('aiBrief').placeholder = 'e.g. make it more formal / shorter / friendlier';
+        $('aiBrief').value = '';
+        $('aiBrief').focus();
+        $('aiSubmitBtn').textContent = 'Polish it';
+    }
+}
+
+function closeAiPanel() { $('aiPanel').style.display = 'none'; _aiMode = null; }
+
+$('aiGenerateBtn').addEventListener('click', () => openAiPanel('generate'));
+$('aiEnhanceBtn').addEventListener('click', () => {
+    if (!$('textInput').value.trim()) return;
+    openAiPanel('enhance');
+});
+$('aiCancelBtn').addEventListener('click', closeAiPanel);
+
+$('aiSubmitBtn').addEventListener('click', async () => {
+    const brief = $('aiBrief').value.trim();
+    const currentText = $('textInput').value.trim();
+    let prompt;
+    if (_aiMode === 'generate') {
+        if (!brief) return ($('aiStatus').textContent = 'Tell me what to write.');
+        prompt = GEN_PROMPT_PREFIX + brief;
+    } else {
+        if (!currentText) return ($('aiStatus').textContent = 'Nothing to polish.');
+        prompt = ENHANCE_PROMPT_PREFIX + currentText;
+        if (brief) prompt += '\n\nAdditional direction: ' + brief;
+    }
+    $('aiSubmitBtn').disabled = true;
+    $('aiStatus').textContent = 'Thinking…';
+    try {
+        const r = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: prompt }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        const text = (data.response || '').trim().replace(/^["']|["']$/g, '');
+        if (!text) throw new Error('empty response from LLM');
+        _previousText = $('textInput').value;
+        $('textInput').value = text;
+        updateCharCount();
+        $('aiUndoBtn').style.display = 'inline-flex';
+        closeAiPanel();
+        showStatus(_aiMode === 'generate' ? 'AI wrote your text. Review and tweak as needed.' : 'AI polished your text. Review and tweak as needed.', 'success');
+    } catch (e) {
+        $('aiStatus').textContent = `Failed: ${e.message}`;
+    } finally {
+        $('aiSubmitBtn').disabled = false;
+    }
+});
+
+$('aiUndoBtn').addEventListener('click', () => {
+    if (_previousText === null) return;
+    $('textInput').value = _previousText;
+    _previousText = null;
+    $('aiUndoBtn').style.display = 'none';
+    updateCharCount();
+    showStatus('Reverted to previous text.', 'info');
 });
 
 // ── Silence selector ──
