@@ -477,9 +477,14 @@ def _action_jingle(_q, body: dict):
     # v5 uses model V5 (not V5.5) — V5.5 tends to render fuller/longer outputs;
     # V5 hits the 10-15s short-form sweet spot more reliably with the truncated
     # `, [Intro` trick.
+    # Brand-repeat: 1× sends the brand once (shortest), 2× duplicates it (slightly
+    # longer), 3× three times. Each extra brand mention adds brand-word-count words
+    # to the prompt — keep total ≤5 words for the [Intro recipe to hold (verified
+    # 2026-05-07: prompt ≤5 words = 10-30s output, ≥7 = 60s+).
+    brand_phrase = ' '.join([brand] * max(1, repeat))
     if instrumental:
         kw_phrase = f'{style_keyword} ' if style_keyword else ''
-        jingle_prompt = f'{brand} {kw_phrase}instrumental audio logo, [Intro'
+        jingle_prompt = f'{brand_phrase} {kw_phrase}instrumental audio logo, [Intro'
         request_body = {
             'prompt': jingle_prompt,
             'customMode': False,
@@ -489,7 +494,7 @@ def _action_jingle(_q, body: dict):
         }
     else:
         kw_phrase = f'{style_keyword} ' if style_keyword else ''
-        jingle_prompt = f'{brand} {kw_phrase}vocal logo jingle, [Intro'
+        jingle_prompt = f'{brand_phrase} {kw_phrase}vocal logo jingle, [Intro'
         request_body = {
             'prompt': jingle_prompt,
             'customMode': False,
