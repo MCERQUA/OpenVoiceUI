@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="page-icon" content="audio-clip">
+    <title>Audio Clip Creator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #0b1220;
+            color: #e2e8f0;
+            padding: 16px;
+            min-height: 100vh;
+        }
+
+        .wrap { max-width: 920px; margin: 0 auto; }
+
+        h1 { font-size: 1.6rem; font-weight: 700; color: #e2e8f0; margin-bottom: 4px; }
+        .sub { font-size: 0.85rem; color: #94a3b8; margin-bottom: 20px; }
+
+        .card {
+            background: #111827;
+            border: 1px solid rgba(59,130,246,0.25);
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.82rem;
+            color: #94a3b8;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        textarea, input[type=text] {
+            width: 100%;
+            background: #0b1220;
+            border: 1px solid rgba(148,163,184,0.2);
+            border-radius: 8px;
+            padding: 10px 12px;
+            color: #e2e8f0;
+            font: inherit;
+            font-size: 0.95rem;
+            resize: vertical;
+            min-height: 44px;
+        }
+        textarea { min-height: 120px; }
+        textarea:focus, input:focus { outline: none; border-color: #3b82f6; }
+
+        .charcount {
+            text-align: right;
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-top: 4px;
+        }
+        .charcount.warn { color: #f59e0b; }
+
+        .provider-section { margin-bottom: 14px; }
+        .provider-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.82rem;
+            color: #cbd5e1;
+            font-weight: 600;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(148,163,184,0.12);
+        }
+        .provider-status { font-size: 0.7rem; font-weight: 500; }
+        .provider-status.active { color: #22c55e; }
+        .provider-status.inactive { color: #ef4444; }
+
+        .voice-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            gap: 8px;
+        }
+
+        .voice-card {
+            background: #0b1220;
+            border: 1.5px solid rgba(148,163,184,0.15);
+            border-radius: 8px;
+            padding: 10px 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            min-height: 44px;
+            transition: all 0.12s;
+        }
+        .voice-card:hover { border-color: #3b82f6; }
+        .voice-card.selected {
+            border-color: #3b82f6;
+            background: rgba(59,130,246,0.1);
+        }
+        .voice-card.disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .voice-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+        .voice-name { font-size: 0.88rem; color: #e2e8f0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+        .voice-meta { font-size: 0.7rem; color: #64748b; }
+        .voice-play {
+            background: transparent;
+            border: 1px solid rgba(148,163,184,0.25);
+            color: #94a3b8;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            min-width: 36px;
+            min-height: 36px;
+        }
+        .voice-play:hover { border-color: #3b82f6; color: #3b82f6; }
+        .voice-play.playing { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+
+        .row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 18px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            min-height: 44px;
+            transition: background 0.12s;
+        }
+        .btn:hover { background: #2563eb; }
+        .btn:disabled { background: #475569; cursor: not-allowed; opacity: 0.6; }
+        .btn.secondary {
+            background: transparent;
+            border: 1.5px solid rgba(148,163,184,0.3);
+            color: #cbd5e1;
+        }
+        .btn.secondary:hover { border-color: #3b82f6; color: #3b82f6; background: rgba(59,130,246,0.05); }
+        .btn.danger { background: #b91c1c; }
+        .btn.danger:hover { background: #991b1b; }
+
+        .opt-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .opt-btn {
+            background: #0b1220;
+            border: 1.5px solid rgba(148,163,184,0.18);
+            color: #94a3b8;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            cursor: pointer;
+            min-height: 36px;
+        }
+        .opt-btn.active { background: rgba(59,130,246,0.15); border-color: #3b82f6; color: #93c5fd; font-weight: 600; }
+        .opt-btn:hover:not(.active) { border-color: #3b82f6; color: #93c5fd; }
+
+        #status {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.86rem;
+            display: none;
+        }
+        #status.show { display: block; }
+        #status.info { background: rgba(59,130,246,0.12); color: #93c5fd; }
+        #status.error { background: rgba(239,68,68,0.12); color: #fca5a5; }
+        #status.success { background: rgba(34,197,94,0.12); color: #86efac; }
+
+        #result { display: none; }
+        #result.show { display: block; }
+
+        audio { width: 100%; margin-top: 10px; }
+
+        .clip-row {
+            display: flex;
+            gap: 10px;
+            padding: 10px 12px;
+            background: #0b1220;
+            border: 1px solid rgba(148,163,184,0.15);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .clip-meta { flex: 1; min-width: 220px; }
+        .clip-label { font-size: 0.92rem; font-weight: 600; color: #e2e8f0; }
+        .clip-sub { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
+        .clip-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .clip-actions a, .clip-actions button {
+            font-size: 0.78rem;
+            padding: 6px 10px;
+            min-height: 32px;
+            text-decoration: none;
+            background: transparent;
+            border: 1px solid rgba(148,163,184,0.3);
+            color: #cbd5e1;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+        }
+        .clip-actions a:hover, .clip-actions button:hover { border-color: #3b82f6; color: #3b82f6; }
+
+        /* Email modal */
+        .modal-bg {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+            align-items: center; justify-content: center;
+            padding: 16px;
+        }
+        .modal-bg.open { display: flex; }
+        .modal {
+            background: #111827;
+            border: 1px solid rgba(59,130,246,0.3);
+            border-radius: 12px;
+            padding: 18px;
+            max-width: 540px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal h2 { font-size: 1.1rem; margin-bottom: 12px; color: #e2e8f0; }
+        .modal label { margin-top: 10px; }
+        .confirm-bar {
+            margin-top: 14px;
+            padding: 10px 12px;
+            background: rgba(245,158,11,0.1);
+            border: 1px solid rgba(245,158,11,0.4);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #fcd34d;
+        }
+        .confirm-bar.armed {
+            background: rgba(34,197,94,0.1);
+            border-color: rgba(34,197,94,0.4);
+            color: #86efac;
+        }
+
+        @media (max-width: 600px) {
+            body { padding: 12px; }
+            h1 { font-size: 1.35rem; }
+            .voice-grid { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h1>Audio Clip Creator</h1>
+    <p class="sub">Type or paste text, pick a voice, generate an MP3 with 1s leading silence. Download or email it. Every clip is saved on the server.</p>
+
+    <!-- Input card -->
+    <div class="card">
+        <label for="textInput">Text to narrate</label>
+        <textarea id="textInput" placeholder="Paste a letter, write a script, or dictate a passage..." maxlength="8000"></textarea>
+        <div class="charcount" id="charCount">0 / 8000</div>
+
+        <label style="margin-top: 14px;">Voice</label>
+        <div id="voicesContainer"><p style="color:#64748b;font-size:0.85rem">Loading voices…</p></div>
+
+        <label style="margin-top: 14px;">Leading silence (ms)</label>
+        <div class="opt-row" id="silenceRow">
+            <button class="opt-btn" data-ms="0">None</button>
+            <button class="opt-btn" data-ms="500">500ms</button>
+            <button class="opt-btn active" data-ms="1000">1000ms</button>
+            <button class="opt-btn" data-ms="2000">2000ms</button>
+        </div>
+
+        <label style="margin-top: 14px;">Label (for clip history)</label>
+        <input type="text" id="labelInput" placeholder="e.g. delphina-letter" maxlength="60">
+
+        <div class="row">
+            <button class="btn" id="generateBtn">Generate clip</button>
+        </div>
+        <div id="status"></div>
+
+        <div id="result">
+            <audio id="audioPlayer" controls></audio>
+            <div class="row">
+                <a class="btn secondary" id="downloadBtn" download>Download MP3</a>
+                <button class="btn secondary" id="emailBtn">Email this clip</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clip history -->
+    <div class="card">
+        <h2 style="font-size:1rem;color:#cbd5e1;margin-bottom:12px;">Saved clips</h2>
+        <div id="clipsList"><p style="color:#64748b;font-size:0.85rem">Loading…</p></div>
+    </div>
+</div>
+
+<!-- Email modal -->
+<div class="modal-bg" id="emailModal">
+    <div class="modal">
+        <h2>Email clip</h2>
+        <label for="emTo">To (comma-separated)</label>
+        <input type="text" id="emTo" placeholder="recipient@example.com">
+        <label for="emCc">CC (optional)</label>
+        <input type="text" id="emCc" placeholder="cc@example.com">
+        <label for="emSubject">Subject</label>
+        <input type="text" id="emSubject" value="Audio clip">
+        <label for="emBody">Body</label>
+        <textarea id="emBody" rows="5">Audio clip attached.</textarea>
+
+        <div class="confirm-bar" id="confirmBar">
+            Click <strong>Send</strong> to confirm. This will email the clip via the tenant's AgentMail inbox.
+        </div>
+
+        <div class="row">
+            <button class="btn" id="emSend">Send</button>
+            <button class="btn secondary" id="emCancel">Cancel</button>
+        </div>
+        <div id="emStatus" style="margin-top:10px;font-size:0.85rem;"></div>
+    </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+let voices = [];                 // flat list: {provider, voice, gender, type, active}
+let selectedVoice = null;        // {provider, voice}
+let leadingSilenceMs = 1000;
+let lastClipId = null;
+let _previewAudio = null;
+
+const VOICE_GENDER = {
+    autumn:'F', diana:'F', hannah:'F',
+    austin:'M', daniel:'M', troy:'M',
+    rachel:'F', domi:'F', bella:'F', elli:'F',
+    drew:'M', clyde:'M', paul:'M', antoni:'M',
+};
+
+// ── Char counter ──
+$('textInput').addEventListener('input', e => {
+    const n = e.target.value.length;
+    const el = $('charCount');
+    el.textContent = `${n} / 8000`;
+    el.classList.toggle('warn', n > 7500);
+});
+
+// ── Silence selector ──
+document.querySelectorAll('#silenceRow .opt-btn').forEach(b => {
+    b.addEventListener('click', () => {
+        document.querySelectorAll('#silenceRow .opt-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        leadingSilenceMs = parseInt(b.dataset.ms, 10);
+    });
+});
+
+// ── Status helper ──
+function showStatus(msg, kind='info') {
+    const el = $('status');
+    el.textContent = msg;
+    el.className = `show ${kind}`;
+}
+function hideStatus() { $('status').className = ''; }
+
+// ── Voice loading ──
+async function loadVoices() {
+    try {
+        const r = await fetch('/api/tts/providers');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        renderVoices(data.providers || []);
+    } catch (e) {
+        $('voicesContainer').innerHTML = `<p style="color:#fca5a5;font-size:0.85rem">Failed to load voices: ${e.message}</p>`;
+    }
+}
+
+function renderVoices(providers) {
+    voices = [];
+    const container = $('voicesContainer');
+    container.innerHTML = '';
+
+    for (const p of providers) {
+        const provVoices = [];
+        for (const cv of (p.cloned_voices || [])) {
+            provVoices.push({ provider: p.provider_id, voice: cv.voice_id, name: cv.name, type: 'cloned', active: p.status === 'active' });
+        }
+        for (const v of (p.voices || [])) {
+            provVoices.push({ provider: p.provider_id, voice: v, name: v, type: 'stock', active: p.status === 'active' });
+        }
+        if (provVoices.length === 0) continue;
+        voices.push(...provVoices);
+
+        const sec = document.createElement('div');
+        sec.className = 'provider-section';
+        const head = document.createElement('div');
+        head.className = 'provider-header';
+        head.innerHTML = `
+            <span>${p.provider_id}</span>
+            <span class="provider-status ${p.status === 'active' ? 'active' : 'inactive'}">${p.status === 'active' ? 'active' : 'unavailable'}</span>
+        `;
+        sec.appendChild(head);
+
+        const grid = document.createElement('div');
+        grid.className = 'voice-grid';
+        for (const v of provVoices) {
+            const card = document.createElement('div');
+            card.className = `voice-card ${v.active ? '' : 'disabled'}`;
+            const gender = VOICE_GENDER[v.voice.toLowerCase()] || '';
+            const meta = [v.type, gender ? (gender === 'F' ? 'female' : 'male') : ''].filter(Boolean).join(' · ');
+            card.innerHTML = `
+                <div class="voice-info">
+                    <div class="voice-name">${v.name}</div>
+                    <div class="voice-meta">${meta}</div>
+                </div>
+                <button class="voice-play" title="Preview" aria-label="Preview ${v.name}">▶</button>
+            `;
+            const playBtn = card.querySelector('.voice-play');
+            playBtn.addEventListener('click', e => { e.stopPropagation(); previewVoice(v.provider, v.voice, playBtn); });
+            if (v.active) {
+                card.addEventListener('click', () => selectVoice(v, card));
+            }
+            grid.appendChild(card);
+        }
+        sec.appendChild(grid);
+        container.appendChild(sec);
+    }
+    if (voices.length === 0) {
+        container.innerHTML = '<p style="color:#fca5a5;font-size:0.85rem">No TTS voices available.</p>';
+    }
+}
+
+function selectVoice(v, card) {
+    if (!v.active) return;
+    document.querySelectorAll('.voice-card.selected').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+    selectedVoice = { provider: v.provider, voice: v.voice, name: v.name };
+}
+
+// ── Voice preview ──
+async function previewVoice(provider, voice, btn) {
+    if (_previewAudio) { _previewAudio.pause(); _previewAudio = null; }
+    document.querySelectorAll('.voice-play.playing').forEach(b => b.classList.remove('playing'));
+    btn.classList.add('playing');
+    btn.textContent = '■';
+    try {
+        const r = await fetch('/api/tts/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: "Hi, this is a quick voice preview.",
+                provider, voice,
+            }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        const a = new Audio(URL.createObjectURL(blob));
+        a.onended = () => { btn.classList.remove('playing'); btn.textContent = '▶'; _previewAudio = null; };
+        a.play();
+        _previewAudio = a;
+    } catch (e) {
+        btn.classList.remove('playing');
+        btn.textContent = '▶';
+        showStatus(`Preview failed: ${e.message}`, 'error');
+    }
+}
+
+// ── Generate ──
+$('generateBtn').addEventListener('click', async () => {
+    const text = $('textInput').value.trim();
+    if (!text) return showStatus('Enter some text first.', 'error');
+    if (!selectedVoice) return showStatus('Pick a voice.', 'error');
+
+    const label = $('labelInput').value.trim() || `clip-${Date.now()}`;
+
+    $('generateBtn').disabled = true;
+    showStatus('Generating audio… this can take 5–60 seconds for longer text.', 'info');
+    $('result').classList.remove('show');
+
+    try {
+        const r = await fetch('/api/audio-clips/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text,
+                provider: selectedVoice.provider,
+                voice: selectedVoice.voice,
+                label,
+                leading_silence_ms: leadingSilenceMs,
+            }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+
+        lastClipId = data.id;
+        $('audioPlayer').src = data.url;
+        $('downloadBtn').href = data.url;
+        $('downloadBtn').download = data.filename;
+        $('result').classList.add('show');
+        const dur = data.duration_ms ? `${(data.duration_ms / 1000).toFixed(1)}s` : '?';
+        const kb = (data.size_bytes / 1024).toFixed(0);
+        showStatus(`Generated. ${dur}, ${kb} KB. Saved as ${data.filename}.`, 'success');
+        loadClips();
+    } catch (e) {
+        showStatus(`Generation failed: ${e.message}`, 'error');
+    } finally {
+        $('generateBtn').disabled = false;
+    }
+});
+
+// ── Email modal ──
+let modalArmed = false;
+function openEmail(clipId) {
+    lastClipId = clipId;
+    modalArmed = false;
+    $('confirmBar').classList.remove('armed');
+    $('confirmBar').innerHTML = 'Click <strong>Send</strong> to arm, then <strong>Send</strong> again to confirm. Two clicks required.';
+    $('emSend').textContent = 'Send';
+    $('emStatus').textContent = '';
+    $('emailModal').classList.add('open');
+}
+$('emailBtn').addEventListener('click', () => openEmail(lastClipId));
+$('emCancel').addEventListener('click', () => $('emailModal').classList.remove('open'));
+
+$('emSend').addEventListener('click', async () => {
+    if (!modalArmed) {
+        modalArmed = true;
+        $('confirmBar').classList.add('armed');
+        $('confirmBar').innerHTML = '<strong>Armed.</strong> Click <strong>Send</strong> once more to actually send the email.';
+        $('emSend').textContent = 'Send (confirm)';
+        return;
+    }
+    const to = $('emTo').value.split(',').map(s => s.trim()).filter(Boolean);
+    const cc = $('emCc').value.split(',').map(s => s.trim()).filter(Boolean);
+    const subject = $('emSubject').value.trim();
+    const body = $('emBody').value;
+    if (!to.length || !subject) {
+        $('emStatus').innerHTML = '<span style="color:#fca5a5">Need at least one To address and a subject.</span>';
+        return;
+    }
+    $('emSend').disabled = true;
+    $('emStatus').textContent = 'Sending…';
+    try {
+        const r = await fetch('/api/audio-clips/email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clip_id: lastClipId, to, cc, subject, body }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        $('emStatus').innerHTML = `<span style="color:#86efac">Sent. Message ID: ${data.message_id}</span>`;
+        setTimeout(() => $('emailModal').classList.remove('open'), 2000);
+        loadClips();
+    } catch (e) {
+        $('emStatus').innerHTML = `<span style="color:#fca5a5">Failed: ${e.message}</span>`;
+    } finally {
+        $('emSend').disabled = false;
+    }
+});
+
+// ── Clip history ──
+async function loadClips() {
+    try {
+        const r = await fetch('/api/audio-clips/list');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        renderClips(data.clips || []);
+    } catch (e) {
+        $('clipsList').innerHTML = `<p style="color:#fca5a5;font-size:0.85rem">Failed to load clips: ${e.message}</p>`;
+    }
+}
+
+function renderClips(clips) {
+    const list = $('clipsList');
+    if (clips.length === 0) {
+        list.innerHTML = '<p style="color:#64748b;font-size:0.85rem">No clips yet.</p>';
+        return;
+    }
+    list.innerHTML = '';
+    for (const c of clips) {
+        const dur = c.duration_ms ? `${(c.duration_ms / 1000).toFixed(1)}s` : '?';
+        const kb = c.size_bytes ? `${(c.size_bytes / 1024).toFixed(0)} KB` : '';
+        const when = c.created_at ? new Date(c.created_at).toLocaleString() : '';
+        const sentCount = (c.emails_sent || []).length;
+        const sentBadge = sentCount > 0 ? ` · sent ${sentCount}×` : '';
+        const row = document.createElement('div');
+        row.className = 'clip-row';
+        row.innerHTML = `
+            <div class="clip-meta">
+                <div class="clip-label">${c.label || c.id}</div>
+                <div class="clip-sub">${c.provider}/${c.voice || '?'} · ${dur} · ${kb} · ${when}${sentBadge}</div>
+            </div>
+            <audio controls style="width: 220px; min-width: 180px;" preload="none" src="${c.url}"></audio>
+            <div class="clip-actions">
+                <a href="${c.url}" download="${c.filename}">Download</a>
+                <button data-id="${c.id}" class="email-clip">Email</button>
+            </div>
+        `;
+        row.querySelector('.email-clip').addEventListener('click', () => openEmail(c.id));
+        list.appendChild(row);
+    }
+}
+
+loadVoices();
+loadClips();
+</script>
+</body>
+</html>

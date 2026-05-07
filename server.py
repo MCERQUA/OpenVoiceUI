@@ -181,6 +181,9 @@ app.register_blueprint(vision_bp)
 from routes.transcripts import transcripts_bp
 app.register_blueprint(transcripts_bp)
 
+from routes.audio_clips import audio_clips_bp
+app.register_blueprint(audio_clips_bp)
+
 from routes.pi import pi_bp
 app.register_blueprint(pi_bp)
 
