@@ -2088,7 +2088,19 @@ def _conversation_inner():
                                 continue  # back to event loop — text_done NOT sent yet
 
                             # ── Z.AI direct fallback after double-empty ──
-                            if _is_empty and getattr(stream_response, '_retried', False):
+                            # Trigger on ANY empty user-message response (rate-limited to
+                            # _DOUBLE_EMPTY_MAX_RESTARTS/_DOUBLE_EMPTY_WINDOW_SECONDS below).
+                            # Was previously gated by `_retried` (conversation.py's own
+                            # retry path), but the openclaw gateway client retries
+                            # internally on EMPTY-FINAL (openclaw.py ~line 1147) and never
+                            # sets that flag — so the breaker silently missed every
+                            # gateway-internal double-empty. Verified on foambot 2026-05-11:
+                            # zai/glm-5-turbo timed out on a 80KB web_fetch context, then
+                            # next two attempts returned chat.final with no text, no
+                            # "DOUBLE EMPTY" log line ever fired. Skipping system messages
+                            # (__session_start__ etc.) because they have their own
+                            # short-text fallback path below.
+                            if _is_empty and not user_message.startswith('__'):
                                 logger.warning('### DOUBLE EMPTY — session poisoned, entering recovery mode')
 
                                 # 1. Switch to recovery session key so NEXT request
