@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import queue
+import random
 import re
 import sqlite3
 import threading
@@ -234,6 +235,27 @@ _VOICE_INSTRUCTIONS = (
 
     "]"
 )
+
+
+# Spoken fallbacks for __session_start__ when the LLM returns nothing usable.
+# The current temporary primary model (zai/glm-5-turbo — see
+# memory/glm-primary-temporary-swap) returns empty / bare-"NO" completions on
+# the first turn of a session noticeably more often than MiniMax did. When that
+# happens we substitute one of these so the user always hears a greeting on
+# connect instead of dead air. (A profile-defined conversation.greeting wins
+# over these — see the __session_start__ handling in _conversation_inner.)
+_SESSION_START_FALLBACK_GREETINGS = (
+    "Hey — I'm here. What can I do for you?",
+    "Hi there. What's on your mind?",
+    "I'm listening — what do you need?",
+    "Hey, I'm here. What's up?",
+    "Ready when you are — what can I help with?",
+)
+
+
+def _pick_session_start_greeting() -> str:
+    """Pick a varied generic greeting for the empty-__session_start__ fallback."""
+    return random.choice(_SESSION_START_FALLBACK_GREETINGS)
 
 
 def _is_vision_request(msg: str) -> bool:
@@ -1287,6 +1309,8 @@ def _conversation_inner():
     _parallel_sentences = True  # default — fire all TTS in parallel threads
     _inter_sentence_gap_ms = 0  # default — no gap between audio chunks
     _prof = None  # default — referenced again in __session_start__ greeting branch below
+    _profile_greeting = ''  # default — set in the __session_start__ branch; read by the
+                            # empty-greeting fallback in stream_response (closure capture)
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
@@ -1318,6 +1342,23 @@ def _conversation_inner():
         if _user_tag:
             context_parts.append(_user_tag)
             logger.info(f'### CURRENT_USER injected: clerk_uid={_clerk_uid} tenant={_tenant}')
+
+        # Mesh-access gate — refresh the .mesh-admin-session marker on every
+        # turn where the admin (Mike) is the authenticated Clerk user. The
+        # mesh-send/mesh-recv wrappers in voice tenants check this marker
+        # (300s TTL) before allowing any mesh operation. Voice tenants serving
+        # a non-admin customer get NO mesh access; admin sessions get full
+        # both-direction access. host/test-dev/webtops bypass the gate.
+        # See /mnt/system/base/skills/agent-mesh/bin/mesh-gate-check.
+        ADMIN_CLERK_ID = 'user_3AJGqe2Fgn1qD580pg6tt2ysplR'
+        if _clerk_uid == ADMIN_CLERK_ID:
+            try:
+                _gate_path = '/app/runtime/uploads/.mesh-admin-session'
+                _ts_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                with open(_gate_path, 'w', encoding='utf-8') as _gf:
+                    _gf.write(f'admin={_clerk_uid}\nrefreshed_at={_ts_iso}\nsource=conversation.py auto-refresh\n')
+            except Exception as _ge:
+                logger.warning(f'mesh-gate refresh failed (non-fatal): {_ge}')
     except Exception as _e:
         logger.warning(f'CURRENT_USER injection failed (non-fatal): {_e}')
 
@@ -1812,9 +1853,14 @@ def _conversation_inner():
                                 full_response = _truncate_at_sentence(full_response, max_response_chars)
 
                             # Suppress bare NO/YES sentinel responses to system triggers
-                            # (gateway returns "NO" for wake-word checks on __session_start__)
+                            # (gateway returns "NO" for wake-word checks on some triggers).
+                            # __session_start__ is the exception: a bare NO/YES there is the
+                            # same broken-greeting case as an empty reply, and silently
+                            # `break`-ing here means the user connects the call and hears
+                            # nothing. So let __session_start__ fall through to the
+                            # empty-greeting fallback below instead of dead-ending.
                             _is_system_trigger = user_message.startswith('__')
-                            if _is_system_trigger and full_response and \
+                            if _is_system_trigger and user_message != '__session_start__' and full_response and \
                                     full_response.strip().upper() in ('NO', 'NO.', 'YES', 'YES.'):
                                 logger.info(f'Suppressing sentinel "{full_response.strip()}" for system trigger')
                                 yield json.dumps({'type': 'no_audio'}) + '\n'
@@ -2190,6 +2236,40 @@ def _conversation_inner():
                                     f"### TIMEOUT EMPTY ({metrics['llm_inference_ms']}ms) — "
                                     f"graceful fallback, no session recovery"
                                 )
+
+                            # ── __session_start__ must ALWAYS produce a spoken greeting ──
+                            # GLM-5-turbo (current temporary primary, see
+                            # memory/glm-primary-temporary-swap) returns empty / bare-"NO" /
+                            # tag-only completions on the first turn of a session noticeably
+                            # more than MiniMax did. The gateway already retried once
+                            # internally (openclaw.py EMPTY-FINAL retry); the double-empty
+                            # breaker and the conversation.py retry both deliberately skip
+                            # __ system triggers; and the timeout-empty branch above only
+                            # covers >30s runs. So a 5–30s empty greeting falls through to
+                            # here with full_response = None — and an empty text_done makes
+                            # app.js "silent resume" (user connects the call, hears dead air,
+                            # has to speak first). Substitute a real greeting instead: the
+                            # profile's verbatim conversation.greeting if it defines one,
+                            # otherwise a varied generic one. The agent's openclaw session is
+                            # still warmed by the empty turn, so the conversation continues
+                            # normally from the user's next message.
+                            if user_message == '__session_start__':
+                                _gs = (full_response or '').strip()
+                                _gs_norm = _gs.upper().rstrip('.!?')
+                                _gs_tag_only = bool(_gs) and re.match(r'^\s*(\[[^\]]+\]\s*)+$', _gs)
+                                if (not _gs) or _gs_norm in ('NO', 'YES') or _gs_tag_only:
+                                    _fb_greeting = (_profile_greeting or '').strip() or _pick_session_start_greeting()
+                                    logger.warning(
+                                        f"### SESSION_START produced no usable greeting "
+                                        f"(was {full_response!r}, {metrics.get('llm_inference_ms')}ms) "
+                                        f"— substituting fallback greeting: {_fb_greeting!r}"
+                                    )
+                                    full_response = _fb_greeting
+                                    metrics['fallback_used'] = 1
+                                    # Drop any partial / bare-token TTS buffered from the
+                                    # broken turn so only the fallback greeting is spoken.
+                                    _tts_buf = ''
+                                    _tts_pending.clear()
 
                             # ── Final safety net: bare "NO" / "YES" must NEVER reach the user ──
                             # Catches any degenerate single-token response that slipped past
