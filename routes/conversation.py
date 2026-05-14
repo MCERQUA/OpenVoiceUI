@@ -1342,6 +1342,23 @@ def _conversation_inner():
         if _user_tag:
             context_parts.append(_user_tag)
             logger.info(f'### CURRENT_USER injected: clerk_uid={_clerk_uid} tenant={_tenant}')
+
+        # Mesh-access gate — refresh the .mesh-admin-session marker on every
+        # turn where the admin (Mike) is the authenticated Clerk user. The
+        # mesh-send/mesh-recv wrappers in voice tenants check this marker
+        # (300s TTL) before allowing any mesh operation. Voice tenants serving
+        # a non-admin customer get NO mesh access; admin sessions get full
+        # both-direction access. host/test-dev/webtops bypass the gate.
+        # See /mnt/system/base/skills/agent-mesh/bin/mesh-gate-check.
+        ADMIN_CLERK_ID = 'user_3AJGqe2Fgn1qD580pg6tt2ysplR'
+        if _clerk_uid == ADMIN_CLERK_ID:
+            try:
+                _gate_path = '/app/runtime/uploads/.mesh-admin-session'
+                _ts_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                with open(_gate_path, 'w', encoding='utf-8') as _gf:
+                    _gf.write(f'admin={_clerk_uid}\nrefreshed_at={_ts_iso}\nsource=conversation.py auto-refresh\n')
+            except Exception as _ge:
+                logger.warning(f'mesh-gate refresh failed (non-fatal): {_ge}')
     except Exception as _e:
         logger.warning(f'CURRENT_USER injection failed (non-fatal): {_e}')
 
