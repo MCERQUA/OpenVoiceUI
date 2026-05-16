@@ -9,7 +9,7 @@
   "repository": "https://github.com/MCERQUA/openvoiceui-plugins",
   "provides": "gateway",
   "gateway_class": "HermesGateway",
-  "hermes_version": "0.6.0",
+  "hermes_version": "0.13.0",
   "requires_env": [
     "HERMES_HOST"
   ],
@@ -319,13 +319,14 @@
     "profiles/hermes-agent.json"
   ],
   "container": {
-    "image": "nousresearch/hermes-agent:v0.6.0",
+    "image": "nousresearch/hermes-agent:v2026.5.7",
     "hostname": "hermes",
     "port": 18790,
     "env": {
       "API_SERVER_ENABLED": "true",
       "API_SERVER_PORT": "18790",
-      "API_SERVER_HOST": "0.0.0.0"
+      "API_SERVER_HOST": "0.0.0.0",
+      "GATEWAY_ALLOW_ALL_USERS": "true"
     },
     "volumes": {
       "./hermes-data": "/opt/data"
