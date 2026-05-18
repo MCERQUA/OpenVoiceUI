@@ -18,7 +18,7 @@ psutil==7.2.2
 # Image processing (icon generation, uploads)
 Pillow>=12.2.0
 pillow-heif>=0.18.0
-PyYAML>=6.0
+PyYAML>=6.0.3
 
 # Speech-to-text (optional — adds ~200MB for onnxruntime + ctranslate2)
 # Only needed for LOCAL on-device STT. Most users use Groq or Deepgram API instead.
