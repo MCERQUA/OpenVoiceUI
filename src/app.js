@@ -3462,6 +3462,15 @@ connectAiradio();
                 // fetch. Checked in sendMessage() to fall through to the normal
                 // fresh-request path instead of interject.
                 this._textDoneReceived = false;
+                // Drain-timer extension: when the server response stream is still
+                // open, more TTS chunks may arrive with LONG gaps (Groq Orpheus
+                // takes 20-25s per chunk under load). The default 800ms drain
+                // briefly empties the audio queue between chunks → STT resumes →
+                // mic captures the next chunk as user speech. While this flag is
+                // true, playNextAudio() uses a 30s drain instead. The stream's
+                // finally{} clears the flag, after which the normal 800ms drain
+                // releases the mic promptly. Origin: 2026-05-19 echo capture bug.
+                this._streamingResponseActive = false;
 
                 // Use shared STT instance instead of creating a new one
                 // This prevents conflicts with VoiceConversation's STT
@@ -3943,6 +3952,7 @@ connectAiradio();
                     const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
                     this._fetchAbortController = new AbortController();
                     this._textDoneReceived = false;  // new stream — reset the race-window guard
+                    this._streamingResponseActive = true;  // stream open — TTS chunks may arrive with long gaps; see constructor note
                     const response = await fetch(`${this.config.serverUrl}/api/conversation?stream=1`, {
                         method: 'POST',
                         signal: this._fetchAbortController.signal,
@@ -4648,6 +4658,17 @@ connectAiradio();
                     if (_inactivityTimer) clearTimeout(_inactivityTimer);
                     this._sending = false;
                     this._fetchAbortController = null;
+                    // Stream is done. Future drain timer fires should use the short
+                    // 800ms wait again. If an extended-wait drain timer is currently
+                    // pending and the queue is empty, collapse it to the short window
+                    // so the mic returns promptly after the response ends.
+                    // See constructor note on _streamingResponseActive.
+                    this._streamingResponseActive = false;
+                    if (this._drainTimer && this.audioQueue.length === 0) {
+                        clearTimeout(this._drainTimer);
+                        this._drainTimer = null;
+                        this.playNextAudio();  // re-run drain logic with short wait now
+                    }
                     // Safety net: if no audio was queued/played, STT never gets restarted
                     // via onListening callback. Ensure mic comes back after a short delay.
                     // Only fires if call is still active (_voiceActive) — prevents restart after hang-up.
@@ -4924,6 +4945,16 @@ connectAiradio();
                     // Don't immediately transition to listening — more TTS chunks
                     // may be in-flight from streamed sentences. Wait briefly and
                     // check again so the stop button doesn't flash between sentences.
+                    //
+                    // 2026-05-19: extend the drain window while the server response
+                    // stream is still open. Groq Orpheus has been observed taking
+                    // 22-25 SECONDS to generate a single TTS chunk under load; the
+                    // old 800ms wait empties the queue between chunks, STT resumes,
+                    // and the mic captures the late chunk as user speech (echo).
+                    // While _streamingResponseActive is true, wait up to 30s. The
+                    // stream's finally{} clears the flag and re-arms the short
+                    // timer so the mic releases promptly after the stream ends.
+                    const drainMs = this._streamingResponseActive ? 30000 : 800;
                     if (!this._drainTimer) {
                         this._drainTimer = setTimeout(() => {
                             this._drainTimer = null;
@@ -4956,7 +4987,7 @@ connectAiradio();
                                     }, 600);
                                 }
                             }
-                        }, 800);  // 800ms grace period for next TTS chunk to arrive
+                        }, drainMs);
                     }
                     return;
                 }
