@@ -163,7 +163,12 @@ def search_icons():
 
 @icons_bp.route('/api/icons/library/<name>.svg')
 def serve_icon(name):
-    """Serve a Lucide SVG icon by name."""
+    """Serve a Lucide SVG icon by name.
+
+    NO-CACHE: see docs/jambot/no-cache-policy.md. Icons are user-visible
+    surfaces that agents may swap or redirect. No browser cache anywhere on
+    icons in this system, even for the "static" Lucide set.
+    """
     # Sanitize name
     safe = re.sub(r'[^a-z0-9\-]', '', name.lower())
     path = LUCIDE_DIR / f'{safe}.svg'
@@ -171,8 +176,11 @@ def serve_icon(name):
     if not path.exists():
         return Response('<!-- icon not found -->', status=404, mimetype='image/svg+xml')
 
-    return send_file(str(path), mimetype='image/svg+xml',
-                     max_age=86400)  # cache 1 day
+    resp = send_file(str(path), mimetype='image/svg+xml')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 
 # ══════════════════════════════════════════════════════════════
@@ -346,9 +354,18 @@ def list_generated():
 
 @icons_bp.route('/api/icons/generated/<filename>')
 def serve_generated(filename):
-    """Serve a generated icon."""
+    """Serve a generated icon.
+
+    NO-CACHE: see docs/jambot/no-cache-policy.md. Agents regenerate icons —
+    a 1-hour cache here used to hide updates for an hour. Live updates win;
+    optimize the source images for size instead.
+    """
     safe = re.sub(r'[^\w.\-]', '', filename)
     path = _ensure_generated_dir() / safe
     if not path.exists():
         return jsonify({'error': 'Not found'}), 404
-    return send_file(str(path), max_age=3600)
+    resp = send_file(str(path))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp

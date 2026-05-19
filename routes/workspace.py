@@ -241,7 +241,13 @@ def raw_file():
         return jsonify({'error': f'File too large ({size // (1024*1024)} MB). Max is 20 MB.'}), 413
 
     try:
-        return send_file(str(target), conditional=True)
+        # NO-CACHE: workspace files are agent-edited continuously. See
+        # docs/jambot/no-cache-policy.md.
+        resp = send_file(str(target), conditional=True)
+        resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Expires'] = '0'
+        return resp
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

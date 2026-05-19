@@ -409,13 +409,25 @@ def serve_emulator(filepath):
 
 @static_files_bp.route('/uploads/<path:filename>')
 def serve_upload(filename):
-    """Serve uploaded files (path traversal guarded)."""
+    """Serve uploaded files (path traversal guarded).
+
+    NO-CACHE POLICY (do not change without reading docs/jambot/no-cache-policy.md):
+    Uploads contain icons, wallpapers, agent-generated assets, and canvas page
+    media that agents and admins regenerate live. Caching breaks the "live
+    updates always visible" guarantee of the canvas system. The ONLY assets
+    that may be cached are known_faces photos (handled by a separate route).
+    Optimize for size (smaller files), not for browser cache hits.
+    """
     upload_path = _safe_path(UPLOADS_DIR, filename)
     if upload_path is None:
         return jsonify({"error": "Invalid path"}), 400
     if not upload_path.exists():
         return jsonify({"error": "File not found"}), 404
-    return send_file(upload_path)
+    resp = send_file(upload_path)
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 
 @static_files_bp.route('/src/<path:filepath>')
@@ -442,12 +454,20 @@ def serve_src(filepath):
 
 @static_files_bp.route('/known_faces/<name>/<filename>')
 def serve_face_photo(name, filename):
-    """Serve face photos for the My Face section"""
+    """Serve face photos for the My Face section.
+
+    CACHE ALLOWED — face photos are the documented exception to the
+    no-cache policy (docs/jambot/no-cache-policy.md). Face content does not
+    update live and is identity-stable. A long browser cache here is a
+    deliberate perf win and does NOT violate the canvas/icons rule.
+    """
     photo_path = _safe_path(KNOWN_FACES_DIR, name, filename)
     if photo_path is None:
         return jsonify({"error": "Invalid path"}), 400
     if photo_path.exists():
-        return send_file(photo_path)
+        resp = send_file(photo_path)
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        return resp
     return jsonify({"error": "Photo not found"}), 404
 
 
@@ -558,11 +578,19 @@ def serve_sw():
 
 @static_files_bp.route('/static/icons/<filename>')
 def serve_icon(filename):
-    """PWA icons"""
+    """PWA icons.
+
+    NO-CACHE: icons across the system are not cached. See
+    docs/jambot/no-cache-policy.md.
+    """
     icon_path = _safe_path(STATIC_DIR / 'icons', filename)
     if icon_path is None or not icon_path.exists():
         return jsonify({"error": "Icon not found"}), 404
-    return send_file(icon_path, mimetype='image/png')
+    resp = send_file(icon_path, mimetype='image/png')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 
 @static_files_bp.route('/install')
