@@ -25,6 +25,7 @@ OpenVoiceUI needs at least one LLM provider to power conversations. The AI gatew
 |----------|---------|-------------------|
 | Groq (Llama, Qwen) | `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) |
 | Z.AI (GLM-5-turbo) | Set via OpenClaw config | [z.ai](https://z.ai) |
+| NEAR AI Cloud (TEE inference) | `NEARAI_API_KEY` | [cloud.near.ai](https://cloud.near.ai) |
 | OpenAI (GPT-4o) | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
 | Anthropic (Claude) | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
 
@@ -106,6 +107,8 @@ Complete list of all recognized environment variables:
 | `GATEWAY_SESSION_KEY` | No | `voice-main-1` | Session key prefix. Change if running multiple instances on the same gateway. |
 | `OPENCLAW_VERSION` | No | `2026.3.13` | Docker build arg: OpenClaw version to install. Only change if you have verified compatibility. |
 | `CANVAS_PAGES_DIR` | No | `runtime/canvas-pages/` | Where canvas HTML pages are stored. Docker: leave unset (uses volume mount). VPS: set to the path created by the deploy script. |
+| `NEARAI_API_KEY` | No | -- | NEAR AI Cloud API key for OpenAI-compatible TEE inference. |
+| `NEARAI_BASE_URL` | No | `https://cloud-api.near.ai/v1` | Override for the NEAR AI Cloud OpenAI-compatible endpoint. |
 | `GROQ_API_KEY` | Recommended | -- | Groq API key for Orpheus TTS and Whisper STT. |
 | `USE_GROQ` | No | -- | Set `true` to enable Groq integration. |
 | `USE_GROQ_TTS` | No | -- | Set `true` to enable Groq Orpheus TTS. |

@@ -156,3 +156,25 @@ class TestServerStats:
         resp = admin_client.get("/api/server-stats")
         data = resp.get_json()
         assert "timestamp" in data
+
+
+# ---------------------------------------------------------------------------
+# AI provider catalog
+# ---------------------------------------------------------------------------
+
+class TestAIProviderCatalog:
+    def test_nearai_provider_registered(self):
+        from routes.admin import _AI_PROVIDERS
+
+        provider = _AI_PROVIDERS["nearai"]
+        assert provider["name"] == "NEAR AI Cloud"
+        assert provider["envKey"] == "NEARAI_API_KEY"
+        assert provider["baseUrl"] == "https://cloud-api.near.ai/v1"
+        assert provider["api"] == "openai-completions"
+
+    def test_nearai_models_have_context_windows(self):
+        from routes.admin import _AI_PROVIDERS
+
+        models = _AI_PROVIDERS["nearai"]["models"]
+        assert any(model["id"] == "zai-org/GLM-5.1-FP8" for model in models)
+        assert all(model["contextWindow"] > 0 for model in models)

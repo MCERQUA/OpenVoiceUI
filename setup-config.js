@@ -22,6 +22,16 @@ const PORT = getKey("PORT") || "5001";
 const token = crypto.randomBytes(24).toString("hex");
 const secret = crypto.randomBytes(32).toString("hex");
 
+// Sampled from GET https://cloud-api.near.ai/v1/model/list on 2026-05-21.
+const NEARAI_MODELS = [
+  { id: "zai-org/GLM-5.1-FP8", name: "GLM 5.1", contextWindow: 202752 },
+  { id: "Qwen/Qwen3.6-35B-A3B-FP8", name: "Qwen 3.6 35B A3B FP8", contextWindow: 262144 },
+  { id: "Qwen/Qwen3.5-122B-A10B", name: "Qwen3.5 122B A10B", contextWindow: 131072 },
+  { id: "Qwen/Qwen3-VL-30B-A3B-Instruct", name: "Qwen3-VL 30B A3B Instruct", contextWindow: 256000 },
+  { id: "google/gemma-4-31B-it", name: "Gemma 4 31B Instruct", contextWindow: 262144 },
+  { id: "openai/gpt-oss-120b", name: "GPT OSS 120B", contextWindow: 131000 },
+];
+
 // ---------------------------------------------------------------------------
 // 1. Write openclaw.json (nested gateway/agents format for v2026.3.2+)
 // ---------------------------------------------------------------------------
@@ -67,6 +77,20 @@ const openclawConfig = {
   // Plugins configured by individual plugin installers
 };
 
+if (getKey("NEARAI_API_KEY")) {
+  openclawConfig.models = {
+    mode: "merge",
+    providers: {
+      nearai: {
+        baseUrl: "https://cloud-api.near.ai/v1",
+        api: "openai-completions",
+        apiKey: "${NEARAI_API_KEY}",
+        models: NEARAI_MODELS,
+      },
+    },
+  };
+}
+
 fs.mkdirSync("openclaw-data/workspace", { recursive: true });
 fs.writeFileSync(
   "openclaw-data/openclaw.json",
@@ -95,6 +119,7 @@ const envLines = [
 const envKeyList = [
   "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
   "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "XAI_API_KEY", "ZAI_API_KEY",
+  "NEARAI_API_KEY",
   "CEREBRAS_API_KEY", "TOGETHER_API_KEY", "HF_TOKEN",
   "MOONSHOT_API_KEY", "KIMI_API_KEY", "MINIMAX_API_KEY", "QIANFAN_API_KEY",
   "MODELSTUDIO_API_KEY", "XIAOMI_API_KEY", "VOLCANO_ENGINE_API_KEY",
@@ -135,6 +160,7 @@ const providerMap = {
   MISTRAL_API_KEY: "mistral",
   XAI_API_KEY: "xai",
   ZAI_API_KEY: "zai",
+  NEARAI_API_KEY: "nearai",
   CEREBRAS_API_KEY: "cerebras",
   TOGETHER_API_KEY: "together",
   HF_TOKEN: "huggingface",

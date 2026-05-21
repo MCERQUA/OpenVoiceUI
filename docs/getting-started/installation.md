@@ -85,6 +85,8 @@ GROQ_API_KEY=your-groq-api-key
 SECRET_KEY=any-random-string-here
 ```
 
+Optional: set `NEARAI_API_KEY=your-nearai-key` to enable NEAR AI Cloud TEE inference.
+
 See [Configuration](/getting-started/configuration) for the full list of environment variables.
 
 ### 2. Optional: enable coding agent

@@ -601,6 +601,16 @@ def list_clients():
 
 _OPENCLAW_CONFIG_PATH = Path('/app/runtime/openclaw.json')
 
+# Static admin list sampled from GET https://cloud-api.near.ai/v1/model/list on 2026-05-21.
+_NEARAI_MODELS = [
+    {'id': 'zai-org/GLM-5.1-FP8', 'name': 'GLM 5.1', 'contextWindow': 202752},
+    {'id': 'Qwen/Qwen3.6-35B-A3B-FP8', 'name': 'Qwen 3.6 35B A3B FP8', 'contextWindow': 262144},
+    {'id': 'Qwen/Qwen3.5-122B-A10B', 'name': 'Qwen3.5 122B A10B', 'contextWindow': 131072},
+    {'id': 'Qwen/Qwen3-VL-30B-A3B-Instruct', 'name': 'Qwen3-VL 30B A3B Instruct', 'contextWindow': 256000},
+    {'id': 'google/gemma-4-31B-it', 'name': 'Gemma 4 31B Instruct', 'contextWindow': 262144},
+    {'id': 'openai/gpt-oss-120b', 'name': 'GPT OSS 120B', 'contextWindow': 131000},
+]
+
 # Known providers and their config shape
 _AI_PROVIDERS = {
     'mx': {
@@ -663,6 +673,13 @@ _AI_PROVIDERS = {
             {'id': 'llama-4-scout-17b-16e-instruct', 'name': 'Llama 4 Scout', 'contextWindow': 131072},
             {'id': 'llama-4-maverick-17b-128e-instruct', 'name': 'Llama 4 Maverick', 'contextWindow': 131072},
         ],
+    },
+    'nearai': {
+        'name': 'NEAR AI Cloud',
+        'envKey': 'NEARAI_API_KEY',
+        'baseUrl': 'https://cloud-api.near.ai/v1',
+        'api': 'openai-completions',
+        'models': _NEARAI_MODELS,
     },
     'google': {
         'name': 'Google Gemini',

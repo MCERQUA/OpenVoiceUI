@@ -72,6 +72,13 @@ module.exports = {
             required: false,
           },
           {
+            key: "NEARAI_API_KEY",
+            title: "[RECOMMENDED] NEAR AI Cloud API Key — TEE inference",
+            description: "cloud.near.ai — OpenAI-compatible private inference",
+            placeholder: "",
+            required: false,
+          },
+          {
             key: "ANTHROPIC_API_KEY",
             title: "[RECOMMENDED] Anthropic API Key — Claude models",
             description: "console.anthropic.com/settings/keys — highest quality",
@@ -314,6 +321,7 @@ module.exports = {
           PINOKIO_DEEPGRAM_API_KEY: "{{input.DEEPGRAM_API_KEY}}",
           PINOKIO_ANTHROPIC_API_KEY: "{{input.ANTHROPIC_API_KEY}}",
           PINOKIO_ZAI_API_KEY: "{{input.ZAI_API_KEY}}",
+          PINOKIO_NEARAI_API_KEY: "{{input.NEARAI_API_KEY}}",
           PINOKIO_OPENAI_API_KEY: "{{input.OPENAI_API_KEY}}",
           PINOKIO_GEMINI_API_KEY: "{{input.GEMINI_API_KEY}}",
           PINOKIO_OPENROUTER_API_KEY: "{{input.OPENROUTER_API_KEY}}",

@@ -153,3 +153,93 @@ class TestZAIProvider:
         with patch.object(p, "generate", return_value=mock_response):
             chunks = list(p.generate_stream([{"role": "user", "content": "hi"}]))
         assert chunks == ["test response"]
+
+
+# ---------------------------------------------------------------------------
+# NearAIProvider
+# ---------------------------------------------------------------------------
+
+class TestNearAIProvider:
+    def test_instantiate_default(self):
+        from providers.llm.nearai_provider import NearAIProvider
+        p = NearAIProvider()
+        assert p is not None
+
+    def test_default_model(self):
+        from providers.llm.nearai_provider import NearAIProvider
+        p = NearAIProvider()
+        assert p.default_model == "zai-org/GLM-5.1-FP8"
+
+    def test_base_url_default(self, monkeypatch):
+        from providers.llm.nearai_provider import NearAIProvider
+        monkeypatch.delenv("NEARAI_BASE_URL", raising=False)
+        p = NearAIProvider()
+        assert p.base_url == "https://cloud-api.near.ai/v1"
+
+    def test_is_available_without_key(self, monkeypatch):
+        from providers.llm.nearai_provider import NearAIProvider
+        monkeypatch.delenv("NEARAI_API_KEY", raising=False)
+        p = NearAIProvider({"api_key": ""})
+        assert p.is_available() is False
+
+    def test_is_available_with_key(self):
+        from providers.llm.nearai_provider import NearAIProvider
+        p = NearAIProvider({"api_key": "test-key"})
+        assert p.is_available() is True
+
+    def test_resolve_api_key_ignores_placeholder(self, monkeypatch):
+        from providers.llm.nearai_provider import NearAIProvider
+        monkeypatch.setenv("NEARAI_API_KEY", "env-key")
+        p = NearAIProvider({"api_key": "${NEARAI_API_KEY}"})
+        assert p.api_key == "env-key"
+
+    def test_generate_maps_max_completion_tokens_to_max_tokens(self):
+        from providers.llm.nearai_provider import NearAIProvider
+
+        p = NearAIProvider({"api_key": "key"})
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [
+                {"message": {"content": "hello"}, "finish_reason": "stop"}
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }
+        mock_resp.raise_for_status.return_value = None
+
+        with patch("requests.post", return_value=mock_resp) as post:
+            response = p.generate(
+                [{"role": "developer", "content": "be concise"}, {"role": "user", "content": "hi"}],
+                max_completion_tokens=123,
+                store=True,
+                reasoning_effort="high",
+            )
+
+        payload = post.call_args.kwargs["json"]
+        assert payload["max_tokens"] == 123
+        assert "max_completion_tokens" not in payload
+        assert "store" not in payload
+        assert "reasoning_effort" not in payload
+        assert payload["messages"][0]["role"] == "system"
+        assert response.content == "hello"
+
+    def test_generate_raises_on_api_failure(self):
+        from providers.llm.nearai_provider import NearAIProvider
+        from providers.llm.base import LLMError
+        p = NearAIProvider({"api_key": "bad-key"})
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = Exception("401 Unauthorized")
+        with patch("requests.post", return_value=mock_resp):
+            with pytest.raises(LLMError):
+                p.generate([{"role": "user", "content": "hello"}])
+
+    def test_generate_stream_yields_string(self):
+        from providers.llm.nearai_provider import NearAIProvider
+        from providers.llm.base import LLMResponse
+        p = NearAIProvider({"api_key": "key"})
+        mock_response = LLMResponse(
+            content="test response", model="zai-org/GLM-5.1-FP8", provider="nearai",
+            usage={}, latency_ms=10
+        )
+        with patch.object(p, "generate", return_value=mock_response):
+            chunks = list(p.generate_stream([{"role": "user", "content": "hi"}]))
+        assert chunks == ["test response"]

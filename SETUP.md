@@ -93,6 +93,8 @@ GROQ_API_KEY=your-groq-key
 SECRET_KEY=any-random-string-here
 ```
 
+Optional: set `NEARAI_API_KEY=your-nearai-key` to enable NEAR AI Cloud TEE inference.
+
 **Optional: enable the coding-agent skill**
 
 The coding-agent skill lets the AI write code, create files, and run commands
@@ -159,6 +161,8 @@ Point openvoiceui at your running OpenClaw gateway instead of starting a new one
    GROQ_API_KEY=your-groq-key
    SECRET_KEY=any-random-string-here
    ```
+
+   Optional: set `NEARAI_API_KEY=your-nearai-key` to enable NEAR AI Cloud TEE inference.
 
 4. Start only the openvoiceui and supertonic services (skip the built-in openclaw):
    ```bash

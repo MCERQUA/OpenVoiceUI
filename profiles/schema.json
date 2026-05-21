@@ -43,7 +43,7 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["zai", "clawdbot", "gateway", "openai", "ollama", "anthropic", "hume", "elevenlabs"]
+          "enum": ["zai", "nearai", "clawdbot", "gateway", "openai", "ollama", "anthropic", "hume", "elevenlabs"]
         },
         "model":     { "type": "string" },
         "config_id": { "type": "string" },

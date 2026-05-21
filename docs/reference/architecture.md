@@ -446,6 +446,8 @@ Set in `app.py` after_request handler.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CLAWDBOT_GATEWAY_URL` | `ws://127.0.0.1:18791` | Gateway WebSocket URL |
+| `NEARAI_API_KEY` | — | NEAR AI Cloud TEE inference |
+| `NEARAI_BASE_URL` | `https://cloud-api.near.ai/v1` | Optional NEAR AI endpoint override |
 | `GROQ_API_KEY` | — | Groq Orpheus TTS |
 | `FAL_KEY` | — | Qwen3-TTS via fal.ai |
 | `SUNO_API_KEY` | — | AI song generation |

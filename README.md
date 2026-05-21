@@ -157,7 +157,7 @@ See [`deploy/`](deploy/) for the full production setup including SSL, nginx reve
 All configuration is in `.env`. Copy `.env.example` to `.env` and fill in your values.
 
 **Required:**
-- An LLM provider API key (OpenAI, Anthropic, Groq, Z.AI, or any OpenClaw-compatible provider)
+- An LLM provider API key (OpenAI, Anthropic, Groq, Z.AI, NEAR AI Cloud, or any OpenClaw-compatible provider)
 - `CLAWDBOT_AUTH_TOKEN` — set during `npx openvoiceui setup` or in OpenClaw's setup wizard
 
 **Optional but recommended:**
@@ -177,6 +177,7 @@ See [`.env.example`](.env.example) for all available options with descriptions.
 |----------|--------|
 | OpenClaw Gateway | Built-in — routes to OpenAI, Anthropic, Groq, Z.AI, and more |
 | Z.AI (GLM-5-turbo) | Built-in |
+| NEAR AI Cloud | OpenAI-compatible TEE inference via OpenClaw |
 | Groq (Llama, Qwen) | Via OpenClaw |
 | Google Gemini | Via OpenClaw |
 | MiniMax | Via OpenClaw |

@@ -194,6 +194,7 @@ def test_concrete_providers_registered():
     from providers.registry import registry as r, ProviderType as PT
 
     assert r.is_registered(PT.LLM, "zai")
+    assert r.is_registered(PT.LLM, "nearai")
     assert r.is_registered(PT.LLM, "clawdbot")
     assert r.is_registered(PT.TTS, "supertonic")
     assert r.is_registered(PT.TTS, "groq")
