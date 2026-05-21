@@ -8,15 +8,25 @@
  *   import { inject } from './ui/AppShell.js';
  *   inject(); // must be first, before DOM queries
  */
+import { TTS_PROVIDERS, TRANSCRIPT_UPLOAD_ACCEPT, CANVAS_SANDBOX_PERMISSIONS } from '../core/constants.js';
+
 export function inject() {
-    document.body.insertAdjacentHTML('afterbegin', SHELL_HTML);
+    document.body.insertAdjacentHTML('afterbegin', buildShellHTML());
     // Activity chip style — light grey on dark grey, no backdrop-filter
     const chipStyle = document.createElement('style');
     chipStyle.textContent = `.agent-activity-chip{background:var(--bg-elevated)!important;border:1px solid rgba(180,190,210,0.3)!important;color:var(--text-primary)!important;backdrop-filter:none!important;box-shadow:0 2px 12px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.07)!important;overflow:hidden!important;}`;
     document.head.appendChild(chipStyle);
 }
 
-const SHELL_HTML = `
+/** Build TTS provider <option> elements from constants */
+function buildProviderOptions() {
+    return TTS_PROVIDERS.map(
+        p => `<option value="${p.id}">${p.label}</option>`
+    ).join('\n                    ');
+}
+
+function buildShellHTML() {
+return `
     <!-- Canvas Menu Button - Top Left Corner (Desktop) -->
     <button id="canvas-menu-button" title="Desktop"><svg viewBox="0 0 48 48" width="22" height="22" style="vertical-align:middle;filter:drop-shadow(0 0 2px rgba(0,200,255,0.4))"><circle cx="24" cy="24" r="20" style="fill:var(--green)"/><circle cx="24" cy="24" r="20" fill="url(#globe-g)" opacity="0.7"/><ellipse cx="24" cy="24" rx="10" ry="20" fill="none" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/><line x1="4" y1="24" x2="44" y2="24" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/><ellipse cx="24" cy="15" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/><ellipse cx="24" cy="33" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/><circle cx="24" cy="24" r="20" fill="none" style="stroke:var(--cyan)" stroke-width="1" opacity="0.5"/><defs><radialGradient id="globe-g" cx="35%" cy="35%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#059669"/></radialGradient></defs></svg></button>
 
@@ -63,7 +73,7 @@ const SHELL_HTML = `
             id="canvas-iframe"
             src="about:blank"
             data-canvas-src=""
-            sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms allow-top-navigation-by-user-activation allow-downloads allow-pointer-lock"
+            sandbox="${CANVAS_SANDBOX_PERMISSIONS}"
             style="width: 100vw; height: 100vh; border: none; display: block; touch-action: manipulation;"
             allow="autoplay; fullscreen; microphone; camera; pointer-lock">
         </iframe>
@@ -108,7 +118,7 @@ const SHELL_HTML = `
             <label class="tp-upload-btn" title="Attach file">
                 📎
                 <input type="file" id="tp-file-input" style="display:none" multiple
-                       accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.md,.json,.csv,.html,.js,.py,.ts,.css,.glb,.gltf,.obj,.fbx,.stl,.3ds,.dae,.ply,.usdz,.blend,.mtl,.hdr,.exr"
+                       accept="${TRANSCRIPT_UPLOAD_ACCEPT}"
                        onchange="TranscriptPanel.handleUpload(this)">
             </label>
             <div class="tp-file-preview" id="tp-file-preview" style="display:none">
@@ -150,9 +160,7 @@ const SHELL_HTML = `
             <div class="settings-group">
                 <label>TTS Provider</label>
                 <select id="voice-provider-select" onchange="window.providerManager?.switchProvider(this.value)">
-                    <option value="supertonic">Supertonic (Free)</option>
-                    <option value="groq">Groq Orpheus</option>
-                    <option value="hume">Hume EVI</option>
+                    ${buildProviderOptions()}
                 </select>
                 <div class="provider-status" id="provider-status">✓ Active</div>
             </div>
@@ -550,3 +558,4 @@ const SHELL_HTML = `
         </div>
     </div>
 `;
+}
