@@ -2218,24 +2218,70 @@ def _conversation_inner():
                                 if not full_response or not full_response.strip():
                                     full_response = "I missed that — my brain glitched for a second. Could you say that again?"
 
-                            # ── Timeout empty: agent ran but produced nothing in 300s ──
-                            # This is NOT session poisoning — the session is healthy but the
-                            # agent ran out of time (long tool chain, image gen, website build).
-                            # Return a graceful spoken message; do NOT enter recovery.
+                            # ── Timeout empty: agent ran 30s+ but produced nothing ──
+                            # Not session poisoning (the gateway is healthy); the LLM just
+                            # hung or returned an empty/thinking-only block after a long run.
+                            # BEFORE 2026-05-21: we just played a "took a bit longer" apology
+                            # and the user got no real answer. Mike + Danielle saw this
+                            # across many transcripts (4 of 5 had ZERO tools — pure LLM hang).
+                            # NOW: try the Z.AI direct fallback (bypasses the gateway and
+                            # any stuck openclaw session state) and only fall back to the
+                            # apology if direct Z.AI also fails. Same code path the
+                            # double-empty branch uses — just extended to slow-empty.
                             if _is_empty and not getattr(stream_response, '_retried', False) \
                                     and metrics.get('llm_inference_ms', 0) >= 30000:
-                                if user_message == '__session_start__':
-                                    full_response = "Hey, give me just a moment — I'm getting started."
-                                else:
-                                    full_response = (
-                                        "That took a bit longer than expected on my end. "
-                                        "I'm still here — try again and I'll get right to it."
+                                # Try Z.AI direct first — skip for __session_start__ since
+                                # the dedicated greeting-substitution branch below handles it.
+                                if user_message != '__session_start__':
+                                    try:
+                                        import requests as _req
+                                        _zai_key = os.environ.get('ZAI_API_KEY', '')
+                                        _fallback_msg = message_with_context if message_with_context else user_message
+                                        _fallback_system = _load_voice_system_prompt()
+                                        if _zai_key:
+                                            _zai_resp = _req.post(
+                                                'https://api.z.ai/api/anthropic/v1/messages',
+                                                headers={
+                                                    'x-api-key': _zai_key,
+                                                    'anthropic-version': '2023-06-01',
+                                                    'content-type': 'application/json',
+                                                },
+                                                json={
+                                                    'model': 'glm-5-turbo',
+                                                    'max_tokens': 1500,
+                                                    'system': _fallback_system,
+                                                    'messages': [{'role': 'user', 'content': _fallback_msg}],
+                                                },
+                                                timeout=20,
+                                            )
+                                            if _zai_resp.status_code == 200:
+                                                _zai_data = _zai_resp.json()
+                                                _zai_text = _zai_data.get('content', [{}])[0].get('text', '')
+                                                if _zai_text and _zai_text.strip():
+                                                    full_response = _zai_text
+                                                    metrics['fallback_used'] = 1
+                                                    metrics['profile'] = 'zai-direct-slowempty'
+                                                    logger.warning(
+                                                        f"### SLOW EMPTY ({metrics['llm_inference_ms']}ms) — "
+                                                        f"Z.AI direct fallback succeeded: {len(_zai_text)} chars"
+                                                    )
+                                    except Exception as _slowe:
+                                        logger.error(f'### Slow-empty Z.AI fallback failed: {_slowe}')
+
+                                # Only show the apology if Z.AI direct didn't produce text
+                                if not full_response or not full_response.strip():
+                                    if user_message == '__session_start__':
+                                        full_response = "Hey, give me just a moment — I'm getting started."
+                                    else:
+                                        full_response = (
+                                            "That took a bit longer than expected on my end. "
+                                            "I'm still here — try again and I'll get right to it."
+                                        )
+                                    metrics['fallback_used'] = 1
+                                    logger.warning(
+                                        f"### TIMEOUT EMPTY ({metrics['llm_inference_ms']}ms) — "
+                                        f"Z.AI direct also failed; using graceful apology"
                                     )
-                                metrics['fallback_used'] = 1
-                                logger.warning(
-                                    f"### TIMEOUT EMPTY ({metrics['llm_inference_ms']}ms) — "
-                                    f"graceful fallback, no session recovery"
-                                )
 
                             # ── __session_start__ must ALWAYS produce a spoken greeting ──
                             # GLM-5-turbo (current temporary primary, see
