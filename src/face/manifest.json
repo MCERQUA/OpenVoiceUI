@@ -18,7 +18,8 @@
       "description": "Halo frequency ring with wispy smoke core — calm at rest, reacts to TTS speech",
       "module": "/src/face/HaloSmokeFace.js",
       "preview": "/src/face/previews/orb.svg",
-      "moods": [],
+      "moods": ["neutral", "happy", "sad", "angry", "thinking", "surprised", "listening"],
+      "moods_visual_collapse": "Halo only renders two visual states — 'thinking' = animated dots; any other mood = idle smoke. The full mood vocab is accepted so FaceModule.setMood routing works uniformly.",
       "features": ["audio-reactive", "smoke", "halo", "speech-reactive"],
       "configurable": false
     }

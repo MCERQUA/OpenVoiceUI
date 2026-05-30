@@ -72,18 +72,28 @@ def submit_issue():
         'ua': request.headers.get('User-Agent', ''),
     }
 
-    # Always save locally
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    # Always save locally. Never let a filesystem error bubble up as an HTML 500
+    # page — the frontend does res.json() and an HTML body yields the cryptic
+    # "Unexpected token '<', "<!doctype "" error. Return clean JSON instead, and
+    # still forward to the feedback service so the report isn't lost.
+    filename = None
+    save_error = None
+    try:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    date_str = now.strftime('%Y-%m-%d')
-    time_str = now.strftime('%H-%M-%S')
-    filename = f'{date_str}_{time_str}_{issue_type}.json'
-    filepath = REPORTS_DIR / filename
+        date_str = now.strftime('%Y-%m-%d')
+        time_str = now.strftime('%H-%M-%S')
+        filename = f'{date_str}_{time_str}_{issue_type}.json'
+        filepath = REPORTS_DIR / filename
 
-    if filepath.exists():
-        filepath = REPORTS_DIR / f'{date_str}_{time_str}_{issue_type}_2.json'
+        if filepath.exists():
+            filename = f'{date_str}_{time_str}_{issue_type}_2.json'
+            filepath = REPORTS_DIR / filename
 
-    filepath.write_text(json.dumps(report, indent=2))
+        filepath.write_text(json.dumps(report, indent=2))
+    except OSError as e:
+        save_error = str(e)
+        logger.error('Failed to save issue report locally: %s', e)
 
     # Forward to public feedback service (fire-and-forget, non-blocking)
     if _is_public_install():
@@ -93,7 +103,11 @@ def submit_issue():
             daemon=True,
         ).start()
 
-    return jsonify({'ok': True, 'saved': filename})
+    if filename is not None:
+        return jsonify({'ok': True, 'saved': filename})
+    # Local save failed but we still accepted the report (forwarded if public).
+    # Report it as accepted so the user isn't blocked, with a soft warning.
+    return jsonify({'ok': True, 'saved': None, 'warning': 'stored remotely only', 'detail': save_error})
 
 
 @report_issue_bp.route('/api/report-issues', methods=['GET'])

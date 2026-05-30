@@ -873,15 +873,21 @@ def canvas_pages_proxy(path):
                 )
                 return resp
             else:
-                # Non-HTML files: use send_file for proper range request support
-                # (required for video/audio streaming playback)
+                # Non-HTML files served from canvas-pages/ — icons, JSON state,
+                # backing images, generated audio, etc. Agents update these live
+                # via the API, so caching breaks the "live updates" guarantee.
+                # See docs/jambot/no-cache-policy.md.
+                # NOTE: conditional=True is kept so range requests still work for
+                # audio/video streaming playback; only the cache headers change.
                 resp = send_file(
                     resolved,
                     conditional=True,
-                    max_age=3600,
                 )
-                # Tell Cloudflare CDN to cache media files explicitly
-                resp.headers['CDN-Cache-Control'] = 'public, max-age=86400'
+                resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                resp.headers['Pragma'] = 'no-cache'
+                resp.headers['Expires'] = '0'
+                resp.headers['CDN-Cache-Control'] = 'no-store'
+                resp.headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
                 resp.headers['Accept-Ranges'] = 'bytes'
                 return resp
         return 'Page not found', 404
@@ -892,14 +898,22 @@ def canvas_pages_proxy(path):
 
 @canvas_bp.route('/images/<path:path>')
 def canvas_images_proxy(path):
-    """Serve files from Canvas images directory."""
+    """Serve files from Canvas images directory.
+
+    NO-CACHE: see docs/jambot/no-cache-policy.md. Canvas images are
+    agent-updatable surfaces.
+    """
     try:
         # P7-T3 security: prevent path traversal
         resolved = _safe_canvas_path('/var/www/canvas-display/images', path)
         if resolved is None:
             return 'Invalid path', 400
         if resolved.exists():
-            return send_file(resolved)
+            resp = send_file(resolved)
+            resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            resp.headers['Pragma'] = 'no-cache'
+            resp.headers['Expires'] = '0'
+            return resp
         return 'Image not found', 404
     except Exception as exc:
         logger.error(f'Canvas images proxy error: {exc}')

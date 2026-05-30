@@ -26,7 +26,7 @@ RUN COMMIT="${BUILD_COMMIT:-$(git -C /app rev-parse --short HEAD 2>/dev/null || 
     echo "{\"commit\":\"${COMMIT}\",\"branch\":\"${BRANCH}\",\"date\":\"${DATE}\"}" > /app/version.json
 
 # Writable dirs for runtime data
-RUN mkdir -p runtime/uploads runtime/canvas-pages runtime/known_faces runtime/music runtime/generated_music runtime/faces runtime/transcripts
+RUN mkdir -p runtime/uploads runtime/canvas-pages runtime/known_faces runtime/music runtime/generated_music runtime/faces runtime/transcripts runtime/issue-reports
 
 # Run as non-root user
 RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app

@@ -578,8 +578,11 @@ connectAiradio();
                 }
                 this.currentMood = mood;
 
-                // Propagate mood to BigHeadFace if active
+                // Propagate mood to BigHeadFace + HaloSmokeFace if active.
+                // HaloSmoke collapses non-'thinking' moods to its idle state,
+                // which is how it clears the dots animation when a turn ends.
                 window.BigHeadFace?.setMood(mood);
+                window.HaloSmokeFace?.setMood(mood);
             },
 
             blink() {
@@ -2732,7 +2735,19 @@ connectAiradio();
                             context: this._gatherContext(),
                         }),
                     });
-                    const data = await res.json();
+                    // Guard: a non-JSON body (e.g. an HTML error/login page) would
+                    // make res.json() throw the cryptic "Unexpected token '<'" error.
+                    // Surface a clean message based on status instead.
+                    let data;
+                    try {
+                        data = await res.json();
+                    } catch (_) {
+                        throw new Error(
+                            res.status === 401 || res.status === 403
+                                ? 'Not signed in — please sign in and try again.'
+                                : `Server returned ${res.status}. Please try again.`
+                        );
+                    }
                     if (data.ok) {
                         if (this._statusEl) { this._statusEl.textContent = '✓ Report submitted. Thank you!'; this._statusEl.className = 'irm-status success'; }
                         setTimeout(() => this.close(), 1800);
@@ -3462,6 +3477,15 @@ connectAiradio();
                 // fetch. Checked in sendMessage() to fall through to the normal
                 // fresh-request path instead of interject.
                 this._textDoneReceived = false;
+                // Drain-timer extension: when the server response stream is still
+                // open, more TTS chunks may arrive with LONG gaps (Groq Orpheus
+                // takes 20-25s per chunk under load). The default 800ms drain
+                // briefly empties the audio queue between chunks → STT resumes →
+                // mic captures the next chunk as user speech. While this flag is
+                // true, playNextAudio() uses a 30s drain instead. The stream's
+                // finally{} clears the flag, after which the normal 800ms drain
+                // releases the mic promptly. Origin: 2026-05-19 echo capture bug.
+                this._streamingResponseActive = false;
 
                 // Use shared STT instance instead of creating a new one
                 // This prevents conflicts with VoiceConversation's STT
@@ -3773,6 +3797,7 @@ connectAiradio();
                 if (this._ttsGuardTimer) { clearTimeout(this._ttsGuardTimer); this._ttsGuardTimer = null; }
                 // Abort any in-flight fetch so streaming stops immediately
                 if (this._fetchAbortController) {
+                    this._abortReason = 'stop';
                     this._fetchAbortController.abort();
                     this._fetchAbortController = null;
                     // Tell server to abort the openclaw run (fire-and-forget)
@@ -3845,6 +3870,7 @@ connectAiradio();
                         // instead: abort the tail, then fall through to the normal
                         // sendMessage path.
                         console.warn(`↩ POST-TEXT_DONE message — treating as fresh request: "${text.substring(0,30)}"`);
+                        this._abortReason = 'user';
                         this._fetchAbortController.abort();
                         this._fetchAbortController = null;
                         fetch(`${this.config.serverUrl}${convPath('abort')}`, {
@@ -3855,6 +3881,7 @@ connectAiradio();
                         this.stopAudio();
                     } else if (this._ttsPlaying) {
                         // Agent already responded, TTS playing → ABORT
+                        this._abortReason = 'user';
                         this._fetchAbortController.abort();
                         this._fetchAbortController = null;
                         console.warn(`⛔ ABORT source: ClawdbotMode.sendMessage (TTS playing, new msg: "${text.substring(0,30)}")`);
@@ -3943,6 +3970,7 @@ connectAiradio();
                     const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
                     this._fetchAbortController = new AbortController();
                     this._textDoneReceived = false;  // new stream — reset the race-window guard
+                    this._streamingResponseActive = true;  // stream open — TTS chunks may arrive with long gaps; see constructor note
                     const response = await fetch(`${this.config.serverUrl}/api/conversation?stream=1`, {
                         method: 'POST',
                         signal: this._fetchAbortController.signal,
@@ -3977,14 +4005,20 @@ connectAiradio();
                     const decoder = new TextDecoder();
                     let buffer = '';
 
-                    // Inactivity timeout: abort if no data received for 60s
-                    // (heartbeats arrive every 10-15s during tool execution)
+                    // Inactivity timeout: abort if no data received for this long.
+                    // MUST be >= the server-side run budget (openclaw gateway
+                    // timeout = 300s) so the client never gives up before the
+                    // server does — otherwise long silent work (subagent spawns,
+                    // batch ops) gets cut at the client and shows a false
+                    // "stream timed out". Heartbeats normally arrive every 5-10s
+                    // and reset this; 300s is the hard backstop matching the server.
                     // _inactivityTimer declared in outer scope so finally{} can clear it
-                    const INACTIVITY_TIMEOUT_MS = 60000;
+                    const INACTIVITY_TIMEOUT_MS = 300000;
                     const _resetInactivity = () => {
                         if (_inactivityTimer) clearTimeout(_inactivityTimer);
                         _inactivityTimer = setTimeout(() => {
                             console.warn('[Stream] No data for 60s — aborting');
+                            this._abortReason = 'inactivity';
                             this._fetchAbortController?.abort();
                         }, INACTIVITY_TIMEOUT_MS);
                     };
@@ -4583,11 +4617,25 @@ connectAiradio();
                         FaceModule.setMood('neutral');
                         StatusModule.update('idle', 'READY');
                         TranscriptPanel.removeThinking();
-                        // If agent was mid-task (had heartbeats), note the redirect
-                        if (this._wasAgentic) {
-                            this._wasAgentic = false;
+                        // Label the abort by its ACTUAL cause — only an explicit
+                        // user interrupt is "redirected by user". An inactivity
+                        // timeout (agent went silent during long work) or a call
+                        // stop is NOT a user redirect, and mislabeling it confused
+                        // users ("why does it say redirected when I didn't?").
+                        const _reason = this._abortReason;
+                        this._abortReason = null;
+                        const _wasAgentic = this._wasAgentic;
+                        this._wasAgentic = false;
+                        if (_reason === 'user') {
                             TranscriptPanel.finalizeStreaming('🔀 Redirected.');
                             ActionConsole.addEntry('system', 'Task redirected by user');
+                        } else if (_reason === 'inactivity') {
+                            TranscriptPanel.finalizeStreaming('⏳ Agent went quiet — stream timed out.');
+                            ActionConsole.addEntry('system', 'Stream timed out (agent silent 60s) — not a user action');
+                        } else if (_wasAgentic && !_reason) {
+                            // Unknown-source abort during agentic work — don't blame
+                            // the user; just close the stream quietly.
+                            TranscriptPanel.finalizeStreaming(null);
                         } else {
                             TranscriptPanel.finalizeStreaming(null);
                         }
@@ -4648,6 +4696,17 @@ connectAiradio();
                     if (_inactivityTimer) clearTimeout(_inactivityTimer);
                     this._sending = false;
                     this._fetchAbortController = null;
+                    // Stream is done. Future drain timer fires should use the short
+                    // 800ms wait again. If an extended-wait drain timer is currently
+                    // pending and the queue is empty, collapse it to the short window
+                    // so the mic returns promptly after the response ends.
+                    // See constructor note on _streamingResponseActive.
+                    this._streamingResponseActive = false;
+                    if (this._drainTimer && this.audioQueue.length === 0) {
+                        clearTimeout(this._drainTimer);
+                        this._drainTimer = null;
+                        this.playNextAudio();  // re-run drain logic with short wait now
+                    }
                     // Safety net: if no audio was queued/played, STT never gets restarted
                     // via onListening callback. Ensure mic comes back after a short delay.
                     // Only fires if call is still active (_voiceActive) — prevents restart after hang-up.
@@ -4924,6 +4983,16 @@ connectAiradio();
                     // Don't immediately transition to listening — more TTS chunks
                     // may be in-flight from streamed sentences. Wait briefly and
                     // check again so the stop button doesn't flash between sentences.
+                    //
+                    // 2026-05-19: extend the drain window while the server response
+                    // stream is still open. Groq Orpheus has been observed taking
+                    // 22-25 SECONDS to generate a single TTS chunk under load; the
+                    // old 800ms wait empties the queue between chunks, STT resumes,
+                    // and the mic captures the late chunk as user speech (echo).
+                    // While _streamingResponseActive is true, wait up to 30s. The
+                    // stream's finally{} clears the flag and re-arms the short
+                    // timer so the mic releases promptly after the stream ends.
+                    const drainMs = this._streamingResponseActive ? 30000 : 800;
                     if (!this._drainTimer) {
                         this._drainTimer = setTimeout(() => {
                             this._drainTimer = null;
@@ -4956,7 +5025,7 @@ connectAiradio();
                                     }, 600);
                                 }
                             }
-                        }, 800);  // 800ms grace period for next TTS chunk to arrive
+                        }, drainMs);
                     }
                     return;
                 }
@@ -8286,6 +8355,13 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
 
             addMessage(role, text, opts = {}) {
                 if (!this.messages || !text) return;
+
+                // Remove any stale thinking bubble before appending an assistant
+                // response. The streaming path (startStreaming/finalizeStreaming)
+                // already does this, but the non-streaming response path
+                // (data.response → addMessage) was leaving the dots floating
+                // above the rendered reply.
+                if (role === 'assistant') this.removeThinking();
 
                 const msg = document.createElement('div');
                 msg.className = `tp-msg ${role === 'user' ? 'user' : 'assistant'}`;

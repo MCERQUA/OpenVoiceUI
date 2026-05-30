@@ -505,7 +505,16 @@ window.HaloSmokeFace = (function () {
 
     function setThinking(v) { _thinking = !!v; }
 
-    return { start, stop, setThinking };
+    // Implement the BaseFace mood contract — halo visually collapses all
+    // moods to two states: 'thinking' → animated dots, anything else → idle.
+    // Without this, FaceModule.setMood('neutral') after a turn couldn't reach
+    // halo (it only propagated to BigHeadFace), so the dots animation would
+    // stay on screen indefinitely.
+    function setMood(mood) {
+        _thinking = (mood === 'thinking');
+    }
+
+    return { start, stop, setThinking, setMood };
 })();
 
 // Self-register with FaceRenderer plugin system
