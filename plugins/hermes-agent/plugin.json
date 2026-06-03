@@ -1,7 +1,7 @@
 {
   "id": "hermes-agent",
   "name": "Hermes Agent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Self-improving AI agent with auto-generated skills, deep memory search, and autonomous tasks. Adds a standalone Hermes agent mode with full voice support.",
   "author": "Nous Research / OpenVoiceUI",
   "type": "gateway",
@@ -9,7 +9,7 @@
   "repository": "https://github.com/MCERQUA/openvoiceui-plugins",
   "provides": "gateway",
   "gateway_class": "HermesGateway",
-  "hermes_version": "0.13.0",
+  "hermes_version": "0.15.2",
   "requires_env": [
     "HERMES_HOST"
   ],
