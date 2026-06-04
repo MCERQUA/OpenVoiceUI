@@ -275,12 +275,11 @@ def generate_tts_b64(
 
     # ── Try primary provider (single attempt for cloud, retries for local) ──
     last_err = None
-    # Resemble gets 5 attempts — their cluster throws transient 500s frequently.
-    # Losing the custom character voice to a fallback is far worse than retry delay.
-    # Cloud providers (groq/elevenlabs) get 2 attempts.
-    if tts_provider == 'resemble':
-        max_attempts = 5
-    elif tts_provider in ('groq', 'qwen3', 'elevenlabs'):
+    # Resemble gets 2 attempts; cloud providers (groq/elevenlabs) get 2; local gets _MAX_RETRIES+1.
+    # Note: HTTP 5xx errors from Resemble are NOT retried — they're server-confirmed failures
+    # (often account quota/plan issues) that will repeat on every attempt and burn 8s × N before
+    # falling back. A single retry is kept only for genuine transient network blips.
+    if tts_provider in ('groq', 'qwen3', 'elevenlabs', 'resemble'):
         max_attempts = 2
     else:
         max_attempts = _MAX_RETRIES + 1
@@ -291,6 +290,12 @@ def generate_tts_b64(
             return base64.b64encode(audio_bytes).decode('utf-8')
         except Exception as e:
             last_err = e
+            err_str = str(e)
+            # HTTP status errors (4xx/5xx) are server-confirmed — retrying won't help.
+            # Fail fast and fall back immediately instead of burning N × 8s per attempt.
+            if 'API error 4' in err_str or 'API error 5' in err_str:
+                logger.warning(f"TTS HTTP error, no retry (provider={tts_provider}): {e} — falling back")
+                break
             if attempt < max_attempts - 1:
                 delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
                 logger.warning(f"TTS attempt {attempt + 1} failed (provider={tts_provider}): {e} — retrying in {delay}s")

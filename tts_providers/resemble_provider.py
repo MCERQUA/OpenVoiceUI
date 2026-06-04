@@ -431,28 +431,22 @@ class ResembleProvider(TTSProvider):
             model = style['model']
         prompt = style.get('prompt', '')
 
-        # Wrap in SSML with prompt/exaggeration if applicable
-        if not text.strip().startswith('<speak'):
-            attrs = []
-            if exaggeration is not None:
-                attrs.append(f'exaggeration="{exaggeration}"')
-            if prompt:
-                attrs.append(f'prompt="{prompt}"')
-            if attrs:
-                text = f'<speak {" ".join(attrs)}>{text}</speak>'
-
+        # Resemble's Chatterbox API (f.cluster.resemble.ai/stream) accepts
+        # exaggeration and prompt as TOP-LEVEL JSON fields, NOT as SSML attributes.
+        # Sending them as <speak exaggeration="..."> attributes returns 500.
+        # Plain text or bare <speak>text</speak> SSML is fine; just don't put
+        # exaggeration/prompt inside the SSML wrapper.
         payload = {
             'voice_uuid': voice_uuid,
-            'data': text[:2000],  # API limit
+            'data': text[:2000],
             'precision': precision,
             'sample_rate': sample_rate,
+            'model': model or DEFAULT_MODEL,
         }
-
-        # Only include model if explicitly requested — API defaults to
-        # the correct model for each voice. Forcing chatterbox-turbo on
-        # voices that don't support it returns 500.
-        if model:
-            payload['model'] = model
+        if exaggeration is not None:
+            payload['exaggeration'] = exaggeration
+        if prompt:
+            payload['prompt'] = prompt
 
         t = time.time()
         logger.info(
