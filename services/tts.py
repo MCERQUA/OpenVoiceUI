@@ -266,20 +266,23 @@ def generate_tts_b64(
     """
     voice = voice or 'M1'
 
-    # Sticky fallback: if a previous sentence in this response already fell back,
-    # use the fallback provider/voice directly to keep the voice consistent.
-    if fallback_state and fallback_state.get('provider'):
+    # Sticky fallback: if a previous sentence fell back, keep voice consistent —
+    # EXCEPT for Resemble, where the user strongly prefers the real custom voice
+    # over consistency. Each Resemble sentence retries independently so a single
+    # cluster hiccup doesn't doom the whole response to the fallback voice.
+    if fallback_state and fallback_state.get('provider') and tts_provider != 'resemble':
         tts_provider = fallback_state['provider']
         voice = fallback_state['voice']
         logger.info(f"TTS using sticky fallback: provider={tts_provider}, voice={voice}")
 
-    # ── Try primary provider (single attempt for cloud, retries for local) ──
+    # ── Try primary provider ──────────────────────────────────────────────────
     last_err = None
-    # Resemble gets 2 attempts; cloud providers (groq/elevenlabs) get 2; local gets _MAX_RETRIES+1.
-    # Note: HTTP 5xx errors from Resemble are NOT retried — they're server-confirmed failures
-    # (often account quota/plan issues) that will repeat on every attempt and burn 8s × N before
-    # falling back. A single retry is kept only for genuine transient network blips.
-    if tts_provider in ('groq', 'qwen3', 'elevenlabs', 'resemble'):
+    # Resemble gets 3 attempts — the custom voice is worth waiting for; a slow
+    # cluster response is better than a wrong voice. HTTP 5xx still bails fast.
+    # Other cloud providers (groq/elevenlabs) get 2 attempts.
+    if tts_provider == 'resemble':
+        max_attempts = 3
+    elif tts_provider in ('groq', 'qwen3', 'elevenlabs'):
         max_attempts = 2
     else:
         max_attempts = _MAX_RETRIES + 1
@@ -314,8 +317,9 @@ def generate_tts_b64(
             fallback_voice = _map_voice_to_fallback(voice, tts_provider, fallback_id)
             audio_bytes = _generate_with_provider(fallback_id, text, fallback_voice)
             logger.info(f"TTS fallback OK: provider={fallback_id}, voice={fallback_voice} (original: {tts_provider}/{voice})")
-            # Record fallback so subsequent sentences in this response stay consistent
-            if fallback_state is not None:
+            # Lock sticky fallback for non-Resemble providers — keeps voice consistent.
+            # For Resemble: don't lock — next sentence should retry the real voice.
+            if fallback_state is not None and tts_provider != 'resemble':
                 fallback_state['provider'] = fallback_id
                 fallback_state['voice'] = fallback_voice
                 logger.info(f"TTS sticky fallback locked: {fallback_id}/{fallback_voice} for rest of response")
