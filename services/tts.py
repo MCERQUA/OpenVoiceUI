@@ -277,11 +277,11 @@ def generate_tts_b64(
 
     # ── Try primary provider ──────────────────────────────────────────────────
     last_err = None
-    # Resemble gets 3 attempts — the custom voice is worth waiting for; a slow
+    # Resemble gets 4 attempts — the custom voice is worth waiting for; a slow
     # cluster response is better than a wrong voice. HTTP 5xx still bails fast.
     # Other cloud providers (groq/elevenlabs) get 2 attempts.
     if tts_provider == 'resemble':
-        max_attempts = 3
+        max_attempts = 4
     elif tts_provider in ('groq', 'qwen3', 'elevenlabs'):
         max_attempts = 2
     else:
