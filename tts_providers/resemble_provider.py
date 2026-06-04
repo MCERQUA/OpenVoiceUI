@@ -40,11 +40,7 @@ MODELS = {
     "chatterbox-multilingual": "Chatterbox Multilingual — 23+ languages",
 }
 
-DEFAULT_MODEL = "chatterbox"
-
-# chatterbox-turbo accepts sample_rate/precision; base chatterbox returns 500 if those
-# fields are included. Tested 2026-06-04: chatterbox + sample_rate → 500, no sr → 200.
-_MODELS_WITH_SAMPLE_RATE = {"chatterbox-turbo"}
+DEFAULT_MODEL = "chatterbox-turbo"
 
 # Timeouts
 STREAM_TIMEOUT = 30.0    # Max wait for full streaming response
@@ -435,25 +431,31 @@ class ResembleProvider(TTSProvider):
             model = style['model']
         prompt = style.get('prompt', '')
 
-        # Resemble's Chatterbox API (f.cluster.resemble.ai/stream):
-        # - model is REQUIRED (returns 500 when omitted). Default to chatterbox.
-        # - exaggeration and prompt must be TOP-LEVEL JSON fields, NOT SSML attributes.
-        #   <speak exaggeration="..."> returns 500.
-        # - sample_rate/precision only supported by chatterbox-turbo; base chatterbox
-        #   returns 500 when those fields are included (tested 2026-06-04).
-        effective_model = model or DEFAULT_MODEL
+        # Documented correct format: exaggeration + prompt go as <speak> SSML attributes
+        # inside `data`. They are NOT top-level JSON fields.
+        # model: omit to auto-select chatterbox (base) for cloned voices — this gives
+        # richer emotion than chatterbox-turbo. sample_rate=24000 was working pre-June-3.
+        # NOTE 2026-06-04: Resemble cluster outage is causing 500s on SSML + no-model
+        # requests. When cluster recovers this format restores full Kyle character.
+        # Fast-fail (tts.py) means 500s now fall back to Groq in <1s, not 47s.
+        if not text.strip().startswith('<speak'):
+            attrs = []
+            if exaggeration is not None:
+                attrs.append(f'exaggeration="{exaggeration}"')
+            if prompt:
+                escaped_prompt = prompt.replace('"', '&quot;')
+                attrs.append(f'prompt="{escaped_prompt}"')
+            if attrs:
+                text = f'<speak {" ".join(attrs)}>{text}</speak>'
+
         payload = {
             'voice_uuid': voice_uuid,
             'data': text[:2000],
-            'model': effective_model,
+            'precision': precision,
+            'sample_rate': sample_rate,
         }
-        if effective_model in _MODELS_WITH_SAMPLE_RATE:
-            payload['sample_rate'] = sample_rate
-            payload['precision'] = precision
-        if exaggeration is not None:
-            payload['exaggeration'] = exaggeration
-        if prompt:
-            payload['prompt'] = prompt
+        if model:
+            payload['model'] = model
 
         t = time.time()
         logger.info(
