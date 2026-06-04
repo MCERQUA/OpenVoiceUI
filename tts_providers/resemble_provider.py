@@ -40,7 +40,11 @@ MODELS = {
     "chatterbox-multilingual": "Chatterbox Multilingual — 23+ languages",
 }
 
-DEFAULT_MODEL = "chatterbox-turbo"
+DEFAULT_MODEL = "chatterbox"
+
+# chatterbox-turbo accepts sample_rate/precision; base chatterbox returns 500 if those
+# fields are included. Tested 2026-06-04: chatterbox + sample_rate → 500, no sr → 200.
+_MODELS_WITH_SAMPLE_RATE = {"chatterbox-turbo"}
 
 # Timeouts
 STREAM_TIMEOUT = 30.0    # Max wait for full streaming response
@@ -431,18 +435,21 @@ class ResembleProvider(TTSProvider):
             model = style['model']
         prompt = style.get('prompt', '')
 
-        # Resemble's Chatterbox API (f.cluster.resemble.ai/stream) accepts
-        # exaggeration and prompt as TOP-LEVEL JSON fields, NOT as SSML attributes.
-        # Sending them as <speak exaggeration="..."> attributes returns 500.
-        # Plain text or bare <speak>text</speak> SSML is fine; just don't put
-        # exaggeration/prompt inside the SSML wrapper.
+        # Resemble's Chatterbox API (f.cluster.resemble.ai/stream):
+        # - model is REQUIRED (returns 500 when omitted). Default to chatterbox.
+        # - exaggeration and prompt must be TOP-LEVEL JSON fields, NOT SSML attributes.
+        #   <speak exaggeration="..."> returns 500.
+        # - sample_rate/precision only supported by chatterbox-turbo; base chatterbox
+        #   returns 500 when those fields are included (tested 2026-06-04).
+        effective_model = model or DEFAULT_MODEL
         payload = {
             'voice_uuid': voice_uuid,
             'data': text[:2000],
-            'precision': precision,
-            'sample_rate': sample_rate,
-            'model': model or DEFAULT_MODEL,
+            'model': effective_model,
         }
+        if effective_model in _MODELS_WITH_SAMPLE_RATE:
+            payload['sample_rate'] = sample_rate
+            payload['precision'] = precision
         if exaggeration is not None:
             payload['exaggeration'] = exaggeration
         if prompt:
