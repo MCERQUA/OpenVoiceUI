@@ -378,18 +378,24 @@ class WebSpeechSTT {
 
         // Restore listening state — stop()/pttRelease() may have set isListening=false
         this.isListening = true;
-        if (this.recognition) {
-            // Defer start — a prior stop() may still be in-flight (async onend).
-            // Immediate start() throws InvalidStateError which the catch swallows,
-            // then the onend restart also fails if isProcessing got re-poisoned.
-            try { this.recognition.start(); } catch (e) {
-                // Recognition still stopping — retry after onend fires
-                setTimeout(() => {
-                    if (this.isListening && !this.isProcessing && !this._micMuted && this.recognition) {
-                        try { this.recognition.start(); } catch (e2) {}
-                    }
-                }, 350);
-            }
+        if (!this.recognition) {
+            // Recognition was never created — stt.start() was called while _micMuted=true
+            // (e.g. PTT mode was enabled before or during call startup, so start() returned
+            // early before _ensureRecognition() ran). Delegate to start() which handles
+            // both _ensureRecognition() and getUserMedia(); _micMuted is false now.
+            this.start();
+            return;
+        }
+        // Defer start — a prior stop() may still be in-flight (async onend).
+        // Immediate start() throws InvalidStateError which the catch swallows,
+        // then the onend restart also fails if isProcessing got re-poisoned.
+        try { this.recognition.start(); } catch (e) {
+            // Recognition still stopping — retry after onend fires
+            setTimeout(() => {
+                if (this.isListening && !this.isProcessing && !this._micMuted && this.recognition) {
+                    try { this.recognition.start(); } catch (e2) {}
+                }
+            }, 350);
         }
     }
 }
