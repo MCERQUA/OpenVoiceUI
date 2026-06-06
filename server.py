@@ -1706,6 +1706,122 @@ def openclaw_ui_websocket(ws):
 
 
 # ---------------------------------------------------------------------------
+# Terminal — PTY over WebSocket (backs the terminal canvas block)
+# ---------------------------------------------------------------------------
+# Spawns a login shell inside THIS container, cwd'd to the dedicated code
+# sandbox (CODE_WORKSPACE_DIR). Gated by the Clerk __session cookie (same as
+# /ws/clawdbot) OR the internal X-Agent-Key. Pure-Python pty — no node-pty.
+
+@sock.route("/ws/terminal")
+def terminal_websocket(ws):
+    import pty, select, struct, fcntl, termios, signal, threading
+    from services.auth import verify_clerk_token, get_token_from_request
+    from services.paths import CODE_WORKSPACE_DIR
+
+    # --- auth: valid Clerk session OR internal agent key ---
+    token = get_token_from_request()
+    user_id = verify_clerk_token(token) if token else None
+    agent_key = os.getenv("AGENT_API_KEY", "").strip()
+    has_agent_key = bool(agent_key) and request.headers.get("X-Agent-Key") == agent_key
+    if not user_id and not has_agent_key:
+        logger.warning("Terminal WS rejected — no valid Clerk token / agent key")
+        try:
+            ws.send(json.dumps({"type": "error", "message": "Unauthorized"}))
+            ws.close()
+        except Exception:
+            pass
+        return
+    logger.info(f"Terminal WS authenticated: user={user_id or 'agent-key'}")
+
+    try:
+        CODE_WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    pid, master_fd = pty.fork()
+    if pid == 0:
+        # --- child: become the login shell ---
+        os.environ["TERM"] = "xterm-256color"
+        try:
+            os.chdir(str(CODE_WORKSPACE_DIR))
+        except Exception:
+            pass
+        shell = os.environ.get("SHELL") or "/bin/bash"
+        try:
+            os.execvp(shell, [shell, "-l"])
+        except Exception:
+            try:
+                os.execvp("/bin/sh", ["/bin/sh"])
+            except Exception:
+                os._exit(1)
+
+    # --- parent: bridge pty <-> websocket ---
+    stop = threading.Event()
+
+    def _pty_to_ws():
+        while not stop.is_set():
+            try:
+                r, _, _ = select.select([master_fd], [], [], 0.2)
+                if master_fd in r:
+                    data = os.read(master_fd, 65536)
+                    if not data:
+                        break
+                    ws.send(data.decode("utf-8", "replace"))
+            except (OSError, ValueError):
+                break
+            except Exception:
+                break
+        stop.set()
+        try:
+            ws.close()
+        except Exception:
+            pass
+
+    reader = threading.Thread(target=_pty_to_ws, daemon=True)
+    reader.start()
+
+    try:
+        while not stop.is_set():
+            msg = ws.receive()
+            if msg is None:
+                break
+            try:
+                data = json.loads(msg)
+            except Exception:
+                continue
+            mtype = data.get("type")
+            if mtype == "input":
+                try:
+                    os.write(master_fd, data.get("data", "").encode("utf-8"))
+                except OSError:
+                    break
+            elif mtype == "resize":
+                try:
+                    cols = max(1, int(data.get("cols", 80)))
+                    rows = max(1, int(data.get("rows", 24)))
+                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ,
+                                struct.pack("HHHH", rows, cols, 0, 0))
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.error(f"Terminal WS error: {e}")
+    finally:
+        stop.set()
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+        try:
+            os.close(master_fd)
+        except Exception:
+            pass
+        try:
+            os.waitpid(pid, 0)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
 # Game Library API
 # ---------------------------------------------------------------------------
 # Serves game catalog data to canvas pages (same-origin, no CORS needed).

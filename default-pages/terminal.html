@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="page-icon" content="🖥️">
+<title>Terminal</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+  html,body { margin:0; height:100%; background:#0a0a0a; }
+  /* position:fixed + inset:0 fills the viewport, ignoring the canvas
+     system's injected body{padding:25px} so the terminal sits flush. */
+  #app { position:fixed; inset:0; display:flex; flex-direction:column; background:#0a0a0a; }
+  #bar { height:30px; flex:none; display:flex; align-items:center; gap:8px; padding:0 10px;
+    background:#181818; border-bottom:1px solid #2a2a2a; font:12px -apple-system,Segoe UI,sans-serif; color:#888; }
+  #dot { width:9px; height:9px; border-radius:50%; background:#666; flex:none; }
+  #dot.on { background:#3fb950; } #dot.off { background:#f85149; }
+  #bar .sp { flex:1; }
+  #bar button { background:#262626; color:#ccc; border:1px solid #333; border-radius:4px; font-size:11px; padding:3px 9px; cursor:pointer; }
+  #bar button:hover { background:#303030; }
+  #term { flex:1; min-height:0; padding:6px 8px; }
+  .xterm .xterm-viewport::-webkit-scrollbar { width:6px; }
+  .xterm .xterm-viewport::-webkit-scrollbar-thumb { background:#3a3a42; border-radius:99px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <span id="dot"></span><span id="status">Connecting…</span>
+    <span class="sp"></span>
+    <button id="reconnect">Reconnect</button>
+  </div>
+  <div id="term"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+let term, fit, ws, closedByUs = false;
+
+function setStatus(state, text){
+  $('#dot').className = state==='on'?'on':(state==='off'?'off':'');
+  $('#status').textContent = text;
+}
+
+function sendResize(){
+  if(!fit || !ws || ws.readyState!==1) return;
+  try { fit.fit(); ws.send(JSON.stringify({type:'resize', cols:term.cols, rows:term.rows})); } catch(e){}
+}
+
+function connect(){
+  closedByUs = false;
+  const proto = location.protocol==='https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto+'://'+location.host+'/ws/terminal');
+  setStatus('', 'Connecting…');
+  ws.onopen = () => { setStatus('on','Connected'); term.focus(); setTimeout(sendResize, 60); };
+  ws.onmessage = (e) => {
+    // control frames arrive as JSON {type:'error'|...}; shell output is raw text
+    if(e.data && e.data[0]==='{'){
+      try { const j=JSON.parse(e.data); if(j.type==='error'){ term.write('\r\n\x1b[31m['+j.message+']\x1b[0m\r\n'); return; } } catch(_){}
+    }
+    term.write(e.data);
+  };
+  ws.onclose = () => { setStatus('off', closedByUs?'Disconnected':'Connection closed'); };
+  ws.onerror = () => { setStatus('off','Connection error'); };
+}
+
+function init(){
+  term = new Terminal({ cursorBlink:true, fontSize:13, fontFamily:'ui-monospace,Menlo,Consolas,monospace',
+    theme:{ background:'#0a0a0a', foreground:'#d4d4d4', cursor:'#d4d4d4' }, scrollback:5000, convertEol:false });
+  fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open($('#term'));
+  fit.fit();
+  term.onData(d => { if(ws && ws.readyState===1) ws.send(JSON.stringify({type:'input', data:d})); });
+  window.addEventListener('resize', sendResize);
+  new ResizeObserver(sendResize).observe($('#term'));
+  $('#reconnect').onclick = () => { closedByUs=true; try{ws && ws.close();}catch(e){} term.reset(); connect(); };
+  connect();
+}
+
+if(window.Terminal && window.FitAddon) init();
+else window.addEventListener('load', init);
+</script>
+</body>
+</html>
