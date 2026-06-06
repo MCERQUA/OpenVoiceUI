@@ -20,7 +20,7 @@ initUpdateChecker();
 // and POSTs to /api/airadio/* endpoints. Idempotent; survives mode switches.
 connectAiradio();
 
-        import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js?v=3';
+        import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js?v=4';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
         import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js?v=3';
         import { ExternalSTT, ExternalWakeWordDetector } from '/src/providers/ExternalSTT.js';

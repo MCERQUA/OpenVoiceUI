@@ -266,20 +266,22 @@ def generate_tts_b64(
     """
     voice = voice or 'M1'
 
-    # Sticky fallback: if a previous sentence in this response already fell back,
-    # use the fallback provider/voice directly to keep the voice consistent.
-    if fallback_state and fallback_state.get('provider'):
+    # Sticky fallback: if a previous sentence fell back, keep voice consistent —
+    # EXCEPT for Resemble, where the user strongly prefers the real custom voice
+    # over consistency. Each Resemble sentence retries independently so a single
+    # cluster hiccup doesn't doom the whole response to the fallback voice.
+    if fallback_state and fallback_state.get('provider') and tts_provider != 'resemble':
         tts_provider = fallback_state['provider']
         voice = fallback_state['voice']
         logger.info(f"TTS using sticky fallback: provider={tts_provider}, voice={voice}")
 
-    # ── Try primary provider (single attempt for cloud, retries for local) ──
+    # ── Try primary provider ──────────────────────────────────────────────────
     last_err = None
-    # Resemble gets 5 attempts — their cluster throws transient 500s frequently.
-    # Losing the custom character voice to a fallback is far worse than retry delay.
-    # Cloud providers (groq/elevenlabs) get 2 attempts.
+    # Resemble gets 4 attempts — the custom voice is worth waiting for; a slow
+    # cluster response is better than a wrong voice. HTTP 5xx still bails fast.
+    # Other cloud providers (groq/elevenlabs) get 2 attempts.
     if tts_provider == 'resemble':
-        max_attempts = 5
+        max_attempts = 4
     elif tts_provider in ('groq', 'qwen3', 'elevenlabs'):
         max_attempts = 2
     else:
@@ -291,6 +293,12 @@ def generate_tts_b64(
             return base64.b64encode(audio_bytes).decode('utf-8')
         except Exception as e:
             last_err = e
+            err_str = str(e)
+            # HTTP status errors (4xx/5xx) are server-confirmed — retrying won't help.
+            # Fail fast and fall back immediately instead of burning N × 8s per attempt.
+            if 'API error 4' in err_str or 'API error 5' in err_str:
+                logger.warning(f"TTS HTTP error, no retry (provider={tts_provider}): {e} — falling back")
+                break
             if attempt < max_attempts - 1:
                 delay = _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
                 logger.warning(f"TTS attempt {attempt + 1} failed (provider={tts_provider}): {e} — retrying in {delay}s")
@@ -309,8 +317,9 @@ def generate_tts_b64(
             fallback_voice = _map_voice_to_fallback(voice, tts_provider, fallback_id)
             audio_bytes = _generate_with_provider(fallback_id, text, fallback_voice)
             logger.info(f"TTS fallback OK: provider={fallback_id}, voice={fallback_voice} (original: {tts_provider}/{voice})")
-            # Record fallback so subsequent sentences in this response stay consistent
-            if fallback_state is not None:
+            # Lock sticky fallback for non-Resemble providers — keeps voice consistent.
+            # For Resemble: don't lock — next sentence should retry the real voice.
+            if fallback_state is not None and tts_provider != 'resemble':
                 fallback_state['provider'] = fallback_id
                 fallback_state['voice'] = fallback_voice
                 logger.info(f"TTS sticky fallback locked: {fallback_id}/{fallback_voice} for rest of response")

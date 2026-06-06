@@ -431,26 +431,29 @@ class ResembleProvider(TTSProvider):
             model = style['model']
         prompt = style.get('prompt', '')
 
-        # Wrap in SSML with prompt/exaggeration if applicable
+        # Documented correct format: exaggeration + prompt go as <speak> SSML attributes
+        # inside `data`. They are NOT top-level JSON fields.
+        # model: omit to auto-select chatterbox (base) for cloned voices — this gives
+        # richer emotion than chatterbox-turbo. sample_rate=24000 was working pre-June-3.
+        # NOTE 2026-06-04: Resemble cluster outage is causing 500s on SSML + no-model
+        # requests. When cluster recovers this format restores full Kyle character.
+        # Fast-fail (tts.py) means 500s now fall back to Groq in <1s, not 47s.
         if not text.strip().startswith('<speak'):
             attrs = []
             if exaggeration is not None:
                 attrs.append(f'exaggeration="{exaggeration}"')
             if prompt:
-                attrs.append(f'prompt="{prompt}"')
+                escaped_prompt = prompt.replace('"', '&quot;')
+                attrs.append(f'prompt="{escaped_prompt}"')
             if attrs:
                 text = f'<speak {" ".join(attrs)}>{text}</speak>'
 
         payload = {
             'voice_uuid': voice_uuid,
-            'data': text[:2000],  # API limit
+            'data': text[:2000],
             'precision': precision,
             'sample_rate': sample_rate,
         }
-
-        # Only include model if explicitly requested — API defaults to
-        # the correct model for each voice. Forcing chatterbox-turbo on
-        # voices that don't support it returns 500.
         if model:
             payload['model'] = model
 
