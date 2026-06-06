@@ -42,7 +42,7 @@ from services.canvas_versioning import (
 # Constants
 # ---------------------------------------------------------------------------
 
-from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR
+from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR, CODE_WORKSPACE_DIR
 CANVAS_SSE_PORT = int(os.getenv('CANVAS_SSE_PORT', '3030'))
 CANVAS_SESSION_PORT = int(os.getenv('CANVAS_SESSION_PORT', '3002'))
 BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
@@ -732,7 +732,7 @@ def canvas_pages_proxy(path):
         # inside the app's own iframe and the parent page already handled authentication.
         # The iframe may not have the Clerk __session cookie on cross-subdomain visits.
         _is_html = path.endswith('.html')
-        _OS_PAGES = {'desktop.html', 'file-explorer.html'}
+        _OS_PAGES = {'desktop.html', 'file-explorer.html', 'monaco-editor.html', 'terminal.html'}
         if CANVAS_REQUIRE_AUTH and _is_html and path not in _OS_PAGES:
             page_id = Path(path).stem
             manifest = load_canvas_manifest()
@@ -856,10 +856,10 @@ def canvas_pages_proxy(path):
                 resp.headers['Content-Security-Policy'] = (
                     "default-src 'none'; "
                     "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://games.jam-bot.com blob:; "
-                    "style-src 'unsafe-inline' https://games.jam-bot.com https://fonts.googleapis.com; "
+                    "style-src 'unsafe-inline' https://games.jam-bot.com https://fonts.googleapis.com https://cdn.jsdelivr.net; "
                     "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob: https:; "
-                    "font-src 'self' https://fonts.gstatic.com; "
+                    "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
                     "connect-src 'self' blob: https://games.jam-bot.com "
                         "https://*.jam-bot.com wss://*.jam-bot.com "
                         "https://api.openai.com https://generativelanguage.googleapis.com "
@@ -1381,6 +1381,112 @@ def canvas_data_write(filename):
         return jsonify({'ok': True})
     except Exception as exc:
         logger.error(f'canvas_data write error: {exc}')
+        return jsonify({'error': str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Workspace file API — backs the Monaco code-editor canvas block.
+# Scoped to WORKSPACE_DIR (/app/runtime/workspace). NOT under the public
+# /api/canvas/ prefix, so the global Clerk before_request gate protects every
+# read/write when auth is enabled. _safe_canvas_path blocks traversal.
+# ---------------------------------------------------------------------------
+_WORKSPACE_MAX_BYTES = 5 * 1024 * 1024  # 5MB per-file ceiling for the editor
+_WORKSPACE_SKIP_SEGMENTS = {'.git', 'node_modules', '__pycache__', '.cache'}
+
+
+def _workspace_root() -> Path:
+    CODE_WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    return CODE_WORKSPACE_DIR
+
+
+@canvas_bp.route('/api/workspace/tree', methods=['GET'])
+def workspace_tree():
+    """Return the workspace file tree (relative paths, dirs + files)."""
+    root = _workspace_root()
+    entries = []
+    try:
+        for p in sorted(root.rglob('*')):
+            rel = p.relative_to(root)
+            parts = rel.parts
+            if any(seg in _WORKSPACE_SKIP_SEGMENTS for seg in parts):
+                continue
+            if len(parts) > 12:  # avoid pathological deep trees
+                continue
+            try:
+                is_dir = p.is_dir()
+                entries.append({
+                    'path': str(rel),
+                    'name': p.name,
+                    'type': 'dir' if is_dir else 'file',
+                    'size': 0 if is_dir else p.stat().st_size,
+                })
+            except OSError:
+                continue
+    except Exception as exc:
+        logger.error(f'workspace_tree error: {exc}')
+        return jsonify({'error': str(exc)}), 500
+    return jsonify({'root': 'workspace', 'entries': entries})
+
+
+@canvas_bp.route('/api/workspace/file', methods=['GET'])
+def workspace_file_read():
+    """Read a single workspace file as UTF-8 text for the editor."""
+    rel = request.args.get('path', '').strip()
+    if not rel:
+        return jsonify({'error': 'path required'}), 400
+    resolved = _safe_canvas_path(str(_workspace_root()), rel)
+    if resolved is None or not resolved.exists() or not resolved.is_file():
+        return jsonify({'error': 'not found'}), 404
+    if resolved.stat().st_size > _WORKSPACE_MAX_BYTES:
+        return jsonify({'error': 'file too large to edit'}), 413
+    try:
+        content = resolved.read_text(encoding='utf-8')
+    except UnicodeDecodeError:
+        return jsonify({'error': 'binary file — not editable'}), 415
+    return jsonify({'path': rel, 'content': content})
+
+
+@canvas_bp.route('/api/workspace/file', methods=['POST'])
+def workspace_file_write():
+    """Create or overwrite a workspace file (also creates parent dirs)."""
+    data = request.get_json(silent=True) or {}
+    rel = (data.get('path') or '').strip()
+    content = data.get('content')
+    if not rel or content is None:
+        return jsonify({'error': 'path and content required'}), 400
+    if not isinstance(content, str):
+        return jsonify({'error': 'content must be a string'}), 400
+    if len(content.encode('utf-8')) > _WORKSPACE_MAX_BYTES:
+        return jsonify({'error': 'content too large'}), 413
+    resolved = _safe_canvas_path(str(_workspace_root()), rel)
+    if resolved is None:
+        return jsonify({'error': 'invalid path'}), 400
+    if resolved.exists() and resolved.is_dir():
+        return jsonify({'error': 'path is a directory'}), 400
+    try:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content, encoding='utf-8')
+        return jsonify({'ok': True, 'path': rel, 'bytes': len(content.encode('utf-8'))})
+    except Exception as exc:
+        logger.error(f'workspace_file_write error: {exc}')
+        return jsonify({'error': str(exc)}), 500
+
+
+@canvas_bp.route('/api/workspace/mkdir', methods=['POST'])
+def workspace_mkdir():
+    """Create a directory inside the workspace."""
+    data = request.get_json(silent=True) or {}
+    rel = (data.get('path') or '').strip()
+    if not rel:
+        return jsonify({'error': 'path required'}), 400
+    resolved = _safe_canvas_path(str(_workspace_root()), rel)
+    if resolved is None:
+        return jsonify({'error': 'invalid path'}), 400
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+        return jsonify({'ok': True, 'path': rel})
+    except Exception as exc:
+        logger.error(f'workspace_mkdir error: {exc}')
         return jsonify({'error': str(exc)}), 500
 
 
