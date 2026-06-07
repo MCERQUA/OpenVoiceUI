@@ -122,6 +122,30 @@ def verify_clerk_token(token: str) -> Optional[str]:
     return None
 
 
+def get_clerk_user_profile(user_id: str) -> dict:
+    """Fetch username/name from Clerk Backend API. Returns {} on failure."""
+    import urllib.request, urllib.error, json as _json
+    secret = os.getenv('CLERK_SECRET_KEY', '')
+    if not secret or not user_id:
+        return {}
+    try:
+        req = urllib.request.Request(
+            f'https://api.clerk.com/v1/users/{user_id}',
+            headers={'Authorization': f'Bearer {secret}'},
+        )
+        with urllib.request.urlopen(req, timeout=4) as r:
+            data = _json.loads(r.read())
+        return {
+            'username':   data.get('username') or '',
+            'first_name': data.get('first_name') or '',
+            'last_name':  data.get('last_name') or '',
+            'email':      (data.get('email_addresses') or [{}])[0].get('email_address', ''),
+            'user_id':    user_id,
+        }
+    except Exception:
+        return {'user_id': user_id}
+
+
 def get_token_from_request() -> Optional[str]:
     """
     Extract Clerk session token from the current Flask request.

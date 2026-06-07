@@ -171,6 +171,13 @@ ALLOWED_RPC_METHODS = frozenset({
 # Auth check endpoint
 # ---------------------------------------------------------------------------
 
+@admin_bp.route('/api/auth/me', methods=['GET'])
+def auth_me():
+    """Return the current user's display name from the container environment."""
+    username = os.getenv('JAMBOT_TENANT') or os.getenv('CLIENT_NAME') or 'User'
+    return jsonify({'username': username})
+
+
 @admin_bp.route('/api/auth/check', methods=['GET'])
 def auth_check():
     """
