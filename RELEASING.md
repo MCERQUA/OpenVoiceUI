@@ -31,7 +31,44 @@ component version.
    git tag vYYYY.M.D
    git push origin vYYYY.M.D
    ```
-4. Rebuild images from `main`, verify, then point the live source dir at `main`.
+4. **Publish a GitHub Release** from that tag (this is the artifact people see — always
+   create it, not just the tag). Use the **exact** title + body format below.
+5. Rebuild images from `main`, verify, then point the live source dir at `main`.
+
+## GitHub Release format — DO NOT improvise, every release looks identical
+
+Create with `gh release create vYYYY.M.D --repo MCERQUA/OpenVoiceUI --title "..." --notes "..."`.
+
+- **Title:** `OpenVoiceUI YYYY.M.D` — the word `OpenVoiceUI` + a space + the bare CalVer
+  (no `v`, no "Release", no extra words). e.g. `OpenVoiceUI 2026.5.30`.
+- **First line of body:** `Release YYYY.M.D — bundles all work since <PREV_VERSION> (<one-line summary>).`
+- **Then these `## ` sections, in this order. Include a section ONLY if it has entries; omit empty ones.**
+  Compile entries from `git log --oneline v<PREV>..main` (drop merge commits). One bullet per change,
+  past tense, append the PR number `(#NNN)` and `— @author` for community PRs.
+
+  ```markdown
+  Release YYYY.M.D — bundles all work since <PREV> (<summary>).
+
+  ## Voice / conversation
+  - <STT / wake-word / TTS / call-lifecycle changes>
+
+  ## Features
+  - <new endpoints / engines / capabilities>
+
+  ## Fixes
+  - <bug fixes not covered above>
+
+  ## Community contributions
+  - <external-contributor PRs> (#NNN) — @author
+
+  ## Dependencies
+  - <one bullet listing the bumped packages + versions; note security fixes>
+
+  ## Ops
+  - <OpenClaw/Hermes pins, RELEASING/CI/infra changes>
+  ```
+
+  Reference exemplar: the `v2026.5.30` release body. Match its tone and density exactly.
 
 ## OpenClaw pin — separate from the app version
 The bundled OpenClaw version is pinned in three installer paths + `services/gateways/compat.py`.
