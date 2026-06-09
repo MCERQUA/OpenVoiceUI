@@ -43,7 +43,10 @@ MODELS = {
 DEFAULT_MODEL = "chatterbox-turbo"
 
 # Timeouts
-STREAM_TIMEOUT = 30.0    # Max wait for full streaming response
+STREAM_TIMEOUT = 120.0   # Max wait for full streaming response. Resemble's custom-clone
+                         # base model is slow (~53ms/char → a long ~1500-char chunk needs
+                         # ~80s); 30s used to cut long replies off mid-stream → silence.
+                         # 120s lets a full reply finish so the clone voice always speaks. (2026-06-07)
 CONNECT_TIMEOUT = 10.0   # TCP connect timeout
 API_TIMEOUT = 15.0       # For voice listing / non-synthesis calls
 
