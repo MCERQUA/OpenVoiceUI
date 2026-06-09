@@ -229,8 +229,13 @@ def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
     # number of individual API calls. Fewer requests = fewer chances for any
     # single one to hit a transient cluster issue.
     if tts_provider == 'resemble':
-        if len(text) > 1500:
-            return generate_tts_chunked(provider, text, voice, max_chars=1500)
+        # Resemble's stream DROPS long requests — a ~900+ char / ~36s generation gets
+        # "RemoteProtocolError: peer closed connection" → after retries that's total
+        # silence. Chunk at 400 chars so every request finishes well under the drop
+        # threshold. The chunker splits on sentence boundaries and tolerates a single
+        # chunk failing as a small gap rather than dropping the whole reply. (2026-06-07)
+        if len(text) > 400:
+            return generate_tts_chunked(provider, text, voice, max_chars=400)
         return provider.generate_speech(text=text, voice=voice)
     # Cloud providers returning MP3 (groq, elevenlabs) handle their own limits
     if audio_format == 'mp3':
@@ -277,11 +282,13 @@ def generate_tts_b64(
 
     # ── Try primary provider ──────────────────────────────────────────────────
     last_err = None
-    # Resemble gets 4 attempts — the custom voice is worth waiting for; a slow
-    # cluster response is better than a wrong voice. HTTP 5xx still bails fast.
+    # Resemble gets 6 attempts — the custom CLONE voice is worth waiting for; retrying a
+    # slow/timed-out cluster response is better than silence and FAR better than a wrong
+    # voice. Paired with STREAM_TIMEOUT=120s so a long reply finishes instead of being cut
+    # off. HTTP 5xx still bails fast (a real outage won't fix on retry).
     # Other cloud providers (groq/elevenlabs) get 2 attempts.
     if tts_provider == 'resemble':
-        max_attempts = 4
+        max_attempts = 6
     elif tts_provider in ('groq', 'qwen3', 'elevenlabs'):
         max_attempts = 2
     else:
@@ -294,9 +301,14 @@ def generate_tts_b64(
         except Exception as e:
             last_err = e
             err_str = str(e)
-            # HTTP status errors (4xx/5xx) are server-confirmed — retrying won't help.
-            # Fail fast and fall back immediately instead of burning N × 8s per attempt.
-            if 'API error 4' in err_str or 'API error 5' in err_str:
+            # 4xx = client error (bad auth/payload) — never retry. 5xx normally means a real
+            # outage, so most providers fast-fail. BUT Resemble's cluster throws INTERMITTENT
+            # 500s (a retry seconds later usually succeeds), so for Resemble we RETRY 5xx
+            # instead of dropping the sentence to silence — its base clone has no equal-voice
+            # fallback, so a missed retry = dead air. (2026-06-07)
+            is_4xx = 'API error 4' in err_str
+            is_5xx = 'API error 5' in err_str
+            if is_4xx or (is_5xx and tts_provider != 'resemble'):
                 logger.warning(f"TTS HTTP error, no retry (provider={tts_provider}): {e} — falling back")
                 break
             if attempt < max_attempts - 1:
@@ -308,6 +320,12 @@ def generate_tts_b64(
 
     # ── Fallback to alternate provider ───────────────────────────────
     fallback_id = _FALLBACK_CHAIN.get(tts_provider)
+    # Custom CLONED voices (Resemble — e.g. bhb's Kyle) must NEVER be substituted with a
+    # different voice. For tenants with RESEMBLE_NO_FALLBACK=1, a brief silence beats a
+    # wrong/switching voice (a slow Resemble sentence goes silent; the next retries the
+    # real clone). Default unchanged (fallback ON) for other tenants. (Mike 2026-06-07, bhb)
+    if tts_provider == 'resemble' and os.getenv('RESEMBLE_NO_FALLBACK', '').strip().lower() in ('1', 'true', 'yes', 'on'):
+        fallback_id = None
     if fallback_id:
         logger.info(f"TTS falling back: {tts_provider} → {fallback_id}")
         try:
