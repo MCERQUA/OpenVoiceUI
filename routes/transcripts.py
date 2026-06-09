@@ -109,6 +109,69 @@ def list_transcripts():
     return jsonify(entries)
 
 
+@transcripts_bp.route('/api/history', methods=['GET'])
+def conversation_history():
+    """Return real conversation turns from this client's transcripts directory.
+
+    Query params:
+      days   — how many days back (default 30)
+      limit  — max turns to return (default 200)
+      date   — filter to a specific date YYYY-MM-DD
+    """
+    days  = min(int(request.args.get('days', 30)), 365)
+    limit = min(int(request.args.get('limit', 200)), 1000)
+    date_filter = request.args.get('date', '')
+
+    from datetime import timedelta as _td
+    cutoff = (datetime.now() - _td(days=days)).strftime('%Y-%m-%d')
+
+    turns = []
+    if not os.path.isdir(TRANSCRIPTS_DIR):
+        return jsonify({'turns': [], 'total': 0})
+
+    for date_dir in sorted(os.listdir(TRANSCRIPTS_DIR), reverse=True):
+        if date_dir < cutoff:
+            break
+        if date_filter and date_dir != date_filter:
+            continue
+        day_path = os.path.join(TRANSCRIPTS_DIR, date_dir)
+        if not os.path.isdir(day_path):
+            continue
+        for fname in sorted(os.listdir(day_path), reverse=True):
+            if not fname.endswith('.json'):
+                continue
+            fpath = os.path.join(day_path, fname)
+            try:
+                with open(fpath, encoding='utf-8') as f:
+                    data = json.load(f)
+                user = (data.get('user') or '').strip()
+                if user == '__session_start__':
+                    continue
+                if not user and not (data.get('assistant') or '').strip():
+                    continue
+                turns.append({
+                    'date':          data.get('date', date_dir),
+                    'time':          data.get('time', '00:00:00'),
+                    'timestamp':     data.get('timestamp', ''),
+                    'user':          user[:300],
+                    'assistant':     (data.get('assistant') or '')[:500],
+                    'tools':         data.get('tools', []),
+                    'session_id':    data.get('session_id', ''),
+                    'session_key':   data.get('session_key', 'main'),
+                    'duration_ms':   data.get('duration_ms'),
+                    'word_count':    data.get('word_count', {}),
+                    'clerk_user_id': data.get('clerk_user_id', ''),
+                })
+                if len(turns) >= limit:
+                    break
+            except Exception:
+                pass
+        if len(turns) >= limit:
+            break
+
+    return jsonify({'turns': turns, 'total': len(turns), 'days': days})
+
+
 @transcripts_bp.route('/api/transcripts/<date_dir>/<filename>', methods=['GET'])
 def get_transcript(date_dir, filename):
     # Resolve and verify path stays within TRANSCRIPTS_DIR
