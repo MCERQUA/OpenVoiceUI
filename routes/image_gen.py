@@ -16,6 +16,7 @@ import base64
 import json
 import logging
 import os
+import threading
 import time
 import requests as http
 from flask import Blueprint, jsonify, request
@@ -70,9 +71,16 @@ def _load_manifest():
     return []
 
 
+_manifest_lock = threading.Lock()
+
+
 def _save_manifest(entries):
+    """Atomic write (tmp + replace) so a concurrent reader never sees a
+    truncated file. Callers doing read-modify-write hold _manifest_lock."""
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    AI_DESIGNS_MANIFEST.write_text(json.dumps(entries, indent=2))
+    tmp = AI_DESIGNS_MANIFEST.with_suffix('.json.tmp')
+    tmp.write_text(json.dumps(entries, indent=2))
+    tmp.replace(AI_DESIGNS_MANIFEST)
 
 
 def _save_generated_image(mime_type: str, b64_data: str) -> str:
@@ -341,11 +349,12 @@ def save_design():
     if not url:
         return jsonify({'error': 'url is required'}), 400
 
-    entries = _load_manifest()
-    # Avoid duplicates — remove existing entry for same URL first
-    entries = [e for e in entries if e.get('url') != url]
-    entries.insert(0, {'url': url, 'name': name, 'ts': ts})
-    _save_manifest(entries)
+    with _manifest_lock:
+        entries = _load_manifest()
+        # Avoid duplicates — remove existing entry for same URL first
+        entries = [e for e in entries if e.get('url') != url]
+        entries.insert(0, {'url': url, 'name': name, 'ts': ts})
+        _save_manifest(entries)
     logger.info('ai-designs manifest: saved %d entries', len(entries))
     return jsonify({'ok': True, 'count': len(entries)})
 
@@ -358,7 +367,8 @@ def delete_saved_design():
     if not url:
         return jsonify({'error': 'url is required'}), 400
 
-    entries = _load_manifest()
-    entries = [e for e in entries if e.get('url') != url]
-    _save_manifest(entries)
+    with _manifest_lock:
+        entries = _load_manifest()
+        entries = [e for e in entries if e.get('url') != url]
+        _save_manifest(entries)
     return jsonify({'ok': True, 'count': len(entries)})

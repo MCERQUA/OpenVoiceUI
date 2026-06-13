@@ -809,6 +809,11 @@ connectAiradio();
             },
 
             async start() {
+                // Re-entrancy guard: toggle() checks this.stream, but it's only set
+                // after the getUserMedia await — a fast double-click would start two
+                // capture loops and leak a MediaStream + orphaned intervals.
+                if (this._starting) return;
+                this._starting = true;
                 try {
                     this.stream = await navigator.mediaDevices.getUserMedia({
                         video: { facingMode: 'user', width: 640, height: 480 }
@@ -826,12 +831,15 @@ connectAiradio();
                     }, 1000);
 
                     // Re-identify every 8 seconds while camera is on but call is not active
+                    if (this.faceInterval) clearInterval(this.faceInterval);
                     this.faceInterval = setInterval(() => {
                         if (!window.voiceAgent?.isConnected) this.identifyFace();
                     }, 8000);
                 } catch (error) {
                     console.error('Camera error:', error);
                     UIModule.showError('Camera access denied');
+                } finally {
+                    this._starting = false;
                 }
             },
 
@@ -855,6 +863,7 @@ connectAiradio();
             },
 
             startFrameCapture() {
+                if (this.frameInterval) clearInterval(this.frameInterval);
                 this.frameInterval = setInterval(() => {
                     if (!this.stream) return;
 
@@ -6877,6 +6886,7 @@ connectAiradio();
                 // Sync button visual state with detector state
                 setInterval(() => {
                     const wakeButton = document.getElementById('wake-button');
+                    if (!wakeButton) return;
                     if (wakeDetector.isListening) {
                         wakeButton.classList.add('listening');
                     } else {

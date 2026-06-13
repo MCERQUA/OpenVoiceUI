@@ -30,6 +30,14 @@ TRANSCRIPTS_DIR = str(_TRANSCRIPTS_DIR_PATH)
 SMS_LEDGER_DIR = str(_RUNTIME_DIR / 'workspace' / 'Agent' / 'ledger' / 'sms')
 
 
+def _int_arg(name: str, default: int, cap: int) -> int:
+    """Parse an int query param, falling back to default on garbage (no 500s)."""
+    try:
+        return min(int(request.args.get(name, default)), cap)
+    except (TypeError, ValueError):
+        return default
+
+
 def _slug(title: str) -> str:
     """Turn a title into a safe filename slug."""
     s = title.strip().lower()
@@ -123,8 +131,8 @@ def conversation_history():
       limit  — max turns to return (default 200)
       date   — filter to a specific date YYYY-MM-DD
     """
-    days  = min(int(request.args.get('days', 30)), 365)
-    limit = min(int(request.args.get('limit', 200)), 1000)
+    days  = _int_arg('days', 30, 365)
+    limit = _int_arg('limit', 200, 1000)
     date_filter = request.args.get('date', '')
 
     from datetime import timedelta as _td
@@ -238,8 +246,8 @@ def sms_history():
       limit  — max messages to return (default 500, max 2000)
       date   — filter to a specific date YYYY-MM-DD
     """
-    days  = min(int(request.args.get('days', 30)), 365)
-    limit = min(int(request.args.get('limit', 500)), 2000)
+    days  = _int_arg('days', 30, 365)
+    limit = _int_arg('limit', 500, 2000)
     date_filter = request.args.get('date', '')
 
     from datetime import timedelta as _td
