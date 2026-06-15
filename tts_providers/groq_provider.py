@@ -53,6 +53,15 @@ class GroqProvider(TTSProvider):
                     api_key=self.api_key,
                     timeout=GROQ_TTS_TIMEOUT_SECONDS,
                 )
+                # JamBot Books: record every Groq call on this client (TTS success +
+                # failures) via the httpx response hook. This is the LIVE voice path
+                # (get_provider('groq')); without it nothing recorded → no fire to
+                # prov:groq on the board. Mirrors services/tts.py get_groq_client().
+                try:
+                    from services.jambot_books_hook import attach_groq
+                    attach_groq(self._client)
+                except Exception:
+                    pass
             except ImportError:
                 raise RuntimeError("groq package not installed — run: pip install groq")
         return self._client
