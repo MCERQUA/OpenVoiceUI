@@ -13,6 +13,12 @@ services:
       - canvas-pages:/root/.openclaw/workspace/canvas-pages
       - uploads:/app/runtime/uploads
       - uploads:/root/.openclaw/workspace/uploads
+      # transcripts: the agent must be able to READ its own voice transcripts. They are
+      # written by the OpenVoiceUI app (runtime/transcripts) but the agent only sees its
+      # workspace — so a transcript/note "sent to the AI" is invisible to it without this
+      # shared volume. Dual-mounted like the others.
+      - transcripts:/app/runtime/transcripts
+      - transcripts:/root/.openclaw/workspace/transcripts
       - generated-music:/app/runtime/generated_music
       - generated-music:/root/.openclaw/workspace/generated_music
       - music:/app/runtime/music
@@ -50,6 +56,7 @@ services:
       - openvoiceui-runtime:/app/runtime
       - canvas-pages:/app/runtime/canvas-pages
       - uploads:/app/runtime/uploads
+      - transcripts:/app/runtime/transcripts
       - generated-music:/app/runtime/generated_music
       - music:/app/runtime/music
     depends_on:
@@ -70,5 +77,6 @@ volumes:
   openvoiceui-runtime:
   canvas-pages:
   uploads:
+  transcripts:
   generated-music:
   music:

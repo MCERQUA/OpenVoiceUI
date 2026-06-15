@@ -13,6 +13,10 @@ services:
       - canvas-pages:/root/.openclaw/workspace/canvas-pages
       - uploads:/app/runtime/uploads
       - uploads:/root/.openclaw/workspace/uploads
+      # transcripts: agent must READ its own voice transcripts (this override REPLACES the
+      # base openclaw volume list, so the mount must be repeated here or it's dropped).
+      - transcripts:/app/runtime/transcripts
+      - transcripts:/root/.openclaw/workspace/transcripts
       - generated-music:/app/runtime/generated_music
       - generated-music:/root/.openclaw/workspace/generated_music
       - music:/app/runtime/music
