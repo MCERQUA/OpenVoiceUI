@@ -71,6 +71,8 @@ def _record(response) -> None:
             pass
 
         model = in_tok = out_tok = cache = None
+        units = None
+        path = str(response.url.path)
         # ONLY touch the body when it's JSON — never consume an audio/stream body.
         ctype = ""
         try:
@@ -94,12 +96,34 @@ def _record(response) -> None:
             except Exception:
                 pass
 
+        # TTS (audio/speech) carries NO usage in the (audio) response — Groq bills
+        # it per CHARACTER of input text, which lives in the REQUEST body. Parse
+        # the request (cached bytes, never touches the response audio stream) so
+        # the call books a real usage count instead of all-NULL. units="chars".
+        if in_tok is None and "/audio/speech" in path:
+            try:
+                req = getattr(response, "request", None)
+                rbody = getattr(req, "content", None) if req is not None else None
+                if rbody:
+                    rb = json.loads(rbody)
+                    if isinstance(rb, dict):
+                        model = model or rb.get("model")
+                        txt = rb.get("input")
+                        if isinstance(txt, str):
+                            in_tok = len(txt)
+                            units = "chars"
+            except Exception:
+                pass
+
+        extras = {"leg": "ovu-file-drop"}
+        if units:
+            extras["units"] = units
         rec = {
             "type": "api_call",
             "capture_method": "sdk",
             "provider": provider,
             "host": host,
-            "endpoint": str(response.url.path),
+            "endpoint": path,
             "model": model,
             "input_tokens": in_tok,
             "output_tokens": out_tok,
@@ -108,7 +132,7 @@ def _record(response) -> None:
             "response_status": getattr(response, "status_code", None),
             "source_container": _source_container(),
             "ts": _now_iso(),
-            "provider_extras": {"leg": "ovu-file-drop"},
+            "provider_extras": extras,
         }
         os.makedirs(os.path.dirname(_QUEUE), exist_ok=True)
         with _lock, open(_QUEUE, "a") as fh:
