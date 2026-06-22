@@ -272,8 +272,13 @@ def create_app(config_override: dict = None):
         response.headers.setdefault(
             'Content-Security-Policy',
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://*.clerk.accounts.dev https://*.jam-bot.com; "
-            "style-src 'self' 'unsafe-inline'; "
+            # cdn.tailwindcss.com is REQUIRED — canvas pages load Tailwind via the Play CDN; without it
+            # in script-src the script is blocked and pages render as raw unstyled text. Do NOT re-strip
+            # (recurring regression; memory feedback_canvas_tailwind_cdn). fonts.googleapis.com (style) +
+            # fonts.gstatic.com (font) are needed for the Google-font <link>s canvas pages use.
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.jam-bot.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
             "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io; "
             "media-src 'self' blob:; "
             "connect-src 'self' wss: https:; "
