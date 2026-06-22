@@ -1847,6 +1847,10 @@ connectAiradio();
                 setTimeout(() => this._hideStatus(), 8000);
                 // Refresh music player so the agent and UI see the new track immediately
                 window.musicPlayer?.loadMetadata();
+                // Also refresh the Generated playlist panel if it's open, so the new
+                // song appears there without a manual reload (no-op when the panel is
+                // closed or showing Library). Fixes the panel-not-auto-refreshing bug.
+                window.SettingsPanel?._playlistEditor?.refreshIfGenerated?.();
                 // Notify the agent so it can proactively respond
                 ActionConsole?.addEntry('system', `🎵 Song ready: "${title}"`);
                 this._notifyAgent(title);

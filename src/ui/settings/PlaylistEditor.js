@@ -51,6 +51,16 @@ export class PlaylistEditor {
         }
     }
 
+    // Called when a Suno song finishes generating (from SunoController._onComplete).
+    // Auto-refreshes the track list so a newly-saved song appears in the Generated
+    // panel without a manual reload — but only when the panel is mounted AND showing
+    // the Generated tab, so it never disrupts a Library view or runs detached.
+    async refreshIfGenerated() {
+        if (this._root && this._playlist === 'generated') {
+            await this._loadTracks();
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Render
     // -------------------------------------------------------------------------
