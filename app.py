@@ -276,7 +276,11 @@ def create_app(config_override: dict = None):
             # in script-src the script is blocked and pages render as raw unstyled text. Do NOT re-strip
             # (recurring regression; memory feedback_canvas_tailwind_cdn). fonts.googleapis.com (style) +
             # fonts.gstatic.com (font) are needed for the Google-font <link>s canvas pages use.
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.jam-bot.com; "
+            # 'unsafe-eval' + 'wasm-unsafe-eval' are REQUIRED: cdn.tailwindcss.com is the Tailwind PLAY
+            # CDN, which compiles CSS at runtime via eval()/new Function — without unsafe-eval the script
+            # loads but generates NO styles → pages still render as raw text. (canvas.py CSP already had
+            # these; the global one didn't — that was the real cause of the unstyled SEO dashboard.)
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.jam-bot.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' data: https://fonts.gstatic.com; "
             "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io; "
