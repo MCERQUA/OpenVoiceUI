@@ -137,3 +137,16 @@
                 font-size: 14px;
             }
         }
+
+        /* Dynamic viewport height — iOS Safari's 100vh includes browser chrome,
+           cutting off bottom content. 100dvh tracks the actual visible viewport.
+           Browsers that don't support dvh silently ignore the second declaration. */
+        body {
+            height: 100dvh;
+        }
+
+        /* Prevent elastic pull-to-refresh bounce on mobile — the app is a fixed
+           layout, not a scrollable document. Also improves scroll performance. */
+        html, body {
+            overscroll-behavior: none;
+        }

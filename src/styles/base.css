@@ -3056,3 +3056,91 @@
                 top: 8px;
             }
         }
+
+/* ============================================================
+   MOBILE IMPROVEMENTS — Safe areas, iOS fixes, bottom sheet
+   ============================================================ */
+
+/* iOS safe-area-inset — home indicator is ~34px on iPhone X+.
+   Bottom-anchored fixed elements must clear it or they're clipped. */
+.console-button {
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+}
+.transcript-button {
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+}
+/* Music panel: internal bottom padding so controls sit above home bar */
+.music-panel {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent iOS Safari auto-zoom on input focus (triggered by font-size < 16px).
+   Only applies to inputs the user types into — not display labels. */
+@media (max-width: 768px) {
+    .tp-text-input {
+        font-size: 16px;
+    }
+    .fp-register input[type="text"] {
+        font-size: 16px;
+    }
+    /* Faster tap response — removes the 300ms touch delay on tappable elements */
+    button, a, [role="button"] {
+        touch-action: manipulation;
+    }
+}
+
+/* Transcript panel: full-width bottom sheet on narrow phones.
+   Replaces the floating 380px bubble which overflows or feels cramped. */
+@media (max-width: 480px) {
+    #transcript-panel {
+        width: 100vw !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        max-height: 72vh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    /* Transcript button: stay bottom-right, clear safe area */
+    .transcript-button {
+        right: 8px;
+        bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    }
+    /* Console button: likewise */
+    .console-button {
+        left: 8px;
+        bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    }
+    /* Agent activity chip: cap width so it doesn't run under edge tabs */
+    .agent-activity-chip {
+        max-width: calc(100vw - 120px);
+    }
+}
+
+/* Landscape phones — very short viewport, face + controls need to shrink */
+@media (max-height: 500px) and (orientation: landscape) {
+    .face-box {
+        width: min(190px, 36vh);
+        height: min(190px, 36vh);
+        padding-top: min(34px, 7vh);
+        padding-bottom: min(18px, 4vh);
+    }
+    .face-container {
+        padding: 6px;
+    }
+    /* Shorter edge tabs so they fit the reduced height */
+    .edge-tab {
+        height: 34px !important;
+        font-size: 14px !important;
+    }
+    /* Transcript panel: shallower in landscape */
+    @media (max-width: 900px) {
+        #transcript-panel {
+            max-height: 80vh;
+            bottom: 60px;
+        }
+    }
+}
