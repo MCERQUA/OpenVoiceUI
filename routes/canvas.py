@@ -1364,6 +1364,46 @@ def canvas_data(filename):
             return jsonify({}), 200
     return jsonify({}), 200
 
+
+@canvas_bp.route('/canvas-data/<path:filename>', methods=['GET'])
+def canvas_data_static(filename):
+    """Serve processed-song / canvas media assets (audio stems, json, etc.) from
+    canvas-pages/_data/. Companion to /api/canvas/data/ (json-only) — this one serves
+    ANY file type with a correct mimetype so the Suno Studio audio editor can load
+    vocal/stem .mp3 files and processed-song fixtures from a stable /canvas-data/ path.
+    The dir is mounted in both openclaw + openvoiceui, so it's the shared media bridge.
+    Added 2026-06-25 for the suno-audio-editor Phase 1 bridge (bun submesh)."""
+    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
+    if resolved and resolved.exists() and resolved.is_file():
+        try:
+            return send_file(str(resolved), conditional=True,
+                             download_name=resolved.name,
+                             max_age=0)  # canvas no-cache rule
+        except Exception as exc:
+            logger.error(f'canvas_data_static read error: {exc}')
+            return jsonify({'error': 'read error'}), 500
+    return jsonify({'error': 'not found'}), 404
+
+
+def _ovu_is_empty(v):
+    return v is None or v == "" or v == [] or v == {}
+
+
+def _ovu_merge_preserve(base, incoming):
+    """Deep-merge `incoming` into `base` but NEVER overwrite a populated base value
+    with an empty incoming one. Protects the website-setup record so a partial/fresh
+    save (e.g. pushing new business data) can't blank already-set fields like the
+    `stitch` design block. Scoped to website-setup.json — other keys keep replace."""
+    if isinstance(base, dict) and isinstance(incoming, dict):
+        merged = dict(base)
+        for k, v in incoming.items():
+            merged[k] = _ovu_merge_preserve(base[k], v) if k in base else v
+        return merged
+    if _ovu_is_empty(incoming) and not _ovu_is_empty(base):
+        return base
+    return incoming
+
+
 @canvas_bp.route('/api/canvas/data/<path:filename>', methods=['POST'])
 def canvas_data_write(filename):
     """Write JSON data from canvas pages (e.g. approval actions)."""
@@ -1377,6 +1417,32 @@ def canvas_data_write(filename):
         return jsonify({'error': 'invalid path'}), 400
     try:
         resolved.parent.mkdir(parents=True, exist_ok=True)
+        # Scoped protection for the website-setup record: timestamped backup + a merge
+        # that never blanks already-populated fields (prevents a full-record save from
+        # wiping the stitch design block). All other canvas data keys keep replace.
+        if resolved.name in ('website-setup.json', 'website-creator.json'):
+            existing = {}
+            if resolved.exists():
+                try:
+                    existing = json.loads(resolved.read_text(encoding='utf-8'))
+                except Exception:
+                    existing = {}
+                try:
+                    bdir = resolved.parent / '.backups'
+                    bdir.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.now().strftime('%Y%m%dT%H%M%S')
+                    stem = resolved.stem  # website-setup | website-creator
+                    shutil.copy2(str(resolved), str(bdir / f'{stem}.{ts}.json'))
+                    baks = sorted(bdir.glob(f'{stem}.*.json'))
+                    for old in baks[:-30]:
+                        try:
+                            old.unlink()
+                        except Exception:
+                            pass
+                except Exception as bexc:
+                    logger.warning(f'website-setup backup failed (non-fatal): {bexc}')
+            if isinstance(existing, dict) and isinstance(data, dict):
+                data = _ovu_merge_preserve(existing, data)
         resolved.write_text(json.dumps(data, indent=2), encoding='utf-8')
         return jsonify({'ok': True})
     except Exception as exc:

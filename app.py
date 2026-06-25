@@ -109,6 +109,7 @@ def create_app(config_override: dict = None):
             '/music/',
             '/images/',    # canvas images (individual pages check their own flag)
             '/uploads/',   # uploaded/generated files — served from VPS filesystem (no secrets)
+            '/canvas-data/',  # processed-song media (audio stems) + fixtures for the Suno Studio editor — non-sensitive, served like /uploads/ (added 2026-06-25)
             '/static/',    # PWA icons, app icons
             '/pages/',     # canvas pages — served without auth (CANVAS_REQUIRE_AUTH opt-in)
             '/api/canvas/',  # canvas API — creation, manifest, context (no per-user auth needed)
