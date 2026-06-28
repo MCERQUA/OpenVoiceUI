@@ -4982,8 +4982,16 @@ connectAiradio();
                     }
                     // Queue audio - if already playing, it will play after current finishes
                     this.audioQueue.push({ base64: base64Audio, format });
-                    // Only start playback if nothing is currently playing
-                    if (!this.isPlaying) {
+                    // If a drain timer is pending (gap between chunks), cancel it and
+                    // trigger playback immediately — the new chunk arrived, no need to wait.
+                    // Without this, multi-sentence TTS has a 30s silence gap between
+                    // sentences because playNextAudio set a drain timer but nothing wakes it.
+                    if (this._drainTimer) {
+                        clearTimeout(this._drainTimer);
+                        this._drainTimer = null;
+                        this.playNextAudio();
+                    } else if (!this.isPlaying) {
+                        // Nothing playing at all — start playback
                         this.playNextAudio();
                     }
                 } catch (error) {

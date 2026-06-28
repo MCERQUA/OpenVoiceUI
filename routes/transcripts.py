@@ -229,6 +229,7 @@ def _parse_sms_file(text: str) -> dict:
         'timestamp': timestamp,
         'from': fields.get('from', ''),
         'to': fields.get('to', ''),
+        'name': fields.get('name', ''),
         'body': body,
     }
 
@@ -286,6 +287,7 @@ def sms_history():
                     'direction': parsed['direction'],
                     'from':      parsed['from'],
                     'to':        parsed['to'],
+                    'name':      parsed['name'],
                     'body':      parsed['body'][:1000],
                 })
                 if len(messages) >= limit:
