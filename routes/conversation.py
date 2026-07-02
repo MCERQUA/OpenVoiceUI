@@ -604,6 +604,25 @@ def _build_recovery_prime(max_turns: int = 6, window_minutes: int = 120) -> str 
         return None
 
 
+def _with_recent_history(fallback_msg: str) -> str:
+    """Prepend recent conversation turns to a Z.AI-direct fallback message.
+
+    The direct fallback bypasses the openclaw session entirely, so without
+    this the fallback model answers with ZERO conversation memory — the
+    client-facing "amnesia" replies ("no indication of what 'one' refers
+    to", phatty 2026-07-02). Reuses the recovery-prime builder (last turns
+    from conversation_log). Fail-open: on any problem, return the message
+    unchanged.
+    """
+    try:
+        prime = _build_recovery_prime(max_turns=8)
+        if prime:
+            return prime + fallback_msg
+    except Exception as _e:
+        logger.warning(f'### _with_recent_history failed: {_e}')
+    return fallback_msg
+
+
 def consume_recovery_prime() -> str | None:
     """Return the recovery context prime once and clear it.
     Discards primes older than :data:`_RECOVERY_PRIME_MAX_AGE_S` — a prime
@@ -2189,6 +2208,14 @@ def _conversation_inner():
                                 and metrics.get('llm_inference_ms', 0) > 1000
                                 and not getattr(stream_response, '_continued', False)
                                 and _promise_re.search(full_response)
+                                # Question guard (phatty 2026-07-02): a reply that
+                                # ENDS with a question is the agent asking the user
+                                # for a decision ("Want me to send this for approval
+                                # first, or just fire it?"). Forcing "actually do it
+                                # now" both bypasses the user's answer AND lands a
+                                # chat.send in the turn-finalization window where it
+                                # gets coalesced → bare final → recovery cascade.
+                                and not full_response.strip().rstrip('*_ \n').endswith('?')
                             ):
                                 stream_response._continued = True
                                 logger.warning(
@@ -2432,7 +2459,7 @@ def _conversation_inner():
                                     import requests as _req
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
                                     # Use full context so the fallback LLM has agent personality
-                                    _fallback_msg = message_with_context if message_with_context else user_message
+                                    _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
                                     _fallback_system = _load_voice_system_prompt()
                                     if _zai_key:
                                         _zai_resp = _req.post(
@@ -2482,7 +2509,7 @@ def _conversation_inner():
                                     try:
                                         import requests as _req
                                         _zai_key = os.environ.get('ZAI_API_KEY', '')
-                                        _fallback_msg = message_with_context if message_with_context else user_message
+                                        _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
                                         _fallback_system = _load_voice_system_prompt()
                                         if _zai_key:
                                             _zai_resp = _req.post(
@@ -2811,7 +2838,8 @@ def _conversation_inner():
         # Lazy import to avoid circular dependency (server.py imports this blueprint)
         try:
             import server as _server
-            ai_response = _server.get_zai_direct_response(message_with_context, session_id)
+            ai_response = _server.get_zai_direct_response(
+                _with_recent_history(message_with_context), session_id)
         except Exception as e:
             logger.error(f'Z.AI direct call failed: {e}')
             ai_response = None

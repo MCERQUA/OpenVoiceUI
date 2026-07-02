@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import queue
+import re as _re
 import threading
 import time
 import uuid
@@ -143,6 +144,20 @@ class _WSClosedError(Exception):
 # ---------------------------------------------------------------------------
 
 
+def _strip_internal_markers(text):
+    """Remove openclaw-internal reply markers (NO_REPLY / ANNOUNCE_SKIP /
+    REPLY_SKIP) that can leak into the visible text of a COALESCED followup
+    turn (queue mode collect merges several queued payloads — including
+    silent system turns — into one reply). Pure-marker responses are already
+    suppressed by is_system_response(); this handles the mixed case
+    ("Teal.\\n\\nNO_REPLY", observed test-dev 2026-07-02)."""
+    if not text:
+        return text
+    cleaned = _re.sub(r'(?:^|\n)\s*(?:NO_REPLY|ANNOUNCE_SKIP|REPLY_SKIP)\s*(?=$|\n)',
+                      '', text).strip()
+    return cleaned or text
+
+
 class Subscription:
     """Tracks state for a single chat.send request.
 
@@ -186,6 +201,26 @@ class EventDispatcher:
         self._reader_task: asyncio.Task | None = None
         self._send_lock: asyncio.Lock = asyncio.Lock()
         self._aborted_runs: set[str] = set()  # runIds from aborted runs — never deliver to new subs
+        # Learned alias→canonical session key map. OVUI subscribes with the
+        # SHORT alias it passed to chat.send ('main', 'recovery-<epoch>', …)
+        # but gateway events carry the CANONICAL key
+        # ('agent:openvoiceui:main'). Strict == comparisons therefore NEVER
+        # matched, silently disabling followup-run routing and session-scoped
+        # fallback delivery (found 2026-07-02, phatty bare-final incident).
+        # Learned from runId-routed events, which pair a sub (alias) with the
+        # event's canonical key authoritatively.
+        self._canonical_keys: dict[str, str] = {}
+
+    def _sk_match(self, event_sk: str, sub_sk: str) -> bool:
+        """True when an event's canonical sessionKey refers to sub's session."""
+        if not event_sk or event_sk == sub_sk:
+            return True
+        canon = self._canonical_keys.get(sub_sk)
+        if canon:
+            return event_sk == canon
+        # Not learned yet (no runId-routed event has paired them) — best-effort
+        # suffix match on the alias segment.
+        return event_sk.endswith(':' + sub_sk)
 
     def subscribe(self, chat_id: str, session_key: str) -> Subscription:
         """Create and register a new subscription."""
@@ -300,6 +335,13 @@ class EventDispatcher:
                     if chat_id:
                         sub = self._subscriptions.get(chat_id)
                         if sub and sub.state != Subscription.DONE:
+                            # Learn the alias→canonical session key pairing
+                            # (used by _sk_match for followup/fallback routing)
+                            if (event_session_key and sub.session_key
+                                    and event_session_key != sub.session_key):
+                                self._canonical_keys[sub.session_key] = event_session_key
+                                if len(self._canonical_keys) > 50:
+                                    self._canonical_keys.clear()
                             await sub.event_queue.put(data)
                             return
 
@@ -322,7 +364,7 @@ class EventDispatcher:
                     if queued:
                         chosen = queued[0]
                         # Only match if session keys align (prevents cross-session routing)
-                        if not event_session_key or event_session_key == chosen.session_key:
+                        if self._sk_match(event_session_key, chosen.session_key):
                             chosen.run_id = event_run_id
                             chosen.state = Subscription.ACTIVE
                             self._run_to_chat[event_run_id] = chosen.chat_id
@@ -352,7 +394,8 @@ class EventDispatcher:
                 if event_session_key:
                     for sub in self._subscriptions.values():
                         if (sub.state == Subscription.ACTIVE
-                                and sub.session_key == event_session_key):
+                                and self._sk_match(event_session_key,
+                                                   sub.session_key)):
                             await sub.event_queue.put(data)
                             return
                 else:
@@ -369,6 +412,26 @@ class EventDispatcher:
                     and sub.state in (Subscription.ACTIVE, Subscription.PENDING)):
                 return sub
         return None
+
+    def demote_to_queued(self, chat_id: str):
+        """Return a sub to QUEUED state so followup-run events can attach.
+
+        Used when a chat.send got an ACK+runId but the gateway then emitted a
+        bare final (no text, zero events for that runId) — the signature of a
+        message that was COALESCED into the followup queue of a busy session
+        (queue mode "collect"). The queued payload will run later as a brand
+        new run with a runId we've never seen; the unknown-runId routing in
+        _route() only attaches those events to subs in QUEUED state, so the
+        sub must be demoted (its dead runId mapping cleared) to receive them.
+        """
+        sub = self._subscriptions.get(chat_id)
+        if not sub:
+            return
+        if sub.run_id:
+            self._run_to_chat.pop(sub.run_id, None)
+            self._aborted_runs.discard(sub.run_id)
+        sub.run_id = None
+        sub.state = Subscription.QUEUED
 
 
 # ---------------------------------------------------------------------------
@@ -706,12 +769,34 @@ class GatewayConnection:
         subagent_ends = 0         # Count subagent lifecycle.end events
         continuation_sent = False  # True after we send a continuation nudge
         continuation_sub = None    # Subscription for continuation chat.send
+        saw_run_event = False      # True once ANY agent/delta event arrived for our run
+        followup_demoted = False   # True after a bare final demoted us to QUEUED (waiting for followup run)
+        # Max wait for the coalesced followup run. Balance: a legit followup
+        # fires when the active turn ends (typically <60s of remaining work);
+        # but if the active run got user-aborted, openclaw DROPS its queued
+        # followups and nothing ever comes — so cap the silence and let the
+        # route-level history-aware fallback answer instead.
+        _FOLLOWUP_WAIT_S = 75
 
         while time.time() - start_time < timeout:
             try:
                 data = await asyncio.wait_for(sub.event_queue.get(), timeout=5.0)
             except asyncio.TimeoutError:
                 elapsed = int(time.time() - start_time)
+                # Demoted-wait expiry: our message was coalesced into a busy
+                # session's followup queue but no followup run reached us in
+                # time (e.g. another queued sub got the coalesced turn). Give
+                # up QUIETLY: no abort (an abort could kill the coalesced turn
+                # that is answering someone), no retry (the payload is still
+                # queued server-side — a re-send would duplicate it). The
+                # route-level fallback answers this turn instead.
+                if followup_demoted and elapsed > _FOLLOWUP_WAIT_S and not saw_run_event:
+                    logger.warning(
+                        f"### FOLLOWUP WAIT expired ({elapsed}s) — no followup run "
+                        f"attached; returning null (no abort, no retry)")
+                    event_queue.put({'type': 'text_done', 'response': None,
+                                     'actions': captured_actions})
+                    return
                 if subagent_active and not collected_text:
                     if elapsed % 30 < 6:
                         logger.info(f"### Waiting for subagent announce-back... ({elapsed}s elapsed)")
@@ -754,6 +839,12 @@ class GatewayConnection:
             if data.get('type') == 'event' and canonical_evt == 'agent':
                 payload = data.get('payload', {})
                 canonical_stream = match_stream(payload.get('stream', ''))
+                # Any agent-stream event for our run proves the run actually
+                # executed — distinguishes a genuine empty final (GLM
+                # thinking-only leak: lifecycle events DID flow) from a
+                # queued-coalesced bare final (ZERO events ever).
+                if payload.get('runId') and payload.get('runId') == sub.run_id:
+                    saw_run_event = True
 
                 if canonical_stream == 'assistant':
                     d = payload.get('data', {})
@@ -938,7 +1029,7 @@ class GatewayConnection:
                                 event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
                                 return
                             logger.info(f"### ✓✓✓ AI RESPONSE (lifecycle end): {collected_text[:200]}...")
-                            event_queue.put({'type': 'text_done', 'response': collected_text, 'actions': captured_actions})
+                            event_queue.put({'type': 'text_done', 'response': _strip_internal_markers(collected_text), 'actions': captured_actions})
                             return
 
             # ── Chat events ───────────────────────────────────────────────
@@ -1055,7 +1146,7 @@ class GatewayConnection:
                             main_lifecycle_ended = False
                             continue
                         logger.info(f"### ✓✓✓ AI RESPONSE (chat final): {final_text[:200]}...")
-                        event_queue.put({'type': 'text_done', 'response': final_text, 'actions': captured_actions})
+                        event_queue.put({'type': 'text_done', 'response': _strip_internal_markers(final_text), 'actions': captured_actions})
                         return
 
                     # Also check if any captured actions suggest subagent activity
@@ -1074,13 +1165,42 @@ class GatewayConnection:
                             logger.info("### SUBAGENT detected via captured_actions (late detection)")
                         continue
                     else:
-                        # MiniMax-M2.7-highspeed reliably produces "chat.final
-                        # with no text" in a subset of turns (15+ events in a
-                        # 30-min window observed). openclaw's server-side
-                        # model-fallback only triggers on timeout (300s), not
-                        # on empty-final — so the user turn dies silently.
-                        # Signal the caller to retry chat.send once more; a
-                        # second MiniMax attempt usually returns real text.
+                        # ── Bare final, ZERO events for our run: message was
+                        # QUEUED, not answered (root cause of the 2026-07-02
+                        # phatty amnesia + 2026-06-30 src collapse family).
+                        # When chat.send lands on a session that is busy (or
+                        # still finalizing the previous turn), openclaw queue
+                        # mode "collect" coalesces the payload into a followup
+                        # turn and emits an immediate bare final for OUR runId.
+                        # The payload then runs later under a BRAND-NEW runId
+                        # (verified live on test-dev 2026-07-02). The old code
+                        # treated this as an empty response: abort (which can
+                        # KILL the queued turn doing real work) + re-send
+                        # (which DUPLICATES the queued payload) → double-empty
+                        # → "session poisoned" → history-less fallback reply →
+                        # the client-facing amnesia. Instead: demote this sub
+                        # to QUEUED so the dispatcher's unknown-runId routing
+                        # attaches the followup run's events to us, and keep
+                        # streaming — the user gets the real answer with full
+                        # session context.
+                        if not saw_run_event and not followup_demoted:
+                            followup_demoted = True
+                            self._dispatcher.demote_to_queued(chat_id)
+                            chat_final_seen = False
+                            lifecycle_ended = False
+                            run_was_aborted = False
+                            collected_text = ''
+                            prev_text_len = 0
+                            start_time = time.time()  # fresh window for the followup run
+                            logger.warning(
+                                "### BARE FINAL (0 events for run) — gateway queued the "
+                                "message behind a busy session; demoted to QUEUED and "
+                                "waiting for the followup run (no abort, no retry)")
+                            continue
+                        # Genuine empty final — the run DID execute (lifecycle
+                        # events flowed) but produced no visible text (e.g. the
+                        # GLM thinking-only leak). Safe to retry: the payload
+                        # is NOT sitting in a queue, so a re-send won't duplicate.
                         logger.warning("### chat.final with no text (no subagent) — signaling retry")
                         await self._send_abort(sub.run_id or chat_id, session_key, "empty-response")
                         return 'empty-final'
@@ -1110,8 +1230,22 @@ class GatewayConnection:
                     break
                 await asyncio.sleep(0.1)
             else:
-                # Force-unsubscribe the stale sub if it didn't clear
+                # Force-unsubscribe the stale sub if it didn't clear — and
+                # signal its stream loop so the old HTTP request exits NOW
+                # instead of zombie-heartbeating to the 300s hard timeout
+                # (the unsubscribe unmaps the runId, so the gateway's
+                # chat:aborted event can no longer reach it).
                 logger.warning(f"### Abort-before-send: force-unsubscribing stale {existing_sub.chat_id[:8]}")
+                try:
+                    existing_sub.event_queue.put_nowait({
+                        'type': 'event', 'event': 'chat',
+                        'payload': {'state': 'aborted',
+                                    'runId': existing_sub.run_id or '',
+                                    'sessionKey': session_key,
+                                    'stopReason': 'pre-send-cleanup'},
+                    })
+                except Exception:
+                    pass
                 self._dispatcher.unsubscribe(existing_sub.chat_id)
             # Brief settle after abort so Z.AI processes the state change
             await asyncio.sleep(0.2)
