@@ -980,6 +980,7 @@ details[open] summary .arrow{transform:rotate(90deg)}
     <button class="btn" onclick="saveNow()">Save Draft</button>
     <button class="btn secondary" id="addToQueueBtn" disabled onclick="addToQueue()" title="Add to queue without starting immediately">+ Queue</button>
     <button class="btn primary" id="startResearchBtn" disabled onclick="startResearch()">✨ Generate 4 Styles</button>
+    <button class="btn primary" id="startBuildBtn" onclick="startBuild()" title="Build the full website from the chosen style or selected design template">🚀 Build Website</button>
   </div>
 </div>
 
@@ -1578,7 +1579,7 @@ function getColors(){
   const c=formData.branding.customColors;
   const t=findTheme(formData.branding.theme);
   return{
-    primary:c.primary||t?.colors[0]||'#4F46E5',
+    primary:c.primary||t?.colors[0]||'#3b82f6',
     secondary:c.secondary||t?.colors[1]||'#0F172A',
     accent:c.accent||t?.colors[2]||'#F59E0B',
     bg:c.background||t?.colors[3]||'#F8FAFC'
@@ -2517,7 +2518,7 @@ async function checkExistingBuild(){
       }
     }
   }catch(e){}
-  return;
+  // Also restore an existing BUILD (pipeline reconnected 2026-07-07)
   try{
     const biz=formData.basics.businessName?formData.basics.businessName.trim():'';
     if(!biz)return;
@@ -2562,6 +2563,57 @@ async function startResearch(){
     toast('Generating 4 homepage styles — ~3 minutes');
   }catch(e){toast('Failed to start style generation: '+e.message)}
   return;
+}
+
+// ── Build Website — full pipeline handoff ──
+// Chosen drawer style (Stitch project+screen) or selected design template becomes
+// the design foundation; the host watcher runs the v2 pipeline: research → plan →
+// convert chosen design → build remaining pages in the SAME style → quality gates
+// → deploy → GitHub push → verification → SEO review.
+async function startBuild(){
+  await doSave();
+  const biz=formData.basics.businessName?formData.basics.businessName.trim():'';
+  if(!biz){toast('Business name is required');return}
+  const tpl=formData.branding&&formData.branding.designTemplate;
+  if(!formData.chosenStyle&&!(tpl&&tpl.slug)){
+    toast('Pick a design first — ✨ Generate 4 Styles and Choose one, or select a design template');return;
+  }
+  const project=biz.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  _buildProject=project;
+  // Resolve the chosen creator style from the server (source of truth, not window state)
+  let cs=null;
+  if(formData.chosenStyle){
+    try{
+      const r=await authGet('/api/canvas/data/creator-styles-status.json');
+      if(r.ok){const s=await r.json().catch(()=>null);cs=(s&&s.variants&&s.variants[formData.chosenStyle])||null;}
+    }catch(e){}
+    if(!cs||!cs.projectId||!cs.screenId){
+      toast('Chosen style is missing its Stitch reference — regenerate that style, Choose it, then build');return;
+    }
+  }
+  const intake=_intakeFromForm(project);
+  if(cs){
+    intake.creatorStyle={variant:formData.chosenStyle,projectId:cs.projectId,screenId:cs.screenId,
+      page:cs.page||('/pages/creator-style-'+formData.chosenStyle+'.html')};
+    // RULE 0 Tier 1.A-CREATOR: chosen screen = literal homepage blueprint; additional
+    // pages are generated in the SAME Stitch project so the style stays consistent.
+    if(!intake.stitchScreens||!intake.stitchScreens.length){
+      intake.stitchProjectId=cs.projectId;
+      intake.stitchScreens=[{name:'home',id:cs.screenId,creatorVariant:formData.chosenStyle,partial:true}];
+    }
+  }
+  try{
+    await authPost('/api/canvas/data/builds/'+project+'-intake.json',intake);
+    await authPost('/api/canvas/data/builds/'+project+'-status.json',_freshBuildStatus(project));
+    await authPost('/api/canvas/data/builds/'+project+'-trigger.json',{project:project,requestedAt:new Date().toISOString()});
+    $('statusBadge').className='status-badge running';
+    $('statusBadge').textContent='Building…';
+    $('startBuildBtn').disabled=true;$('startBuildBtn').textContent='Building…';
+    showBuildPanel();
+    renderBuildProgress(_freshBuildStatus(project));
+    startBuildPolling(project);
+    toast('Build started — research, plan, design conversion, pages, review, deploy. Watch the drawer.');
+  }catch(e){toast('Failed to start build: '+e.message)}
 }
 
 // ── 4-Styles polling + grid ──
@@ -2752,26 +2804,16 @@ async function _old_startResearch(){
 }
 
 // ── Add to Queue (no trigger — queued but not started) ──
-async function addToQueue(){
-  await doSave();
-  // PIPELINE DISCONNECTED (build system being rebuilt) — form-only mode.
-  toast('Saved to draft. The build queue is being rebuilt — disconnected for now.');
-  return;
-  const biz=formData.basics.businessName.trim();
-  if(!biz){toast('Business name is required');return}
-  const project=biz.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-  _buildProject=project;
-
-  // Build intake (same as startResearch)
-  const intake={
-    businessName:biz,industry:formData.basics.industry,description:formData.basics.description,
+function _intakeFromForm(project){
+  return {
+    businessName:formData.basics.businessName.trim(),industry:formData.basics.industry,description:formData.basics.description,
     about:formData.basics.about,ownerName:formData.basics.ownerName,yearsInBusiness:formData.basics.yearsInBusiness,
     license:formData.basics.license,domain:formData.basics.domain,projectName:project,
     siteType:formData.siteConfig.siteType,pages:formData.siteConfig.pages||[],
     features:formData.siteConfig.specialFeatures||[],theme:formData.branding.theme,
     tone:formData.branding.tone,colors:getColors(),style:formData.branding.style,
     designTemplate:formData.branding.designTemplate||null,
-    logo:formData.images.logo.url,primaryKeywords:formData.seo.primaryKeywords||[],
+    logo:(formData.images&&formData.images.logo)?formData.images.logo.url:'',primaryKeywords:formData.seo.primaryKeywords||[],
     competitors:formData.seo.competitors||[],referenceSites:(formData.seo.referenceSites||[]).map(r=>r.url),
     services:formData.targetAudience.services||[],targetMarkets:formData.targetAudience.targetMarkets||[],
     topics:formData.targetAudience.topics||[],idealCustomer:formData.targetAudience.idealCustomer,
@@ -2783,7 +2825,10 @@ async function addToQueue(){
     stitchInstructions:(formData.stitch&&formData.stitch.instructions)||'',stitchProjectTitle:(formData.stitch&&formData.stitch.projectTitle)||'',stitchScreens:(formData.stitch&&formData.stitch.screens)||[],stitchProjectId:(formData.stitch&&formData.stitch.projectId)||'',
     createdAt:new Date().toISOString()
   };
-  const status={
+}
+
+function _freshBuildStatus(project){
+  return {
     projectName:project,status:'queued',startedAt:new Date().toISOString(),
     updatedAt:new Date().toISOString(),completedAt:null,error:null,currentPhase:null,
     phases:{research:{status:'not_started',message:null},scaffold:{status:'not_started',message:null},
@@ -2792,14 +2837,21 @@ async function addToQueue(){
       'quality-gate':{status:'not_started',message:null},deploy:{status:'not_started',message:null}},
     devUrl:getDevUrl()
   };
+}
 
+async function addToQueue(){
+  await doSave();
+  const biz=formData.basics.businessName?formData.basics.businessName.trim():'';
+  if(!biz){toast('Business name is required');return}
+  const project=biz.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  _buildProject=project;
   try{
-    await authPost('/api/canvas/data/builds/'+project+'-intake.json',intake);
-    await authPost('/api/canvas/data/builds/'+project+'-status.json',status);
+    await authPost('/api/canvas/data/builds/'+project+'-intake.json',_intakeFromForm(project));
+    await authPost('/api/canvas/data/builds/'+project+'-status.json',_freshBuildStatus(project));
     // No trigger file — added to queue without starting
     $('statusBadge').className='status-badge draft';
     $('statusBadge').textContent='Queued';
-    toast('"'+biz+'" added to queue — open Website Queue to run it');
+    toast('"'+biz+'" added to queue — hit 🚀 Build Website to run it');
   }catch(e){
     toast('Failed to queue: '+e.message);
   }
