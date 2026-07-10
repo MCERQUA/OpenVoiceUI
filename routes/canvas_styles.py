@@ -135,7 +135,19 @@ def preview_style(style_id):
     style = store.get_style(style_id)
     if style is None:
         return Response('style not found', status=404)
-    resp = Response(store.rendered_template(style), mimetype='text/html')
+    html = store.rendered_template(style)
+    # Mirror the /pages/ serve environment: the canvas proxy injects 25px body
+    # padding into every real page, and templates are authored assuming it.
+    # Without this, spec-compliant templates (no own body padding) preview
+    # edge-to-edge.
+    _pad = ('<style id="canvas-preview-padding">'
+            'html,body{padding:25px!important;box-sizing:border-box!important;}'
+            '</style>')
+    if '</head>' in html:
+        html = html.replace('</head>', _pad + '</head>', 1)
+    else:
+        html = _pad + html
+    resp = Response(html, mimetype='text/html')
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     # Same inline-friendly CSP as canvas pages so previews render fully.
     resp.headers['Content-Security-Policy'] = (
