@@ -604,6 +604,25 @@ def _build_recovery_prime(max_turns: int = 6, window_minutes: int = 120) -> str 
         return None
 
 
+def _with_recent_history(fallback_msg: str) -> str:
+    """Prepend recent conversation turns to a Z.AI-direct fallback message.
+
+    The direct fallback bypasses the openclaw session entirely, so without
+    this the fallback model answers with ZERO conversation memory — the
+    client-facing "amnesia" replies ("no indication of what 'one' refers
+    to", phatty 2026-07-02). Reuses the recovery-prime builder (last turns
+    from conversation_log). Fail-open: on any problem, return the message
+    unchanged.
+    """
+    try:
+        prime = _build_recovery_prime(max_turns=8)
+        if prime:
+            return prime + fallback_msg
+    except Exception as _e:
+        logger.warning(f'### _with_recent_history failed: {_e}')
+    return fallback_msg
+
+
 def consume_recovery_prime() -> str | None:
     """Return the recovery context prime once and clear it.
     Discards primes older than :data:`_RECOVERY_PRIME_MAX_AGE_S` — a prime
@@ -909,6 +928,62 @@ def normalize_action_tags(text: str) -> str:
     return text
 
 
+def strip_canvas_action_tags(text: str) -> str:
+    """Strip [CANVAS_ACTION:{...JSON...}] tags via a brace walker.
+
+    The JSON payload nests {} and [] (e.g. checkbox-group ``values`` arrays),
+    which defeats both ``[^\\]]*`` and the ``_nb`` one-level-nesting pattern
+    used for browser-companion tags. Walk the payload respecting string
+    literals, escapes, and brace depth. (2026-07-02 tradeshow form-fill fix —
+    without this the raw JSON tag was spoken aloud by TTS.)
+    """
+    if not text or '[CANVAS_ACTION' not in text.upper():
+        return text
+    out = []
+    idx = 0
+    pattern = re.compile(r'\[CANVAS_ACTION:', re.IGNORECASE)
+    while True:
+        m = pattern.search(text, idx)
+        if not m:
+            out.append(text[idx:])
+            break
+        json_start = m.end()
+        if json_start >= len(text) or text[json_start] != '{':
+            out.append(text[idx:m.end()])
+            idx = m.end()
+            continue
+        depth, i, in_str, esc = 0, json_start, False, False
+        while i < len(text):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == '\\':
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            i += 1
+        if depth == 0 and i < len(text) and text[i] == ']':
+            out.append(text[idx:m.start()])
+            idx = i + 1  # skip the whole tag
+        else:
+            # Malformed/unterminated tag (e.g. mid-stream cut): drop from tag
+            # start to end of text so a half-arrived tag is never spoken.
+            out.append(text[idx:m.start()])
+            idx = len(text)
+            break
+    return ''.join(out)
+
+
 def clean_for_tts(text: str) -> str:
     """Remove markdown, reasoning tokens, and non-speech characters for TTS."""
     if not text:
@@ -916,6 +991,10 @@ def clean_for_tts(text: str) -> str:
 
     # Normalize sloppy tag whitespace FIRST so every strip regex below matches.
     text = normalize_action_tags(text)
+
+    # Strip [CANVAS_ACTION:{json}] BEFORE the regex chain — the JSON payload
+    # nests ] and } so no regex below can match it (2026-07-02).
+    text = strip_canvas_action_tags(text)
 
     # Strip GPT-OSS-120B reasoning tokens (but not if NO/YES is the full response)
     if text.strip().upper() not in ['NO', 'YES', 'NO.', 'YES.']:
@@ -2189,6 +2268,14 @@ def _conversation_inner():
                                 and metrics.get('llm_inference_ms', 0) > 1000
                                 and not getattr(stream_response, '_continued', False)
                                 and _promise_re.search(full_response)
+                                # Question guard (phatty 2026-07-02): a reply that
+                                # ENDS with a question is the agent asking the user
+                                # for a decision ("Want me to send this for approval
+                                # first, or just fire it?"). Forcing "actually do it
+                                # now" both bypasses the user's answer AND lands a
+                                # chat.send in the turn-finalization window where it
+                                # gets coalesced → bare final → recovery cascade.
+                                and not full_response.strip().rstrip('*_ \n').endswith('?')
                             ):
                                 stream_response._continued = True
                                 logger.warning(
@@ -2432,7 +2519,7 @@ def _conversation_inner():
                                     import requests as _req
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
                                     # Use full context so the fallback LLM has agent personality
-                                    _fallback_msg = message_with_context if message_with_context else user_message
+                                    _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
                                     _fallback_system = _load_voice_system_prompt()
                                     if _zai_key:
                                         _zai_resp = _req.post(
@@ -2482,7 +2569,7 @@ def _conversation_inner():
                                     try:
                                         import requests as _req
                                         _zai_key = os.environ.get('ZAI_API_KEY', '')
-                                        _fallback_msg = message_with_context if message_with_context else user_message
+                                        _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
                                         _fallback_system = _load_voice_system_prompt()
                                         if _zai_key:
                                             _zai_resp = _req.post(
@@ -2811,7 +2898,8 @@ def _conversation_inner():
         # Lazy import to avoid circular dependency (server.py imports this blueprint)
         try:
             import server as _server
-            ai_response = _server.get_zai_direct_response(message_with_context, session_id)
+            ai_response = _server.get_zai_direct_response(
+                _with_recent_history(message_with_context), session_id)
         except Exception as e:
             logger.error(f'Z.AI direct call failed: {e}')
             ai_response = None

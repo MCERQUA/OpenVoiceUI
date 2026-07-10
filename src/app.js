@@ -26,6 +26,106 @@ connectAiradio();
         import { ExternalSTT, ExternalWakeWordDetector } from '/src/providers/ExternalSTT.js';
         import { DeepgramStreamingSTT, DeepgramStreamingWakeWordDetector } from '/src/providers/DeepgramStreamingSTT.js?v=3';
 
+        // ===== CANVAS_ACTION MODULE (2026-07-02, tradeshow form-fill fix) =====
+        // [CANVAS_ACTION:{"action":"<verb>","payload":{...}}] — agent-driven canvas
+        // form fill/submit. The JSON payload nests {} and [] (checkbox-group values),
+        // so extraction brace-walks instead of regexing. Defined ONCE at module top
+        // level so the streaming path, non-streaming voice path, and fast-lane
+        // interject handlers all share the same extract/strip/dispatch + ready-queue.
+        // The receiving canvas page declares a `canvas-action` postMessage listener
+        // (reference impl: canvas-pages/quote-spray-foam.html).
+        window.__canvasAction = (() => {
+            const extract = (text) => {
+                const tags = [];
+                if (!text) return tags;
+                const re = /\[CANVAS_ACTION:/gi;
+                let m;
+                while ((m = re.exec(text)) !== null) {
+                    const tagStart = m.index;
+                    const jsonStart = m.index + m[0].length;
+                    if (text[jsonStart] !== '{') continue;
+                    let depth = 0, i = jsonStart, inStr = false, esc = false;
+                    for (; i < text.length; i++) {
+                        const c = text[i];
+                        if (inStr) {
+                            if (esc) { esc = false; continue; }
+                            if (c === '\\') { esc = true; continue; }
+                            if (c === '"') inStr = false;
+                            continue;
+                        }
+                        if (c === '"') { inStr = true; continue; }
+                        if (c === '{') depth++;
+                        else if (c === '}') {
+                            depth--;
+                            if (depth === 0) { i++; break; }
+                        }
+                    }
+                    if (depth !== 0 || text[i] !== ']') continue;
+                    try {
+                        const payload = JSON.parse(text.slice(jsonStart, i));
+                        tags.push({ tagStart, tagEnd: i + 1, payload });
+                    } catch (e) {
+                        console.warn('[CANVAS_ACTION] JSON parse failed:', text.slice(jsonStart, i + 1), e);
+                    }
+                }
+                return tags;
+            };
+            const strip = (text) => {
+                if (!text) return text;
+                const tags = extract(text);
+                if (tags.length === 0) return text;
+                let out = '', cursor = 0;
+                for (const t of tags) { out += text.slice(cursor, t.tagStart); cursor = t.tagEnd; }
+                return out + text.slice(cursor);
+            };
+            // Ready-queue: when [CANVAS:page] + [CANVAS_ACTION:...] arrive in one
+            // response the iframe is still loading — a bare postMessage is dropped
+            // (the page's listener isn't armed yet). Queue + flush on iframe `load`.
+            const pending = [];
+            let flushHooked = false;
+            const flush = () => {
+                const iframe = document.getElementById('canvas-iframe');
+                if (!iframe?.contentWindow) return;
+                while (pending.length > 0) {
+                    const a = pending.shift();
+                    console.log('[Canvas] CANVAS_ACTION dispatch (flush):', a.action, a.payload);
+                    iframe.contentWindow.postMessage({ type: 'canvas-action', action: a.action, payload: a.payload }, '*');
+                }
+            };
+            const dispatch = (action, payload) => {
+                const iframe = document.getElementById('canvas-iframe');
+                window.ActionConsole?.addEntry?.('system', `Canvas action: ${action}`);
+                window.AgentActivityChip?.handleTag?.('canvas_action', action);
+                if (iframe && !flushHooked) {
+                    flushHooked = true;
+                    // one tick past `load` so the page's inline listener-registration ran
+                    iframe.addEventListener('load', () => setTimeout(flush, 50));
+                }
+                const doc = (() => { try { return iframe?.contentDocument; } catch { return null; } })();
+                // Ready = cross-origin (can't inspect, assume ready) OR same-origin doc
+                // fully loaded AND not the initial about:blank — a just-created iframe's
+                // blank document reports readyState 'complete', and posting into it loses
+                // the message when the real page loads (caught by the race test 2026-07-02).
+                const ready = iframe?.contentWindow && (
+                    doc === null /* cross-origin: assume ready */ ||
+                    (doc?.readyState === 'complete' && doc?.location?.href !== 'about:blank')
+                );
+                if (ready) {
+                    console.log('[Canvas] CANVAS_ACTION dispatch:', action, payload);
+                    iframe.contentWindow.postMessage({ type: 'canvas-action', action, payload }, '*');
+                } else {
+                    console.log('[Canvas] CANVAS_ACTION queued (iframe not ready):', action);
+                    pending.push({ action, payload });
+                }
+            };
+            const dispatchFrom = (text) => {
+                for (const t of extract(text)) {
+                    if (t.payload?.action) dispatch(t.payload.action, t.payload?.payload || {});
+                }
+            };
+            return { extract, strip, dispatch, dispatchFrom, flush };
+        })();
+
         // ===== CONFIGURATION =====
         const CONFIG = {
             // AGENT_CONFIG is injected by Flask from AGENT_SERVER_URL env var.
@@ -3921,13 +4021,15 @@ connectAiradio();
                             const labels = { context: 'Note', steer: 'Steering', fast_lane: 'Quick' };
                             ActionConsole.addEntry('system', `${labels[lane]}: "${text.substring(0, 60)}"`);
                             console.log(`🔀 INTERJECT result: lane=${lane} action=${data.action}`);
-                            // Fast lane responses come with text — display + TTS them
+                            // Fast lane responses come with text — display + TTS them.
+                            // Strip + dispatch action tags (parseActionTags never existed —
+                            // orphan call threw a swallowed TypeError and rendered raw tags. 2026-07-02)
                             if (lane === 'fast_lane' && data.response) {
-                                this.displayMessage('assistant', data.response);
-                                this.callbacks.onMessage('assistant', data.response);
-                                TranscriptPanel.addMessage('assistant', data.response);
-                                // Parse action tags from fast lane response
-                                this.parseActionTags(data.response);
+                                const clean = (window.__canvasAction?.strip(data.response) ?? data.response).trim();
+                                this.displayMessage('assistant', clean);
+                                this.callbacks.onMessage('assistant', clean);
+                                TranscriptPanel.addMessage('assistant', clean);
+                                window.__canvasAction?.dispatchFrom(data.response);
                             }
                         }).catch(() => {
                             ActionConsole.addEntry('system', `Interjecting: "${text.substring(0, 60)}"`);
@@ -4059,8 +4161,13 @@ connectAiradio();
                             .replace(/\[([A-Z][A-Z0-9_]*)\s*:\s*([^\]]*?)\s*\]/g, '[$1:$2]')
                             .replace(/\[([A-Z][A-Z0-9_]*)\s*\]/g, '[$1]');
                     };
+                    // CANVAS_ACTION extract/strip/dispatch live in the top-level
+                    // window.__canvasAction module (defined at app startup) so the
+                    // streaming, voice, and fast-lane paths share one implementation.
+                    const extractCanvasActionTags = window.__canvasAction.extract;
+                    const dispatchCanvasAction = window.__canvasAction.dispatch;
                     const stripCanvasTags = (text) => {
-                        return normalizeActionTags(text)
+                        text = normalizeActionTags(text)
                             .replace(/```html[\s\S]*?```/gi, '')  // complete html fences
                             .replace(/```[\s\S]*?```/g, '')        // complete generic fences
                             .replace(/```html[\s\S]*/gi, '')       // unclosed html fence (streaming)
@@ -4082,8 +4189,19 @@ connectAiradio();
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SOUND:[^\]]*\]/gi, '')
-                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
-                            .trim();
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '');
+                        // Strip [CANVAS_ACTION:{...}] tags via brace walker (nested {} and []
+                        // in the JSON payload defeat the regex chain above). NOTE: the original
+                        // 2026-05-08 stash had `return` on the chain above, making this block
+                        // dead code — the bug that kept the tradeshow failure alive. Fixed 2026-07-02.
+                        const actionTags = extractCanvasActionTags(text);
+                        if (actionTags.length > 0) {
+                            let out = '', cursor = 0;
+                            for (const t of actionTags) { out += text.slice(cursor, t.tagStart); cursor = t.tagEnd; }
+                            out += text.slice(cursor);
+                            text = out;
+                        }
+                        return text.trim();
                     };
 
                     // Helper: check for canvas/music commands in accumulated text
@@ -4282,6 +4400,22 @@ connectAiradio();
                             } else {
                                 console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
                                 ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
+                            }
+                        }
+                        // Check for [CANVAS_ACTION:{...JSON...}] — voice/agent-driven canvas
+                        // form fill / submit. The canvas page must declare a `canvas-action`
+                        // postMessage listener (see `quote-spray-foam.html` for reference).
+                        // Multiple action tags in one stream are allowed (e.g. fill + checkbox
+                        // groups + consent + submit).
+                        const canvasActionTags = extractCanvasActionTags(text);
+                        if (canvasActionTags.length > 0) {
+                            for (const t of canvasActionTags) {
+                                const action = t.payload?.action;
+                                if (!action) continue;
+                                const dedupeKey = 'CANVAS_ACTION:' + action + ':' + JSON.stringify(t.payload?.payload ?? '');
+                                if (canvasCommandsProcessed.has(dedupeKey)) continue;
+                                canvasCommandsProcessed.add(dedupeKey);
+                                dispatchCanvasAction(action, t.payload?.payload || {});
                             }
                         }
                         // Check for [MOOD:xxx] — agent-driven facial expression change
@@ -5625,7 +5759,7 @@ connectAiradio();
 
                     if (data.response) {
                         await this._processCommandTags(data.response);
-                        const displayText = data.response
+                        let displayText = data.response
                             .replace(/\[CANVAS_MENU\]/gi, '')
                             .replace(/\[CANVAS:[^\]]*\]/gi, '')
                             .replace(/\[CANVAS_URL:[^\]]*\]/gi, '')
@@ -5634,8 +5768,8 @@ connectAiradio();
                             .replace(/\[MUSIC_NEXT\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
-                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
-                            .trim();
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '');
+                        displayText = (window.__canvasAction?.strip(displayText) ?? displayText).trim();
                         this.callbacks.onTranscript(displayText, false);
                         TranscriptPanel.addMessage('assistant', displayText);
                     }
@@ -5706,15 +5840,18 @@ connectAiradio();
                             const lane = data.lane || 'context';
                             const labels = { context: 'Note', steer: 'Steering', fast_lane: 'Quick' };
                             ActionConsole.addEntry('system', `${labels[lane]}: "${transcript.substring(0, 60)}"`);
-                            // Fast lane responses come with text — display + TTS them
+                            // Fast lane responses come with text — display + TTS them.
+                            // Strip + dispatch action tags (parseActionTags never existed —
+                            // orphan call threw a swallowed TypeError and rendered raw tags. 2026-07-02)
                             if (lane === 'fast_lane' && data.response) {
+                                const clean = (window.__canvasAction?.strip(data.response) ?? data.response).trim();
                                 const cm = ModeManager?.clawdbotMode;
                                 if (cm) {
-                                    cm.displayMessage('assistant', data.response);
-                                    cm.callbacks.onMessage('assistant', data.response);
-                                    cm.parseActionTags(data.response);
+                                    cm.displayMessage('assistant', clean);
+                                    cm.callbacks.onMessage('assistant', clean);
                                 }
-                                TranscriptPanel.addMessage('assistant', data.response);
+                                window.__canvasAction?.dispatchFrom(data.response);
+                                TranscriptPanel.addMessage('assistant', clean);
                             }
                         }).catch(() => {
                             ActionConsole.addEntry('system', `Interjecting: "${transcript.substring(0, 60)}"`);
@@ -5809,11 +5946,11 @@ connectAiradio();
                             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')
                             .replace(/\[SLEEP\]/gi, '')
                             .replace(/\[MOOD:[^\]]*\]/gi, '')
-                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '')
-                            .trim();
+                            .replace(/\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]/gi, '');
+                        const displayTextClean = (window.__canvasAction?.strip(displayText) ?? displayText).trim();
 
-                        this.callbacks.onTranscript(displayText, false);
-                        TranscriptPanel.addMessage('assistant', displayText);
+                        this.callbacks.onTranscript(displayTextClean, false);
+                        TranscriptPanel.addMessage('assistant', displayTextClean);
 
                         // Play TTS if audio provided
                         if (data.audio) {
@@ -5925,6 +6062,10 @@ connectAiradio();
                 if (bandcampPageMatch) {
                     window.openEmbedCanvasPage?.('bandcamp', bandcampPageMatch[1].trim());
                 }
+                // [CANVAS_ACTION:{...JSON...}] — voice-path canvas form fill/submit
+                // (streaming path handles this in checkCanvasInStream; this covers the
+                // non-streamed /api/conversation voice + greeting responses. 2026-07-02)
+                window.__canvasAction?.dispatchFrom(text);
                 // [REGISTER_FACE:name]
                 const registerFaceMatch = text.match(/\[REGISTER_FACE:([^\]]+)\]/i);
                 if (registerFaceMatch) {
@@ -8584,19 +8725,23 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 else if (stagedFile) {
                     try {
                         const result = await this.uploadFile(stagedFile.file);
+                        // Full location string so the agent always knows exactly where the
+                        // file lives (local path + public URL, indexed in .uploads-index.jsonl)
+                        const loc = result.url_full ? `${result.path} (public URL: ${result.url_full})` : result.path;
                         if (result.type === 'image') {
                             // Pass image path so server can run vision analysis
                             this._pendingImagePath = result.path;
                             messageToSend = text || `What do you see in this image? (${result.original_name})`;
+                            messageToSend += `\n[IMAGE SAVED: ${loc}]`;
                         } else if (result.content_preview) {
                             const sizeKb = result.file_size ? ` (${(result.file_size / 1024).toFixed(1)} KB)` : '';
                             if (result.content_preview_truncated) {
-                                messageToSend = `[USER ATTACHED FILE: ${result.original_name}${sizeKb}, saved at ${result.path}]\nFile is large — preview below is TRUNCATED. To read the full file, use your Read tool on the path above.\n--- File preview (truncated) ---\n${result.content_preview}\n--- End preview ---\n${text}`;
+                                messageToSend = `[USER ATTACHED FILE: ${result.original_name}${sizeKb}, saved at ${loc}]\nFile is large — preview below is TRUNCATED. To read the full file, use your Read tool on the path above.\n--- File preview (truncated) ---\n${result.content_preview}\n--- End preview ---\n${text}`;
                             } else {
-                                messageToSend = `[USER ATTACHED FILE: ${result.original_name}${sizeKb}, saved at ${result.path}]\n--- File contents ---\n${result.content_preview}\n--- End file ---\n${text}`;
+                                messageToSend = `[USER ATTACHED FILE: ${result.original_name}${sizeKb}, saved at ${loc}]\n--- File contents ---\n${result.content_preview}\n--- End file ---\n${text}`;
                             }
                         } else {
-                            messageToSend = `[USER ATTACHED FILE: ${result.original_name}, saved at ${result.path}] ${text}`;
+                            messageToSend = `[USER ATTACHED FILE: ${result.original_name}, saved at ${loc}] ${text}`;
                         }
                     } catch (err) {
                         console.error('File upload failed:', err);

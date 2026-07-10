@@ -11,7 +11,7 @@
             const s=document.createElement('script');
             s.async=true;s.crossOrigin='anonymous';
             s.dataset.clerkPublishableKey=cfg.clerkPublishableKey;
-            s.src='https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js';
+            s.src='https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
             document.head.appendChild(s);
         }
     }).catch(()=>{});
@@ -744,10 +744,9 @@ const Agents = {
       const d=await(await fetch('/api/profiles/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile_id:id})})).json();
       if(d.active||d.profile){
         this.active=id;this.renderBanner();this.renderGrid();
-        // Sync to main app — clear localStorage override so main app uses server's active on next load
-        // Also broadcast to any open tabs on this origin
+        // Sync to main app — server is the source of truth (/api/profiles/active);
+        // broadcast so open tabs re-fetch it. No localStorage (server-state rule).
         try{
-          localStorage.setItem('active_profile_id',id);
           const bc=new BroadcastChannel('profile-switch');
           bc.postMessage({type:'profile-activated',profileId:id});
           bc.close();
@@ -888,8 +887,7 @@ const Builder = {
           '<option value="zai/glm-5.1"'+((llmProv==='zai/glm-5.1')?' selected':'')+'>Z.AI GLM-5.1</option>'+
           '<option value="zai/glm-5-turbo"'+((llmProv==='zai/glm-5-turbo')?' selected':'')+'>Z.AI GLM-5-turbo (direct)</option>'+
           '<option value="groq"'+(llmProv==='groq'?' selected':'')+'>Groq (Llama / Qwen)</option>'+
-          '<option value="minimax"'+(llmProv==='minimax'?' selected':'')+'>MiniMax M2.7</option>'+
-          '<option value="kimi"'+(llmProv==='kimi'?' selected':'')+'>Kimi K2.5</option>'+
+
           '<option value="gemini"'+(llmProv==='gemini'?' selected':'')+'>Google Gemini</option>'+
           '<option value="hume_evi"'+(llmProv==='hume_evi'?' selected':'')+'>Hume EVI</option>'+
           '<option value="elevenlabs"'+(llmProv==='elevenlabs'?' selected':'')+'>ElevenLabs AI</option>'+
@@ -1704,7 +1702,7 @@ const TESTS=[
   {id:'profiles_api',name:'Profiles API',icon:'📋'},
   {id:'tts',name:'TTS Voices',icon:'🎙️'},
   {id:'music',name:'Music Endpoint',icon:'🎵'},
-  {id:'dj_prompt',name:'DJ Prompt API',icon:'✏️'},
+  {id:'ai_config',name:'AI Config (openclaw.json)',icon:'🧠'},
   {id:'server_stats',name:'Server Stats',icon:'📊'},
   {id:'session',name:'Session API',icon:'🔄'},
   {id:'canvas',name:'Canvas API',icon:'🖥️'},
@@ -1737,7 +1735,7 @@ const Tests={
     await run('profiles_api',async()=>{const d=await(await fetch('/api/profiles')).json();if(!d.profiles)throw new Error('no profiles');return d.profiles.length+' profiles'});
     await run('tts',async()=>{const r=await fetch('/api/tts/voices').catch(()=>null);if(!r?.ok)return'endpoint ok';const d=await r.json();const v=d.voices||{};const n=typeof v==='object'&&!Array.isArray(v)?Object.keys(v).length:Array.isArray(v)?v.length:0;return n+' providers'});
     await run('music',async()=>{const d=await(await fetch('/api/music?action=status')).json();return d.status||'ok'});
-    await run('dj_prompt',async()=>{const r=await fetch('/api/dj-prompt');if(!r.ok)return r.status===404?'not configured':'status '+r.status;const d=await r.json();if(!d.prompt&&!d.text&&!d.content)throw new Error('no prompt');return'loaded'});
+    await run('ai_config',async()=>{const r=await fetch('/api/admin/ai-config');if(!r.ok)return'status '+r.status;const d=await r.json();if(!d.primary)return'config mount missing';return d.primary+(d.fallback?' → '+d.fallback:'')});
     await run('server_stats',async()=>{const d=await(await fetch('/api/server-stats')).json();return'cpu '+(d.cpu_percent||'?')+'%'});
     await run('session',async()=>{const r=await fetch('/api/session').catch(()=>null);return r?.ok?'ok':'endpoint ok'});
     await run('canvas',async()=>{const d=await(await fetch('/api/canvas/manifest')).json();const p=d.pages||{};const n=typeof p==='object'&&!Array.isArray(p)?Object.keys(p).length:Array.isArray(p)?p.length:0;return n+' pages'});
@@ -1757,8 +1755,7 @@ const Providers={
       {id:'gateway',name:'OpenClaw Gateway',detail:'GLM-5-turbo via OpenClaw. Full tools, memory, canvas.'},
       {id:'zai',name:'Z.AI Direct',detail:'GLM-5-turbo / GLM-5.1. No agent tools.'},
       {id:'groq',name:'Groq',detail:'Llama 4 Scout / Qwen3-32b. Fast inference.'},
-      {id:'minimax',name:'MiniMax',detail:'M2.7-highspeed. Custom provider "mx".'},
-      {id:'kimi',name:'Kimi',detail:'K2.5 / Moonshot AI.'},
+
       {id:'gemini',name:'Google Gemini',detail:'Gemini 3. Multimodal.'},
       {id:'hume_evi',name:'Hume EVI',detail:'Built-in eLLM. Emotion-aware.'},
       {id:'elevenlabs',name:'ElevenLabs AI',detail:'Conversational AI. Built-in.'},
@@ -2518,7 +2515,13 @@ const CustomFaces = {
   // ── Actions ──────────────────────────────────────────────────────────────
   async activate(faceId) {
     try {
-      const pid = 'default';
+      // Write to the ACTIVE profile — hardcoding 'default' changed the wrong
+      // profile's face whenever a non-default profile was active.
+      let pid = 'default';
+      try {
+        const act = await (await fetch('/api/profiles/active')).json();
+        if (act && act.id) pid = act.id;
+      } catch(e0) {}
       await fetch('/api/profiles/' + pid, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
@@ -2764,7 +2767,13 @@ async function initAdminAuth() {
     if (typeof Clerk !== 'undefined') break;
     await new Promise(r => setTimeout(r, 500));
   }
-  if (typeof Clerk === 'undefined') return; // skip if Clerk unavailable
+  if (typeof Clerk === 'undefined') {
+    // Clerk IS configured but the SDK failed to load — fail closed, not open.
+    // (APIs enforce auth server-side regardless; rendering the panel would just
+    // show a broken page of 401s.)
+    document.body.innerHTML = '<div style="height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0f17;color:#e2e8f0;font-family:system-ui,sans-serif">Sign-in service failed to load.&nbsp;<a href="/" style="color:#3b82f6">Return to app</a></div>';
+    return;
+  }
   await Clerk.load();
   if (!Clerk.user) {
     // Redirect to main app login
@@ -2781,7 +2790,7 @@ addEventListener('DOMContentLoaded', async function(){
     if(d.clients?.length)$('nav-section-platform').style.display=''
   }).catch(()=>{});
   const hash=location.hash.slice(1);
-  const valid=['agents','builder','tests','providers','system','canvas','plugins','workspace','music','clients'];
+  const valid=['agents','builder','tests','providers','system','canvas','plugins','workspace','music','clients','faces','connections','platform-setup'];
   show(valid.includes(hash)?hash:'agents');
 });
 </script>

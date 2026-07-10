@@ -13,6 +13,7 @@ Registers routes:
 import logging
 import random
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, send_file
@@ -34,6 +35,30 @@ from services.paths import APP_ROOT, SOUNDS_DIR, UPLOADS_DIR, KNOWN_FACES_DIR, S
 BASE_DIR = APP_ROOT
 
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Uploads index — ONE ledger of every client-provided file, shared with the
+# host-side intake helper (scripts/uploads/jambot-upload-intake.py writes the
+# same schema for SMS/email media). Dotfile so serve_upload never exposes it.
+# The agent reads it at workspace/uploads/.uploads-index.jsonl.
+# ---------------------------------------------------------------------------
+
+UPLOADS_INDEX = UPLOADS_DIR / '.uploads-index.jsonl'
+
+
+def append_upload_index(record: dict) -> None:
+    """Append one entry to the uploads ledger. Fail-soft: an index problem
+    must never fail the upload itself."""
+    try:
+        import json as _json
+        with open(UPLOADS_INDEX, 'a', encoding='utf-8') as fh:
+            fh.write(_json.dumps(record, ensure_ascii=False) + '\n')
+        try:
+            UPLOADS_INDEX.chmod(0o666)  # host-side writers run as a different uid
+        except OSError:
+            pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('uploads-index append failed: %s', exc)
 
 # ---------------------------------------------------------------------------
 # DJ Sounds catalogue
@@ -328,13 +353,31 @@ def upload_file():
         mime = 'image/jpeg'
     is_image = mime.startswith('image/')
 
+    # Full public URL — the agent (and the index) always get the complete location
+    url_full = f"https://{request.host}/uploads/{safe_name}"
+
     result = {
         'original_name': original_name,
         'path': str(dest),
         'filename': safe_name,
         'url': f'/uploads/{safe_name}',
+        'url_full': url_full,
+        'agent_path': f'workspace/uploads/{safe_name}',
         'file_size': file_size,
     }
+
+    append_upload_index({
+        'at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'filename': safe_name,
+        'original_name': original_name,
+        'url': url_full,
+        'agent_path': f'workspace/uploads/{safe_name}',
+        'source': 'chat',
+        'from': '',
+        'mime': mime,
+        'size': file_size,
+        'note': '',
+    })
 
     if is_image:
         result['type'] = 'image'
@@ -418,6 +461,9 @@ def serve_upload(filename):
     that may be cached are known_faces photos (handled by a separate route).
     Optimize for size (smaller files), not for browser cache hits.
     """
+    # dotfiles (e.g. the .uploads-index.jsonl ledger) are internal — never served
+    if any(part.startswith('.') for part in Path(filename).parts):
+        return jsonify({"error": "File not found"}), 404
     upload_path = _safe_path(UPLOADS_DIR, filename)
     if upload_path is None:
         return jsonify({"error": "Invalid path"}), 400

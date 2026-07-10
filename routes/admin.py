@@ -81,21 +81,33 @@ async def _gateway_rpc(method: str, params: dict, timeout: float = 10.0) -> dict
             if not is_challenge_event(challenge):
                 return {"ok": False, "error": f"Unexpected greeting: {challenge}"}
 
-            # Step 2 — send connect request
+            # Step 2 — send connect request. Operator scopes are only granted
+            # to a SIGNED device identity (Ed25519 over the challenge nonce) —
+            # without the device block the gateway connects us with no scopes
+            # and every RPC fails 'missing scope: operator.read'.
+            from services.gateways.openclaw import _load_device_identity, _sign_device_connect
+            nonce = challenge.get('payload', {}).get('nonce', '')
+            scopes = ["operator.admin", "operator.read", "operator.write"]
+            identity = _load_device_identity()
+            device_block = _sign_device_connect(
+                identity, "cli", "cli", "operator", scopes, auth_token, nonce
+            )
             req_id = str(uuid.uuid4())
-            params = build_connect_params(
+            connect_params = build_connect_params(
                 auth_token=auth_token,
                 client_id="cli",
                 client_mode="cli",
                 platform="linux",
                 user_agent="openvoice-ui-admin/1.0.0",
+                scopes=scopes,
                 caps=[],
+                device_block=device_block,
             )
             await ws.send(json.dumps({
                 "type": "req",
                 "id": f"connect-{req_id}",
                 "method": "connect",
-                "params": params,
+                "params": connect_params,
             }))
 
             # Step 3 — receive hello
@@ -488,11 +500,37 @@ def install_start():
 
             async def _send():
                 async with websockets.connect(gateway_url, open_timeout=10) as ws:
-                    challenge = await asyncio.wait_for(ws.recv(), timeout=5)
-                    await ws.send(_json.dumps({'type':'connect','token':auth_token,'protocol':3,'role':'operator'}))
-                    hello = await asyncio.wait_for(ws.recv(), timeout=5)
-                    req_id = str(uuid.uuid4())[:8]
-                    await ws.send(_json.dumps({'type':'req','id':req_id,'method':'chat.send','params':{'sessionKey':'admin-install','message':message,'deliver':False}}))
+                    challenge = _json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                    if not is_challenge_event(challenge):
+                        raise RuntimeError(f"Unexpected gateway greeting: {challenge.get('type')}")
+                    # Signed device block — operator scopes are not granted without it.
+                    from services.gateways.openclaw import _load_device_identity, _sign_device_connect
+                    nonce = challenge.get('payload', {}).get('nonce', '')
+                    scopes = ["operator.admin", "operator.read", "operator.write"]
+                    device_block = _sign_device_connect(
+                        _load_device_identity(), 'cli', 'cli', 'operator', scopes, auth_token, nonce
+                    )
+                    connect_id = str(uuid.uuid4())[:8]
+                    await ws.send(_json.dumps({
+                        'type': 'req',
+                        'id': f'connect-{connect_id}',
+                        'method': 'connect',
+                        'params': build_connect_params(
+                            auth_token=auth_token,
+                            client_id='cli',
+                            client_mode='cli',
+                            platform='linux',
+                            user_agent='openvoice-ui-admin/1.0.0',
+                            scopes=scopes,
+                            caps=[],
+                            device_block=device_block,
+                        ),
+                    }))
+                    hello = _json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+                    if hello.get('type') != 'res' or hello.get('error'):
+                        raise RuntimeError(f"Gateway auth failed: {hello.get('error')}")
+                    req_id = str(uuid.uuid4())
+                    await ws.send(_json.dumps({'type':'req','id':req_id,'method':'chat.send','params':{'sessionKey':'admin-install','message':message,'idempotencyKey':req_id}}))
                     collected = ''
                     for _ in range(120):
                         try:
@@ -610,38 +648,48 @@ def list_clients():
 # AI Config — model selection + API keys (writes openclaw.json)
 # ---------------------------------------------------------------------------
 
+# Writable mount (template compose: single-file bind of the tenant's real
+# openclaw.json). Older Phase-1.5 tenants only carry a read-only view at
+# openclaw-client.json — reads fall back to it so the panel still shows the
+# current model chain, but writes require the rw mount.
 _OPENCLAW_CONFIG_PATH = Path('/app/runtime/openclaw.json')
+_OPENCLAW_CONFIG_RO_FALLBACK = Path('/app/runtime/openclaw-client.json')
 
-# Known providers and their config shape
+# Known providers and their config shape.
+# Canonical source: /home/mike/MIKE-AI/docs/jambot/llm-provider-registry.md
+# Active chain is Z.AI account A ('zai') + account B ('zai_fb') — both route to
+# api.z.ai/api/anthropic. MiniMax ('mx'), bigmodel-GLM, and Groq-for-LLM are
+# DROPPED providers and must never be offered here (Groq stays TTS-only).
 _AI_PROVIDERS = {
-    'mx': {
-        'name': 'MiniMax',
-        'envKey': 'MINIMAX_API_KEY',
-        'baseUrl': 'https://api.minimax.io/anthropic',
-        'api': 'anthropic-messages',
-        'models': [
-            {'id': 'MiniMax-M2.7-highspeed', 'name': 'M2.7 Highspeed', 'contextWindow': 204800},
-            {'id': 'MiniMax-M2.7', 'name': 'M2.7', 'contextWindow': 204800},
-        ],
-    },
-    'glm': {
-        'name': 'GLM / ZhipuAI',
-        'envKey': 'GLM_API_KEY',
-        'baseUrl': 'https://open.bigmodel.cn/api/paas/v4',
-        'api': 'openai-completions',
-        'models': [
-            {'id': 'glm-5-turbo', 'name': 'GLM-5 Turbo', 'contextWindow': 128000},
-            {'id': 'glm-4-plus', 'name': 'GLM-4 Plus', 'contextWindow': 128000},
-        ],
-    },
     'zai': {
-        'name': 'Z.AI',
+        'name': 'Z.AI (Account A)',
         'envKey': 'ZAI_API_KEY',
-        'baseUrl': 'https://api.z.ai/api/anthropic/v1/messages',
+        'baseUrl': 'https://api.z.ai/api/anthropic',
         'api': 'anthropic-messages',
         'models': [
             {'id': 'glm-5-turbo', 'name': 'GLM-5 Turbo (Z.AI)', 'contextWindow': 204000},
             {'id': 'glm-4.7', 'name': 'GLM-4.7 (Z.AI)', 'contextWindow': 204000},
+        ],
+    },
+    'zai_fb': {
+        'name': 'Z.AI (Account B / fallback)',
+        'envKey': 'ZAI_FALLBACK_API_KEY',
+        'baseUrl': 'https://api.z.ai/api/anthropic',
+        'api': 'anthropic-messages',
+        'models': [
+            {'id': 'glm-5-turbo', 'name': 'GLM-5 Turbo (Z.AI B)', 'contextWindow': 204000},
+            {'id': 'glm-4.7', 'name': 'GLM-4.7 (Z.AI B)', 'contextWindow': 204000},
+        ],
+    },
+    'anthropic': {
+        'name': 'Anthropic',
+        'envKey': 'ANTHROPIC_API_KEY',
+        'baseUrl': 'https://api.anthropic.com',
+        'api': 'anthropic-messages',
+        'models': [
+            {'id': 'claude-sonnet-5', 'name': 'Claude Sonnet 5', 'contextWindow': 200000},
+            {'id': 'claude-opus-4-8', 'name': 'Claude Opus 4.8', 'contextWindow': 200000},
+            {'id': 'claude-haiku-4-5-20251001', 'name': 'Claude Haiku 4.5', 'contextWindow': 200000},
         ],
     },
     'openai': {
@@ -653,26 +701,6 @@ _AI_PROVIDERS = {
             {'id': 'gpt-4.1', 'name': 'GPT-4.1', 'contextWindow': 1047576},
             {'id': 'gpt-4o', 'name': 'GPT-4o', 'contextWindow': 128000},
             {'id': 'gpt-4o-mini', 'name': 'GPT-4o Mini', 'contextWindow': 128000},
-        ],
-    },
-    'anthropic': {
-        'name': 'Anthropic',
-        'envKey': 'ANTHROPIC_API_KEY',
-        'baseUrl': 'https://api.anthropic.com',
-        'api': 'anthropic-messages',
-        'models': [
-            {'id': 'claude-sonnet-4-5-20250514', 'name': 'Claude Sonnet 4.5', 'contextWindow': 200000},
-            {'id': 'claude-haiku-4-5-20251001', 'name': 'Claude Haiku 4.5', 'contextWindow': 200000},
-        ],
-    },
-    'groqcloud': {
-        'name': 'Groq',
-        'envKey': 'GROQ_API_KEY',
-        'baseUrl': 'https://api.groq.com/openai/v1',
-        'api': 'openai-completions',
-        'models': [
-            {'id': 'llama-4-scout-17b-16e-instruct', 'name': 'Llama 4 Scout', 'contextWindow': 131072},
-            {'id': 'llama-4-maverick-17b-128e-instruct', 'name': 'Llama 4 Maverick', 'contextWindow': 131072},
         ],
     },
     'google': {
@@ -689,33 +717,63 @@ _AI_PROVIDERS = {
 
 
 def _parse_jsonc(text: str) -> dict:
-    """Parse JSONC (JSON with comments and trailing commas) into a dict."""
-    import re
-    # Strip single-line comments (// ...)
-    text = re.sub(r'//[^\n]*', '', text)
-    # Strip multi-line comments (/* ... */)
-    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
-    # Remove trailing commas before } or ]
-    text = re.sub(r',\s*([}\]])', r'\1', text)
-    return json.loads(text)
+    """Parse JSONC into a dict — string-aware (services.vault implementation).
+
+    The previous local regex approach (r'//[^\\n]*') destroyed every
+    'https://…' baseUrl value, so parsing failed on effectively every real
+    tenant config. services.vault._parse_jsonc walks char-by-char and only
+    strips comments outside string literals.
+    """
+    from services.vault import _parse_jsonc as _vault_parse_jsonc
+    return _vault_parse_jsonc(text)
+
+
+def _oc_config_read_path() -> Path | None:
+    """The config path to read: rw mount first, then the ro Phase-1.5 view."""
+    if _OPENCLAW_CONFIG_PATH.exists():
+        return _OPENCLAW_CONFIG_PATH
+    if _OPENCLAW_CONFIG_RO_FALLBACK.exists():
+        return _OPENCLAW_CONFIG_RO_FALLBACK
+    return None
+
+
+def _oc_config_writable() -> bool:
+    return _OPENCLAW_CONFIG_PATH.exists() and os.access(_OPENCLAW_CONFIG_PATH, os.W_OK)
 
 
 def _read_oc_config() -> dict:
-    """Read the openclaw.json config file."""
-    if not _OPENCLAW_CONFIG_PATH.exists():
+    """Read the openclaw.json config file (rw mount or ro fallback)."""
+    path = _oc_config_read_path()
+    if not path:
         return {}
     try:
-        return _parse_jsonc(_OPENCLAW_CONFIG_PATH.read_text())
+        return _parse_jsonc(path.read_text())
     except Exception as exc:
-        logger.error(f"Failed to parse openclaw.json: {exc}")
+        logger.error(f"Failed to parse {path.name}: {exc}")
         return {}
 
 
 def _write_oc_config(config: dict):
-    """Write openclaw.json (clean JSON). OpenClaw hot-reloads on change."""
-    tmp = _OPENCLAW_CONFIG_PATH.with_suffix('.tmp')
-    tmp.write_text(json.dumps(config, indent=2))
-    tmp.replace(_OPENCLAW_CONFIG_PATH)
+    """Write openclaw.json IN PLACE (single write, same inode).
+
+    The file reaches this container as a single-file bind mount, so an
+    atomic tmp+rename would (a) fail with EBUSY on the mount point and
+    (b) even if it worked, swap the inode and never reach the host file
+    the openclaw container watches. A backup copy is kept beside it in
+    the container layer for immediate restore.
+    """
+    serialized = json.dumps(config, indent=2)
+    try:
+        backup = _OPENCLAW_CONFIG_PATH.parent / (
+            _OPENCLAW_CONFIG_PATH.name + '.bak-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        )
+        backup.write_text(_OPENCLAW_CONFIG_PATH.read_text())
+    except Exception as exc:
+        logger.warning(f"openclaw.json backup skipped: {exc}")
+    with open(_OPENCLAW_CONFIG_PATH, 'w') as fh:
+        fh.write(serialized)
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def _mask_key(key: str) -> str:
@@ -725,12 +783,35 @@ def _mask_key(key: str) -> str:
     return key[:6] + '...' + key[-4:]
 
 
+# OpenClaw redacts apiKey values in config.get responses with this marker —
+# its presence means "a key is configured", nothing more.
+_OC_REDACTED = '__OPENCLAW_REDACTED__'
+
+
+def _get_effective_config() -> tuple[dict, str, str]:
+    """Current openclaw config, gateway-first.
+
+    Returns (config, source, base_hash) where source is 'gateway' | 'file' | ''.
+    The gateway is authoritative (no mount/permission dependency — openclaw
+    chmods its config 600 on startup, so file access is best-effort only).
+    base_hash is the config.get hash needed by config.patch ('' when file-sourced).
+    """
+    result = _run_rpc('config.get', {}, timeout=8.0)
+    if result.get('ok'):
+        payload = result.get('result') or {}
+        parsed = payload.get('parsed')
+        if isinstance(parsed, dict) and parsed:
+            return parsed, 'gateway', payload.get('hash', '')
+    config = _read_oc_config()
+    return config, ('file' if config else ''), ''
+
+
 @admin_bp.route('/api/admin/ai-config', methods=['GET'])
 def get_ai_config():
     """
     Return the current AI model configuration + which API keys are set.
     """
-    config = _read_oc_config()
+    config, source, _hash = _get_effective_config()
     defaults = config.get('agents', {}).get('defaults', {})
     model_cfg = defaults.get('model', {})
     providers_cfg = config.get('models', {}).get('providers', {})
@@ -745,17 +826,24 @@ def get_ai_config():
         # Check if key is configured (in openclaw.json providers section)
         oc_prov = providers_cfg.get(pid, {})
         raw_key = oc_prov.get('apiKey', '')
-        # If it's an env var reference like ${FOO}, check if env var is set
-        if raw_key.startswith('${') and raw_key.endswith('}'):
+        if raw_key == _OC_REDACTED:
+            # Gateway redacts configured keys — try the env var for a mask.
+            actual_key = os.environ.get(pinfo['envKey'], '') or raw_key
+        elif raw_key.startswith('${') and raw_key.endswith('}'):
+            # Env var reference like ${FOO} — check if the env var is set
             env_name = raw_key[2:-1]
             actual_key = os.environ.get(env_name, '')
         else:
             actual_key = raw_key
+        # Provider not wired into openclaw.json yet, but its platform env key
+        # exists — report it so the UI can offer one-click enable.
+        if not actual_key:
+            actual_key = os.environ.get(pinfo['envKey'], '')
 
         providers[pid] = {
             'name': pinfo['name'],
             'hasKey': bool(actual_key),
-            'maskedKey': _mask_key(actual_key),
+            'maskedKey': '•••' if actual_key == _OC_REDACTED else _mask_key(actual_key),
             'models': pinfo['models'],
             'configured': pid in providers_cfg,
         }
@@ -765,7 +853,66 @@ def get_ai_config():
         'fallback': fallback,
         'providers': providers,
         'subagentModel': defaults.get('subagents', {}).get('model', primary),
+        'source': source,
     })
+
+
+def _build_ai_config_partial(data: dict, config: dict) -> tuple[dict, list]:
+    """Build a minimal deep-merge partial (config.patch shape) of ONLY the
+    requested changes, against the current effective config. Returns
+    (partial, change_log). Empty partial = nothing to change."""
+    partial = {}
+    changes = []
+
+    providers_cfg = config.get('models', {}).get('providers', {})
+    for pid, key_value in (data.get('keys') or {}).items():
+        if pid not in _AI_PROVIDERS or not key_value:
+            continue
+        pinfo = _AI_PROVIDERS[pid]
+        prov_partial = {'apiKey': key_value}
+        if pid not in providers_cfg:
+            # New provider — include the full shape so openclaw can use it.
+            prov_partial.update({
+                'baseUrl': pinfo['baseUrl'],
+                'api': pinfo['api'],
+                'models': [dict(m) for m in pinfo['models']],
+            })
+        partial.setdefault('models', {}).setdefault('providers', {})[pid] = prov_partial
+        changes.append(f'apiKey:{pid}')
+
+    defaults = config.get('agents', {}).get('defaults', {})
+    model_cfg = defaults.get('model', {})
+    agents_partial = {}
+
+    new_primary = data.get('primary')
+    if new_primary and new_primary != model_cfg.get('primary'):
+        agents_partial.setdefault('model', {})['primary'] = new_primary
+        agents_partial.setdefault('models', {})[new_primary] = {}
+        # Subagent model follows primary
+        agents_partial.setdefault('subagents', {})['model'] = new_primary
+        changes.append(f'primary→{new_primary}')
+
+    new_fallback = data.get('fallback')
+    if new_fallback is not None:
+        new_fallbacks = [new_fallback] if new_fallback else []
+        if new_fallbacks != model_cfg.get('fallbacks', []):
+            agents_partial.setdefault('model', {})['fallbacks'] = new_fallbacks
+            if new_fallback:
+                agents_partial.setdefault('models', {})[new_fallback] = {}
+            changes.append(f'fallback→{new_fallback or "none"}')
+
+    if agents_partial:
+        partial['agents'] = {'defaults': agents_partial}
+    return partial, changes
+
+
+def _deep_merge(dst: dict, src: dict) -> dict:
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _deep_merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
 
 
 @admin_bp.route('/api/admin/ai-config', methods=['PUT'])
@@ -775,77 +922,58 @@ def update_ai_config():
 
     Request body (all fields optional):
     {
-        "primary": "mx/MiniMax-M2.7-highspeed",
-        "fallback": "glm/glm-5-turbo",
+        "primary": "zai/glm-5-turbo",
+        "fallback": "zai_fb/glm-5-turbo",
         "keys": {
-            "mx": "sk-...",
+            "anthropic": "sk-ant-...",
             "openai": "sk-..."
         }
     }
+
+    Write path: the gateway's config.patch RPC (schema-validated, hot-applied
+    by openclaw itself, no file permissions involved). Falls back to a direct
+    in-place file write only in local/self-hosted mode when the gateway is
+    unreachable but the config file is writable.
     """
     data = request.get_json(silent=True) or {}
-    config = _read_oc_config()
 
+    # Validate model refs early — a typo here would land in openclaw.json.
+    for field in ('primary', 'fallback'):
+        val = data.get(field)
+        if val and ('/' not in val or val.startswith('/') or val.endswith('/')):
+            return jsonify({'error': f"{field} must be 'provider/model-id', got: {val}"}), 400
+
+    config, source, base_hash = _get_effective_config()
     if not config:
-        return jsonify({'error': 'Cannot read openclaw.json — config mount missing'}), 500
+        return jsonify({'error': 'Cannot read openclaw config — gateway unreachable and no '
+                                 'readable openclaw.json mount'}), 500
 
-    defaults = config.setdefault('agents', {}).setdefault('defaults', {})
-    model_cfg = defaults.setdefault('model', {})
-    models_section = config.setdefault('models', {'mode': 'merge', 'providers': {}})
-    providers_cfg = models_section.setdefault('providers', {})
-
-    changed = False
-
-    # Update API keys
-    keys = data.get('keys', {})
-    for pid, key_value in keys.items():
-        if pid not in _AI_PROVIDERS or not key_value:
-            continue
-        pinfo = _AI_PROVIDERS[pid]
-        # Ensure provider section exists in config
-        if pid not in providers_cfg:
-            providers_cfg[pid] = {
-                'baseUrl': pinfo['baseUrl'],
-                'api': pinfo['api'],
-                'apiKey': key_value,
-                'models': [
-                    {k: v for k, v in m.items()}
-                    for m in pinfo['models']
-                ],
-            }
-        else:
-            providers_cfg[pid]['apiKey'] = key_value
-        changed = True
-        logger.info(f"AI Config: updated API key for {pid}")
-
-    # Update model selection
-    new_primary = data.get('primary')
-    if new_primary and new_primary != model_cfg.get('primary'):
-        model_cfg['primary'] = new_primary
-        # Also update the models dict
-        defaults.setdefault('models', {})[new_primary] = {}
-        # Subagent model follows primary
-        defaults.setdefault('subagents', {})['model'] = new_primary
-        changed = True
-        logger.info(f"AI Config: primary model → {new_primary}")
-
-    new_fallback = data.get('fallback')
-    if new_fallback is not None:
-        current_fallbacks = model_cfg.get('fallbacks', [])
-        new_fallbacks = [new_fallback] if new_fallback else []
-        if new_fallbacks != current_fallbacks:
-            model_cfg['fallbacks'] = new_fallbacks
-            if new_fallback:
-                defaults.setdefault('models', {})[new_fallback] = {}
-            changed = True
-            logger.info(f"AI Config: fallback model → {new_fallback or 'none'}")
-
-    if changed:
-        try:
-            _write_oc_config(config)
-            return jsonify({'ok': True, 'message': 'Config saved — OpenClaw will hot-reload'})
-        except Exception as exc:
-            logger.error(f"Failed to write openclaw.json: {exc}")
-            return jsonify({'error': f'Write failed: {exc}'}), 500
-    else:
+    partial, changes = _build_ai_config_partial(data, config)
+    if not partial:
         return jsonify({'ok': True, 'message': 'No changes'})
+
+    # Path 1 — gateway config.patch (authoritative, schema-validated).
+    if source == 'gateway':
+        result = _run_rpc('config.patch', {'raw': json.dumps(partial), 'baseHash': base_hash},
+                          timeout=15.0)
+        if result.get('ok'):
+            logger.info(f"AI Config: patched via gateway ({', '.join(changes)})")
+            return jsonify({'ok': True, 'message': 'Config updated via OpenClaw gateway — '
+                                                   'changes are validated and applied by openclaw itself.',
+                            'changes': changes})
+        logger.error(f"AI Config: gateway config.patch failed: {result.get('error')}")
+        return jsonify({'ok': False, 'error': f"Gateway rejected config change: {result.get('error')}"}), 502
+
+    # Path 2 — local mode: direct in-place file write.
+    if not _oc_config_writable():
+        return jsonify({'error': 'Gateway unreachable and openclaw.json is not writable from this '
+                                 'container — cannot apply config changes.'}), 409
+    try:
+        _write_oc_config(_deep_merge(config, partial))
+        logger.info(f"AI Config: wrote openclaw.json directly ({', '.join(changes)})")
+        return jsonify({'ok': True, 'message': 'Config saved to openclaw.json. Restart the openclaw '
+                                               'gateway if a change does not take effect.',
+                        'changes': changes})
+    except Exception as exc:
+        logger.error(f"Failed to write openclaw.json: {exc}")
+        return jsonify({'error': 'Write failed — see server logs'}), 500

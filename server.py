@@ -881,6 +881,22 @@ def get_hume_token():
 
 
 # ---------------------------------------------------------------------------
+# Routes — xAI Grok Realtime config (used by src/adapters/xai-realtime.js)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/xai/config", methods=["GET"])
+def get_xai_config():
+    """Check whether xAI Realtime is configured server-side.
+
+    Returns {"available": true} when XAI_API_KEY is set.
+    The frontend adapter calls this during init so it can surface a helpful
+    message instead of silently failing on WebSocket connect.
+    """
+    api_key = os.getenv("XAI_API_KEY")
+    return jsonify({"available": bool(api_key)})
+
+
+# ---------------------------------------------------------------------------
 # Routes — STT (Speech-to-Text)
 # ---------------------------------------------------------------------------
 
@@ -1767,6 +1783,99 @@ def openclaw_ui_websocket(ws):
         asyncio.run(_run())
     except Exception as e:
         logger.error(f"OpenClaw UI: fatal WebSocket error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — xAI Grok Realtime proxy (/ws/xai-realtime)
+# ---------------------------------------------------------------------------
+# Transparent bidirectional bridge: browser ↔ wss://api.x.ai/v1/realtime
+# The XAI_API_KEY is injected as a Bearer header here — it never reaches
+# the browser. All JSON event frames (including base64 PCM16 audio) are
+# forwarded as-is; the adapter in xai-realtime.js handles the protocol.
+# ---------------------------------------------------------------------------
+
+@sock.route("/ws/xai-realtime")
+def xai_realtime_websocket(ws):
+    """WebSocket proxy between browser and xAI Grok Realtime API."""
+    from services.auth import verify_clerk_token, get_token_from_request
+
+    token   = get_token_from_request()
+    user_id = verify_clerk_token(token) if token else None
+    if not user_id:
+        logger.warning("xAI Realtime WebSocket rejected — no valid Clerk token")
+        ws.send(json.dumps({"type": "error", "message": "Unauthorized"}))
+        ws.close()
+        return
+
+    api_key = os.getenv("XAI_API_KEY")
+    if not api_key:
+        logger.error("XAI_API_KEY not set — xAI Realtime WebSocket rejected")
+        ws.send(json.dumps({"type": "error", "message": "xAI API key not configured on server"}))
+        ws.close()
+        return
+
+    xai_url = "wss://api.x.ai/v1/realtime?model=grok-voice-think-fast-1.0"
+    logger.info(f"xAI Realtime: new session for user_id={user_id}")
+
+    async def _run():
+        try:
+            async with websockets.connect(
+                xai_url,
+                additional_headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "OpenAI-Beta":   "realtime=v1",
+                },
+            ) as xai_ws:
+                logger.info("xAI Realtime: upstream connection established")
+
+                async def _from_client():
+                    """Browser → xAI: relay all frames (text and binary)."""
+                    loop = asyncio.get_running_loop()
+                    while True:
+                        # run_in_executor so blocking ws.receive() doesn't
+                        # starve _from_xai() waiting on async xai_ws.recv().
+                        msg = await loop.run_in_executor(None, ws.receive)
+                        if msg is None:
+                            logger.info("xAI Realtime: browser disconnected")
+                            break
+                        await xai_ws.send(msg)
+
+                async def _from_xai():
+                    """xAI → browser: relay all frames (text and binary)."""
+                    while True:
+                        try:
+                            msg = await asyncio.wait_for(xai_ws.recv(), timeout=300.0)
+                        except asyncio.TimeoutError:
+                            logger.warning("xAI Realtime: upstream recv() timed out after 300s")
+                            try:
+                                ws.send(json.dumps({"type": "error", "message": "xAI connection timed out"}))
+                            except Exception:
+                                pass
+                            return
+                        # ws.send() handles both str and bytes frames
+                        ws.send(msg)
+
+                await asyncio.gather(_from_client(), _from_xai())
+
+        except (ConnectionRefusedError, OSError) as e:
+            logger.error(f"xAI Realtime: cannot connect to xAI: {e}")
+            try:
+                ws.send(json.dumps({"type": "error", "message": "Cannot connect to xAI API"}))
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"xAI Realtime: WebSocket error: {e}")
+            try:
+                ws.send(json.dumps({"type": "error", "message": "xAI Realtime connection error"}))
+            except Exception:
+                pass
+
+    try:
+        asyncio.run(_run())
+    except Exception as e:
+        logger.error(f"xAI Realtime: fatal error: {e}")
+    finally:
+        logger.info(f"xAI Realtime: session ended for user_id={user_id}")
 
 
 # ---------------------------------------------------------------------------

@@ -99,8 +99,41 @@ def create_app(config_override: dict = None):
     _clerk_key = (os.getenv('CLERK_PUBLISHABLE_KEY') or os.getenv('VITE_CLERK_PUBLISHABLE_KEY', '')).strip()
     _auth_enabled = bool(_clerk_key)
 
+    # Privileged surfaces — require an admin user (services.auth.ADMIN_USER_IDS),
+    # not just any allowlisted tenant user. ALLOWED_USER_IDS gates the voice app;
+    # these endpoints can rewrite vault credentials, openclaw.json (incl. provider
+    # baseUrl/apiKey), agent workspace files, and inject into the live agent session.
+    _ADMIN_ONLY_PREFIXES = (
+        '/api/admin/',
+        '/api/vault/',      # oauth callback is exempted via _PUBLIC_PREFIXES below
+        '/api/workspace/',
+        '/api/refactor/',
+        '/api/server-stats',
+        '/api/plugins/',    # install/uninstall/restart/config (assets exempted below)
+        '/api/plugins',     # bare list endpoint
+    )
+
     if not _auth_enabled:
         logger.info('No CLERK_PUBLISHABLE_KEY set — auth disabled (local mode)')
+        # Hosted tenants always set CANVAS_REQUIRE_AUTH=true (JamBot .env template).
+        # If the Clerk key goes missing there (broken .platform-keys.env mount),
+        # the admin surface must fail CLOSED — previously it failed open and every
+        # /api/admin, /api/vault and RPC-proxy endpoint became unauthenticated.
+        # Local / self-hosted installs (no CANVAS_REQUIRE_AUTH) keep the documented
+        # open-access behaviour.
+        if os.getenv('CANVAS_REQUIRE_AUTH', '').strip().lower() == 'true':
+            logger.error('CANVAS_REQUIRE_AUTH=true but no Clerk key — admin surface fail-closed')
+
+            @app.before_request
+            def block_admin_unconfigured():
+                path = request.path
+                if (path == '/admin' or path.startswith('/admin/')
+                        or path == '/src/admin.html'
+                        or any(path.startswith(p) for p in _ADMIN_ONLY_PREFIXES)):
+                    return jsonify({
+                        'error': 'Admin surface disabled: auth required but Clerk is not configured',
+                        'code': 'admin_auth_unconfigured',
+                    }), 503
     else:
         # Routes that never require authentication:
         _PUBLIC_PREFIXES = (
@@ -163,20 +196,6 @@ def create_app(config_override: dict = None):
         # without a Clerk JWT. Set AGENT_API_KEY in the container .env.
         _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
 
-        # Privileged surfaces — require an admin user (services.auth.ADMIN_USER_IDS),
-        # not just any allowlisted tenant user. ALLOWED_USER_IDS gates the voice app;
-        # these endpoints can rewrite vault credentials, openclaw.json (incl. provider
-        # baseUrl/apiKey), agent workspace files, and inject into the live agent session.
-        _ADMIN_ONLY_PREFIXES = (
-            '/api/admin/',
-            '/api/vault/',      # oauth callback is exempted via _PUBLIC_PREFIXES above
-            '/api/workspace/',
-            '/api/refactor/',
-            '/api/server-stats',
-            '/api/plugins/',    # install/uninstall/restart/config (assets exempted above)
-            '/api/plugins',     # bare list endpoint
-        )
-
         @app.before_request
         def require_auth():
             """Block unauthenticated requests to all non-exempt routes.
@@ -205,7 +224,9 @@ def create_app(config_override: dict = None):
             # Always allow health probes and static assets
             if path in _PUBLIC_EXACT:
                 return
-            if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+            # /src/ is public (login-screen assets) EXCEPT the admin shell itself —
+            # /src/admin.html must go through the same admin gate as /admin.
+            if path != '/src/admin.html' and any(path.startswith(p) for p in _PUBLIC_PREFIXES):
                 return
             # Canvas pages and images have their own auth logic (public flag)
             # handled inside canvas_bp — let them through here
@@ -223,6 +244,7 @@ def create_app(config_override: dict = None):
             # Clerk-path gate (single source of truth).
             _is_admin_path = (
                 path == '/admin' or path.startswith('/admin/')
+                or path == '/src/admin.html'
                 or any(path.startswith(p) for p in _ADMIN_ONLY_PREFIXES)
             )
 

@@ -243,6 +243,21 @@ def _write_json(path: Path, data: dict):
     tmp.replace(path)
 
 
+def _write_json_inplace(path: Path, data: dict):
+    """Write JSON in place (same inode) — required for single-file bind mounts.
+
+    openclaw.json reaches this container as a single-file docker bind; a
+    tmp+rename there fails with EBUSY, and even where it succeeds it swaps the
+    inode so the change never reaches the host file the openclaw container
+    watches. One serialized write + fsync keeps the mount intact.
+    """
+    serialized = json.dumps(data, indent=2)
+    with open(path, 'w') as fh:
+        fh.write(serialized)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
 def _mask_key(key: str) -> str:
     """Mask an API key for display: show first 6 and last 4 chars."""
     if not key or len(key) < 12:
@@ -1631,7 +1646,9 @@ def set_model_selection(username: str, primary: str = None, fallback: str = None
             defaults.setdefault('models', {})[fallback] = {}
 
     try:
-        _write_json(config_path, config)
+        # In-place, NOT _write_json: openclaw.json is a single-file bind mount
+        # on template-shaped tenants — tmp+rename breaks the mount.
+        _write_json_inplace(config_path, config)
     except (PermissionError, OSError) as exc:
         logger.warning(
             f"Cannot write {config_path} ({exc}); model selection update "

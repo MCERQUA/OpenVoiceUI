@@ -24,8 +24,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ADAPTER_PATHS = {
-    'clawdbot':  '../adapters/ClawdBotAdapter.js',
-    'hume-evi':  '../adapters/hume-evi.js',
+    'clawdbot':       '../adapters/ClawdBotAdapter.js',
+    'hume-evi':       '../adapters/hume-evi.js',
+    'xai-realtime':   '../adapters/xai-realtime.js',
     // Add future adapters here:
     // 'elevenlabs-classic': '../adapters/elevenlabs-classic.js',
     // 'hybrid':             '../adapters/hybrid.js',
