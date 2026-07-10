@@ -22,6 +22,19 @@ logger = logging.getLogger(__name__)
 canvas_styles_bp = Blueprint('canvas_styles', __name__)
 
 
+@canvas_styles_bp.after_request
+def _no_store(resp):
+    # Canvas no-cache policy: style state must never be served stale — a cached
+    # /api/canvas/styles response makes the picker show the OLD active style
+    # after switching (looks like the choice didn't save).
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    resp.headers['CDN-Cache-Control'] = 'no-store'
+    resp.headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
+    return resp
+
+
 @canvas_styles_bp.get('/api/canvas/styles')
 def list_styles():
     include_archived = request.args.get('archived') == '1'
