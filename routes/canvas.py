@@ -480,6 +480,11 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
     page_id = Path(filename).stem
     category = suggest_category(title, content)
 
+    # Stamp the tenant's active canvas style — the serve-time base-CSS injection
+    # follows the style the page was authored under (legacy pages keep dark).
+    from services.canvas_styles import get_active_style_id
+    active_style = get_active_style_id()
+
     # Extract canonical icon from the page HTML meta tag
     page_icon = extract_page_icon(content) if content else None
     if not page_icon:
@@ -501,6 +506,9 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
         # Update icon from page HTML if present (page is source of truth)
         if page_icon:
             manifest['pages'][page_id]['icon'] = page_icon
+        # Rewritten pages are re-authored under the current active style
+        if active_style:
+            manifest['pages'][page_id]['style'] = active_style
     else:
         is_new_page = True
         manifest['pages'][page_id] = {
@@ -517,6 +525,8 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
             'voice_aliases': generate_voice_aliases(title),
             'access_count': 0,
         }
+        if active_style:
+            manifest['pages'][page_id]['style'] = active_style
         if page_icon:
             manifest['pages'][page_id]['icon'] = page_icon
     if category not in manifest['categories']:
@@ -771,30 +781,22 @@ def canvas_pages_proxy(path):
                 content_str = content.decode('utf-8', errors='replace')
                 content = content_str.encode('utf-8')
 
-                # Inject base dark-theme fallback + padding for UI chrome clearance.
+                # Inject base-theme fallback + padding for UI chrome clearance.
                 # Edge tabs are 44px wide on left+right — safe area is 52px each side.
                 # CSS custom props let fixed/absolute elements also honour the safe area.
-                _base_css = (
-                    b'<style id="canvas-base-styles">'
-                    b':root{'
-                    b'--canvas-safe-top:25px;'
-                    b'--canvas-safe-right:25px;'
-                    b'--canvas-safe-bottom:25px;'
-                    b'--canvas-safe-left:25px;}'
-                    b'html,body{'
-                    b'padding:25px!important;'
-                    b'box-sizing:border-box!important;'
-                    b'color:#e2e8f0;'
-                    b'background:#0a0a0a;}'
-                    b'h1,h2,h3,h4{color:#fff;}'
-                    b'a{color:#fb923c;}'
-                    b'*,html,body{scrollbar-width:thin;scrollbar-color:#3a3a42 transparent;}'
-                    b'::-webkit-scrollbar{width:5px!important;height:5px!important;}'
-                    b'::-webkit-scrollbar-track{background:transparent!important;}'
-                    b'::-webkit-scrollbar-thumb{background:#3a3a42!important;border-radius:99px!important;}'
-                    b'::-webkit-scrollbar-thumb:hover{background:#555!important;}'
-                    b'</style>'
-                )
+                # Colors come from the style the page was authored under (canvas
+                # style system); pages with no style stamp get the legacy dark base.
+                # Color rules are :where()-wrapped (zero specificity) so page-authored
+                # CSS always wins — see services/canvas_styles.py.
+                from services.canvas_styles import base_css_for
+                _page_style = None
+                try:
+                    _style_manifest = load_canvas_manifest()
+                    _page_style = _style_manifest.get('pages', {}).get(
+                        Path(path).stem, {}).get('style')
+                except Exception:
+                    pass
+                _base_css = base_css_for(_page_style)
                 # Inject error bridge — posts JS errors back to parent for debugging
                 _error_bridge = (
                     b'<script id="canvas-error-bridge">'

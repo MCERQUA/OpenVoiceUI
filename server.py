@@ -155,6 +155,9 @@ app.register_blueprint(admin_bp)
 from routes.theme import theme_bp
 app.register_blueprint(theme_bp)
 
+from routes.canvas_styles import canvas_styles_bp
+app.register_blueprint(canvas_styles_bp)
+
 from routes.conversation import conversation_bp, clean_for_tts
 app.register_blueprint(conversation_bp)
 
