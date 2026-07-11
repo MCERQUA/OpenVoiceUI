@@ -373,6 +373,7 @@ def sync_canvas_manifest() -> dict:
 # the route), so pages silently fell back to the generic document icon
 # whenever an agent skipped the step. This is the enforcement layer.
 _ICON_GEN_RETRY_COOLDOWN = 6 * 3600  # seconds — backoff after a failed attempt
+_icon_gen_lock = threading.Lock()  # single-flight guard — see _kick_off_pending_icon_generation
 
 
 def _kick_off_pending_icon_generation(manifest: dict) -> None:
@@ -380,8 +381,18 @@ def _kick_off_pending_icon_generation(manifest: dict) -> None:
     page still missing one. Must never run inline here — this function is
     called on every /api/canvas/manifest sync (throttled to 60s, but still a
     request path polled by every open desktop), and Gemini calls take
-    seconds. The thread generates sequentially, never concurrently, so a
-    tenant with many icon-less pages doesn't fire a burst of API calls."""
+    seconds.
+
+    Single-flight: _kick_off_pending_icon_generation is called on every sync,
+    and a large backlog takes many sync cycles (2s stagger per page) to work
+    through. Without this lock, each cycle spawned its OWN thread over the
+    SAME still-pending list — multiple overlapping threads generating the
+    same pages concurrently. That burst blew through Gemini's rate limit
+    (confirmed live: 429s across 139 pages) and none of them recovered until
+    their independent 6h cooldowns expired. Only one batch may run at a time,
+    fleet-wide within this process."""
+    if not _icon_gen_lock.acquire(blocking=False):
+        return  # a batch is already in flight — this sync cycle's backlog will be picked up next time
     now = time.time()
     pending = []
     for page_id, page_data in manifest.get('pages', {}).items():
@@ -392,12 +403,20 @@ def _kick_off_pending_icon_generation(manifest: dict) -> None:
             continue
         pending.append(page_id)
     if not pending:
+        _icon_gen_lock.release()
         return
     threading.Thread(target=_generate_pending_icons, args=(pending,), daemon=True).start()
 
 
 def _generate_pending_icons(page_ids) -> None:
     """Background-thread worker — see _kick_off_pending_icon_generation()."""
+    try:
+        _generate_pending_icons_inner(page_ids)
+    finally:
+        _icon_gen_lock.release()
+
+
+def _generate_pending_icons_inner(page_ids) -> None:
     from routes.icons import generate_icon_image, IconGenerationError
     logger = logging.getLogger(__name__)
     for i, page_id in enumerate(page_ids):

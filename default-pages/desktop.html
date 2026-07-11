@@ -882,6 +882,7 @@ let knownPages = [];       // all page IDs we've ever seen
 let _manifestTimer = null;
 let wallpaperUrl = null;   // server URL of custom desktop wallpaper
 let savedPageCategories = {}; // { pageId: catId } — persists drag-to-folder assignments across fetchManifest cycles
+let recentPages = []; // most-recently-opened page ids, newest first — Start Menu shows the last 2
 
 // Breakpoint helpers
 function getBreakpoint() {
@@ -910,7 +911,7 @@ function _doSaveState() {
   // Always save full state to master desktop entry (iconPositions = desktop positions)
   const state = JSON.stringify({
     theme: currentTheme, iconPositions, recycleBin,
-    customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories,
+    customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories, recentPages,
   });
   const saves = [
     fetch('/api/canvas/manifest/page/desktop', {
@@ -958,6 +959,7 @@ async function loadState() {
           if (state.knownPages) knownPages = state.knownPages;
           if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
           if (state.savedPageCategories) savedPageCategories = state.savedPageCategories;
+          if (state.recentPages) recentPages = state.recentPages;
         }
       } catch(e) {}
     }
@@ -2218,6 +2220,12 @@ function showStartCategoryFlyout(anchorEl, catId) {
   el.className = 'ctx-submenu sm-flyout';
   el.style.display = 'block';
   el.style.position = 'absolute';
+  // .ctx-submenu's base rule has no z-index of its own — it normally relies
+  // on being DOM-nested inside #context-menu (z-index:10000). This flyout is
+  // appended to #app as a SIBLING of #start-menu instead (see comment above),
+  // so it needs an explicit z-index above #start-menu's 9500 or it renders
+  // behind the menu it's supposed to expand out of.
+  el.style.zIndex = '9600';
 
   let html = '';
   if (!pages.length) {
@@ -2313,12 +2321,13 @@ function buildStartMenu() {
 
   html += '<div class="sm-body">';
   html += '<div class="sm-left">';
-  // Recent/pinned pages
-  const pinned = ['bored-arcade','civ-sim','music-library','wolf3d-engine','office-hub'];
-  pinned.forEach(pid => {
+  // Recently opened pages — real usage (see openCanvasPage), filtered against
+  // both PAGES (still exists) AND recycleBin (not trashed) so a recycled page
+  // can't keep showing up here just because the manifest hasn't purged it yet.
+  const recent = recentPages.filter(pid => PAGES[pid] && !recycleBin.includes(pid)).slice(0, 2);
+  recent.forEach(pid => {
     const p = PAGES[pid];
-    if (!p) return;
-    html += `<div class="sm-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><div class="sm-icon">${getIcon('document')}</div>${p.name}</div>`;
+    html += `<div class="sm-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><div class="sm-icon">${getIcon(getPageIconType(p.cat, pid, p.name))}</div>${p.name}</div>`;
   });
   html += '<div class="sm-separator"></div>';
   // All Programs submenu - show categories, hover expands a flyout of pages in it
@@ -2708,6 +2717,12 @@ function refreshExplorers() {
    OPEN CANVAS PAGE
    ══════════════════════════════════════════════════════════════ */
 function openCanvasPage(pageId, newWindow) {
+  // Track for the Start Menu's recent-pages row — real usage, not a
+  // hardcoded shortlist (that list used to keep showing pages long after
+  // they'd been recycled, since it only checked PAGES[pid] existence and
+  // never checked recycleBin membership).
+  recentPages = [pageId, ...recentPages.filter(id => id !== pageId)].slice(0, 2);
+  saveState();
   if (newWindow) {
     window.open('/pages/' + pageId + '.html', '_blank');
     return;
