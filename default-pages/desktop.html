@@ -149,8 +149,9 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
 .sm-item{
   padding:5px 12px;cursor:pointer;
   font-size:12px;display:flex;align-items:center;gap:8px;
-  white-space:nowrap;
+  white-space:nowrap;position:relative;
 }
+.sm-item.has-sub::after{content:'▶';position:absolute;right:8px;font-size:8px;opacity:.6}
 .sm-item .sm-icon{width:24px;height:24px;flex-shrink:0}
 .sm-item .sm-icon svg{width:100%;height:100%}
 .sm-separator{margin:2px 0;border:none}
@@ -334,8 +335,10 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   border-radius:6px;
 }
 
-/* ── Mobile / small container responsive ── */
-@media (max-width:600px) {
+/* ── Mobile / small container responsive ──
+   Thresholds must match JS getBreakpoint() (480=phone, 1024=tablet ceiling)
+   so icon sizing/grid math and CSS layout never disagree. */
+@media (max-width:768px) {
   /* Desktop icons — smaller grid */
   .desktop-icon{width:56px!important}
   .desktop-icon .icon-img{width:32px!important;height:32px!important}
@@ -383,7 +386,7 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   #dock .dock-icon svg{width:28px!important;height:28px!important}
   #dock{padding:2px 4px!important;gap:1px!important;border-radius:10px!important}
 }
-@media (max-width:400px) {
+@media (max-width:480px) {
   .desktop-icon{width:48px!important}
   .desktop-icon .icon-img{width:26px!important;height:26px!important}
   .desktop-icon .icon-label{font-size:8px!important;max-width:46px!important}
@@ -833,6 +836,10 @@ const ICONS = {
   recycle:`<svg viewBox="0 0 48 48"><rect x="14" y="6" width="20" height="4" rx="2" fill="#7f8c8d"/><rect x="20" y="4" width="8" height="4" rx="1" fill="#95a5a6"/><rect x="10" y="10" width="28" height="3" rx="1" fill="#95a5a6"/><path d="M13 13h22l-2 31H15z" fill="#bdc3c7"/><path d="M13 13h22l-1 4H14z" fill="#aab4be"/><line x1="20" y1="20" x2="19" y2="40" stroke="#95a5a6" stroke-width="1.5"/><line x1="24" y1="20" x2="24" y2="40" stroke="#95a5a6" stroke-width="1.5"/><line x1="28" y1="20" x2="29" y2="40" stroke="#95a5a6" stroke-width="1.5"/></svg>`,
   'recycle-full':`<svg viewBox="0 0 48 48"><rect x="14" y="6" width="20" height="4" rx="2" fill="#7f8c8d"/><rect x="20" y="4" width="8" height="4" rx="1" fill="#95a5a6"/><rect x="10" y="10" width="28" height="3" rx="1" fill="#95a5a6"/><path d="M13 13h22l-2 31H15z" fill="#bdc3c7"/><path d="M13 13h22l-1 4H14z" fill="#aab4be"/><rect x="17" y="15" width="5" height="8" rx="1" fill="#e8e8e8" transform="rotate(-10 19 19)"/><rect x="25" y="14" width="5" height="9" rx="1" fill="#d0d0d0" transform="rotate(5 27 18)"/><rect x="20" y="17" width="4" height="7" rx="1" fill="#f0f0f0" transform="rotate(-3 22 20)"/></svg>`,
   document:`<svg viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><line x1="16" y1="22" x2="34" y2="22" stroke="#ddd" stroke-width="1.5"/><line x1="16" y1="28" x2="34" y2="28" stroke="#ddd" stroke-width="1.5"/><line x1="16" y1="34" x2="28" y2="34" stroke="#ddd" stroke-width="1.5"/></svg>`,
+  image:`<svg viewBox="0 0 48 48"><rect x="4" y="6" width="40" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><circle cx="16" cy="18" r="4.5" fill="#f5c842"/><path d="M8 36l11-13 8 9 5-6 12 10v2a2 2 0 01-2 2H10a2 2 0 01-2-2v-2z" fill="#5dade2"/></svg>`,
+  video:`<svg viewBox="0 0 48 48"><rect x="4" y="10" width="40" height="28" rx="3" fill="#1a1a2e"/><path d="M20 18l12 8-12 8z" fill="#fff"/><rect x="4" y="10" width="40" height="5" fill="#0d0d1a"/><circle cx="9" cy="12.5" r="1.2" fill="#e63030"/><circle cx="14" cy="12.5" r="1.2" fill="#f5c842"/><circle cx="19" cy="12.5" r="1.2" fill="#34d399"/></svg>`,
+  pdf:`<svg viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><rect x="9" y="26" width="24" height="14" rx="2" fill="#e63030"/><text x="21" y="36" text-anchor="middle" font-family="system-ui,sans-serif" font-size="9" font-weight="800" fill="#fff">PDF</text></svg>`,
+  archive:`<svg viewBox="0 0 48 48"><rect x="6" y="8" width="36" height="32" rx="2" fill="#e8b84b" stroke="#c99a35" stroke-width="1"/><rect x="20" y="8" width="8" height="32" fill="#c99a35" opacity="0.5"/><rect x="20" y="8" width="8" height="4" fill="#c99a35"/><rect x="20" y="16" width="8" height="4" fill="#c99a35"/><rect x="20" y="24" width="8" height="4" fill="#c99a35"/><circle cx="24" cy="33" r="3" fill="#7f8c8d"/></svg>`,
   internet:`<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="20" fill="#3498db"/><circle cx="24" cy="24" r="20" fill="none" stroke="#2980b9" stroke-width="1"/><ellipse cx="24" cy="24" rx="10" ry="20" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><line x1="4" y1="24" x2="44" y2="24" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><ellipse cx="24" cy="15" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/><ellipse cx="24" cy="33" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/></svg>`,
   music:`<svg viewBox="0 0 48 48"><circle cx="14" cy="36" r="6" fill="#e74c3c"/><circle cx="14" cy="36" r="2" fill="#c0392b"/><circle cx="34" cy="32" r="6" fill="#e74c3c"/><circle cx="34" cy="32" r="2" fill="#c0392b"/><rect x="18" y="8" width="3" height="28" fill="#2c3e50" rx="1"/><rect x="38" y="4" width="3" height="28" fill="#2c3e50" rx="1"/><rect x="18" y="6" width="23" height="5" fill="#2c3e50" rx="1"/></svg>`,
   game:`<svg viewBox="0 0 48 48"><rect x="4" y="14" width="40" height="22" rx="11" fill="#2c3e50"/><rect x="4" y="14" width="40" height="11" rx="11" fill="#34495e"/><circle cx="14" cy="25" r="3.5" fill="#ecf0f1"/><rect x="11.5" y="23.5" width="5" height="1.5" rx=".5" fill="#bdc3c7"/><rect x="13.2" y="21.5" width="1.5" height="5" rx=".5" fill="#bdc3c7"/><circle cx="34" cy="22" r="2.5" fill="#e74c3c"/><circle cx="38" cy="26" r="2.5" fill="#3498db"/><circle cx="30" cy="26" r="2.5" fill="#2ecc71"/><circle cx="34" cy="30" r="2.5" fill="#f39c12"/></svg>`,
@@ -889,8 +896,13 @@ function getActivePositions() {
   return iconPositions;
 }
 
-// Save state to server (debounced)
+// Save state to server (debounced). _stateDirty guards fetchManifest from
+// clobbering unsaved local changes (drag positions, etc.) — a 30s manifest
+// poll landing between a drag and its debounced save used to silently
+// discard the drag.
+let _stateDirty = false;
 function saveState() {
+  _stateDirty = true;
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(_doSaveState, 500);
 }
@@ -900,25 +912,28 @@ function _doSaveState() {
     theme: currentTheme, iconPositions, recycleBin,
     customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories,
   });
-  fetch('/api/canvas/manifest/page/desktop', {
-    method: 'PATCH',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({description: state}),
-  }).catch(() => {});
+  const saves = [
+    fetch('/api/canvas/manifest/page/desktop', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({description: state}),
+    }).catch(() => {}),
+  ];
   // Save breakpoint-specific positions to their own manifest entries
   if (currentBreakpoint === 'tablet') {
-    fetch('/api/canvas/manifest/page/desktop-tablet', {
+    saves.push(fetch('/api/canvas/manifest/page/desktop-tablet', {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsTablet})}),
-    }).catch(() => {});
+    }).catch(() => {}));
   } else if (currentBreakpoint === 'phone') {
-    fetch('/api/canvas/manifest/page/desktop-phone', {
+    saves.push(fetch('/api/canvas/manifest/page/desktop-phone', {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsPhone})}),
-    }).catch(() => {});
+    }).catch(() => {}));
   }
+  Promise.all(saves).finally(() => { _stateDirty = false; });
 }
 
 // Load state from server — fetch all three breakpoint entries in parallel
@@ -973,6 +988,7 @@ async function loadState() {
    MANIFEST SYNC — fetch pages dynamically from server
    ══════════════════════════════════════════════════════════════ */
 async function fetchManifest(forceSync) {
+  if (_stateDirty && !forceSync) return; // unsaved local changes — don't clobber
   try {
     const url = '/api/canvas/manifest' + (forceSync ? '?sync=1' : '');
     const resp = await fetch(url);
@@ -1191,10 +1207,11 @@ function getIconName(item) {
 
 function buildDesktopIcons() {
   const desktop = document.getElementById('desktop');
+  bindDesktopIconListeners();
   desktop.querySelectorAll('.desktop-icon').forEach(el => el.remove());
   const isRightToLeft = currentTheme === 'mac';
   const container = document.getElementById('os-container');
-  const isSmall = container && container.offsetWidth < 500;
+  const isSmall = container && container.offsetWidth <= 480; // matches getBreakpoint() phone threshold
   const startX = isRightToLeft ? desktop.offsetWidth - (isSmall ? 65 : 90) : 10;
   const startY = getDesktopTop() + 10;
   const colH = getDesktopHeight() - 20;
@@ -1224,17 +1241,44 @@ function buildDesktopIcons() {
       ? `<img src="${item.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
       : getIcon(recycleIcon);
     el.innerHTML = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
-    el.addEventListener('mousedown', (e) => onIconMouseDown(e, item));
-    el.addEventListener('touchstart', (e) => onIconTouchStart(e, item), {passive:false});
-    el.addEventListener('dblclick', (e) => { e.stopPropagation(); onIconDblClick(item); });
     desktop.appendChild(el);
+  });
+}
+
+// Delegated icon listeners — attached once to #desktop, never re-attached on
+// rebuild. buildDesktopIcons() destroys/recreates icon DOM every manifest
+// poll; per-icon listeners would otherwise be re-registered every cycle.
+let _desktopIconListenersBound = false;
+function bindDesktopIconListeners() {
+  if (_desktopIconListenersBound) return;
+  _desktopIconListenersBound = true;
+  const desktop = document.getElementById('desktop');
+  desktop.addEventListener('mousedown', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) onIconMouseDown(e, item);
+  });
+  desktop.addEventListener('touchstart', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) onIconTouchStart(e, item);
+  }, {passive:false});
+  desktop.addEventListener('dblclick', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) { e.stopPropagation(); onIconDblClick(item); }
   });
 }
 
 function onIconTouchStart(e, item) {
   e.preventDefault();
   const touch = e.touches[0];
-  const el = e.currentTarget;
+  // e.currentTarget is #desktop (delegated listener) — find the actual icon.
+  const el = e.target.closest('.desktop-icon');
+  if (!el) return;
   const startX = touch.clientX, startY = touch.clientY;
   const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
   let moved = false;
@@ -1296,7 +1340,9 @@ function onIconMouseDown(e, item) {
   selectedIcons.add(item.id);
   updateIconSelection();
 
-  const el = e.currentTarget;
+  // e.currentTarget is #desktop (delegated listener) — find the actual icon.
+  const el = e.target.closest('.desktop-icon');
+  if (!el) return;
   const startX = e.clientX, startY = e.clientY;
   const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
   let moved = false;
@@ -1458,28 +1504,21 @@ function createWindow(opts) {
     ? {close:'', min:'', max:''}
     : {close:'\u00D7', min:'\u2013', max:'\u25A1'};
 
-  el.innerHTML = `
-    <div class="titlebar" onmousedown="startWindowDrag(event,${id})">
-      <div class="titlebar-btns">
+  const btnsHtml = `<div class="titlebar-btns">
         <button class="tb-btn close" onclick="closeWindow(${id})" title="Close">${btnSymbols.close}</button>
         <button class="tb-btn min" onclick="minimizeWindow(${id})" title="Minimize">${btnSymbols.min}</button>
         <button class="tb-btn max" onclick="maximizeWindow(${id})" title="Maximize">${btnSymbols.max}</button>
-      </div>
-      <div class="titlebar-title">${opts.title || 'Window'}</div>
-      ${!isMacLike ? '<div class="titlebar-btns"><button class="tb-btn min" onclick="minimizeWindow('+id+')" title="Minimize">\u2013</button><button class="tb-btn max" onclick="maximizeWindow('+id+')" title="Maximize">\u25A1</button><button class="tb-btn close" onclick="closeWindow('+id+')" title="Close">\u00D7</button></div>' : ''}
+      </div>`;
+  const titlebarInnerHtml = isMacLike
+    ? `${btnsHtml}<div class="titlebar-title">${opts.title || 'Window'}</div>`
+    : `<div class="titlebar-title">${opts.title || 'Window'}</div>${btnsHtml}`;
+
+  el.innerHTML = `
+    <div class="titlebar" onmousedown="startWindowDrag(event,${id})">
+      ${titlebarInnerHtml}
     </div>
     <div class="win-body">${opts.content || ''}</div>
   `;
-
-  // For non-mac-like themes, remove the first set of buttons (left-side ones)
-  if (!isMacLike) {
-    const firstBtns = el.querySelector('.titlebar-btns');
-    if (firstBtns) firstBtns.remove();
-  } else {
-    // For mac-like, remove the second set (right-side)
-    const allBtns = el.querySelectorAll('.titlebar-btns');
-    if (allBtns.length > 1) allBtns[1].remove();
-  }
 
   // Add resize handles
   ['n','s','e','w','nw','ne','sw','se'].forEach(dir => {
@@ -2132,6 +2171,7 @@ function closeAllMenus() {
   document.getElementById('start-menu').classList.remove('show');
   contextMenuOpen = false;
   startMenuOpen = false;
+  hideStartFlyoutNow();
 }
 
 function arrangeIcons() {
@@ -2153,6 +2193,72 @@ function toggleStartMenu() {
   buildStartMenu();
   menu.classList.add('show');
   startMenuOpen = true;
+}
+
+/* ── Start Menu category flyouts (real Windows-style nested submenus) ──
+   Reuses the existing .ctx-submenu hover-flyout look (see CONTEXT MENU
+   section) but appended to #app instead of nested in the row, because
+   #start-menu / .sm-left clip overflow (needed for their own scrollbars)
+   and would otherwise chop the flyout off. */
+let _smFlyoutEl = null;
+let _smFlyoutHideTimer = null;
+let _smFlyoutCatId = null;
+
+function showStartCategoryFlyout(anchorEl, catId) {
+  clearTimeout(_smFlyoutHideTimer);
+  if (_smFlyoutCatId === catId && _smFlyoutEl) return;
+  hideStartFlyoutNow();
+  _smFlyoutCatId = catId;
+
+  const pages = Object.entries(PAGES)
+    .filter(([id, p]) => p.cat === catId && !recycleBin.includes(id))
+    .sort((a, b) => a[1].name.localeCompare(b[1].name));
+
+  const el = document.createElement('div');
+  el.className = 'ctx-submenu sm-flyout';
+  el.style.display = 'block';
+  el.style.position = 'absolute';
+
+  let html = '';
+  if (!pages.length) {
+    html += '<div class="ctx-item" style="opacity:.5;cursor:default">(empty)</div>';
+  } else {
+    pages.slice(0, 30).forEach(([pid, p]) => {
+      html += `<div class="ctx-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><span style="display:inline-block;width:16px;height:16px;vertical-align:-3px;margin-right:6px">${getIcon(getPageIconType(catId, pid, p.name))}</span>${p.name}</div>`;
+    });
+  }
+  html += '<div class="ctx-separator"></div>';
+  html += `<div class="ctx-item" onclick="openExplorer('${catId}');closeAllMenus()"><em>Open Folder…</em></div>`;
+  el.innerHTML = html;
+
+  el.addEventListener('mouseenter', () => clearTimeout(_smFlyoutHideTimer));
+  el.addEventListener('mouseleave', scheduleHideStartFlyout);
+
+  const app = document.getElementById('app');
+  app.appendChild(el);
+
+  const appRect = app.getBoundingClientRect();
+  const anchorRect = anchorEl.getBoundingClientRect();
+  const flyoutW = el.offsetWidth || 180;
+  let left = anchorRect.right - appRect.left;
+  if (left + flyoutW > appRect.width) {
+    left = anchorRect.left - appRect.left - flyoutW; // flip left if it would overflow the right edge
+  }
+  el.style.left = Math.max(0, left) + 'px';
+  el.style.top = Math.max(0, Math.min(anchorRect.top - appRect.top, appRect.height - el.offsetHeight)) + 'px';
+
+  _smFlyoutEl = el;
+}
+
+function scheduleHideStartFlyout() {
+  clearTimeout(_smFlyoutHideTimer);
+  _smFlyoutHideTimer = setTimeout(hideStartFlyoutNow, 250);
+}
+
+function hideStartFlyoutNow() {
+  if (_smFlyoutEl) { _smFlyoutEl.remove(); _smFlyoutEl = null; }
+  _smFlyoutCatId = null;
+  clearTimeout(_smFlyoutHideTimer);
 }
 
 function buildStartMenu() {
@@ -2185,7 +2291,7 @@ function buildStartMenu() {
     html += '<div class="ctx-item" onclick="openThemeSettings();closeAllMenus()">'+(isMac?'System Preferences...':(isUbuntu?'Settings...':'Control Panel'))+'</div>';
     html += '<div class="ctx-separator"></div>';
     Object.keys(CATEGORIES).forEach(catId => {
-      html += `<div class="ctx-item" onclick="openExplorer('${catId}');closeAllMenus()">${CATEGORIES[catId].name}</div>`;
+      html += `<div class="ctx-item has-sub" onmouseenter="showStartCategoryFlyout(this,'${catId}')" onmouseleave="scheduleHideStartFlyout()" onclick="openExplorer('${catId}');closeAllMenus()">${CATEGORIES[catId].name}</div>`;
     });
     html += '<div class="ctx-separator"></div>';
     html += '<div class="ctx-item" onclick="openCanvasPage(\'file-explorer\');closeAllMenus()">'+(isMac?'Open Finder':(isUbuntu?'Files':'File Manager'))+'</div>';
@@ -2215,9 +2321,9 @@ function buildStartMenu() {
     html += `<div class="sm-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><div class="sm-icon">${getIcon('document')}</div>${p.name}</div>`;
   });
   html += '<div class="sm-separator"></div>';
-  // All Programs submenu - show categories
+  // All Programs submenu - show categories, hover expands a flyout of pages in it
   Object.keys(CATEGORIES).forEach(catId => {
-    html += `<div class="sm-item" onclick="openExplorer('${catId}');closeAllMenus()"><div class="sm-icon">${getIcon('folder')}</div>${CATEGORIES[catId].name}</div>`;
+    html += `<div class="sm-item has-sub" onmouseenter="showStartCategoryFlyout(this,'${catId}')" onmouseleave="scheduleHideStartFlyout()" onclick="openExplorer('${catId}');closeAllMenus()"><div class="sm-icon">${getIcon('folder')}</div>${CATEGORIES[catId].name}</div>`;
   });
   html += '</div>';
 
@@ -2443,6 +2549,18 @@ function buildExplorerGrid(catId) {
 function getPageIconType(cat, pageId, pageName) {
   const n = (pageName || pageId || '').toLowerCase();
   const pid = (pageId || '').toLowerCase();
+  // File-type icons — a literal extension on the id/name (e.g. an uploaded
+  // image/video/audio/pdf surfaced as a desktop shortcut) is a stronger
+  // signal than name-keyword guessing, so it's checked first.
+  const extMatch = pid.match(/\.([a-z0-9]+)$/) || n.match(/\.([a-z0-9]+)$/);
+  if (extMatch) {
+    const ext = extMatch[1];
+    if (['png','jpg','jpeg','gif','webp','svg','bmp','avif'].includes(ext)) return 'image';
+    if (['mp4','mov','webm','avi','mkv'].includes(ext)) return 'video';
+    if (['mp3','wav','m4a','ogg','flac'].includes(ext)) return 'music';
+    if (ext === 'pdf') return 'pdf';
+    if (['zip','tar','gz','rar','7z'].includes(ext)) return 'archive';
+  }
   // Specific page ID overrides — precise icons for known pages
   const pidMap = {
     'voice-studio':'voice','music-library':'music','song-tagger':'music',
@@ -2464,7 +2582,7 @@ function getPageIconType(cat, pageId, pageName) {
   if (/voice.studio|voice.clone/.test(n)) return 'voice';
   if (/music|song|audio|tts|suno/.test(n)) return 'music';
   if (/game|arcade|wolf|doom|quake|duke|play|shooter|civ.sim|bored/.test(n)) return 'game';
-  if (/video|film|remotion/.test(n)) return 'folder';
+  if (/video|film|remotion/.test(n)) return 'video';
   if (/book|doc|ref|guide|manual/.test(n)) return 'book';
   if (/tool|build|code|dev|api|terminal/.test(n)) return 'tools';
   if (/crm|contact|lead/.test(n)) return 'crm';
@@ -2604,7 +2722,7 @@ function openCanvasPage(pageId, newWindow) {
     type: 'canvas-action',
     action: 'navigate',
     page: pageId,
-  }, '*');
+  }, window.location.origin);
 }
 
 /* ══════════════════════════════════════════════════════════════

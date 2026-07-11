@@ -187,39 +187,47 @@ def serve_icon(name):
 #  AI ICON GENERATION (Gemini)
 # ══════════════════════════════════════════════════════════════
 
-@icons_bp.route('/api/icons/generate', methods=['POST'])
-def generate_icon():
+# Default style for generated icons — modern glassmorphic 3D, matching the
+# rest of the desktop's move away from flat/retro toward an Apple-style look.
+# Override per-call with the `style` param (e.g. retro/pixel-art for games).
+DEFAULT_ICON_STYLE = (
+    'modern 3D glassmorphic app icon, frosted translucent glass material, '
+    'soft rounded squircle shape, subtle depth and drop shadow, vibrant '
+    'gradient accent color, macOS Big Sur / visionOS app icon style'
+)
+
+
+class IconGenerationError(Exception):
+    """Raised by generate_icon_image() on any failure — callers (HTTP route
+    or internal auto-gen hook) decide how to surface it."""
+    def __init__(self, message, status=502):
+        super().__init__(message)
+        self.status = status
+
+
+def generate_icon_image(prompt, name=None, style=None):
     """
-    Generate a custom icon via Gemini image generation.
+    Core icon-generation logic — callable directly (used by the auto-gen
+    hook in routes/canvas.py) or via the /api/icons/generate HTTP route.
 
-    POST body:
-      { "prompt": "description of icon",
-        "name": "optional-filename-slug",
-        "style": "optional style override" }
-
-    Returns:
-      { "url": "/api/icons/generated/my-icon.png",
-        "name": "my-icon",
-        "prompt": "..." }
+    Returns a dict: {url, name, filename, prompt, size}
+    Raises IconGenerationError on any failure.
     """
     if not GEMINI_API_KEY:
-        return jsonify({'error': 'GEMINI_API_KEY not configured'}), 500
+        raise IconGenerationError('GEMINI_API_KEY not configured', status=500)
 
-    data = request.get_json(silent=True) or {}
-    user_prompt = data.get('prompt', '').strip()
+    user_prompt = (prompt or '').strip()
     if not user_prompt:
-        return jsonify({'error': 'Missing "prompt" field'}), 400
+        raise IconGenerationError('Missing prompt', status=400)
 
-    name_slug = data.get('name', '').strip()
-    style = data.get('style', '').strip()
+    name_slug = (name or '').strip()
+    style = (style or '').strip()
 
     # Build the generation prompt
     # NOTE: NEVER say "transparent background" — AI models render checkerboard patterns
     # instead of real alpha. Use a solid chroma-key color that we remove in post-processing.
     # The green bg is ALWAYS appended regardless of custom style — background removal depends on it.
-    base_style = style or (
-        'Windows XP style icon, clean vector art, vibrant colors, slight 3D shading'
-    )
+    base_style = style or DEFAULT_ICON_STYLE
     # Strip any "transparent" from custom styles — it causes checkerboard
     base_style = base_style.replace('transparent background', 'solid background')
     style_instruction = f'{base_style}, solid bright green (#00FF00) background'
@@ -255,7 +263,7 @@ def generate_icon():
         resp.raise_for_status()
         result = resp.json()
     except requests.RequestException as e:
-        return jsonify({'error': f'Gemini API error: {str(e)}'}), 502
+        raise IconGenerationError(f'Gemini API error: {str(e)}', status=502)
 
     # Extract image from response
     image_data = None
@@ -273,10 +281,7 @@ def generate_icon():
         pass
 
     if not image_data:
-        return jsonify({
-            'error': 'Gemini did not return an image',
-            'raw': result.get('candidates', [{}])[0].get('content', {}).get('parts', []),
-        }), 502
+        raise IconGenerationError('Gemini did not return an image', status=502)
 
     # Remove background → real PNG alpha transparency
     # Save original as backup first, then process
@@ -312,15 +317,38 @@ def generate_icon():
         'mime': mime_type,
     }, indent=2))
 
-    url = f'/api/icons/generated/{filename}'
-
-    return jsonify({
-        'url': url,
+    return {
+        'url': f'/api/icons/generated/{filename}',
         'name': safe_name,
         'filename': filename,
         'prompt': user_prompt,
         'size': len(image_data),
-    })
+    }
+
+
+@icons_bp.route('/api/icons/generate', methods=['POST'])
+def generate_icon():
+    """
+    Generate a custom icon via Gemini image generation.
+
+    POST body:
+      { "prompt": "description of icon",
+        "name": "optional-filename-slug",
+        "style": "optional style override" }
+
+    Returns:
+      { "url": "/api/icons/generated/my-icon.png",
+        "name": "my-icon",
+        "prompt": "..." }
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        result = generate_icon_image(
+            data.get('prompt', ''), name=data.get('name', ''), style=data.get('style', ''),
+        )
+    except IconGenerationError as e:
+        return jsonify({'error': str(e)}), e.status
+    return jsonify(result)
 
 
 # ══════════════════════════════════════════════════════════════

@@ -7486,7 +7486,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                             await window.CanvasMenu?.loadManifest?.();
                         } catch {}
                         const pageId = saveRes.page_id || saveRes.filename.replace(/\.html$/, '');
-                        window.CanvasControl?.showPage?.(pageId);
+                        window.CanvasControl?.showPageById?.(pageId);
                     }
                 } catch (e) {
                     console.error('[openEmbedCanvasPage] save failed:', e);
@@ -7567,8 +7567,9 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                             }
                             break;
                         case 'navigate':
-                            // Navigate to another canvas page
-                            if (page) CanvasControl.showPage(page);
+                            // Navigate to another canvas page. The desktop
+                            // sends exact page ids here — never fuzzy match.
+                            if (page) CanvasControl.showPageById(page);
                             break;
                         case 'open-url':
                             // Load external URL in the iframe
@@ -7751,14 +7752,39 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 this.openPage('desktop.html');
             },
 
-            showPage(pageName) {
-                // Fuzzy-find page by name using CanvasMenu's lookup
+            showPageById(pageId) {
+                // Exact match ONLY — no fuzzy scoring. Used by the desktop's
+                // postMessage navigation and any other caller that already
+                // knows the precise page id/filename stem (never voice input).
+                if (!pageId) return;
+                const menu = window.CanvasMenu;
+                const filename = pageId.endsWith('.html') ? pageId : pageId + '.html';
+                const stem = filename.replace(/\.html$/, '');
+                if (menu?.manifest?.pages?.[stem]) {
+                    console.log('[Canvas] showPageById exact:', stem);
+                    menu.showPage(menu.manifest.pages[stem].filename);
+                    return;
+                }
+                // Manifest doesn't have it (not synced yet, or a raw filename
+                // stem) — direct-load by filename. Still exact, no fuzzy fallback.
+                console.log('[Canvas] showPageById direct:', filename);
+                if (this.iframe) {
+                    this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
+                    localStorage.setItem('canvas_last_page', filename);
+                    this._lastMtime = null;
+                    this.show();
+                }
+            },
+
+            showPageByName(pageName) {
+                // Fuzzy-find page by name — for voice commands and agent
+                // [CANVAS:pagename] tags where the exact id isn't known.
                 if (!pageName) return;
                 const menu = window.CanvasMenu;
                 if (!menu?.manifest) {
                     // Manifest not loaded yet — try direct filename
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
-                    console.log('[Canvas] showPage direct:', filename);
+                    console.log('[Canvas] showPageByName direct:', filename);
                     if (this.iframe) {
                         this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
                         localStorage.setItem('canvas_last_page', filename);
@@ -7769,12 +7795,12 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 }
                 const match = menu.findPageByName(pageName);
                 if (match) {
-                    console.log('[Canvas] showPage matched:', match.page.display_name);
+                    console.log('[Canvas] showPageByName matched:', match.page.display_name);
                     menu.showPage(match.page.filename);
                 } else {
                     // Fallback: try as-is with .html
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
-                    console.log('[Canvas] showPage fallback:', filename);
+                    console.log('[Canvas] showPageByName fallback:', filename);
                     if (this.iframe) {
                         this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
                         localStorage.setItem('canvas_last_page', filename);
@@ -7782,6 +7808,12 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                         this.show();
                     }
                 }
+            },
+
+            showPage(pageName) {
+                // Back-compat alias — fuzzy match (voice/agent-tag callers).
+                // Programmatic exact-id callers should use showPageById().
+                this.showPageByName(pageName);
             },
 
             async updateDisplay(type, path, title) {
@@ -8517,6 +8549,11 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     }
                 }
 
+                // Reject weak matches — a bare single-word substring hit
+                // (score ~53) used to be enough to win and open the wrong
+                // page. Require at least a solid partial-name/alias match.
+                const MIN_MATCH_SCORE = 70;
+                if (bestMatch && bestMatch.score < MIN_MATCH_SCORE) return null;
                 return bestMatch;
             },
 

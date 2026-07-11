@@ -362,7 +362,78 @@ def generate_voice_aliases(title: str) -> list[str]:
 def sync_canvas_manifest() -> dict:
     """Full sync with pages directory."""
     with _manifest_lock:
-        return _sync_canvas_manifest_locked()
+        manifest = _sync_canvas_manifest_locked()
+    _kick_off_pending_icon_generation(manifest)
+    return manifest
+
+
+# Pages still missing a custom icon after HTML-meta extraction get a real
+# generated one automatically — the icon-generation skill tells agents to do
+# this themselves, but nothing enforced it (grep found no call site besides
+# the route), so pages silently fell back to the generic document icon
+# whenever an agent skipped the step. This is the enforcement layer.
+_ICON_GEN_RETRY_COOLDOWN = 6 * 3600  # seconds — backoff after a failed attempt
+
+
+def _kick_off_pending_icon_generation(manifest: dict) -> None:
+    """Fire-and-forget: spawn a background thread to generate icons for any
+    page still missing one. Must never run inline here — this function is
+    called on every /api/canvas/manifest sync (throttled to 60s, but still a
+    request path polled by every open desktop), and Gemini calls take
+    seconds. The thread generates sequentially, never concurrently, so a
+    tenant with many icon-less pages doesn't fire a burst of API calls."""
+    now = time.time()
+    pending = []
+    for page_id, page_data in manifest.get('pages', {}).items():
+        if page_id == 'desktop' or page_data.get('icon'):
+            continue
+        failed_at = page_data.get('icon_gen_failed_at')
+        if failed_at and now - failed_at < _ICON_GEN_RETRY_COOLDOWN:
+            continue
+        pending.append(page_id)
+    if not pending:
+        return
+    threading.Thread(target=_generate_pending_icons, args=(pending,), daemon=True).start()
+
+
+def _generate_pending_icons(page_ids) -> None:
+    """Background-thread worker — see _kick_off_pending_icon_generation()."""
+    from routes.icons import generate_icon_image, IconGenerationError
+    logger = logging.getLogger(__name__)
+    for i, page_id in enumerate(page_ids):
+        if i > 0:
+            time.sleep(2)  # stagger Gemini calls
+        try:
+            with _manifest_lock:
+                manifest = load_canvas_manifest()
+                page_data = manifest['pages'].get(page_id)
+                if not page_data or page_data.get('icon'):
+                    continue  # something else set an icon meanwhile
+                title = page_data.get('display_name') or page_id.replace('-', ' ').title()
+                category = page_data.get('category', 'uncategorized')
+                description = page_data.get('description', '')
+
+            prompt = f'A {category} icon for: {title}.' + (f' {description}' if description else '')
+            try:
+                result = generate_icon_image(prompt, name=f'{page_id}-icon')
+            except IconGenerationError as e:
+                logger.warning(f'Auto icon-gen failed for {page_id}: {e}')
+                with _manifest_lock:
+                    manifest = load_canvas_manifest()
+                    if page_id in manifest['pages']:
+                        manifest['pages'][page_id]['icon_gen_failed_at'] = time.time()
+                        save_canvas_manifest(manifest)
+                continue
+
+            with _manifest_lock:
+                manifest = load_canvas_manifest()
+                if page_id in manifest['pages'] and not manifest['pages'][page_id].get('icon'):
+                    manifest['pages'][page_id]['icon'] = result['url']
+                    manifest['pages'][page_id].pop('icon_gen_failed_at', None)
+                    save_canvas_manifest(manifest)
+                    logger.info(f"Auto-generated icon for {page_id}: {result['url']}")
+        except Exception as e:
+            logger.warning(f'Auto icon-gen error for {page_id}: {e}')
 
 
 def _sync_canvas_manifest_locked() -> dict:
