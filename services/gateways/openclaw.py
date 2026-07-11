@@ -635,6 +635,14 @@ class GatewayConnection:
         nonce = challenge_data.get('payload', {}).get('nonce', '')
         scopes = ["operator.admin", "operator.read", "operator.write"]
         identity = _load_device_identity()
+        # client_id "cli" is ENUM-VALIDATED by the gateway — an arbitrary label
+        # (tried "openvoiceui" 2026-07-11) is rejected with INVALID_REQUEST
+        # "/client/id must be equal to one of the allowed values". This label is
+        # the "Sender (untrusted metadata)" the agent sees in runtime context and
+        # once repeated to a customer ("you're coming in from the CLI") — that
+        # leak is handled at the prompt layer (AGENTS.md: never mention transport
+        # metadata). If relabeling is ever revisited, test enum values against a
+        # SCRATCH session, not the live voice handshake.
         device_block = _sign_device_connect(
             identity, "cli", "cli", "operator", scopes, self.auth_token, nonce
         )
