@@ -1,0 +1,32 @@
+{
+  "id": "atelier",
+  "name": "Atelier",
+  "tagline": "Editorial warmth, print-grade precision.",
+  "description": "A warm ivory page with near-black ink, Fraunces display serifs, and hairline rules. Premium print energy — Stripe Press meets a high-end annual report — with a single deep-teal accent and amber for emphasis. Depth comes from borders and spacing, never blur.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#faf8f5",
+    "surface": "#fffefb",
+    "surface-2": "#f3efe7",
+    "border": "#e4ddd0",
+    "text": "#26211a",
+    "text-secondary": "#5c5546",
+    "text-muted": "#8b8271",
+    "heading": "#1c170f",
+    "brand": "#0f766e",
+    "brand-contrast": "#fffefb",
+    "accent": "#b45309",
+    "success": "#227a4b",
+    "warning": "#b45309",
+    "danger": "#b3372e",
+    "scrollbar": "#d8d0c1",
+    "radius": "3px",
+    "radius-sm": "2px",
+    "shadow": "0 1px 0 rgba(38, 33, 26, 0.05)",
+    "font-display": "'Fraunces', Georgia, 'Times New Roman', serif",
+    "font-body": "'Source Sans 3', -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif",
+    "font-mono": "ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Source+Sans+3:ital,wght@0,400..700;1,400..600&display=swap"
+  }
+}

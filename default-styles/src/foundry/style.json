@@ -1,0 +1,32 @@
+{
+  "id": "foundry",
+  "name": "Foundry",
+  "tagline": "Dark copper industrial luxe — warm metal, condensed type",
+  "description": "A whiskey distillery's tasting room rendered as a dashboard: warm near-black brown surfaces, parchment text, molten-copper brand and glowing ember accents. Big Shoulders Display condensed uppercase headings over Assistant body — Tom Dixon lighting for your data.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#181310",
+    "surface": "#211a14",
+    "surface-2": "#2a2119",
+    "border": "#3b2d21",
+    "text": "#e9ddcc",
+    "text-secondary": "#b5a48d",
+    "text-muted": "#82715c",
+    "heading": "#f6ecdc",
+    "brand": "#c2703d",
+    "brand-contrast": "#1c120a",
+    "accent": "#e08e45",
+    "success": "#8fb573",
+    "warning": "#dfa943",
+    "danger": "#d96a4a",
+    "scrollbar": "#4a392a",
+    "radius": "10px",
+    "radius-sm": "6px",
+    "shadow": "0 8px 24px rgba(10, 6, 3, 0.55), 0 2px 6px rgba(10, 6, 3, 0.4)",
+    "font-display": "'Big Shoulders Display', 'Assistant', system-ui, sans-serif",
+    "font-body": "'Assistant', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Overpass Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700;800&family=Assistant:wght@400;500;600;700&family=Overpass+Mono:wght@400;600&display=swap"
+  }
+}

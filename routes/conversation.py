@@ -1604,6 +1604,26 @@ def _conversation_inner():
     except Exception as _e:
         logger.warning(f'CURRENT_USER injection failed (non-fatal): {_e}')
 
+    # Inject [CANVAS_STYLE: ...] when the tenant has an active canvas style.
+    # Agents write page files directly (bypassing the pages API) and long
+    # sessions never re-read skills, so soft skill guidance is not enough —
+    # this per-turn tag is the enforcement that actually reaches the agent.
+    try:
+        from services.canvas_styles import get_active_style_id as _get_style_id
+        _style_id = _get_style_id()
+        if _style_id:
+            context_parts.append(
+                f'[CANVAS_STYLE: The user chose the "{_style_id}" design system for all '
+                f'canvas pages. BEFORE creating or restyling ANY canvas page you MUST '
+                f'read /app/runtime/canvas-pages/canvas-styles/ACTIVE-STYLE.md and start '
+                f'by cp-ing canvas-styles/active-template.html to the new page file, then '
+                f'edit the copy (keep its full <style> block — never retype the template). '
+                f'Never use the old dark default. '
+                f'Never use emoji as UI icons — use inline SVG.]'
+            )
+    except Exception as _se:
+        logger.warning(f'CANVAS_STYLE injection failed (non-fatal): {_se}')
+
     # Inject voice assistant instructions so the agent knows about action tags.
     # This must be in-app (not workspace files) so it works out of the box.
     context_parts.append(_load_voice_system_prompt())

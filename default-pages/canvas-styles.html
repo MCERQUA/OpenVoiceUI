@@ -1,0 +1,1019 @@
+<!-- openvoiceui-version: 1 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="page-icon" content="/pages/canvas-styles-icon.svg">
+<title>Canvas Styles</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#f6f7f9;
+  --card:#ffffff;
+  --border:#e4e7ec;
+  --border-strong:#d0d5dd;
+  --text:#1a202c;
+  --muted:#5b6472;
+  --faint:#8a93a2;
+  --blue:#3b82f6;
+  --blue-dark:#2563eb;
+  --blue-soft:#eff6ff;
+  --green:#16a34a;
+  --green-soft:#f0fdf4;
+  --red:#dc2626;
+  --red-soft:#fef2f2;
+  --shadow:0 1px 2px rgba(16,24,40,.05);
+  --shadow-lg:0 12px 32px -8px rgba(16,24,40,.18);
+  --radius:14px;
+}
+html{background:var(--bg)}
+body{
+  font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+  line-height:1.5;
+}
+/* Host wrapper already injects 25px body padding — no extra page padding. */
+/* Explicit heading/link colors: the host's injected fallback styles beat
+   inheritance (they're declared rules), so headings must declare color. */
+h1,h2,h3,h4{color:var(--text)}
+a{color:var(--blue-dark)}
+.wrap{max-width:1180px;margin:0 auto}
+
+button{font:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--blue);outline-offset:2px;border-radius:8px;
+}
+svg{display:block}
+
+/* ---------- Hero ---------- */
+.hero{padding:8px 0 22px}
+.hero h1{font-size:clamp(1.5rem,3.5vw,2rem);font-weight:800;letter-spacing:-.02em}
+.hero .sub{color:var(--muted);margin-top:6px;font-size:1rem;max-width:56ch}
+.hero .active-line{
+  display:inline-flex;align-items:center;gap:8px;margin-top:14px;
+  background:var(--card);border:1px solid var(--border);border-radius:999px;
+  padding:6px 14px 6px 10px;font-size:.85rem;color:var(--muted);box-shadow:var(--shadow);
+}
+.hero .active-line .dot{width:9px;height:9px;border-radius:50%;background:var(--green);flex:none}
+.hero .active-line strong{color:var(--text);font-weight:600}
+
+/* ---------- Grid + cards ---------- */
+.grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+  gap:20px;padding-bottom:56px;
+}
+.card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;
+  transition:box-shadow .18s ease,border-color .18s ease;
+}
+.card:hover{box-shadow:0 6px 20px -6px rgba(16,24,40,.14)}
+.card.is-active{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.14)}
+
+.card-preview{
+  position:relative;aspect-ratio:16/10;background:#eceef2;overflow:hidden;
+  border-bottom:1px solid var(--border);
+}
+.card-preview iframe{
+  position:absolute;top:0;left:0;width:1280px;height:800px;border:0;
+  transform-origin:0 0;pointer-events:none;background:#fff;
+}
+.chip{
+  position:absolute;top:10px;left:10px;display:inline-flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,.92);border:1px solid var(--border);
+  border-radius:999px;padding:3px 10px;font-size:.72rem;font-weight:600;color:var(--muted);
+  backdrop-filter:blur(4px);
+}
+.chip .cdot{width:8px;height:8px;border-radius:50%;flex:none;border:1px solid rgba(0,0,0,.12)}
+.badge-active{
+  position:absolute;top:10px;right:10px;display:inline-flex;align-items:center;gap:5px;
+  background:var(--blue);color:#fff;border-radius:999px;padding:4px 11px;
+  font-size:.72rem;font-weight:700;letter-spacing:.03em;box-shadow:0 2px 8px rgba(59,130,246,.4);
+}
+.badge-custom{
+  position:absolute;bottom:10px;left:10px;
+  background:rgba(255,255,255,.92);border:1px solid var(--border);border-radius:999px;
+  padding:3px 10px;font-size:.7rem;font-weight:600;color:var(--faint);
+}
+
+.card-body{padding:16px 18px 18px;display:flex;flex-direction:column;gap:10px;flex:1}
+.card-body h3{font-size:1.06rem;font-weight:700;letter-spacing:-.01em}
+.card-body .tagline{color:var(--muted);font-size:.88rem;min-height:1.3em}
+.swatches{display:flex;gap:6px;align-items:center}
+.swatch{width:20px;height:20px;border-radius:50%;border:1px solid rgba(0,0,0,.14);flex:none}
+
+.card-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto;padding-top:6px}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  border-radius:10px;padding:9px 15px;font-size:.87rem;font-weight:600;
+  border:1px solid transparent;min-height:40px;transition:background .15s,border-color .15s,color .15s;
+  white-space:nowrap;
+}
+.btn svg{width:15px;height:15px;flex:none}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:hover{background:var(--blue-dark)}
+.btn-secondary{background:var(--card);color:var(--text);border-color:var(--border-strong)}
+.btn-secondary:hover{background:#f2f4f7}
+.btn-current{background:var(--green-soft);color:var(--green);border-color:#bbf0c9;cursor:default}
+.btn-danger{background:var(--card);color:var(--red);border-color:var(--border-strong)}
+.btn-danger:hover{background:var(--red-soft);border-color:#fca5a5}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.btn-grow{flex:1 1 auto}
+
+/* ---------- Skeletons ---------- */
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.skel{background:linear-gradient(90deg,#eceef2 25%,#f6f7f9 50%,#eceef2 75%);
+  background-size:800px 100%;animation:shimmer 1.4s infinite linear;border-radius:8px}
+.skel-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.skel-card .skel-preview{aspect-ratio:16/10;border-radius:0}
+.skel-card .skel-body{padding:16px 18px 20px;display:flex;flex-direction:column;gap:10px}
+.skel-line{height:14px}
+
+/* ---------- States ---------- */
+.state-box{
+  background:var(--card);border:1px dashed var(--border-strong);border-radius:var(--radius);
+  padding:56px 24px;text-align:center;color:var(--muted);
+}
+.state-box .state-icon{width:52px;height:52px;margin:0 auto 16px;color:var(--faint)}
+.state-box h2{font-size:1.15rem;color:var(--text);font-weight:700;margin-bottom:6px}
+.state-box p{font-size:.92rem;max-width:44ch;margin:0 auto}
+.state-box .btn{margin-top:18px}
+.hidden{display:none!important}
+
+/* ---------- Full-screen preview modal ---------- */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:200;
+  display:flex;align-items:center;justify-content:center;padding:20px;
+}
+.preview-modal{
+  background:var(--card);border-radius:var(--radius);width:min(1200px,100%);
+  height:min(860px,100%);display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--shadow-lg);
+}
+.preview-modal header{
+  display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);flex:none;
+}
+.preview-modal header h2{font-size:1rem;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.preview-modal iframe{flex:1;border:0;width:100%;background:#fff}
+.icon-btn{
+  background:none;border:1px solid var(--border-strong);border-radius:10px;
+  width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted);flex:none;
+}
+.icon-btn:hover{background:#f2f4f7;color:var(--text)}
+.icon-btn svg{width:17px;height:17px}
+
+/* ---------- Editor slide-over ---------- */
+.editor-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:210}
+.editor-panel{
+  position:fixed;top:0;right:0;bottom:0;z-index:211;width:min(920px,100%);
+  background:var(--bg);box-shadow:-16px 0 48px rgba(16,24,40,.25);
+  display:flex;flex-direction:column;
+}
+.editor-head{
+  background:var(--card);border-bottom:1px solid var(--border);
+  padding:14px 20px;display:flex;align-items:center;gap:12px;flex:none;
+}
+.editor-head h2{font-size:1.05rem;font-weight:700;flex:1;min-width:0}
+.editor-head .sub-id{display:block;font-size:.75rem;font-weight:500;color:var(--faint);margin-top:1px}
+.editor-scroller{flex:1;overflow-y:auto;padding:20px}
+.editor-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+.editor-form{display:flex;flex-direction:column;gap:18px}
+
+.fieldset{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+.fieldset>legend,.fieldset .fs-title{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);margin-bottom:12px}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.field:last-child{margin-bottom:0}
+.field label{font-size:.85rem;font-weight:600}
+.field .hint{font-size:.78rem;color:var(--faint);font-weight:400}
+.field input[type=text],.field textarea{
+  border:1px solid var(--border-strong);border-radius:10px;padding:10px 12px;
+  font:inherit;font-size:.9rem;background:#fff;color:var(--text);width:100%;
+}
+.field textarea{resize:vertical;min-height:70px}
+.field input[type=text]:focus,.field textarea:focus{border-color:var(--blue)}
+
+.seg{display:inline-flex;background:#eceef2;border-radius:10px;padding:3px;gap:3px}
+.seg button{
+  border:0;background:transparent;border-radius:8px;padding:7px 18px;
+  font-size:.85rem;font-weight:600;color:var(--muted);
+}
+.seg button[aria-pressed="true"]{background:var(--card);color:var(--text);box-shadow:var(--shadow)}
+
+.color-row{display:flex;align-items:center;gap:10px;padding:7px 0}
+.color-row+.color-row{border-top:1px solid #f0f2f5}
+.color-row label{flex:1;font-size:.87rem;font-weight:500;min-width:0}
+.color-row .tok{display:block;font-size:.72rem;color:var(--faint);font-weight:400}
+.color-row input[type=color]{
+  width:46px;height:34px;border:1px solid var(--border-strong);border-radius:8px;
+  padding:2px;background:#fff;cursor:pointer;flex:none;
+}
+.color-row .hexval{font-size:.76rem;color:var(--faint);font-variant-numeric:tabular-nums;width:74px;text-align:right;flex:none}
+
+.readonly-list{display:flex;flex-direction:column;gap:6px}
+.readonly-list .ro-row{display:flex;justify-content:space-between;gap:12px;font-size:.83rem;padding:5px 0;border-bottom:1px solid #f0f2f5}
+.readonly-list .ro-row:last-child{border-bottom:0}
+.readonly-list .ro-key{color:var(--muted);font-weight:500}
+.readonly-list .ro-val{color:var(--text);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+.note{font-size:.78rem;color:var(--faint);margin-top:10px}
+
+details.advanced{background:var(--card);border:1px solid var(--border);border-radius:var(--radius)}
+details.advanced summary{
+  padding:14px 18px;cursor:pointer;font-size:.9rem;font-weight:600;list-style:none;
+  display:flex;align-items:center;gap:10px;color:var(--text);
+}
+details.advanced summary::-webkit-details-marker{display:none}
+details.advanced summary .chev{transition:transform .15s;color:var(--faint)}
+details.advanced[open] summary .chev{transform:rotate(90deg)}
+details.advanced .adv-body{padding:0 18px 16px}
+
+.editor-preview{
+  position:sticky;top:0;background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);overflow:hidden;
+}
+.editor-preview .ep-head{padding:10px 14px;border-bottom:1px solid var(--border);font-size:.8rem;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em}
+.editor-preview .ep-frame{position:relative;aspect-ratio:16/12;background:#eceef2;overflow:hidden}
+.editor-preview .ep-frame iframe{position:absolute;top:0;left:0;width:1280px;height:960px;border:0;transform-origin:0 0;pointer-events:none;background:#fff}
+
+.editor-foot{
+  background:var(--card);border-top:1px solid var(--border);padding:13px 20px;
+  display:flex;align-items:center;gap:10px;flex:none;
+}
+.editor-foot .err{color:var(--red);font-size:.84rem;flex:1;min-width:0}
+.spinner{width:15px;height:15px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- Toasts ---------- */
+#toasts{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:300;display:flex;flex-direction:column;gap:10px;align-items:center;width:min(440px,calc(100vw - 32px))}
+.toast{
+  background:#1f2937;color:#f3f4f6;border-radius:12px;padding:12px 16px;
+  display:flex;align-items:center;gap:12px;width:100%;box-shadow:var(--shadow-lg);
+  font-size:.88rem;animation:toastIn .22s ease;
+}
+@keyframes toastIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.toast.success{background:#14532d}
+.toast.error{background:#7f1d1d}
+.toast .t-msg{flex:1;min-width:0}
+.toast .t-action{
+  background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:8px;
+  padding:6px 12px;font-size:.82rem;font-weight:700;flex:none;
+}
+.toast .t-action:hover{background:rgba(255,255,255,.24)}
+
+/* ---------- Responsive ---------- */
+@media(max-width:900px){
+  .editor-cols{grid-template-columns:1fr}
+  .editor-preview{position:static}
+}
+@media(max-width:640px){
+  .grid{grid-template-columns:1fr;gap:16px}
+  .card-actions .btn{flex:1 1 45%}
+  .editor-panel{width:100%}
+  .preview-modal{height:100%;width:100%;border-radius:10px}
+  .editor-scroller{padding:14px}
+  .editor-foot{flex-wrap:wrap}
+  .editor-foot .err{flex-basis:100%;order:3}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>Canvas Styles</h1>
+    <p class="sub">Pick the look your assistant uses when it builds pages for you. Every new page it creates will follow the style you choose here.</p>
+    <div class="active-line hidden" id="activeLine">
+      <span class="dot" aria-hidden="true"></span>
+      <span>Current style: <strong id="activeName">&mdash;</strong></span>
+    </div>
+  </header>
+
+  <!-- Loading skeletons -->
+  <div class="grid" id="skeletons" aria-hidden="true">
+    <div class="skel-card"><div class="skel skel-preview"></div><div class="skel-body">
+      <div class="skel skel-line" style="width:55%"></div><div class="skel skel-line" style="width:80%"></div><div class="skel skel-line" style="width:40%;height:34px"></div></div></div>
+    <div class="skel-card"><div class="skel skel-preview"></div><div class="skel-body">
+      <div class="skel skel-line" style="width:45%"></div><div class="skel skel-line" style="width:70%"></div><div class="skel skel-line" style="width:40%;height:34px"></div></div></div>
+    <div class="skel-card"><div class="skel skel-preview"></div><div class="skel-body">
+      <div class="skel skel-line" style="width:60%"></div><div class="skel skel-line" style="width:75%"></div><div class="skel skel-line" style="width:40%;height:34px"></div></div></div>
+  </div>
+
+  <!-- Error state -->
+  <div class="state-box hidden" id="errorState" role="alert">
+    <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <h2>We couldn't load your styles</h2>
+    <p id="errorMsg">Something went wrong while fetching your styles. Please try again.</p>
+    <button class="btn btn-primary" id="retryBtn" type="button">Try again</button>
+  </div>
+
+  <!-- Empty state -->
+  <div class="state-box hidden" id="emptyState">
+    <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0 0 20 2 2 0 0 0 2-2v-1a2 2 0 0 1 2-2h1a5 5 0 0 0 5-5c0-5.5-4.5-10-10-10z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/></svg>
+    <h2>No styles yet</h2>
+    <p>Your style gallery is being set up. Check back in a little while &mdash; or ask your assistant to add a style for you.</p>
+  </div>
+
+  <!-- Gallery -->
+  <main class="grid hidden" id="grid" aria-label="Style gallery"></main>
+</div>
+
+<!-- Full-screen preview modal -->
+<div class="modal-overlay hidden" id="previewOverlay">
+  <div class="preview-modal" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+    <header>
+      <h2 id="previewTitle">Preview</h2>
+      <button class="btn btn-primary" id="previewUseBtn" type="button">Use this style</button>
+      <button class="icon-btn" id="previewCloseBtn" type="button" aria-label="Close preview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
+    <iframe id="previewFrame" title="Full style preview"></iframe>
+  </div>
+</div>
+
+<!-- Editor slide-over -->
+<div id="editorRoot" class="hidden">
+  <div class="editor-overlay" id="editorOverlay"></div>
+  <div class="editor-panel" role="dialog" aria-modal="true" aria-labelledby="editorTitle">
+    <div class="editor-head">
+      <div style="flex:1;min-width:0">
+        <h2 id="editorTitle">Customize style</h2>
+        <span class="sub-id" id="editorSubId"></span>
+      </div>
+      <button class="icon-btn" id="editorCloseBtn" type="button" aria-label="Close editor">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="editor-scroller">
+      <div class="editor-cols">
+        <div class="editor-form" id="editorForm"></div>
+        <aside class="editor-preview" aria-label="Live preview">
+          <div class="ep-head">Live preview</div>
+          <div class="ep-frame"><iframe id="editorFrame" title="Live style preview"></iframe></div>
+        </aside>
+      </div>
+    </div>
+    <div class="editor-foot">
+      <span class="err" id="editorErr" role="alert"></span>
+      <button class="btn btn-secondary" id="editorCancelBtn" type="button">Cancel</button>
+      <button class="btn btn-primary" id="editorSaveBtn" type="button">Save style</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+'use strict';
+(function () {
+  var API = '/api/canvas/styles';
+
+  var state = {
+    styles: [],          // list from GET /api/canvas/styles
+    activeId: null,
+    fullDefs: {},        // id -> full definition (incl. template_html, instructions)
+    previewId: null,     // style shown in the full-screen modal
+    editor: null,        // active editor session, see openEditor()
+    lastFocus: null,
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var HEX_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // -------------------------------------------------------------------
+  // Toasts
+  // -------------------------------------------------------------------
+  function toast(msg, opts) {
+    opts = opts || {};
+    var el = document.createElement('div');
+    el.className = 'toast' + (opts.kind ? ' ' + opts.kind : '');
+    var msgEl = document.createElement('span');
+    msgEl.className = 't-msg';
+    msgEl.textContent = msg;
+    el.appendChild(msgEl);
+    var timer = null;
+    function dismiss() {
+      if (timer) clearTimeout(timer);
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }
+    if (opts.action) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 't-action';
+      btn.textContent = opts.action.label;
+      btn.addEventListener('click', function () { dismiss(); opts.action.fn(); });
+      el.appendChild(btn);
+    }
+    $('toasts').appendChild(el);
+    timer = setTimeout(dismiss, opts.duration || (opts.action ? 7000 : 4200));
+    return dismiss;
+  }
+
+  // -------------------------------------------------------------------
+  // Data loading
+  // -------------------------------------------------------------------
+  function fetchJson(url, opts) {
+    return fetch(url, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        if (!r.ok) {
+          var err = new Error((body && body.error) || ('Request failed (' + r.status + ')'));
+          err.status = r.status;
+          throw err;
+        }
+        return body;
+      });
+    });
+  }
+
+  function loadStyles(silent) {
+    if (!silent) {
+      $('skeletons').classList.remove('hidden');
+      $('grid').classList.add('hidden');
+      $('errorState').classList.add('hidden');
+      $('emptyState').classList.add('hidden');
+    }
+    return fetchJson(API).then(function (data) {
+      state.styles = (data.styles || []).filter(function (s) { return !s.archived; });
+      state.activeId = data.active && data.active.style_id ? data.active.style_id : null;
+      renderGallery();
+    }).catch(function (e) {
+      $('skeletons').classList.add('hidden');
+      $('grid').classList.add('hidden');
+      $('emptyState').classList.add('hidden');
+      $('errorMsg').textContent = 'Details: ' + e.message;
+      $('errorState').classList.remove('hidden');
+    });
+  }
+
+  function loadFullDef(id) {
+    if (state.fullDefs[id]) return Promise.resolve(state.fullDefs[id]);
+    return fetchJson(API + '/' + encodeURIComponent(id)).then(function (def) {
+      state.fullDefs[id] = def;
+      return def;
+    });
+  }
+
+  // -------------------------------------------------------------------
+  // Gallery
+  // -------------------------------------------------------------------
+  var ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+  var ICON_EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  var ICON_EDIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
+  var ICON_ARCHIVE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+
+  function swatchDots(tokens) {
+    tokens = tokens || {};
+    var order = ['brand', 'accent', 'bg', 'surface', 'text', 'heading'];
+    var seen = {};
+    var html = '';
+    var count = 0;
+    for (var i = 0; i < order.length && count < 5; i++) {
+      var v = tokens[order[i]];
+      if (typeof v === 'string' && HEX_RE.test(v.trim()) && !seen[v]) {
+        seen[v] = true;
+        html += '<span class="swatch" style="background:' + escapeHtml(v.trim()) + '" title="' + escapeHtml(order[i]) + '"></span>';
+        count++;
+      }
+    }
+    return html;
+  }
+
+  function renderGallery() {
+    $('skeletons').classList.add('hidden');
+    $('errorState').classList.add('hidden');
+
+    // Hero "current style" pill
+    var active = null;
+    for (var i = 0; i < state.styles.length; i++) {
+      if (state.styles[i].id === state.activeId) active = state.styles[i];
+    }
+    if (active) {
+      $('activeName').textContent = active.name;
+      $('activeLine').classList.remove('hidden');
+    } else {
+      $('activeLine').classList.add('hidden');
+    }
+
+    if (!state.styles.length) {
+      $('grid').classList.add('hidden');
+      $('emptyState').classList.remove('hidden');
+      return;
+    }
+    $('emptyState').classList.add('hidden');
+
+    var grid = $('grid');
+    grid.innerHTML = '';
+    state.styles.forEach(function (s) {
+      var isActive = s.id === state.activeId;
+      var card = document.createElement('article');
+      card.className = 'card' + (isActive ? ' is-active' : '');
+      card.dataset.id = s.id;
+
+      var baseLabel = s.base === 'dark' ? 'Dark' : 'Light';
+      var baseDot = s.base === 'dark' ? '#1f2937' : '#fde68a';
+
+      var actions = '';
+      if (isActive) {
+        actions += '<button class="btn btn-current btn-grow" type="button" disabled>' + ICON_CHECK + 'Current style</button>';
+      } else {
+        actions += '<button class="btn btn-primary btn-grow" type="button" data-act="use">' + ICON_CHECK + 'Use this style</button>';
+      }
+      actions += '<button class="btn btn-secondary" type="button" data-act="preview">' + ICON_EYE + 'Preview</button>';
+      if (s.preset) {
+        actions += '<button class="btn btn-secondary" type="button" data-act="clone">' + ICON_COPY + 'Clone &amp; customize</button>';
+      } else {
+        actions += '<button class="btn btn-secondary" type="button" data-act="edit">' + ICON_EDIT + 'Edit</button>';
+        actions += '<button class="btn btn-danger" type="button" data-act="remove" aria-label="Remove ' + escapeHtml(s.name) + '">' + ICON_ARCHIVE + 'Remove</button>';
+      }
+
+      card.innerHTML =
+        '<div class="card-preview">' +
+          '<iframe src="' + API + '/' + encodeURIComponent(s.id) + '/preview" loading="lazy" tabindex="-1" scrolling="no"' +
+            ' title="Preview of ' + escapeHtml(s.name) + '"></iframe>' +
+          '<span class="chip"><span class="cdot" style="background:' + baseDot + '"></span>' + baseLabel + '</span>' +
+          (isActive ? '<span class="badge-active">' + ICON_CHECK + 'ACTIVE</span>' : '') +
+          (!s.preset ? '<span class="badge-custom">Your style</span>' : '') +
+        '</div>' +
+        '<div class="card-body">' +
+          '<h3>' + escapeHtml(s.name) + '</h3>' +
+          '<p class="tagline">' + escapeHtml(s.tagline || '') + '</p>' +
+          '<div class="swatches" aria-hidden="true">' + swatchDots(s.tokens) + '</div>' +
+          '<div class="card-actions">' + actions + '</div>' +
+        '</div>';
+
+      card.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-act]');
+        if (!btn) return;
+        var act = btn.dataset.act;
+        if (act === 'use') activateStyle(s.id);
+        else if (act === 'preview') openPreview(s);
+        else if (act === 'clone') openEditor(s, 'clone');
+        else if (act === 'edit') openEditor(s, 'edit');
+        else if (act === 'remove') removeStyle(s);
+      });
+
+      grid.appendChild(card);
+    });
+    grid.classList.remove('hidden');
+    scaleCardPreviews();
+  }
+
+  // Card iframes are rendered at 1280px and scaled down to fit their card.
+  function scaleCardPreviews() {
+    document.querySelectorAll('.card-preview').forEach(function (wrap) {
+      var iframe = wrap.querySelector('iframe');
+      if (!iframe) return;
+      var scale = wrap.clientWidth / 1280;
+      if (scale > 0) iframe.style.transform = 'scale(' + scale + ')';
+    });
+    var ep = document.querySelector('.ep-frame');
+    if (ep) {
+      var epFrame = ep.querySelector('iframe');
+      var epScale = ep.clientWidth / 1280;
+      if (epFrame && epScale > 0) epFrame.style.transform = 'scale(' + epScale + ')';
+    }
+  }
+  window.addEventListener('resize', scaleCardPreviews);
+  if (window.ResizeObserver) {
+    new ResizeObserver(scaleCardPreviews).observe(document.body);
+  }
+
+  // -------------------------------------------------------------------
+  // Activate (optimistic)
+  // -------------------------------------------------------------------
+  function activateStyle(id) {
+    var prev = state.activeId;
+    if (prev === id) return;
+    state.activeId = id;
+    renderGallery(); // optimistic
+    fetchJson(API + '/' + encodeURIComponent(id) + '/activate', { method: 'POST' })
+      .then(function () {
+        var s = findStyle(id);
+        toast('"' + (s ? s.name : id) + '" is now your style. New pages will use it.', { kind: 'success' });
+      })
+      .catch(function (e) {
+        state.activeId = prev;
+        renderGallery();
+        toast('Could not switch styles: ' + e.message, { kind: 'error' });
+      });
+  }
+
+  function findStyle(id) {
+    for (var i = 0; i < state.styles.length; i++) {
+      if (state.styles[i].id === id) return state.styles[i];
+    }
+    return null;
+  }
+
+  // -------------------------------------------------------------------
+  // Remove (archive) with undo
+  // -------------------------------------------------------------------
+  function removeStyle(s) {
+    if (s.id === state.activeId) {
+      toast('This is your current style. Switch to another style first, then remove it.', { kind: 'error' });
+      return;
+    }
+    fetchJson(API + '/' + encodeURIComponent(s.id) + '/archive', { method: 'POST' })
+      .then(function () {
+        state.styles = state.styles.filter(function (x) { return x.id !== s.id; });
+        renderGallery();
+        toast('"' + s.name + '" removed.', {
+          action: {
+            label: 'Undo',
+            fn: function () {
+              fetchJson(API + '/' + encodeURIComponent(s.id) + '/unarchive', { method: 'POST' })
+                .then(function () { return loadStyles(true); })
+                .catch(function (e) { toast('Could not restore: ' + e.message, { kind: 'error' }); });
+            }
+          }
+        });
+      })
+      .catch(function (e) { toast('Could not remove: ' + e.message, { kind: 'error' }); });
+  }
+
+  // -------------------------------------------------------------------
+  // Full-screen preview modal
+  // -------------------------------------------------------------------
+  function openPreview(s) {
+    state.previewId = s.id;
+    state.lastFocus = document.activeElement;
+    $('previewTitle').textContent = s.name + (s.tagline ? ' — ' + s.tagline : '');
+    $('previewFrame').src = API + '/' + encodeURIComponent(s.id) + '/preview';
+    var useBtn = $('previewUseBtn');
+    if (s.id === state.activeId) {
+      useBtn.textContent = 'Current style';
+      useBtn.disabled = true;
+    } else {
+      useBtn.textContent = 'Use this style';
+      useBtn.disabled = false;
+    }
+    $('previewOverlay').classList.remove('hidden');
+    $('previewCloseBtn').focus();
+  }
+
+  function closePreview() {
+    $('previewOverlay').classList.add('hidden');
+    $('previewFrame').src = 'about:blank';
+    state.previewId = null;
+    if (state.lastFocus && state.lastFocus.focus) state.lastFocus.focus();
+  }
+
+  $('previewCloseBtn').addEventListener('click', closePreview);
+  $('previewOverlay').addEventListener('click', function (e) {
+    if (e.target === this) closePreview();
+  });
+  $('previewUseBtn').addEventListener('click', function () {
+    if (state.previewId) { activateStyle(state.previewId); closePreview(); }
+  });
+
+  // -------------------------------------------------------------------
+  // Editor (clone & customize / edit)
+  // -------------------------------------------------------------------
+  var TOKEN_GROUPS = [
+    { label: 'Background & surfaces', keys: ['bg', 'surface', 'surface-2', 'surface2', 'card', 'border'] },
+    { label: 'Text', keys: ['text', 'heading', 'muted', 'text-muted', 'subtle'] },
+    { label: 'Brand & accent', keys: ['brand', 'brand-contrast', 'accent', 'accent-2', 'link'] },
+    { label: 'Status colors', keys: ['success', 'warning', 'danger', 'error', 'info'] },
+  ];
+  var TOKEN_LABELS = {
+    bg: 'Page background', surface: 'Card background', 'surface-2': 'Secondary surface',
+    surface2: 'Secondary surface', card: 'Card background', border: 'Borders & lines',
+    text: 'Body text', heading: 'Headings', muted: 'Muted text', 'text-muted': 'Muted text',
+    subtle: 'Subtle text', brand: 'Main brand color', 'brand-contrast': 'Text on brand color',
+    accent: 'Accent color', 'accent-2': 'Second accent', link: 'Links',
+    success: 'Success (good news)', warning: 'Warning', danger: 'Danger (alerts)',
+    error: 'Errors', info: 'Info highlights',
+  };
+
+  function prettyLabel(key) {
+    if (TOKEN_LABELS[key]) return TOKEN_LABELS[key];
+    return key.replace(/[-_]+/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); });
+  }
+
+  function slugify(name) {
+    var s = String(name || '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60)
+      .replace(/^-+|-+$/g, '');
+    if (!s || !/^[a-z0-9]/.test(s)) s = 'style' + (s ? '-' + s : '');
+    return s;
+  }
+
+  function uniqueSlug(name) {
+    var base = slugify(name);
+    var existing = {};
+    state.styles.forEach(function (s) { existing[s.id] = true; });
+    if (!existing[base]) return base;
+    for (var n = 2; n < 100; n++) {
+      var candidate = base + '-' + n;
+      if (!existing[candidate]) return candidate;
+    }
+    return base + '-' + Date.now();
+  }
+
+  // Mirror of the server's apply_tokens_to_template(): rewrite --token: values.
+  function applyTokensToTemplate(html, tokens) {
+    var out = html;
+    Object.keys(tokens).forEach(function (key) {
+      var val = tokens[key];
+      if (typeof val !== 'string' || !val.trim()) return;
+      var esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      out = out.replace(new RegExp('(--' + esc + '\\s*:\\s*)[^;}]+', 'g'), '$1' + val.trim());
+    });
+    return out;
+  }
+
+  function openEditor(sourceStyle, mode) {
+    state.lastFocus = document.activeElement;
+    $('editorErr').textContent = '';
+    $('editorSaveBtn').disabled = true;
+    $('editorSaveBtn').innerHTML = 'Loading…';
+    $('editorRoot').classList.remove('hidden');
+    $('editorTitle').textContent = mode === 'clone'
+      ? 'Make it yours — based on "' + sourceStyle.name + '"'
+      : 'Edit "' + sourceStyle.name + '"';
+    $('editorForm').innerHTML = '<div class="skel skel-line" style="width:60%"></div>';
+    $('editorFrame').removeAttribute('srcdoc');
+
+    loadFullDef(sourceStyle.id).then(function (def) {
+      var draft = {
+        mode: mode,                       // 'clone' | 'edit'
+        sourceId: sourceStyle.id,
+        name: mode === 'clone' ? sourceStyle.name + ' (my version)' : (def.name || sourceStyle.name),
+        tagline: def.tagline || '',
+        description: def.description || '',
+        base: def.base === 'dark' ? 'dark' : 'light',
+        tokens: {},                       // working copy — hex + others
+        alpha: {},                        // preserved 2-digit alpha suffixes per token
+        instructions: def.instructions || '',
+        origInstructions: def.instructions || '',
+        template: def.template_html || '',
+      };
+      var toks = def.tokens || {};
+      Object.keys(toks).forEach(function (k) {
+        var v = toks[k];
+        draft.tokens[k] = v;
+        if (typeof v === 'string' && /^#[0-9a-fA-F]{8}$/.test(v.trim())) {
+          draft.alpha[k] = v.trim().slice(7);
+        }
+      });
+      state.editor = draft;
+      buildEditorForm(draft);
+      refreshEditorPreview();
+      $('editorSaveBtn').disabled = false;
+      $('editorSaveBtn').textContent = mode === 'clone' ? 'Save my style' : 'Save changes';
+      var first = $('editorForm').querySelector('input, textarea, button');
+      if (first) first.focus();
+    }).catch(function (e) {
+      $('editorForm').innerHTML = '<div class="state-box"><h2>Could not load this style</h2><p>' + escapeHtml(e.message) + '</p></div>';
+      $('editorSaveBtn').textContent = 'Save';
+    });
+  }
+
+  function buildEditorForm(draft) {
+    var form = $('editorForm');
+    form.innerHTML = '';
+
+    // --- Basics ---
+    var basics = document.createElement('div');
+    basics.className = 'fieldset';
+    basics.innerHTML =
+      '<div class="fs-title">Basics</div>' +
+      '<div class="field"><label for="efName">Style name</label>' +
+        '<input type="text" id="efName" maxlength="80" value="' + escapeHtml(draft.name) + '"></div>' +
+      '<div class="field"><label for="efTagline">Short tagline <span class="hint">(optional)</span></label>' +
+        '<input type="text" id="efTagline" maxlength="120" value="' + escapeHtml(draft.tagline) + '" placeholder="e.g. Clean and friendly"></div>' +
+      '<div class="field"><label for="efDesc">Description <span class="hint">(optional)</span></label>' +
+        '<textarea id="efDesc" rows="2" placeholder="What is this style for?">' + escapeHtml(draft.description) + '</textarea></div>' +
+      '<div class="field"><label id="efBaseLabel">Overall look</label>' +
+        '<div class="seg" role="group" aria-labelledby="efBaseLabel">' +
+          '<button type="button" id="efBaseLight" aria-pressed="' + (draft.base === 'light') + '">Light</button>' +
+          '<button type="button" id="efBaseDark" aria-pressed="' + (draft.base === 'dark') + '">Dark</button>' +
+        '</div></div>';
+    form.appendChild(basics);
+
+    basics.querySelector('#efName').addEventListener('input', function () {
+      draft.name = this.value;
+      updateSubId();
+    });
+    basics.querySelector('#efTagline').addEventListener('input', function () { draft.tagline = this.value; });
+    basics.querySelector('#efDesc').addEventListener('input', function () { draft.description = this.value; });
+    basics.querySelector('#efBaseLight').addEventListener('click', function () { setBase('light'); });
+    basics.querySelector('#efBaseDark').addEventListener('click', function () { setBase('dark'); });
+    function setBase(b) {
+      draft.base = b;
+      basics.querySelector('#efBaseLight').setAttribute('aria-pressed', String(b === 'light'));
+      basics.querySelector('#efBaseDark').setAttribute('aria-pressed', String(b === 'dark'));
+    }
+    updateSubId();
+
+    // --- Colors, grouped ---
+    var hexKeys = Object.keys(draft.tokens).filter(function (k) {
+      var v = draft.tokens[k];
+      return typeof v === 'string' && HEX_RE.test(v.trim());
+    });
+    var placed = {};
+    TOKEN_GROUPS.forEach(function (group) {
+      var keys = group.keys.filter(function (k) { return hexKeys.indexOf(k) !== -1; });
+      if (!keys.length) return;
+      keys.forEach(function (k) { placed[k] = true; });
+      form.appendChild(colorGroup(group.label, keys, draft));
+    });
+    var leftovers = hexKeys.filter(function (k) { return !placed[k]; });
+    if (leftovers.length) form.appendChild(colorGroup('More colors', leftovers, draft));
+
+    // --- Fonts & extras (read-only v1) ---
+    var nonHex = Object.keys(draft.tokens).filter(function (k) { return hexKeys.indexOf(k) === -1; });
+    if (nonHex.length) {
+      var ro = document.createElement('div');
+      ro.className = 'fieldset';
+      var rows = nonHex.map(function (k) {
+        return '<div class="ro-row"><span class="ro-key">' + escapeHtml(prettyLabel(k)) + '</span>' +
+               '<span class="ro-val" title="' + escapeHtml(String(draft.tokens[k])) + '">' + escapeHtml(String(draft.tokens[k])) + '</span></div>';
+      }).join('');
+      ro.innerHTML = '<div class="fs-title">Fonts &amp; extras</div><div class="readonly-list">' + rows + '</div>' +
+        '<p class="note">Fonts and spacing are managed for you in this version. Ask your assistant if you’d like them changed.</p>';
+      form.appendChild(ro);
+    }
+
+    // --- Instructions (advanced, collapsed) ---
+    var adv = document.createElement('details');
+    adv.className = 'advanced';
+    adv.innerHTML =
+      '<summary><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>' +
+      'Instructions for your assistant <span class="hint" style="font-weight:400;color:var(--faint)">(advanced)</span></summary>' +
+      '<div class="adv-body"><div class="field">' +
+        '<label for="efInstructions" class="hint" style="font-weight:400">Plain-language guidance your assistant follows every time it builds a page with this style. For example: “Always use our logo colors” or “Keep pages simple with big readable text.”</label>' +
+        '<textarea id="efInstructions" rows="6"></textarea>' +
+      '</div></div>';
+    form.appendChild(adv);
+    var instEl = adv.querySelector('#efInstructions');
+    instEl.value = draft.instructions;
+    instEl.addEventListener('input', function () { draft.instructions = this.value; });
+  }
+
+  function colorGroup(label, keys, draft) {
+    var box = document.createElement('div');
+    box.className = 'fieldset';
+    box.innerHTML = '<div class="fs-title">' + escapeHtml(label) + '</div>';
+    keys.forEach(function (key) {
+      var val = String(draft.tokens[key]).trim();
+      var pickerVal = val.slice(0, 7); // input[type=color] wants #rrggbb
+      var row = document.createElement('div');
+      row.className = 'color-row';
+      var inputId = 'tok-' + key.replace(/[^a-z0-9-]/gi, '');
+      row.innerHTML =
+        '<label for="' + inputId + '">' + escapeHtml(prettyLabel(key)) +
+          '<span class="tok">--' + escapeHtml(key) + '</span></label>' +
+        '<span class="hexval">' + escapeHtml(val) + '</span>' +
+        '<input type="color" id="' + inputId + '" value="' + escapeHtml(pickerVal) + '">';
+      var input = row.querySelector('input');
+      var hexval = row.querySelector('.hexval');
+      input.addEventListener('input', function () {
+        var next = this.value + (draft.alpha[key] || '');
+        draft.tokens[key] = next;
+        hexval.textContent = next;
+        scheduleEditorPreview();
+      });
+      box.appendChild(row);
+    });
+    return box;
+  }
+
+  function updateSubId() {
+    var draft = state.editor;
+    if (!draft) return;
+    if (draft.mode === 'clone') {
+      $('editorSubId').textContent = 'Will be saved as: ' + uniqueSlug(draft.name);
+    } else {
+      $('editorSubId').textContent = 'Style id: ' + draft.sourceId;
+    }
+  }
+
+  var previewTimer = null;
+  function scheduleEditorPreview() {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(refreshEditorPreview, 160);
+  }
+
+  function refreshEditorPreview() {
+    var draft = state.editor;
+    if (!draft || !draft.template) return;
+    $('editorFrame').srcdoc = applyTokensToTemplate(draft.template, draft.tokens);
+    scaleCardPreviews();
+  }
+
+  function closeEditor() {
+    $('editorRoot').classList.add('hidden');
+    $('editorFrame').removeAttribute('srcdoc');
+    state.editor = null;
+    if (state.lastFocus && state.lastFocus.focus) state.lastFocus.focus();
+  }
+
+  $('editorCloseBtn').addEventListener('click', closeEditor);
+  $('editorCancelBtn').addEventListener('click', closeEditor);
+  $('editorOverlay').addEventListener('click', closeEditor);
+
+  $('editorSaveBtn').addEventListener('click', function () {
+    var draft = state.editor;
+    if (!draft) return;
+    var errEl = $('editorErr');
+    errEl.textContent = '';
+
+    var name = (draft.name || '').trim();
+    if (!name) { errEl.textContent = 'Please give your style a name.'; return; }
+
+    // Instructions: only send when meaningfully filled — otherwise the
+    // original guidance is kept (server requires at least 40 characters).
+    var inst = (draft.instructions || '').trim();
+    var sendInstructions = null;
+    if (inst && inst !== (draft.origInstructions || '').trim()) {
+      if (inst.length < 40) {
+        errEl.textContent = 'Assistant instructions need a little more detail (at least 40 characters) — or clear the box to keep the original guidance.';
+        return;
+      }
+      sendInstructions = inst;
+    }
+
+    var payload = {
+      name: name,
+      tagline: (draft.tagline || '').trim(),
+      description: (draft.description || '').trim(),
+      base: draft.base,
+      tokens: draft.tokens,
+    };
+    if (sendInstructions) payload.instructions = sendInstructions;
+
+    var req;
+    if (draft.mode === 'clone') {
+      payload.clone_from = draft.sourceId;
+      payload.id = uniqueSlug(name);
+      req = fetchJson(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      req = fetchJson(API + '/' + encodeURIComponent(draft.sourceId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    var saveBtn = $('editorSaveBtn');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner"></span>Saving…';
+
+    req.then(function (res) {
+      var savedId = res.id || draft.sourceId;
+      delete state.fullDefs[savedId];
+      closeEditor();
+      toast(draft.mode === 'clone'
+        ? '"' + name + '" saved to your gallery.'
+        : '"' + name + '" updated.', { kind: 'success' });
+      return loadStyles(true);
+    }).catch(function (e) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = draft.mode === 'clone' ? 'Save my style' : 'Save changes';
+      if (e.status === 409) {
+        errEl.textContent = 'A style with that name already exists — try a different name.';
+      } else {
+        errEl.textContent = 'Could not save: ' + e.message;
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Global keyboard handling
+  // -------------------------------------------------------------------
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!$('editorRoot').classList.contains('hidden')) { closeEditor(); return; }
+    if (!$('previewOverlay').classList.contains('hidden')) closePreview();
+  });
+
+  // -------------------------------------------------------------------
+  // Boot
+  // -------------------------------------------------------------------
+  $('retryBtn').addEventListener('click', function () { loadStyles(); });
+  loadStyles();
+})();
+</script>
+</body>
+</html>

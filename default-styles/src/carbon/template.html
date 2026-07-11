@@ -1,0 +1,974 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halvorsen Machine Works — Shop Floor Console</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ================================================================
+   CARBON — Precision-Instrument Dark
+   Matte graphite panels, 1px technical borders, signal-orange
+   controls, HUD-lime telemetry. Every color flows through these
+   tokens — never hardcode hex in component rules.
+   ================================================================ */
+:root {
+  --bg: #101216;
+  --surface: #16181d;
+  --surface-2: #1c1f26;
+  --border: #2a2e37;
+  --text: #c6ccd6;
+  --text-secondary: #8b93a2;
+  --text-muted: #616978;
+  --heading: #eef1f6;
+  --brand: #ea580c;
+  --brand-contrast: #ffffff;
+  --accent: #84cc16;
+  --success: #22c55e;
+  --warning: #eab308;
+  --danger: #ef4444;
+  --scrollbar: #333844;
+  --radius: 6px;
+  --radius-sm: 3px;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.45), 0 4px 14px rgba(0, 0, 0, 0.35);
+  --font-display: 'Chakra Petch', 'Barlow', system-ui, sans-serif;
+  --font-body: 'Barlow', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  /* Derived tints — status-LED backdrops */
+  --brand-tint: rgba(234, 88, 12, 0.13);
+  --accent-tint: rgba(132, 204, 22, 0.11);
+  --success-tint: rgba(34, 197, 94, 0.11);
+  --warning-tint: rgba(234, 179, 8, 0.11);
+  --danger-tint: rgba(239, 68, 68, 0.12);
+  --focus-ring: rgba(234, 88, 12, 0.28);
+  --ease-inst: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background:
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(255, 255, 255, 0.012) 3px 4px),
+    repeating-linear-gradient(90deg, transparent 0 47px, rgba(255, 255, 255, 0.014) 47px 48px),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--brand-tint); color: var(--heading); }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+h1 { color: var(--heading); }
+
+a { color: var(--brand); text-decoration: none; font-weight: 500; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1.5px var(--brand);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Layout shell ---------- */
+.page { max-width: 1120px; margin: 0 auto; }
+
+.section { margin-bottom: 30px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--heading);
+}
+
+.section-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* Micro-label — the Carbon signature: mono, uppercase, wide tracking */
+.microlabel {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---------- Entrance animation (opacity/transform only) ---------- */
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim { opacity: 0; animation: panel-in 0.32s var(--ease-inst) forwards; }
+.d1 { animation-delay: 0.04s; }
+.d2 { animation-delay: 0.08s; }
+.d3 { animation-delay: 0.12s; }
+.d4 { animation-delay: 0.16s; }
+.d5 { animation-delay: 0.20s; }
+.d6 { animation-delay: 0.24s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim { animation: none; opacity: 1; transform: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Page header (corner ticks allowed here only) ---------- */
+.page-header {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0 22px;
+  margin-bottom: 30px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tick { position: absolute; width: 10px; height: 10px; pointer-events: none; }
+.tick-tl { top: 0; left: 0; border-top: 1px solid var(--scrollbar); border-left: 1px solid var(--scrollbar); }
+.tick-tr { top: 0; right: 0; border-top: 1px solid var(--scrollbar); border-right: 1px solid var(--scrollbar); }
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 9px;
+}
+
+.eyebrow .led { width: 6px; height: 6px; border-radius: 1px; background: var(--accent); }
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  text-transform: uppercase;
+  color: var(--heading);
+}
+
+.page-subtitle { margin-top: 7px; font-size: 14px; color: var(--text-secondary); max-width: 58ch; }
+.page-subtitle .mono-inline { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-muted); }
+
+.header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s var(--ease-inst), border-color 0.12s var(--ease-inst),
+              color 0.12s var(--ease-inst);
+  white-space: nowrap;
+}
+.btn svg { flex: none; }
+.btn:active { transform: translateY(0.5px); }
+
+.btn-primary { background: var(--brand); color: var(--brand-contrast); border-color: var(--brand); }
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--brand) 88%, white);
+  border-color: color-mix(in srgb, var(--brand) 88%, white);
+}
+
+.btn-secondary { background: var(--surface-2); color: var(--heading); border-color: var(--border); }
+.btn-secondary:hover { border-color: var(--scrollbar); background: color-mix(in srgb, var(--surface-2) 85%, white); }
+
+.btn-ghost { background: transparent; color: var(--text-secondary); }
+.btn-ghost:hover { background: var(--surface-2); color: var(--heading); }
+
+.btn-sm { padding: 7px 12px; font-size: 12px; }
+
+/* ---------- Panels ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card-pad { padding: 20px; }
+
+/* ---------- KPI instrument grid ---------- */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+
+.kpi { padding: 18px; transition: border-color 0.12s var(--ease-inst), background 0.12s var(--ease-inst); }
+.kpi:hover { border-color: var(--scrollbar); background: var(--surface-2); }
+
+.kpi-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+
+.kpi-icon {
+  width: 28px; height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.kpi-icon.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.kpi-icon.is-success { background: var(--success-tint); color: var(--success); }
+.kpi-icon.is-warning { background: var(--warning-tint); color: var(--warning); }
+
+.kpi-value {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: 29px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--heading);
+}
+.kpi-value .unit {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-left: 3px;
+}
+
+.kpi-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.delta.up   { color: var(--success); background: var(--success-tint); }
+.delta.down { color: var(--danger);  background: var(--danger-tint); }
+
+/* ---------- Two-column body ---------- */
+.cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (min-width: 900px) {
+  .cols { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); }
+}
+
+/* ---------- Table ---------- */
+.table-card { overflow: hidden; }
+
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table-title-wrap { min-width: 0; }
+
+.table-title { font-family: var(--font-display); font-size: 14.5px; font-weight: 600; color: var(--heading); }
+
+.table-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.table-scroll { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 560px; }
+
+thead th {
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  color: var(--text);
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 0.1s var(--ease-inst); }
+tbody tr:hover { background: var(--surface-2); }
+
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num { font-family: var(--font-mono); font-size: 12.5px; color: var(--heading); }
+
+.wo-id { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.03em; color: var(--text-muted); }
+
+.cell-main { font-weight: 500; color: var(--heading); }
+.cell-sub  { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+
+/* ---------- Badges — status LEDs ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.badge::before { content: ""; width: 6px; height: 6px; border-radius: 1px; background: currentColor; }
+.badge.b-run     { color: var(--accent);  background: var(--accent-tint); }
+.badge.b-success { color: var(--success); background: var(--success-tint); }
+.badge.b-warning { color: var(--warning); background: var(--warning-tint); }
+.badge.b-danger  { color: var(--danger);  background: var(--danger-tint); }
+.badge.b-neutral { color: var(--text-secondary); background: var(--surface-2); }
+
+/* ---------- Progress / gauge bars ---------- */
+.progress-row { margin-bottom: 17px; }
+.progress-row:last-child { margin-bottom: 0; }
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 7px;
+  gap: 12px;
+}
+
+.progress-name { font-size: 13.5px; font-weight: 500; color: var(--heading); }
+
+.progress-pct {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.progress-track {
+  height: 6px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill { height: 100%; background: var(--brand); transition: width 0.5s var(--ease-inst); }
+.progress-fill.is-accent  { background: var(--accent); }
+.progress-fill.is-success { background: var(--success); }
+.progress-fill.is-warning { background: var(--warning); }
+
+/* ---------- Activity / event log ---------- */
+.activity { list-style: none; }
+
+.activity li { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.activity li:first-child { padding-top: 2px; }
+.activity li:last-child { border-bottom: none; padding-bottom: 2px; }
+
+.act-icon {
+  flex: none;
+  width: 28px; height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.act-icon.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.act-icon.is-success { background: var(--success-tint); color: var(--success); }
+.act-icon.is-warning { background: var(--warning-tint); color: var(--warning); }
+.act-icon.is-danger  { background: var(--danger-tint);  color: var(--danger); }
+
+.act-body { min-width: 0; }
+.act-text { font-size: 13.5px; color: var(--text); }
+.act-text strong { font-weight: 600; color: var(--heading); }
+.act-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* ---------- Form ---------- */
+.form-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@media (min-width: 640px) {
+  .form-row { grid-template-columns: 1.4fr 1fr auto; align-items: end; }
+}
+
+.field label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 7px;
+}
+
+.input, .select {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--heading);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: border-color 0.12s var(--ease-inst), box-shadow 0.12s var(--ease-inst);
+}
+.input::placeholder { color: var(--text-muted); }
+.input:hover, .select:hover { border-color: var(--scrollbar); }
+.input:focus, .select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238b93a2' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+.form-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-top: 10px;
+}
+
+/* ---------- Machine cell card grid ---------- */
+.cell-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+
+.cell-card {
+  padding: 18px;
+  transition: border-color 0.12s var(--ease-inst), background 0.12s var(--ease-inst);
+}
+.cell-card:hover { border-color: var(--scrollbar); background: var(--surface-2); }
+
+.cell-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+
+.machine-tag {
+  flex: none;
+  width: 38px; height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.machine-tag.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.machine-tag.is-warning { background: var(--warning-tint); color: var(--warning); }
+
+.cell-name { font-family: var(--font-display); font-size: 14px; font-weight: 600; color: var(--heading); }
+
+.cell-role {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.cell-stats { display: flex; gap: 20px; padding-top: 13px; border-top: 1px solid var(--border); }
+
+.cell-stat .v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--heading);
+}
+.cell-stat .k {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* ---------- Featured panel accent ---------- */
+.featured { position: relative; overflow: hidden; }
+.featured::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--brand);
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  margin-top: 38px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.footer .mono { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em; }
+
+/* ---------- Small-screen refinements ---------- */
+/* Mobile width rule: the host wrapper's 25px safe-area padding is the ONLY
+   horizontal inset on phones. Wrappers/sections get ZERO side padding here;
+   panels keep only a 14-16px internal pad. Never stack padded containers. */
+@media (max-width: 640px) {
+  .page, .section { padding-left: 0; padding-right: 0; }
+  .card-pad, .kpi, .cell-card { padding: 15px; }
+  .table-toolbar { padding: 13px 14px; }
+  thead th, tbody td { padding-left: 13px; padding-right: 13px; }
+  .kpi-grid, .cell-grid { gap: 12px; }
+}
+
+@media (max-width: 480px) {
+  .page-title { font-size: 21px; }
+  .kpi-value { font-size: 25px; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ Page header ============ -->
+  <header class="page-header anim">
+    <span class="tick tick-tl"></span>
+    <span class="tick tick-tr"></span>
+    <div>
+      <span class="eyebrow"><span class="led"></span>Shop Floor · Online</span>
+      <h1 class="page-title">Halvorsen Machine Works</h1>
+      <p class="page-subtitle">Second shift · 5-axis and turning cells, work orders, and throughput. <span class="mono-inline">SYNC 18:42:07 · CYCLE 0421</span></p>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export
+      </button>
+      <button class="btn btn-secondary" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.09a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Cell config
+      </button>
+      <button class="btn btn-primary" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New work order
+      </button>
+    </div>
+  </header>
+
+  <!-- ============ KPI instrument row ============ -->
+  <section class="section">
+    <div class="kpi-grid">
+      <div class="card kpi anim d1">
+        <div class="kpi-top">
+          <span class="microlabel">Spindle uptime</span>
+          <span class="kpi-icon is-accent">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">96.4<span class="unit">%</span></div>
+        <div class="kpi-meta"><span class="delta up">&#9650; 1.8%</span> vs last shift</div>
+      </div>
+
+      <div class="card kpi anim d2">
+        <div class="kpi-top">
+          <span class="microlabel">Parts completed</span>
+          <span class="kpi-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">1,284</div>
+        <div class="kpi-meta"><span class="delta up">&#9650; 142</span> ahead of plan</div>
+      </div>
+
+      <div class="card kpi anim d3">
+        <div class="kpi-top">
+          <span class="microlabel">Scrap rate</span>
+          <span class="kpi-icon is-success">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">0.7<span class="unit">%</span></div>
+        <div class="kpi-meta"><span class="delta up">&#9650; 0.2%</span> better than target</div>
+      </div>
+
+      <div class="card kpi anim d4">
+        <div class="kpi-top">
+          <span class="microlabel">Open work orders</span>
+          <span class="kpi-icon is-warning">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">23</div>
+        <div class="kpi-meta"><span class="delta down">&#9660; 4 due</span> within 48 hours</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Table + right rail ============ -->
+  <section class="section cols">
+
+    <!-- Work order table -->
+    <div class="card table-card anim d3">
+      <div class="table-toolbar">
+        <div class="table-title-wrap">
+          <div class="table-title">Active work orders</div>
+          <div class="table-sub">23 OPEN · SORTED BY DUE DATE</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost btn-sm" type="button">Filter</button>
+          <button class="btn btn-secondary btn-sm" type="button">View all</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Work order</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th class="num">Qty</th>
+              <th class="num">Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="cell-main">Impeller housing — 6061-T6</div>
+                <div class="cell-sub"><span class="wo-id">WO-4182</span> · Cell 2 · 5-axis</div>
+              </td>
+              <td>Meridian Pumps</td>
+              <td><span class="badge b-run">Running</span></td>
+              <td class="num">240</td>
+              <td class="num">Jul 14</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Valve manifold block — 17-4PH</div>
+                <div class="cell-sub"><span class="wo-id">WO-4177</span> · Cell 1 · mill/turn</div>
+              </td>
+              <td>Kestrel Hydraulics</td>
+              <td><span class="badge b-success">QC passed</span></td>
+              <td class="num">88</td>
+              <td class="num">Jul 15</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Sensor bezel — anodize black</div>
+                <div class="cell-sub"><span class="wo-id">WO-4190</span> · Cell 4 · lathe</div>
+              </td>
+              <td>Arcline Instruments</td>
+              <td><span class="badge b-warning">Await stock</span></td>
+              <td class="num">1,500</td>
+              <td class="num">Jul 16</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Gearbox end plate — cast iron</div>
+                <div class="cell-sub"><span class="wo-id">WO-4165</span> · Cell 3 · HMC</div>
+              </td>
+              <td>Northgate Conveyor</td>
+              <td><span class="badge b-danger">Fault hold</span></td>
+              <td class="num">36</td>
+              <td class="num">Jul 12</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Drone arm set — 7075 billet</div>
+                <div class="cell-sub"><span class="wo-id">WO-4194</span> · Cell 2 · 5-axis</div>
+              </td>
+              <td>Vantage Aerial</td>
+              <td><span class="badge b-run">Running</span></td>
+              <td class="num">410</td>
+              <td class="num">Jul 18</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Fixture plate re-grind</div>
+                <div class="cell-sub"><span class="wo-id">WO-4201</span> · Grinding · manual</div>
+              </td>
+              <td>In-house tooling</td>
+              <td><span class="badge b-neutral">Queued</span></td>
+              <td class="num">6</td>
+              <td class="num">Jul 21</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Right rail: shift targets + event log -->
+    <div style="display:grid; gap:18px;">
+
+      <div class="card card-pad featured anim d4">
+        <div class="section-head" style="margin-bottom:17px;">
+          <h2 class="section-title" style="font-size:14.5px;">Shift targets</h2>
+          <span class="section-hint">SHIFT 2 / 3</span>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Parts output</span>
+            <span class="progress-pct">1,284 / 1,500</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-accent" style="width:86%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Machine utilization</span>
+            <span class="progress-pct">96.4 / 95.0</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-success" style="width:100%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Setups completed</span>
+            <span class="progress-pct">7 / 12</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" style="width:58%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Tool changes remaining</span>
+            <span class="progress-pct">9 / 30</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-warning" style="width:30%"></div></div>
+        </div>
+      </div>
+
+      <div class="card card-pad anim d5">
+        <div class="section-head" style="margin-bottom:8px;">
+          <h2 class="section-title" style="font-size:14.5px;">Event log</h2>
+          <a href="#">View all</a>
+        </div>
+        <ul class="activity">
+          <li>
+            <span class="act-icon is-success">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text"><strong>WO-4177</strong> cleared final inspection — CMM report attached</div>
+              <div class="act-time">18:31:44</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-accent">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">Cell 2 started <strong>WO-4194</strong> — op 20 of 40, est. 3.2 h</div>
+              <div class="act-time">18:05:12</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-warning">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">Tool wear alert on <strong>Cell 1</strong> — T14 end mill at 92% life</div>
+              <div class="act-time">17:48:03</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-danger">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text"><strong>Cell 3</strong> spindle overload fault — <strong>WO-4165</strong> placed on hold</div>
+              <div class="act-time">16:22:57</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">Quote <strong>#Q-2291</strong> issued to Vantage Aerial — 410 pcs, 7075</div>
+              <div class="act-time">15:37:20</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Work order lookup form ============ -->
+  <section class="section anim d5">
+    <div class="card card-pad">
+      <div class="section-head" style="margin-bottom:17px;">
+        <h2 class="section-title" style="font-size:14.5px;">Work order lookup</h2>
+        <span class="section-hint">TRAVELERS · 24 MO</span>
+      </div>
+      <form class="form-row" onsubmit="return false;">
+        <div class="field">
+          <label for="q">Part number or customer</label>
+          <input class="input" id="q" type="text" placeholder="e.g. HMW-8841-REV-C or Kestrel" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="cell">Cell</label>
+          <select class="select" id="cell">
+            <option>All cells</option>
+            <option>Cell 1 — mill/turn</option>
+            <option>Cell 2 — 5-axis</option>
+            <option>Cell 3 — HMC</option>
+            <option>Cell 4 — lathe</option>
+            <option>Grinding — manual</option>
+          </select>
+        </div>
+        <div class="field">
+          <button class="btn btn-primary" type="submit" style="width:100%;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Search
+          </button>
+        </div>
+      </form>
+      <p class="form-hint">SEARCHES TRAVELERS, SETUP SHEETS, AND CMM REPORTS FROM THE LAST 24 MONTHS.</p>
+    </div>
+  </section>
+
+  <!-- ============ Machine cell card grid ============ -->
+  <section class="section anim d6">
+    <div class="section-head">
+      <h2 class="section-title">Machine cells</h2>
+      <span class="section-hint">4 / 5 ONLINE</span>
+    </div>
+    <div class="cell-grid">
+      <div class="card cell-card">
+        <div class="cell-top">
+          <span class="machine-tag is-accent">C2</span>
+          <div>
+            <div class="cell-name">Cell 2 — DMU 65</div>
+            <div class="cell-role">5-AXIS · WO-4194 · OP 20/40</div>
+          </div>
+        </div>
+        <div class="cell-stats">
+          <div class="cell-stat"><div class="v">98.1%</div><div class="k">Uptime</div></div>
+          <div class="cell-stat"><div class="v">11,400</div><div class="k">RPM</div></div>
+          <div class="cell-stat"><div class="v">3.2h</div><div class="k">Est rem</div></div>
+        </div>
+      </div>
+
+      <div class="card cell-card">
+        <div class="cell-top">
+          <span class="machine-tag is-accent">C1</span>
+          <div>
+            <div class="cell-name">Cell 1 — Integrex i-200</div>
+            <div class="cell-role">MILL/TURN · WO-4182 · OP 30/30</div>
+          </div>
+        </div>
+        <div class="cell-stats">
+          <div class="cell-stat"><div class="v">95.6%</div><div class="k">Uptime</div></div>
+          <div class="cell-stat"><div class="v">4,200</div><div class="k">RPM</div></div>
+          <div class="cell-stat"><div class="v">0.9h</div><div class="k">Est rem</div></div>
+        </div>
+      </div>
+
+      <div class="card cell-card">
+        <div class="cell-top">
+          <span class="machine-tag is-warning">C3</span>
+          <div>
+            <div class="cell-name">Cell 3 — HCN-5000</div>
+            <div class="cell-role">HMC · FAULT HOLD · MAINT DISPATCHED</div>
+          </div>
+        </div>
+        <div class="cell-stats">
+          <div class="cell-stat"><div class="v">61.2%</div><div class="k">Uptime</div></div>
+          <div class="cell-stat"><div class="v">0</div><div class="k">RPM</div></div>
+          <div class="cell-stat"><div class="v">2.0h</div><div class="k">ETA fix</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Footer ============ -->
+  <footer class="footer anim d6">
+    <span>Halvorsen Machine Works — shop floor console. Telemetry refreshes every 30 seconds.</span>
+    <span class="mono">CARBON · CANVAS STYLE V1</span>
+  </footer>
+
+</div>
+</body>
+</html>

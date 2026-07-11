@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel Palace Barcade — Operations Console</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Jost:wght@400;500;600;700&family=VT323&display=swap');
+
+/* ================================================================
+   ARCADE — Retro 8-Bit Cabinet Dark
+   Every color flows through these tokens. Do not hardcode hex
+   values in component rules; extend the palette here instead.
+   ================================================================ */
+:root {
+  --bg: #0a0a14;
+  --surface: #12121f;
+  --surface-2: #1a1a2e;
+  --border: #28284a;
+  --text: #cdd2ea;
+  --text-secondary: #9298bd;
+  --text-muted: #666c94;
+  --heading: #f4f5ff;
+  --brand: #ef4444;
+  --brand-contrast: #ffffff;
+  --accent: #fbbf24;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #dc2626;
+  --scrollbar: #33335c;
+  --radius: 4px;
+  --radius-sm: 2px;
+  --shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 10px 28px rgba(0, 0, 0, 0.5);
+  --shadow-lift: 0 4px 0 rgba(0, 0, 0, 0.5), 0 16px 36px rgba(0, 0, 0, 0.55);
+  --font-display: 'Press Start 2P', 'Jost', monospace;
+  --font-body: 'Jost', system-ui, sans-serif;
+  --font-mono: 'VT323', ui-monospace, monospace;
+  /* Derived tints — low-opacity backdrops for chips and badges */
+  --brand-tint: rgba(239, 68, 68, 0.12);
+  --accent-tint: rgba(251, 191, 36, 0.12);
+  --success-tint: rgba(34, 197, 94, 0.12);
+  --warning-tint: rgba(245, 158, 11, 0.12);
+  --danger-tint: rgba(220, 38, 38, 0.12);
+  --brand-press: rgba(0, 0, 0, 0.45);
+  --focus-ring: rgba(239, 68, 68, 0.28);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* CRT scanline overlay — the ONLY full-page flourish. Very subtle. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg,
+    rgba(0, 0, 0, 0.14) 0px, rgba(0, 0, 0, 0.14) 1px,
+    transparent 1px, transparent 3px);
+  opacity: 0.45;
+  z-index: 999;
+}
+
+::selection { background: var(--accent-tint); color: var(--heading); }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+h1, h2, h3 { color: var(--heading); }
+
+a { color: var(--brand); text-decoration: none; font-weight: 500; }
+a:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1.5px var(--brand);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Layout shell ---------- */
+.page { max-width: 1120px; margin: 0 auto; }
+
+.section { margin-bottom: 32px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  color: var(--heading);
+  text-transform: uppercase;
+}
+
+.section-hint { font-size: 13px; color: var(--text-muted); }
+
+/* ---------- Entrance animation (opacity/transform only) ---------- */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim { opacity: 0; animation: rise-in 0.4s var(--ease-out) forwards; }
+.d1 { animation-delay: 0.05s; } .d2 { animation-delay: 0.10s; }
+.d3 { animation-delay: 0.15s; } .d4 { animation-delay: 0.20s; }
+.d5 { animation-delay: 0.25s; } .d6 { animation-delay: 0.30s; }
+
+/* Insert-coin blink — square marker only, text never blinks */
+@keyframes coin-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.15; }
+}
+.blink-square { animation: coin-blink 1.2s steps(2, end) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim { animation: none; opacity: 1; transform: none; }
+  .blink-square { animation: none; opacity: 1; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Page header ---------- */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 24px;
+  margin-bottom: 32px;
+  border-bottom: 2px solid var(--border);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.eyebrow .sq {
+  width: 7px; height: 7px;
+  background: var(--accent);
+  flex: none;
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  color: var(--heading);
+  text-transform: uppercase;
+}
+
+.page-subtitle {
+  margin-top: 8px;
+  font-size: 15px;
+  color: var(--text-secondary);
+  max-width: 58ch;
+}
+
+.header-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+/* Blinking LIVE chip */
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--success);
+  background: var(--success-tint);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  text-transform: uppercase;
+}
+.live-chip .blink-square { width: 7px; height: 7px; background: var(--success); flex: none; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out), color 0.15s var(--ease-out), transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+  white-space: nowrap;
+}
+.btn svg { flex: none; }
+
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  box-shadow: 0 3px 0 var(--brand-press);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--brand) 86%, var(--brand-contrast));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 0 var(--brand-press);
+}
+.btn-primary:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--brand-press);
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--heading);
+}
+.btn-secondary:hover { border-color: var(--accent); }
+.btn-secondary:active { transform: translateY(1px); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { background: var(--surface-2); color: var(--heading); }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  transition: border-color 0.15s var(--ease-out), transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.card:hover { border-color: var(--scrollbar); transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+
+.card-title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--heading);
+  line-height: 1.6;
+}
+
+/* ---------- KPI stat tiles ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.kpi { display: flex; flex-direction: column; gap: 12px; }
+
+.kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+.kpi-label {
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.kpi-icon {
+  width: 32px; height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+.kpi-icon.brand   { background: var(--brand-tint);   color: var(--brand); }
+.kpi-icon.accent  { background: var(--accent-tint);  color: var(--accent); }
+.kpi-icon.success { background: var(--success-tint); color: var(--success); }
+.kpi-icon.warning { background: var(--warning-tint); color: var(--warning); }
+
+.kpi-value {
+  font-family: var(--font-mono);
+  font-size: 38px;
+  line-height: 1;
+  color: var(--heading);
+  letter-spacing: 0.02em;
+}
+.kpi-value .unit { font-size: 22px; color: var(--text-muted); }
+
+.kpi-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.delta.up   { background: var(--success-tint); color: var(--success); }
+.delta.down { background: var(--danger-tint);  color: var(--danger); }
+.delta.flat { background: var(--warning-tint); color: var(--warning); }
+
+.kpi-caption { font-size: 12px; color: var(--text-muted); }
+
+/* Featured card top-border accent — one per view */
+.card.featured { border-top: 3px solid var(--brand); }
+
+/* ---------- High-score data table ---------- */
+.table-card { padding: 0; overflow: hidden; }
+
+.table-scroll { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; min-width: 640px; }
+
+thead th {
+  font-family: var(--font-display);
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  background: var(--surface-2);
+  padding: 12px 16px;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 0.15s var(--ease-out); }
+tbody tr:hover { background: var(--surface-2); }
+
+.cell-primary { color: var(--heading); font-weight: 500; }
+.cell-sub { display: block; font-size: 12.5px; color: var(--text-muted); margin-top: 1px; }
+
+td.num, th.num { text-align: right; }
+.mono-num {
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--heading);
+}
+.score-num {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+/* Rank badges — 1ST gets the coin-gold treatment */
+.rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  font-family: var(--font-display);
+  font-size: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.rank.first  { background: var(--accent-tint); border-color: var(--accent); color: var(--accent); }
+.rank.second { background: var(--surface-2);   border-color: var(--scrollbar); color: var(--text); }
+
+/* ---------- Status badges ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badge::before { content: ""; width: 6px; height: 6px; background: currentColor; flex: none; }
+.badge.online  { background: var(--success-tint); color: var(--success); }
+.badge.pending { background: var(--warning-tint); color: var(--warning); }
+.badge.down    { background: var(--danger-tint);  color: var(--danger); }
+.badge.info    { background: var(--accent-tint);  color: var(--accent); }
+
+/* ---------- Forms ---------- */
+.form-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.field { display: flex; flex-direction: column; gap: 7px; }
+
+.field label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.field input,
+.field select {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--heading);
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  width: 100%;
+  transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+
+.field input::placeholder { color: var(--text-muted); }
+.field input:hover, .field select:hover { border-color: var(--scrollbar); }
+.field input:focus, .field select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.field select {
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239298bd' stroke-width='2.5' stroke-linecap='square'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+/* ---------- XP / power progress bars ---------- */
+.xp-row { margin-bottom: 18px; }
+.xp-row:last-child { margin-bottom: 0; }
+
+.xp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.xp-name { font-size: 14px; font-weight: 500; color: var(--heading); }
+
+.xp-frac {
+  font-family: var(--font-mono);
+  font-size: 21px;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+.xp-frac strong { color: var(--accent); font-weight: 400; }
+
+.xp-track {
+  height: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.xp-fill {
+  height: 100%;
+  background: var(--accent);
+  /* Segmented power-bar notches */
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 10px, transparent 10px 12px);
+          mask-image: repeating-linear-gradient(90deg, #000 0 10px, transparent 10px 12px);
+}
+.xp-fill.success { background: var(--success); }
+.xp-fill.warning { background: var(--warning); }
+.xp-fill.brand   { background: var(--brand); }
+
+/* ---------- Activity timeline ---------- */
+.timeline { list-style: none; }
+
+.timeline li {
+  display: flex;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.timeline li:first-child { padding-top: 4px; }
+.timeline li:last-child { border-bottom: none; padding-bottom: 4px; }
+
+.tl-icon {
+  width: 30px; height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex: none;
+  margin-top: 2px;
+}
+.tl-icon.brand   { background: var(--brand-tint);   color: var(--brand); }
+.tl-icon.accent  { background: var(--accent-tint);  color: var(--accent); }
+.tl-icon.success { background: var(--success-tint); color: var(--success); }
+.tl-icon.warning { background: var(--warning-tint); color: var(--warning); }
+
+.tl-body { min-width: 0; }
+.tl-text { font-size: 14px; color: var(--text); }
+.tl-text strong { color: var(--heading); font-weight: 600; }
+.tl-time { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+/* ---------- Card grid (cabinet fleet) ---------- */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.cab-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.cab-meta { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
+.cab-meta .sep { color: var(--text-muted); margin: 0 6px; }
+
+.cab-stats {
+  display: flex;
+  gap: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.cab-stat { display: flex; flex-direction: column; gap: 2px; }
+.cab-stat .v {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  line-height: 1;
+  color: var(--heading);
+}
+.cab-stat .k {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---------- Two-column band ---------- */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  margin-top: 48px;
+  padding-top: 20px;
+  border-top: 2px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.footer .credit {
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ---------- Responsive ----------
+   Host injects 25px body padding — that is the ONLY horizontal
+   inset on mobile. Zero wrapper side padding at <=640px. */
+@media (max-width: 900px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .form-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .page, .section { padding-left: 0; padding-right: 0; }
+  .page-title { font-size: 18px; }
+  .card { padding: 16px; }
+  .kpi-value { font-size: 34px; }
+  .page-header { align-items: flex-start; flex-direction: column; }
+  thead th, tbody td { padding-left: 12px; padding-right: 12px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ================= PAGE HEADER ================= -->
+  <header class="page-header anim">
+    <div>
+      <div class="eyebrow"><span class="sq"></span>Player One — Operations</div>
+      <h1 class="page-title">Pixel Palace Barcade</h1>
+      <p class="page-subtitle">Floor console for the week of June 8. Cabinet uptime, token revenue, league standings, and tonight's event prep — all systems reporting.</p>
+    </div>
+    <div class="header-actions">
+      <span class="live-chip"><span class="blink-square"></span>Floor Live</span>
+      <button class="btn btn-secondary">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+        Export Report
+      </button>
+      <button class="btn btn-primary">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M12 5v14M5 12h14"/></svg>
+        New Event
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= KPI ROW ================= -->
+  <section class="section">
+    <div class="kpi-grid">
+      <div class="card kpi featured anim d1">
+        <div class="kpi-top">
+          <span class="kpi-label">Token Revenue</span>
+          <span class="kpi-icon brand">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10h5"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">$12,480</div>
+        <div class="kpi-foot">
+          <span class="delta up">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+            +18.2%
+          </span>
+          <span class="kpi-caption">vs last week</span>
+        </div>
+      </div>
+
+      <div class="card kpi anim d2">
+        <div class="kpi-top">
+          <span class="kpi-label">Cabinets Online</span>
+          <span class="kpi-icon success">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="5" y="3" width="14" height="18"/><rect x="8" y="6" width="8" height="6"/><path d="M9 16h.01M15 16h.01"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">42<span class="unit">/45</span></div>
+        <div class="kpi-foot">
+          <span class="delta up">93% uptime</span>
+          <span class="kpi-caption">3 in service bay</span>
+        </div>
+      </div>
+
+      <div class="card kpi anim d3">
+        <div class="kpi-top">
+          <span class="kpi-label">Players Tonight</span>
+          <span class="kpi-icon accent">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.5c2.8.3 5 2.7 5 5.5"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">318</div>
+        <div class="kpi-foot">
+          <span class="delta up">+41</span>
+          <span class="kpi-caption">vs same night last week</span>
+        </div>
+      </div>
+
+      <div class="card kpi anim d4">
+        <div class="kpi-top">
+          <span class="kpi-label">Avg Session</span>
+          <span class="kpi-icon warning">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">47<span class="unit">min</span></div>
+        <div class="kpi-foot">
+          <span class="delta flat">-2 min</span>
+          <span class="kpi-caption">league night effect</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= HIGH SCORE TABLE ================= -->
+  <section class="section anim d3">
+    <div class="section-head">
+      <h2 class="section-title">High Scores — Killer Bee League</h2>
+      <span class="section-hint">Season 4 · Week 6 of 8</span>
+    </div>
+    <div class="card table-card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Player</th>
+              <th>Cabinet</th>
+              <th class="num">Score</th>
+              <th class="num">Credits</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="rank first">1</span></td>
+              <td>
+                <span class="cell-primary">Dana "Joystick" Okafor</span>
+                <span class="cell-sub">Member #0451 · 3-week streak</span>
+              </td>
+              <td>Galaga Deluxe</td>
+              <td class="num"><span class="score-num">2,847,900</span></td>
+              <td class="num"><span class="mono-num">184</span></td>
+              <td><span class="badge online">Qualified</span></td>
+            </tr>
+            <tr>
+              <td><span class="rank second">2</span></td>
+              <td>
+                <span class="cell-primary">Marcus Reyes</span>
+                <span class="cell-sub">Member #0722 · defending champ</span>
+              </td>
+              <td>Street Brawler II</td>
+              <td class="num"><span class="score-num">2,610,450</span></td>
+              <td class="num"><span class="mono-num">201</span></td>
+              <td><span class="badge online">Qualified</span></td>
+            </tr>
+            <tr>
+              <td><span class="rank">3</span></td>
+              <td>
+                <span class="cell-primary">Priya Natarajan</span>
+                <span class="cell-sub">Member #1103 · rookie season</span>
+              </td>
+              <td>Asteroid Storm</td>
+              <td class="num"><span class="score-num">2,488,120</span></td>
+              <td class="num"><span class="mono-num">96</span></td>
+              <td><span class="badge online">Qualified</span></td>
+            </tr>
+            <tr>
+              <td><span class="rank">4</span></td>
+              <td>
+                <span class="cell-primary">Theo Lindqvist</span>
+                <span class="cell-sub">Member #0388 · score under review</span>
+              </td>
+              <td>Pinball: Nova Run</td>
+              <td class="num"><span class="score-num">2,201,340</span></td>
+              <td class="num"><span class="mono-num">143</span></td>
+              <td><span class="badge pending">Verifying</span></td>
+            </tr>
+            <tr>
+              <td><span class="rank">5</span></td>
+              <td>
+                <span class="cell-primary">June Castellanos</span>
+                <span class="cell-sub">Member #0917 · needs 1 more session</span>
+              </td>
+              <td>Rally Racer GT</td>
+              <td class="num"><span class="score-num">1,975,800</span></td>
+              <td class="num"><span class="mono-num">77</span></td>
+              <td><span class="badge pending">2 games left</span></td>
+            </tr>
+            <tr>
+              <td><span class="rank">6</span></td>
+              <td>
+                <span class="cell-primary">Sam Whitfield</span>
+                <span class="cell-sub">Member #0264 · cabinet fault mid-run</span>
+              </td>
+              <td>Dragon's Keep</td>
+              <td class="num"><span class="score-num">1,730,215</span></td>
+              <td class="num"><span class="mono-num">112</span></td>
+              <td><span class="badge down">Replay owed</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= SPLIT: XP BARS + TIMELINE ================= -->
+  <section class="section anim d4">
+    <div class="split">
+
+      <div class="card">
+        <div class="section-head" style="margin-bottom: 20px;">
+          <h2 class="card-title">Event Prep — Friday Tournament</h2>
+          <span class="badge info">6 days out</span>
+        </div>
+
+        <div class="xp-row">
+          <div class="xp-head">
+            <span class="xp-name">Bracket signups</span>
+            <span class="xp-frac"><strong>52</strong>/64</span>
+          </div>
+          <div class="xp-track"><div class="xp-fill" style="width: 81%;"></div></div>
+        </div>
+
+        <div class="xp-row">
+          <div class="xp-head">
+            <span class="xp-name">Cabinet certification</span>
+            <span class="xp-frac"><strong>10</strong>/12</span>
+          </div>
+          <div class="xp-track"><div class="xp-fill success" style="width: 83%;"></div></div>
+        </div>
+
+        <div class="xp-row">
+          <div class="xp-head">
+            <span class="xp-name">Prize wall stocked</span>
+            <span class="xp-frac"><strong>340</strong>/500 tickets</span>
+          </div>
+          <div class="xp-track"><div class="xp-fill warning" style="width: 68%;"></div></div>
+        </div>
+
+        <div class="xp-row">
+          <div class="xp-head">
+            <span class="xp-name">Bar pre-orders</span>
+            <span class="xp-frac"><strong>29</strong>/80</span>
+          </div>
+          <div class="xp-track"><div class="xp-fill brand" style="width: 36%;"></div></div>
+        </div>
+
+        <!-- Form row: register a walk-in entrant -->
+        <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);">
+          <div class="form-row">
+            <div class="field">
+              <label for="entrant">Register entrant</label>
+              <input id="entrant" type="text" placeholder="Player name or member #">
+            </div>
+            <div class="field">
+              <label for="division">Division</label>
+              <select id="division">
+                <option>Open bracket</option>
+                <option>Pinball league</option>
+                <option>Retro classics</option>
+                <option>Co-op doubles</option>
+              </select>
+            </div>
+            <button class="btn btn-primary">Add Player</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-head" style="margin-bottom: 8px;">
+          <h2 class="card-title">Floor Activity</h2>
+          <a href="#log">Full log</a>
+        </div>
+        <ul class="timeline">
+          <li>
+            <span class="tl-icon accent">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M8 21h8M12 17v4M6 3h12v6a6 6 0 0 1-12 0V3zM6 5H3v2a4 4 0 0 0 3 3.9M18 5h3v2a4 4 0 0 1-3 3.9"/></svg>
+            </span>
+            <div class="tl-body">
+              <p class="tl-text"><strong>Dana Okafor</strong> broke the house record on <strong>Galaga Deluxe</strong> — score verified by floor cam.</p>
+              <span class="tl-time">8 minutes ago</span>
+            </div>
+          </li>
+          <li>
+            <span class="tl-icon success">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M20 6L9 17l-5-5"/></svg>
+            </span>
+            <div class="tl-body">
+              <p class="tl-text"><strong>Dragon's Keep</strong> back online after monitor swap — burn-in test passed.</p>
+              <span class="tl-time">34 minutes ago</span>
+            </div>
+          </li>
+          <li>
+            <span class="tl-icon brand">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10h5"/></svg>
+            </span>
+            <div class="tl-body">
+              <p class="tl-text">Token hopper on <strong>lane 3 changer</strong> refilled — 2,000 tokens loaded by <strong>Marcus (staff)</strong>.</p>
+              <span class="tl-time">1 hour ago</span>
+            </div>
+          </li>
+          <li>
+            <span class="tl-icon warning">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M12 3L2 20h20L12 3zM12 10v4M12 17h.01"/></svg>
+            </span>
+            <div class="tl-body">
+              <p class="tl-text"><strong>Rally Racer GT</strong> steering pot drifting — flagged for calibration before Friday.</p>
+              <span class="tl-time">2 hours ago</span>
+            </div>
+          </li>
+          <li>
+            <span class="tl-icon accent">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="3" y="5" width="18" height="14"/><path d="M3 10h18M8 15h4"/></svg>
+            </span>
+            <div class="tl-body">
+              <p class="tl-text">Group booking confirmed — <strong>Northside Dev Guild</strong>, 24 players, Saturday 7 PM.</p>
+              <span class="tl-time">3 hours ago</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= CABINET FLEET CARD GRID ================= -->
+  <section class="section anim d5">
+    <div class="section-head">
+      <h2 class="section-title">Cabinet Fleet</h2>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <span class="section-hint">Top earners this week</span>
+        <button class="btn btn-ghost">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+          Filter
+        </button>
+      </div>
+    </div>
+    <div class="card-grid">
+
+      <div class="card">
+        <div class="cab-head">
+          <h3 class="card-title">Galaga Deluxe</h3>
+          <span class="badge online">Online</span>
+        </div>
+        <p class="cab-meta">Bay A-01<span class="sep">·</span>1981 restomod<span class="sep">·</span>CRT original</p>
+        <div class="cab-stats">
+          <div class="cab-stat"><span class="v">$918</span><span class="k">Week rev</span></div>
+          <div class="cab-stat"><span class="v">406</span><span class="k">Plays</span></div>
+          <div class="cab-stat"><span class="v">99%</span><span class="k">Uptime</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cab-head">
+          <h3 class="card-title">Street Brawler II</h3>
+          <span class="badge online">Online</span>
+        </div>
+        <p class="cab-meta">Bay A-04<span class="sep">·</span>2-player versus<span class="sep">·</span>new sticks May</p>
+        <div class="cab-stats">
+          <div class="cab-stat"><span class="v">$874</span><span class="k">Week rev</span></div>
+          <div class="cab-stat"><span class="v">522</span><span class="k">Plays</span></div>
+          <div class="cab-stat"><span class="v">97%</span><span class="k">Uptime</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cab-head">
+          <h3 class="card-title">Pinball: Nova Run</h3>
+          <span class="badge pending">Service due</span>
+        </div>
+        <p class="cab-meta">Bay B-02<span class="sep">·</span>flipper rebuild booked<span class="sep">·</span>Thu AM</p>
+        <div class="cab-stats">
+          <div class="cab-stat"><span class="v">$693</span><span class="k">Week rev</span></div>
+          <div class="cab-stat"><span class="v">288</span><span class="k">Plays</span></div>
+          <div class="cab-stat"><span class="v">91%</span><span class="k">Uptime</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="cab-head">
+          <h3 class="card-title">Rally Racer GT</h3>
+          <span class="badge down">Calibrating</span>
+        </div>
+        <p class="cab-meta">Bay C-06<span class="sep">·</span>twin seat<span class="sep">·</span>steering pot drift</p>
+        <div class="cab-stats">
+          <div class="cab-stat"><span class="v">$540</span><span class="k">Week rev</span></div>
+          <div class="cab-stat"><span class="v">201</span><span class="k">Plays</span></div>
+          <div class="cab-stat"><span class="v">84%</span><span class="k">Uptime</span></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= FOOTER ================= -->
+  <footer class="footer anim d6">
+    <span class="credit">Pixel Palace Barcade — Ops Console</span>
+    <span>Data refreshed 6:42 PM · <a href="#settings">Console settings</a></span>
+  </footer>
+
+</div>
+</body>
+</html>
