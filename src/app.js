@@ -7397,8 +7397,14 @@ connectAiradio();
                 });
             }
 
-            // If mode is hume, initialize HumeAdapter as voice agent
-            const activeMode = localStorage.getItem('voice_mode') || 'supertonic';
+            // If mode is hume, initialize HumeAdapter as voice agent.
+            // Server profile is AUTHORITATIVE (VPS = source of truth) — never let a stale
+            // per-tab localStorage voice_mode strand the UI in Hume mode, which hides the
+            // TTS Voice picker (Hume EVI controls voice itself, so #voice-select-group is
+            // hidden). BHB 2026-07-11: localStorage voice_mode='hume' left over from a past
+            // Hume session hid the Voice field despite the server profile being supertonic/
+            // resemble. Mirror line ~7178's server-first resolution.
+            const activeMode = window._serverProfile?.ui?.voice_mode || localStorage.getItem('voice_mode') || 'supertonic';
             if (activeMode === 'hume') {
                 // Force switchMode by temporarily setting a different mode
                 ModeManager.currentMode = '_init';
