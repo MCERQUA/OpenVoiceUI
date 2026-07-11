@@ -419,9 +419,10 @@ def _generate_pending_icons(page_ids) -> None:
 def _generate_pending_icons_inner(page_ids) -> None:
     from routes.icons import generate_icon_image, IconGenerationError
     logger = logging.getLogger(__name__)
+    extra_backoff = 0  # seconds — grows on a 429, so the batch self-throttles instead of hammering a rate-limited API
     for i, page_id in enumerate(page_ids):
         if i > 0:
-            time.sleep(2)  # stagger Gemini calls
+            time.sleep(2 + extra_backoff)  # stagger Gemini calls
         try:
             with _manifest_lock:
                 manifest = load_canvas_manifest()
@@ -435,13 +436,21 @@ def _generate_pending_icons_inner(page_ids) -> None:
             prompt = f'A {category} icon for: {title}.' + (f' {description}' if description else '')
             try:
                 result = generate_icon_image(prompt, name=f'{page_id}-icon')
+                extra_backoff = 0  # reset once a call actually succeeds
             except IconGenerationError as e:
                 logger.warning(f'Auto icon-gen failed for {page_id}: {e}')
-                with _manifest_lock:
-                    manifest = load_canvas_manifest()
-                    if page_id in manifest['pages']:
-                        manifest['pages'][page_id]['icon_gen_failed_at'] = time.time()
-                        save_canvas_manifest(manifest)
+                is_rate_limited = '429' in str(e)
+                if is_rate_limited:
+                    # Rate-limited, not actually broken — don't stamp the long
+                    # cooldown (that would strand it for 6h over a transient
+                    # limit). Back off harder for the rest of THIS batch instead.
+                    extra_backoff = min(extra_backoff + 4, 20)
+                else:
+                    with _manifest_lock:
+                        manifest = load_canvas_manifest()
+                        if page_id in manifest['pages']:
+                            manifest['pages'][page_id]['icon_gen_failed_at'] = time.time()
+                            save_canvas_manifest(manifest)
                 continue
 
             with _manifest_lock:
