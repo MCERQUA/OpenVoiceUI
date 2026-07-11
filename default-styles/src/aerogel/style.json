@@ -1,0 +1,32 @@
+{
+  "id": "aerogel",
+  "name": "Aerogel",
+  "tagline": "Spatial-computing glass in daylight",
+  "description": "The UI of a 2035 AR headset rendered on a page: frosted translucent panels floating over luminous porcelain-silver, graphite-ink type with electric-mint live states. visionOS depth, Fluent acrylic polish — the fleet's only futuristic light theme.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#eef1f5",
+    "surface": "#ffffff",
+    "surface-2": "#f3f6f9",
+    "border": "#dbe2e9",
+    "text": "#3c4756",
+    "text-secondary": "#5f6c7d",
+    "text-muted": "#8d99a9",
+    "heading": "#16202c",
+    "brand": "#16202c",
+    "brand-contrast": "#ffffff",
+    "accent": "#0bd9a2",
+    "success": "#149e63",
+    "warning": "#d9870b",
+    "danger": "#dc4433",
+    "scrollbar": "#c2ccd7",
+    "radius": "22px",
+    "radius-sm": "14px",
+    "shadow": "0 1px 2px rgba(22, 32, 44, 0.04), 0 12px 32px rgba(22, 32, 44, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.7)",
+    "font-display": "'Inter Tight', 'Inter', system-ui, sans-serif",
+    "font-body": "'Inter Tight', system-ui, -apple-system, sans-serif",
+    "font-mono": "'JetBrains Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+  }
+}

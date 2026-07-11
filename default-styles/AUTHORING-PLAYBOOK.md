@@ -8,7 +8,7 @@ System overview: `/home/mike/MIKE-AI/docs/jambot/canvas-style-system.md`.
 
 1. Repo: `/mnt/system/base/OpenVoiceUI/`, branch `feat/canvas-style-system`
    (check `git branch --show-current` — after merge, work on a new branch off main).
-2. Existing presets: `default-styles/src/<id>/` — 13 as of 2026-07-11:
+2. Existing presets: `default-styles/src/<id>/` — 21 as of 2026-07-11:
    meridian = SaaS light (default recommendation), atelier = editorial warm
    light (Fraunces serif/teal), obsidian = premium dark glass (blue/cyan),
    plus the 2026-07-11 Fable batch: ledger (financial serif light, forest
@@ -24,10 +24,18 @@ System overview: `/home/mike/MIKE-AI/docs/jambot/canvas-style-system.md`.
    turf green/scoreboard gold), voltage (extreme-sports dark, Bebas Neue,
    volt/hazard), arcade (retro 8-bit dark, Press Start 2P, coin red/pixel
    yellow), aurora (northern-lights dark, Unbounded, arctic green/ice cyan,
-   animated sky). New styles must be DISTINCT from all existing ones —
-   taken accent families: blue, sky, teal, amber, forest green/gold, orange/
-   lime, terracotta/olive, petrol, crimson-on-mono, emerald/brass, navy/gold,
-   marigold, copper/ember, sepia/sienna.
+   animated sky), and the 2026-07-11 futuristic batch: cipher (cyberdeck
+   terminal dark, Share Tech Mono, phosphor green #00ff9d/terminal amber,
+   scanlines + corner brackets), zenith (orbital-station chrome dark,
+   Michroma, white-light monochrome — NO color accent, glass + starfield),
+   aerogel (spatial-computing glass LIGHT, Inter Tight, graphite ink/electric
+   mint #0bd9a2, 3-tier frosted depth). New styles must be DISTINCT from all
+   existing ones — taken accent families: blue, sky, teal, amber, forest
+   green/gold, orange/lime, terracotta/olive, petrol, crimson-on-mono,
+   emerald/brass, navy/gold, marigold, copper/ember, sepia/sienna, racing
+   red/silver, turf/scoreboard gold, volt/hazard, coin red/pixel yellow,
+   arctic green/ice cyan, phosphor green/terminal amber, chrome-white mono,
+   graphite/electric mint.
 3. Test tenant: test-dev, OVU on host port 5001, containers
    `openvoiceui-test-dev` / `openclaw-test-dev`.
 
