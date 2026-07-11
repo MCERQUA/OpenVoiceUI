@@ -1,0 +1,32 @@
+{
+  "id": "cipher",
+  "name": "Cipher",
+  "tagline": "Phosphor-green cyberdeck operations terminal",
+  "description": "A 2080s hacker's mission console: near-black phosphor CRT with faint scanlines, corner-bracket HUD cards, blinking block cursor, and every readout in geometric monospace. Pure neon-green primaries with terminal-amber warnings — data rendered like live terminal output, polished to broadcast grade.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#030806",
+    "surface": "#071009",
+    "surface-2": "#0b1a10",
+    "border": "#173522",
+    "text": "#b4dcc5",
+    "text-secondary": "#7ba990",
+    "text-muted": "#4e7a63",
+    "heading": "#e9fff3",
+    "brand": "#00ff9d",
+    "brand-contrast": "#02170d",
+    "accent": "#ffb000",
+    "success": "#24e08a",
+    "warning": "#ffc247",
+    "danger": "#ff4757",
+    "scrollbar": "#1d4a30",
+    "radius": "4px",
+    "radius-sm": "2px",
+    "shadow": "0 0 0 1px rgba(0, 255, 157, 0.05), 0 10px 32px rgba(0, 0, 0, 0.65)",
+    "font-display": "'Share Tech Mono', 'JetBrains Mono', ui-monospace, monospace",
+    "font-body": "'JetBrains Mono', ui-monospace, 'SF Mono', monospace",
+    "font-mono": "'JetBrains Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;500;700&display=swap"
+  }
+}

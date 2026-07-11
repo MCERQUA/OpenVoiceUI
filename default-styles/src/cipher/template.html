@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghostline Security — Network Operations Console</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* ================================================================
+   CIPHER — Phosphor Cyberdeck Operations Terminal
+   Every color flows through these tokens. Do not hardcode hex
+   values in component rules; extend the palette here instead.
+   ================================================================ */
+:root {
+  --bg: #030806;
+  --surface: #071009;
+  --surface-2: #0b1a10;
+  --border: #173522;
+  --text: #b4dcc5;
+  --text-secondary: #7ba990;
+  --text-muted: #4e7a63;
+  --heading: #e9fff3;
+  --brand: #00ff9d;
+  --brand-contrast: #02170d;
+  --accent: #ffb000;
+  --success: #24e08a;
+  --warning: #ffc247;
+  --danger: #ff4757;
+  --scrollbar: #1d4a30;
+  --radius: 4px;
+  --radius-sm: 2px;
+  --shadow: 0 0 0 1px rgba(0, 255, 157, 0.05), 0 10px 32px rgba(0, 0, 0, 0.65);
+  --shadow-lift: 0 0 0 1px rgba(0, 255, 157, 0.10), 0 0 22px rgba(0, 255, 157, 0.10), 0 14px 40px rgba(0, 0, 0, 0.7);
+  --font-display: 'Share Tech Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --font-body: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  /* Derived tints & glows — all decorative alpha derives from the tokens above */
+  --brand-tint: rgba(0, 255, 157, 0.10);
+  --brand-glow: rgba(0, 255, 157, 0.28);
+  --brand-glow-soft: rgba(0, 255, 157, 0.12);
+  --accent-tint: rgba(255, 176, 0, 0.10);
+  --accent-glow: rgba(255, 176, 0, 0.22);
+  --success-tint: rgba(36, 224, 138, 0.10);
+  --warning-tint: rgba(255, 194, 71, 0.10);
+  --danger-tint: rgba(255, 71, 87, 0.10);
+  --focus-ring: rgba(0, 255, 157, 0.18);
+  --scanline: rgba(3, 8, 6, 0.55);
+  --grid-line: rgba(0, 255, 157, 0.035);
+  --bracket: rgba(0, 255, 157, 0.55);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--bg); color: var(--text); font-family: var(--font-body);
+  font-size: 13.5px; line-height: 1.62; -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility; position: relative; min-height: 100vh;
+  overflow-x: hidden;
+}
+::selection { background: var(--brand-tint); color: var(--heading); }
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+h1 { color: var(--heading); }
+a { color: var(--brand); text-decoration: none; font-weight: 500; }
+a:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1.5px var(--brand);
+  border-radius: var(--radius-sm);
+}
+/* ================================================================
+   THE TUBE — CRT scanlines + data grid + phosphor bloom.
+   Fixed, behind everything, pointer-events none, fully static.
+   ================================================================ */
+.crt-scanlines {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px, transparent 3px,
+    var(--scanline) 3px, var(--scanline) 4px
+  );
+  opacity: 0.16; mix-blend-mode: multiply;
+}
+.data-grid {
+  position: fixed; inset: 0; z-index: -2; pointer-events: none;
+  background:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.bloom {
+  position: fixed; inset: -10% -20%; z-index: -3; pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 45% at 50% -12%, var(--brand-glow-soft), transparent 62%),
+    radial-gradient(ellipse 45% 35% at 88% 8%, var(--accent-tint), transparent 65%),
+    var(--bg);
+}
+/* ---------- Layout shell ---------- */
+.page { max-width: 1120px; margin: 0 auto; position: relative; z-index: 1; }
+.section { margin-bottom: 36px; }
+.section-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin-bottom: 13px;
+}
+.section-title {
+  font-family: var(--font-display); font-size: 14px; font-weight: 400;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--heading);
+  display: inline-flex; align-items: baseline; gap: 8px;
+}
+.section-title::before { content: "//"; color: var(--brand); letter-spacing: 0; }
+.section-hint {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  letter-spacing: 0.06em;
+}
+/* ---------- Entrance + signature animations ----------
+   Defaults are motionless & fully visible; animation is applied
+   ONLY under prefers-reduced-motion: no-preference. */
+.anim { opacity: 1; }
+@keyframes boot-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes scan-sweep {
+  0%   { top: -2px; opacity: 0; }
+  6%   { opacity: 1; }
+  46%  { top: 100%; opacity: 1; }
+  52%, 100% { top: 100%; opacity: 0; }
+}
+@keyframes pulse-block {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .anim { opacity: 0; animation: boot-in 0.45s var(--ease-out) forwards; }
+  .d1 { animation-delay: 0.05s; }
+  .d2 { animation-delay: 0.10s; }
+  .d3 { animation-delay: 0.16s; }
+  .d4 { animation-delay: 0.22s; }
+  .d5 { animation-delay: 0.28s; }
+  .d6 { animation-delay: 0.34s; }
+  .cursor { animation: cursor-blink 1.1s step-end infinite; }
+  .hero-sweep { display: block; animation: scan-sweep 7s linear infinite; }
+  .flag.ok .glyph, .badge-dot { animation: pulse-block 2.4s ease-in-out infinite; }
+}
+/* ================================================================
+   PAGE HEADER — the hero. Bracket-framed, swept by a scan line.
+   ================================================================ */
+.page-header {
+  position: relative; overflow: hidden;
+  padding: 24px 22px 22px; margin-bottom: 36px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  display: flex; flex-wrap: wrap; align-items: flex-end;
+  justify-content: space-between; gap: 18px;
+}
+.page-header::before, .page-header::after,
+.hud-corner-b::before, .hud-corner-b::after {
+  content: ""; position: absolute; width: 14px; height: 14px; pointer-events: none;
+}
+.page-header::before { top: 6px; left: 6px; border-top: 1.5px solid var(--bracket); border-left: 1.5px solid var(--bracket); }
+.page-header::after { top: 6px; right: 6px; border-top: 1.5px solid var(--bracket); border-right: 1.5px solid var(--bracket); }
+.hud-corner-b::before { bottom: 6px; left: 6px; border-bottom: 1.5px solid var(--bracket); border-left: 1.5px solid var(--bracket); }
+.hud-corner-b::after { bottom: 6px; right: 6px; border-bottom: 1.5px solid var(--bracket); border-right: 1.5px solid var(--bracket); }
+.hero-sweep {
+  display: none; position: absolute; left: 0; right: 0; top: -2px; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--brand-glow), transparent);
+  pointer-events: none;
+}
+.eyebrow {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--brand);
+  margin-bottom: 10px;
+}
+.eyebrow .badge-dot {
+  width: 7px; height: 7px; background: var(--brand); flex: none;
+  box-shadow: 0 0 8px var(--brand-glow);
+}
+.page-title {
+  font-family: var(--font-display); font-size: 26px; font-weight: 400;
+  letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.2;
+  color: var(--heading); text-shadow: 0 0 26px var(--brand-glow);
+  display: block;
+}
+.cursor {
+  display: inline-block; width: 13px; height: 24px; background: var(--brand);
+  box-shadow: 0 0 12px var(--brand-glow); margin-left: 9px; vertical-align: -3px;
+}
+.page-subtitle {
+  display: block; margin-top: 10px; font-size: 12.5px;
+  color: var(--text-secondary); max-width: 62ch;
+  letter-spacing: 0.02em;
+}
+.header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; line-height: 1;
+  padding: 10px 16px; border-radius: var(--radius-sm);
+  border: 1px solid transparent; cursor: pointer; white-space: nowrap;
+  transition: background 0.18s var(--ease-out), border-color 0.18s var(--ease-out),
+              color 0.18s var(--ease-out), transform 0.18s var(--ease-out),
+              box-shadow 0.18s var(--ease-out);
+}
+.btn svg { flex: none; }
+.btn:active { transform: translateY(0.5px); }
+.btn-primary {
+  background: var(--brand); color: var(--brand-contrast);
+  box-shadow: 0 0 18px var(--brand-glow);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--brand) 85%, white);
+  box-shadow: 0 0 26px var(--brand-glow), 0 4px 14px rgba(0, 0, 0, 0.55);
+  transform: translateY(-1px);
+}
+.btn-secondary { background: var(--surface-2); border-color: var(--border); color: var(--heading); }
+.btn-secondary:hover {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  box-shadow: 0 0 14px var(--brand-glow-soft); transform: translateY(-1px);
+}
+.btn-ghost { background: transparent; color: var(--text-secondary); }
+.btn-ghost:hover { background: var(--surface-2); color: var(--heading); }
+/* ================================================================
+   CARDS — HUD panels with corner brackets
+   ================================================================ */
+.card {
+  position: relative; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px;
+  transition: border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out),
+              transform 0.2s var(--ease-out);
+}
+.card::before, .card::after {
+  content: ""; position: absolute; width: 11px; height: 11px; pointer-events: none;
+}
+.card::before { top: 5px; left: 5px; border-top: 1.5px solid var(--bracket); border-left: 1.5px solid var(--bracket); }
+.card::after { bottom: 5px; right: 5px; border-bottom: 1.5px solid var(--bracket); border-right: 1.5px solid var(--bracket); }
+.card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--border));
+  box-shadow: var(--shadow-lift);
+}
+/* ---------- KPI stat tiles ---------- */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.kpi-label {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted);
+}
+.icon-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: var(--radius-sm); flex: none;
+  border: 1px solid transparent;
+}
+.icon-chip.brand { background: var(--brand-tint); color: var(--brand); border-color: color-mix(in srgb, var(--brand) 25%, transparent); }
+.icon-chip.amber { background: var(--accent-tint); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+.icon-chip.success { background: var(--success-tint); color: var(--success); border-color: color-mix(in srgb, var(--success) 25%, transparent); }
+.icon-chip.danger { background: var(--danger-tint); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 25%, transparent); }
+.kpi-value {
+  font-family: var(--font-display); font-size: 28px; font-weight: 400; line-height: 1.15;
+  color: var(--heading); font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 22px var(--brand-glow);
+}
+.kpi-value .unit { font-size: 14px; color: var(--text-secondary); text-shadow: none; }
+.kpi-value.amber { text-shadow: 0 0 22px var(--accent-glow); }
+.kpi-meta {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+.delta {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.06em; padding: 2px 7px; border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums; border: 1px solid transparent;
+}
+.delta.up { background: var(--success-tint); color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
+.delta.down { background: var(--danger-tint); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+.delta.hold { background: var(--accent-tint); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+/* ---------- Terminal status flags [OK] [WARN] [FAIL] [SCAN] ---------- */
+.flag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.08em; padding: 3px 9px; border-radius: var(--radius-sm);
+  border: 1px solid transparent; white-space: nowrap;
+}
+.flag .glyph { width: 6px; height: 6px; background: currentColor; flex: none; }
+.flag.ok { background: var(--success-tint); color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, transparent); }
+.flag.warn { background: var(--warning-tint); color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, transparent); }
+.flag.fail { background: var(--danger-tint); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.flag.scan { background: var(--accent-tint); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.flag.idle { background: var(--brand-tint); color: var(--brand); border-color: color-mix(in srgb, var(--brand) 35%, transparent); }
+/* ---------- Data table ---------- */
+.table-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
+.table-card { padding: 0; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 680px; }
+thead th {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-muted);
+  text-align: left; padding: 11px 14px; background: var(--surface-2);
+  border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+thead th:first-child { padding-left: 18px; }
+thead th:last-child { padding-right: 18px; }
+thead th.num { text-align: right; }
+tbody td {
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+  font-size: 12.5px; vertical-align: middle;
+}
+tbody td:first-child { padding-left: 18px; }
+tbody td:last-child { padding-right: 18px; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out); }
+tbody tr:hover { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--brand); }
+td.num {
+  text-align: right; font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.cell-primary { color: var(--heading); font-weight: 500; letter-spacing: 0.02em; }
+.cell-sub {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted);
+  margin-top: 2px; letter-spacing: 0.05em;
+}
+/* ---------- Form ---------- */
+.form-row { display: grid; grid-template-columns: 2fr 1fr auto; gap: 14px; align-items: end; }
+.field label {
+  display: block; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-secondary);
+  margin-bottom: 7px;
+}
+.field label::before { content: "> "; color: var(--brand); }
+.input, .select {
+  width: 100%; font-family: var(--font-mono); font-size: 13px; color: var(--heading);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+  transition: border-color 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out);
+}
+.input::placeholder { color: var(--text-muted); }
+.input:hover, .select:hover { border-color: var(--scrollbar); }
+.input:focus, .select:focus {
+  outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.select {
+  appearance: none; -webkit-appearance: none; padding-right: 34px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237ba990' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+}
+.select option { background: var(--surface); color: var(--text); }
+/* ---------- Segmented progress meters ---------- */
+.meter-item { margin-bottom: 18px; }
+.meter-item:last-child { margin-bottom: 0; }
+.meter-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  margin-bottom: 7px;
+}
+.meter-name { font-size: 12.5px; font-weight: 500; color: var(--heading); letter-spacing: 0.03em; }
+.meter-val {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums; letter-spacing: 0.04em;
+}
+.meter {
+  position: relative; height: 10px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden;
+}
+.meter .fill {
+  height: 100%; background: var(--brand); box-shadow: 0 0 10px var(--brand-glow);
+}
+.meter .fill.amber { background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+.meter .fill.danger { background: var(--danger); box-shadow: none; }
+/* segment gaps — bg-colored teeth carve the fill into discrete cells */
+.meter::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(90deg,
+    transparent 0px, transparent 9px,
+    var(--bg) 9px, var(--bg) 11px);
+}
+/* ---------- Activity timeline (live feed) ---------- */
+.timeline { list-style: none; }
+.timeline li { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.timeline li:first-child { padding-top: 2px; }
+.timeline li:last-child { border-bottom: none; padding-bottom: 2px; }
+.tl-icon {
+  width: 26px; height: 26px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: none; margin-top: 1px; border: 1px solid transparent;
+}
+.tl-icon.brand { background: var(--brand-tint); color: var(--brand); border-color: color-mix(in srgb, var(--brand) 25%, transparent); }
+.tl-icon.amber { background: var(--accent-tint); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
+.tl-icon.success { background: var(--success-tint); color: var(--success); border-color: color-mix(in srgb, var(--success) 25%, transparent); }
+.tl-icon.warning { background: var(--warning-tint); color: var(--warning); border-color: color-mix(in srgb, var(--warning) 25%, transparent); }
+.tl-icon.danger { background: var(--danger-tint); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 25%, transparent); }
+.tl-body { min-width: 0; }
+.tl-text { font-size: 12.5px; color: var(--text); letter-spacing: 0.01em; }
+.tl-text strong { color: var(--heading); font-weight: 700; }
+.tl-time {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted);
+  margin-top: 3px; letter-spacing: 0.08em;
+}
+/* ---------- Split + card grid ---------- */
+.split { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+.node-card .node-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  margin-bottom: 9px;
+}
+.node-title {
+  font-family: var(--font-display); font-size: 12.5px; font-weight: 400;
+  letter-spacing: 0.12em; text-transform: uppercase; line-height: 1.4;
+  color: var(--heading);
+}
+.node-desc { font-size: 12px; color: var(--text-secondary); margin-bottom: 13px; }
+.node-meta {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted);
+  letter-spacing: 0.06em;
+}
+.node-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.node-meta svg { color: var(--brand); }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+/* ---------- Footer ---------- */
+.footer {
+  margin-top: 44px; padding: 18px 0 8px; border-top: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+/* ================================================================
+   MOBILE — host injects 25px body padding; that is the ONLY
+   horizontal inset. Zero wrapper side padding below 640px.
+   ================================================================ */
+@media (max-width: 900px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .form-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .page, .section { padding-left: 0; padding-right: 0; }
+  .page-header { padding: 18px 16px 16px; margin-bottom: 28px; }
+  .page-title { font-size: 20px; }
+  .cursor { width: 10px; height: 19px; }
+  .card { padding: 16px; }
+  .kpi-grid, .card-grid { grid-template-columns: minmax(0, 1fr); gap: 13px; }
+  .kpi-value { font-size: 25px; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1; }
+  thead th:first-child, tbody td:first-child { padding-left: 15px; }
+  thead th:last-child, tbody td:last-child { padding-right: 15px; }
+  .section { margin-bottom: 28px; }
+}
+</style>
+</head>
+<body>
+
+<!-- The tube: phosphor bloom + data grid behind, scanlines above — all static, non-interactive -->
+<div class="bloom" aria-hidden="true"></div>
+<div class="data-grid" aria-hidden="true"></div>
+<div class="crt-scanlines" aria-hidden="true"></div>
+
+<div class="page">
+
+  <!-- ============ Page header ============ -->
+  <header class="page-header hud-corner-b anim">
+    <div class="hero-sweep" aria-hidden="true"></div>
+    <div>
+      <div class="eyebrow"><span class="badge-dot"></span> Ghostline Security // Node TUC-01 // Clearance L4</div>
+      <h1 class="page-title">Network Operations Console <span class="cursor" aria-hidden="true"></span></h1>
+      <p class="page-subtitle">Perimeter watch for 247 client endpoints. Threat feed synced 00:41:07 UTC — sector Delta under active scan.</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.2-8.56"/><path d="M21 3v6h-6"/></svg>
+        Resync feed
+      </button>
+      <button class="btn btn-secondary" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M4 21h16"/></svg>
+        Export log
+      </button>
+      <button class="btn btn-primary" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg>
+        Raise shield
+      </button>
+    </div>
+  </header>
+
+  <!-- ============ KPI stat tiles ============ -->
+  <section class="section">
+    <div class="kpi-grid">
+
+      <div class="card anim d1">
+        <div class="kpi-top">
+          <span class="kpi-label">Active nodes</span>
+          <span class="icon-chip brand">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">247<span class="unit">/250</span></div>
+        <div class="kpi-meta">
+          <span class="delta up">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+            +3
+          </span>
+          <span>since last watch</span>
+        </div>
+      </div>
+
+      <div class="card anim d2">
+        <div class="kpi-top">
+          <span class="kpi-label">Threats blocked · 24h</span>
+          <span class="icon-chip danger">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9.5 9 5 5"/><path d="m14.5 9-5 5"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">1,382</div>
+        <div class="kpi-meta">
+          <span class="delta down">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+            -211
+          </span>
+          <span>vs. previous cycle</span>
+        </div>
+      </div>
+
+      <div class="card anim d3">
+        <div class="kpi-top">
+          <span class="kpi-label">Mean latency</span>
+          <span class="icon-chip amber">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value amber">12<span class="unit">ms</span></div>
+        <div class="kpi-meta">
+          <span class="delta hold">±1ms</span>
+          <span>backbone stable</span>
+        </div>
+      </div>
+
+      <div class="card anim d4">
+        <div class="kpi-top">
+          <span class="kpi-label">Grid uptime</span>
+          <span class="icon-chip success">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">99.98<span class="unit">%</span></div>
+        <div class="kpi-meta">
+          <span class="delta up">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+            +0.02
+          </span>
+          <span>rolling 30-day</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Perimeter event log (data table) ============ -->
+  <section class="section anim d3">
+    <div class="section-head">
+      <h2 class="section-title">Perimeter event log</h2>
+      <span class="section-hint">UTC · tail -f · <a href="#nodes">full archive</a></span>
+    </div>
+    <div class="table-grid">
+      <div class="card table-card">
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Origin</th>
+                <th>Vector</th>
+                <th class="num">Node</th>
+                <th class="num">Logged</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div class="cell-primary">Handshake anomaly quarantined</div>
+                  <div class="cell-sub">EVT-88231 · auto-contained</div>
+                </td>
+                <td>198.51.100.42</td>
+                <td>TLS downgrade</td>
+                <td class="num">GL-D07</td>
+                <td class="num">00:38:12</td>
+                <td><span class="flag ok"><span class="glyph"></span>OK</span></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="cell-primary">Credential replay attempt</div>
+                  <div class="cell-sub">EVT-88230 · honeypot diverted</div>
+                </td>
+                <td>203.0.113.9</td>
+                <td>Auth endpoint</td>
+                <td class="num">GL-A02</td>
+                <td class="num">00:31:47</td>
+                <td><span class="flag ok"><span class="glyph"></span>OK</span></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="cell-primary">Port sweep across sector Delta</div>
+                  <div class="cell-sub">EVT-88226 · pattern match 94%</div>
+                </td>
+                <td>192.0.2.117</td>
+                <td>SYN scan</td>
+                <td class="num">GL-D01</td>
+                <td class="num">00:24:03</td>
+                <td><span class="flag scan"><span class="glyph"></span>SCAN</span></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="cell-primary">Cert expiry inside 72h window</div>
+                  <div class="cell-sub">EVT-88219 · renewal queued</div>
+                </td>
+                <td>internal</td>
+                <td>PKI rotation</td>
+                <td class="num">GL-B11</td>
+                <td class="num">00:12:55</td>
+                <td><span class="flag warn"><span class="glyph"></span>WARN</span></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="cell-primary">Relay GL-C04 heartbeat lost</div>
+                  <div class="cell-sub">EVT-88214 · failover engaged</div>
+                </td>
+                <td>internal</td>
+                <td>Link watchdog</td>
+                <td class="num">GL-C04</td>
+                <td class="num">00:07:31</td>
+                <td><span class="flag fail"><span class="glyph"></span>FAIL</span></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="cell-primary">Firmware checksum verified fleet-wide</div>
+                  <div class="cell-sub">EVT-88209 · 247 of 247 signed</div>
+                </td>
+                <td>internal</td>
+                <td>Integrity audit</td>
+                <td class="num">ALL</td>
+                <td class="num">23:58:20</td>
+                <td><span class="flag idle"><span class="glyph"></span>DONE</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Split: subsystem meters + directive form | live feed ============ -->
+  <section class="section anim d4">
+    <div class="split">
+
+      <div>
+        <div class="section-head">
+          <h2 class="section-title">Subsystem integrity</h2>
+          <span class="section-hint">polled 00:41:07</span>
+        </div>
+        <div class="card">
+          <div class="meter-item">
+            <div class="meter-head">
+              <span class="meter-name">Intrusion signature database</span>
+              <span class="meter-val">100% · v2081.7</span>
+            </div>
+            <div class="meter"><div class="fill" style="width:100%"></div></div>
+          </div>
+          <div class="meter-item">
+            <div class="meter-head">
+              <span class="meter-name">Edge relay mesh saturation</span>
+              <span class="meter-val">86%</span>
+            </div>
+            <div class="meter"><div class="fill" style="width:86%"></div></div>
+          </div>
+          <div class="meter-item">
+            <div class="meter-head">
+              <span class="meter-name">Cold-storage key rotation</span>
+              <span class="meter-val">58%</span>
+            </div>
+            <div class="meter"><div class="fill amber" style="width:58%"></div></div>
+          </div>
+          <div class="meter-item">
+            <div class="meter-head">
+              <span class="meter-name">Relay GL-C04 failover buffer</span>
+              <span class="meter-val">23%</span>
+            </div>
+            <div class="meter"><div class="fill danger" style="width:23%"></div></div>
+          </div>
+        </div>
+
+        <div class="section-head" style="margin-top:28px;">
+          <h2 class="section-title">Issue directive</h2>
+        </div>
+        <div class="card">
+          <div class="form-row">
+            <div class="field">
+              <label for="directive">Directive payload</label>
+              <input class="input" id="directive" type="text" placeholder="isolate GL-D01 --window 15m --notify watch" />
+            </div>
+            <div class="field">
+              <label for="target">Target scope</label>
+              <select class="select" id="target">
+                <option>Sector Delta only</option>
+                <option>All edge relays</option>
+                <option>Honeypot ring</option>
+                <option>Full grid broadcast</option>
+              </select>
+            </div>
+            <button class="btn btn-primary" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+              Deploy
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="section-head">
+          <h2 class="section-title">Live feed</h2>
+          <span class="section-hint">last 45 min</span>
+        </div>
+        <div class="card">
+          <ul class="timeline">
+            <li>
+              <span class="tl-icon danger">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0Z"/></svg>
+              </span>
+              <div class="tl-body">
+                <div class="tl-text"><strong>Relay GL-C04</strong> dropped heartbeat — failover to GL-C09 completed in 340ms, buffer draining.</div>
+                <div class="tl-time">00:07:31 · watchdog</div>
+              </div>
+            </li>
+            <li>
+              <span class="tl-icon amber">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3"/><path d="M12 18v3"/><path d="M3 12h3"/><path d="M18 12h3"/></svg>
+              </span>
+              <div class="tl-body">
+                <div class="tl-text"><strong>Sector Delta</strong> placed under active scan — SYN sweep matched signature GRIMWIRE at 94% confidence.</div>
+                <div class="tl-time">00:24:03 · sentinel</div>
+              </div>
+            </li>
+            <li>
+              <span class="tl-icon success">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </span>
+              <div class="tl-body">
+                <div class="tl-text"><strong>Operator Vega</strong> verified fleet firmware checksums — 247 of 247 nodes signed and sealed.</div>
+                <div class="tl-time">23:58:20 · audit</div>
+              </div>
+            </li>
+            <li>
+              <span class="tl-icon brand">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg>
+              </span>
+              <div class="tl-body">
+                <div class="tl-text"><strong>Shield profile HARDLINE</strong> pushed to the honeypot ring — 12 decoy services rotated to new fingerprints.</div>
+                <div class="tl-time">23:44:09 · deploy</div>
+              </div>
+            </li>
+            <li>
+              <span class="tl-icon warning">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              </span>
+              <div class="tl-body">
+                <div class="tl-text"><strong>PKI rotation</strong> queued for GL-B11 — client cert enters 72-hour expiry window, renewal at 04:00.</div>
+                <div class="tl-time">23:31:52 · scheduler</div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Card grid: sector nodes ============ -->
+  <section class="section anim d5" id="nodes">
+    <div class="section-head">
+      <h2 class="section-title">Sector nodes</h2>
+      <span class="section-hint">ranked by threat pressure</span>
+    </div>
+    <div class="card-grid">
+
+      <div class="card node-card">
+        <div class="node-head">
+          <div class="node-title">Sector Delta — GL-D01</div>
+          <span class="flag scan"><span class="glyph"></span>SCAN</span>
+        </div>
+        <p class="node-desc">Downtown exchange cluster. Absorbing the GRIMWIRE sweep — decoys engaged, no perimeter contact.</p>
+        <div class="node-meta">
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>
+            64 endpoints
+          </span>
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+            9ms
+          </span>
+          <span>load 71%</span>
+        </div>
+      </div>
+
+      <div class="card node-card">
+        <div class="node-head">
+          <div class="node-title">Sector Alpha — GL-A02</div>
+          <span class="flag ok"><span class="glyph"></span>OK</span>
+        </div>
+        <p class="node-desc">Primary auth ring and credential vault. Replay attempt diverted to honeypot — signatures updated.</p>
+        <div class="node-meta">
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>
+            88 endpoints
+          </span>
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+            11ms
+          </span>
+          <span>load 44%</span>
+        </div>
+      </div>
+
+      <div class="card node-card">
+        <div class="node-head">
+          <div class="node-title">Sector Charlie — GL-C09</div>
+          <span class="flag warn"><span class="glyph"></span>WARN</span>
+        </div>
+        <p class="node-desc">Carrying GL-C04's failover load at 2.1x normal throughput. Field tech dispatched, ticket #4471.</p>
+        <div class="node-meta">
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>
+            52 endpoints
+          </span>
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+            19ms
+          </span>
+          <span>load 92%</span>
+        </div>
+      </div>
+
+      <div class="card node-card">
+        <div class="node-head">
+          <div class="node-title">Sector Bravo — GL-B11</div>
+          <span class="flag ok"><span class="glyph"></span>OK</span>
+        </div>
+        <p class="node-desc">Industrial park uplink. Quiet cycle — cert renewal scheduled 04:00, zero contested packets tonight.</p>
+        <div class="node-meta">
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>
+            43 endpoints
+          </span>
+          <span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+            13ms
+          </span>
+          <span>load 31%</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Footer ============ -->
+  <footer class="footer anim d6">
+    <span>GHOSTLINE SECURITY // NETWORK OPERATIONS CONSOLE</span>
+    <span>feed: sentinel mesh + watchdog · refresh 30s · <a href="#nodes">ops manual</a></span>
+  </footer>
+
+</div>
+
+</body>
+</html>

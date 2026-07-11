@@ -1,0 +1,32 @@
+{
+  "id": "zenith",
+  "name": "Zenith",
+  "tagline": "White light on the bridge of an orbital station",
+  "description": "The command deck of a 2090 orbital station: deep space blue-black, frosted-glass panels edged in hairline white, and a single ice-white glow doing all the talking. Michroma's engineered display face over Titillium body and Space Mono readouts — monochrome chrome, luxury-watch precision, no color anywhere it isn't earned.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#04060b",
+    "surface": "#0a0e16",
+    "surface-2": "#111623",
+    "border": "#222b3a",
+    "text": "#c3cedb",
+    "text-secondary": "#8b99ab",
+    "text-muted": "#5b6879",
+    "heading": "#f4f8fd",
+    "brand": "#e8f1ff",
+    "brand-contrast": "#04060b",
+    "accent": "#9db4cc",
+    "success": "#82ab93",
+    "warning": "#c0a577",
+    "danger": "#b57e7e",
+    "scrollbar": "#2a3444",
+    "radius": "12px",
+    "radius-sm": "8px",
+    "shadow": "0 1px 2px rgba(0, 2, 6, 0.6), 0 16px 40px rgba(0, 2, 6, 0.5)",
+    "font-display": "'Michroma', 'Titillium Web', system-ui, sans-serif",
+    "font-body": "'Titillium Web', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Space Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Michroma&family=Titillium+Web:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap"
+  }
+}
