@@ -3280,15 +3280,31 @@ def conversation_reset():
 
 
 # ---------------------------------------------------------------------------
-# POST /api/session/reset  — manual session reset from UI actions panel
+# POST /api/session/reset-openclaw  — deep reset that also clears the openclaw
+# session JSONL (ADMIN-BUG-2, 2026-07-11)
 # ---------------------------------------------------------------------------
-
-@conversation_bp.route('/api/session/reset', methods=['POST'])
+# HISTORY / ADMIN-BUG-2: this handler was originally registered on
+# '/api/session/reset', the SAME path as server.py's soft/hard reset handler
+# (server.py `session_reset`). Because conversation_bp is registered before the
+# server.py @app.route is defined, Werkzeug matched THIS blueprint rule first —
+# silently shadowing server.py's mode-aware (soft/hard + pre-warm) handler that
+# SessionControl.js / the admin Health panel actually drive (they POST
+# {"mode": "soft"|"hard"} and read back `mode`). Worse, the openclaw-session-file
+# path below (`/home/node/.openclaw/...`) lives inside the OPENCLAW container, so
+# from the openvoiceui container it never exists — the try/except swallowed the
+# miss and this handler degraded to "bump the key" while blocking the richer one.
+#
+# FIX (additive, no deletion): this route is moved to the explicit, distinct
+# '/api/session/reset-openclaw' path. `/api/session/reset` is now unambiguously
+# served by server.py's canonical soft/hard handler. Both remain reachable; the
+# deep openclaw-file clear is opt-in via the new path.
+@conversation_bp.route('/api/session/reset-openclaw', methods=['POST'])
 def session_reset():
     """Clear the corrupted openclaw session state and return a fresh session key.
-    Called by the Reset button in the UI actions panel.
-    Clears the openclaw session JSONL file so orphaned messages don't cascade,
-    then bumps the voice session key so the next request starts completely fresh."""
+    Deep reset (opt-in): clears the openclaw session JSONL file so orphaned
+    messages don't cascade, then bumps the voice session key so the next request
+    starts completely fresh. The default /api/session/reset (server.py) handles
+    the common soft/hard reset."""
     old_key = get_voice_session_key()
     # Find and clear the openclaw session file for the current session key
     try:

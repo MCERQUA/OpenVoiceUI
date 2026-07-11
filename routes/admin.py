@@ -1177,3 +1177,202 @@ def update_tts_fallback():
                 len(policy['chain']), len(policy['voice_gender']))
     return jsonify({'ok': True, 'chain': policy['chain'],
                     'voice_gender': policy['voice_gender']})
+
+
+# ---------------------------------------------------------------------------
+# Update manager panel (WO-4.2) — admin-gated wrappers over
+# services/update_manager.py. All live under /api/admin/ so they inherit the
+# admin gate. The app-level /api/version* endpoints stay untouched (the main-app
+# UpdateBanner still uses them); these are the operator-panel surface with an
+# explicit preview → apply → verify → ROLLBACK flow.
+# ---------------------------------------------------------------------------
+
+def _update_manager():
+    from services.update_manager import UpdateManager
+    return UpdateManager(_PROJECT_ROOT)
+
+
+@admin_bp.route('/api/admin/update/status', methods=['GET'])
+def admin_update_status():
+    """Current version + deployment mode. Cheap — reads version.json/package.json
+    and detects deployment type; no git fetch, no network."""
+    try:
+        mgr = _update_manager()
+        version = {}
+        vf = _PROJECT_ROOT / 'version.json'
+        if vf.exists():
+            try:
+                version = json.loads(vf.read_text())
+            except Exception:
+                version = {}
+        pkg_version = ''
+        pf = _PROJECT_ROOT / 'package.json'
+        if pf.exists():
+            try:
+                pkg_version = json.loads(pf.read_text()).get('version', '')
+            except Exception:
+                pass
+        return jsonify({
+            'commit': version.get('commit', 'unknown'),
+            'branch': version.get('branch', 'unknown'),
+            'date': version.get('date', 'unknown'),
+            'version': pkg_version,
+            'deployment_type': mgr.detect_deployment_type(),
+            'is_git_repo': (_PROJECT_ROOT / '.git').is_dir(),
+        })
+    except Exception as exc:
+        logger.error("admin update status failed: %s", exc)
+        return jsonify({'error': 'Failed to read update status'}), 500
+
+
+@admin_bp.route('/api/admin/update/preview', methods=['GET'])
+def admin_update_preview():
+    """Preview what an update WOULD change (git fetch + diff analysis, no
+    mutation). Also reports which CLI agent / smart path would run + risk."""
+    try:
+        return jsonify(_update_manager().get_update_preview())
+    except Exception as exc:
+        logger.error("admin update preview failed: %s", exc)
+        return jsonify({'error': 'Update preview failed — see server logs'}), 500
+
+
+@admin_bp.route('/api/admin/update/verify', methods=['POST'])
+def admin_update_verify():
+    """Run the post-update health checks (import app, parse routes, pip check).
+    Read-only — safe to run any time to confirm the checkout is healthy."""
+    try:
+        return jsonify(_update_manager().verify())
+    except Exception as exc:
+        logger.error("admin update verify failed: %s", exc)
+        return jsonify({'healthy': False, 'errors': ['verify failed — see server logs']}), 500
+
+
+@admin_bp.route('/api/admin/update/apply', methods=['POST'])
+def admin_update_apply():
+    """Apply the intelligent update (analyse → agent/smart → verify → maybe
+    rollback → schedule restart). Guarded by an explicit {"confirm": true} in the
+    body so a stray GET/click can never trigger a live update."""
+    data = request.get_json(silent=True) or {}
+    if data.get('confirm') is not True:
+        return jsonify({'ok': False,
+                        'error': 'confirmation required: POST {"confirm": true}'}), 400
+    try:
+        result = _update_manager().apply_update()
+        ok = result.get('status') in ('success', 'current')
+        return jsonify({'ok': ok, **result}), (200 if ok else 502)
+    except Exception as exc:
+        logger.error("admin update apply failed: %s", exc)
+        return jsonify({'ok': False, 'error': 'Update apply failed — see server logs'}), 500
+
+
+@admin_bp.route('/api/admin/update/rollback', methods=['POST'])
+def admin_update_rollback():
+    """Roll the checkout back to a prior commit (git reset --hard + restore any
+    .pre-update backups). Requires an explicit {"target_commit": "<sha>"} — the
+    panel captures the pre-update commit from /api/admin/update/status and passes
+    it here."""
+    data = request.get_json(silent=True) or {}
+    target = (data.get('target_commit') or '').strip()
+    if not target:
+        return jsonify({'ok': False, 'error': 'target_commit is required'}), 400
+    # Only allow short/long hex SHAs — never an arbitrary ref/command.
+    if not all(c in '0123456789abcdefABCDEF' for c in target) or not (7 <= len(target) <= 40):
+        return jsonify({'ok': False, 'error': 'target_commit must be a git SHA (7-40 hex chars)'}), 400
+    try:
+        mgr = _update_manager()
+        mgr.rollback(target)
+        return jsonify({'ok': True, 'rolled_back_to': target,
+                        'message': 'Rolled back. Restart the app to load the reverted code.'})
+    except Exception as exc:
+        logger.error("admin update rollback failed: %s", exc)
+        return jsonify({'ok': False, 'error': 'Rollback failed — see server logs'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Marketplace update-diff + one-click update (WO-5.1) — thin wrappers over
+# services/plugins.py. Version-diff each installed plugin vs the catalog/GitHub
+# registry; update reuses the install lifecycle (soft-archive + reinstall).
+# ---------------------------------------------------------------------------
+
+@admin_bp.route('/api/admin/plugins/updates', methods=['GET'])
+def admin_plugins_updates():
+    """Per-installed-plugin version diff vs the catalog/registry (update badges)."""
+    try:
+        from services.plugins import get_plugin_updates
+        rows = get_plugin_updates()
+        return jsonify({'plugins': rows,
+                        'update_count': sum(1 for r in rows if r['update_available'])})
+    except Exception as exc:
+        logger.error("plugin updates check failed: %s", exc)
+        return jsonify({'error': 'Failed to check plugin updates'}), 500
+
+
+@admin_bp.route('/api/admin/plugins/<plugin_id>/update', methods=['POST'])
+def admin_plugin_update(plugin_id):
+    """One-click update: soft-archive the current plugin dir + reinstall the
+    catalog/registry version. Rolls back the archive on failure."""
+    from services.plugins import update_plugin, get_plugin
+    if get_plugin(plugin_id) is None:
+        return jsonify({'ok': False, 'error': f"Plugin '{plugin_id}' is not installed"}), 404
+    data = request.get_json(silent=True) or {}
+    config = data.get('config')
+    try:
+        result = update_plugin(plugin_id, config=config)
+    except Exception as exc:
+        logger.error("plugin update(%s) error: %s", plugin_id, exc)
+        return jsonify({'ok': False, 'error': 'Update failed — see server logs'}), 500
+    if result is None:
+        return jsonify({'ok': False, 'error': 'Plugin not installed'}), 404
+    if result.get('_error'):
+        return jsonify({'ok': False, 'error': result['_error']}), 502
+    return jsonify({'ok': True, 'plugin': result.get('name', plugin_id),
+                    'version': result.get('version'),
+                    'updated_from': result.get('_updated_from'),
+                    'status': result.get('_status'),
+                    'note': 'Restart the app (Plugins tab) to activate the updated plugin.'})
+
+
+# ---------------------------------------------------------------------------
+# Greetings editor helpers (WO-4.3) — the greetings blueprint already exposes
+# GET /api/greetings + POST /api/greetings/add; these admin-gated wrappers add
+# the two edit ops a compact editor needs (queue a one-shot next greeting, and
+# remove a contextual entry). List-entry edits, not file deletes.
+# ---------------------------------------------------------------------------
+
+def _greetings_path():
+    from routes.greetings import GREETINGS_PATH
+    return GREETINGS_PATH
+
+
+@admin_bp.route('/api/admin/greetings/queue', methods=['POST'])
+def admin_greetings_queue():
+    """Queue a one-shot 'next_greeting' used at the next session start."""
+    from routes.greetings import _load, _save
+    data = request.get_json(silent=True) or {}
+    greeting = (data.get('greeting') or '').strip()
+    if not greeting:
+        return jsonify({'ok': False, 'error': 'greeting is required'}), 400
+    if len(greeting) > 300:
+        return jsonify({'ok': False, 'error': 'greeting too long (max 300)'}), 400
+    d = _load()
+    d['next_greeting'] = greeting
+    _save(d)
+    return jsonify({'ok': True, 'queued': greeting})
+
+
+@admin_bp.route('/api/admin/greetings/remove-contextual', methods=['POST'])
+def admin_greetings_remove_contextual():
+    """Remove one contextual greeting by exact text (config-list edit)."""
+    from routes.greetings import _load, _save
+    data = request.get_json(silent=True) or {}
+    text = (data.get('greeting') or '').strip()
+    if not text:
+        return jsonify({'ok': False, 'error': 'greeting is required'}), 400
+    d = _load()
+    contextual = d.get('greetings', {}).get('contextual', [])
+    new_list = [g for g in contextual if g != text]
+    if len(new_list) == len(contextual):
+        return jsonify({'ok': False, 'error': 'greeting not found in contextual list'}), 404
+    d['greetings']['contextual'] = new_list
+    _save(d)
+    return jsonify({'ok': True, 'remaining': len(new_list)})
