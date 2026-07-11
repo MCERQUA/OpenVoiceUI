@@ -93,12 +93,12 @@ async def _gateway_rpc(method: str, params: dict, timeout: float = 10.0) -> dict
             # into agent-visible metadata (2026-07-11 greeting bug). Signature binds
             # client_id|client_mode, so keep both call args in lockstep.
             device_block = _sign_device_connect(
-                identity, "openvoiceui-admin", "backend", "operator", scopes, auth_token, nonce
+                identity, "gateway-client", "backend", "operator", scopes, auth_token, nonce
             )
             req_id = str(uuid.uuid4())
             connect_params = build_connect_params(
                 auth_token=auth_token,
-                client_id="openvoiceui-admin",
+                client_id="gateway-client",
                 client_mode="backend",
                 platform="linux",
                 user_agent="openvoice-ui-admin/1.0.0",
