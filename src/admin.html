@@ -375,6 +375,8 @@ select{cursor:pointer}
     <div class="nav-label">Config</div>
     <div class="nav-item" id="nav-framework" onclick="show('framework')"><span class="nav-icon">&#x1F9E0;</span><span class="nav-text">Agent Framework</span></div>
     <div class="nav-item" id="nav-providers" onclick="show('providers')"><span class="nav-icon">&#x26A1;</span><span class="nav-text">Provider Config</span></div>
+    <div class="nav-item" id="nav-tts" onclick="show('tts')"><span class="nav-icon">&#x1F5E3;</span><span class="nav-text">Voice: TTS</span></div>
+    <div class="nav-item" id="nav-stt" onclick="show('stt')"><span class="nav-icon">&#x1F3A4;</span><span class="nav-text">Voice: STT &amp; Wake</span></div>
     <div class="nav-item" id="nav-connections" onclick="show('connections')"><span class="nav-icon">&#x1F517;</span><span class="nav-text">Connections</span></div>
     <div class="nav-item" id="nav-platform-setup" onclick="show('platform-setup')"><span class="nav-icon">&#x2699;</span><span class="nav-text">Platform Setup</span></div>
   </div>
@@ -537,6 +539,24 @@ select{cursor:pointer}
   </div>
 
 
+  <!-- VOICE: TTS (WO-3.1) -->
+  <div class="panel" id="panel-tts">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Voice &mdash; Text to Speech</div><div class="ph-sub">Provider &amp; voice for the active agent, the cross-provider fallback chain, and a per-provider test-speak. Providers are sourced live from the TTS registry &mdash; adding one never needs a panel edit.</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="TTS.load()">&#8634; Refresh</button><span id="tts-active" style="font-size:12px;color:var(--dim);align-self:center;margin-left:8px"></span></div>
+      <div id="tts-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- VOICE: STT & WAKE (WO-3.2) -->
+  <div class="panel" id="panel-stt">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Voice &mdash; Speech to Text &amp; Wake</div><div class="ph-sub">STT provider for the active agent, wake-word phrases, and a live per-provider connection test. Providers are sourced from the Service Catalog.</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="STT.load()">&#8634; Refresh</button><span id="stt-active" style="font-size:12px;color:var(--dim);align-self:center;margin-left:8px"></span></div>
+      <div id="stt-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
+
   <!-- CONNECTIONS (replaces AI CONFIG) -->
   <div class="panel" id="panel-connections">
     <div class="panel-inner">
@@ -698,6 +718,8 @@ const loaders = {
   clients:()=>Clients.load(),
   framework:()=>Framework.load(),
   providers:()=>Providers.load(),
+  tts:()=>TTS.load(),
+  stt:()=>STT.load(),
   connections:()=>Connections.load(),
   'platform-setup':()=>PlatformSetup.load(),
   system:()=>System.load(),
@@ -774,6 +796,7 @@ const Builder = {
   profiles:[], currentId:null, activeId:null, _voice:null, activeTab:'general',
 
   async load(){
+    await Catalog.get();  // WO-3.3 — preload the Service Catalog for the editor dropdowns
     const r=await fetch('/api/profiles').catch(()=>null);
     if(!r){$('builder-agent-list').innerHTML='<div style="padding:14px;color:var(--red)">Error loading profiles</div>';return}
     const d=await r.json();
@@ -861,6 +884,21 @@ const Builder = {
     sel.innerHTML=filtered.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');
   },
 
+  // WO-3.3 — build <option>s from the Service Catalog with a static fallback.
+  // leadOpts = pseudo-providers (e.g. the OpenClaw 'gateway') pinned on top that
+  // the catalog doesn't list. If the catalog is unavailable, staticHtml is used
+  // verbatim so the editor never loses its provider list.
+  _catOpts(type,sel,staticHtml,leadOpts){
+    const list=Catalog.list(type);
+    if(!list.length)return staticHtml;
+    const ids=(leadOpts||[]).map(o=>o.id).concat(list.map(s=>s.id));
+    let html=(leadOpts||[]).map(o=>'<option value="'+esc(o.id)+'"'+(o.id===sel?' selected':'')+'>'+esc(o.label)+'</option>').join('');
+    html+=list.map(s=>'<option value="'+esc(s.id)+'"'+(s.id===sel?' selected':'')+'>'+esc(s.name||s.id)+'</option>').join('');
+    // Preserve a saved value the catalog doesn't know about (e.g. 'zai/glm-5.1').
+    if(sel&&ids.indexOf(sel)===-1)html='<option value="'+esc(sel)+'" selected>'+esc(sel)+' (current)</option>'+html;
+    return html;
+  },
+
   renderEditor(id,p){
     const defaultVoices=['M1','M2','M3','M4','M5','F1','F2','F3','F4','F5'];
     const selVoice=this._voice||p.voice?.voice_id||'M1';
@@ -893,24 +931,26 @@ const Builder = {
       '</div>'+
       '<div class="g2" style="margin-bottom:14px">'+
         '<div class="fg"><label class="fl">LLM / Agent System</label><select id="be-llm">'+
-          '<option value="gateway"'+(llmProv==='gateway'?' selected':'')+'>OpenClaw Gateway (default)</option>'+
-          '<option value="zai"'+(llmProv==='zai'?' selected':'')+'>Z.AI GLM-5-turbo</option>'+
-          '<option value="zai/glm-5.1"'+((llmProv==='zai/glm-5.1')?' selected':'')+'>Z.AI GLM-5.1</option>'+
-          '<option value="zai/glm-5-turbo"'+((llmProv==='zai/glm-5-turbo')?' selected':'')+'>Z.AI GLM-5-turbo (direct)</option>'+
-          '<option value="groq"'+(llmProv==='groq'?' selected':'')+'>Groq (Llama / Qwen)</option>'+
-
-          '<option value="gemini"'+(llmProv==='gemini'?' selected':'')+'>Google Gemini</option>'+
-          '<option value="hume_evi"'+(llmProv==='hume_evi'?' selected':'')+'>Hume EVI</option>'+
-          '<option value="elevenlabs"'+(llmProv==='elevenlabs'?' selected':'')+'>ElevenLabs AI</option>'+
-          '<option value="openai"'+(llmProv==='openai'?' selected':'')+'>OpenAI</option>'+
+          this._catOpts('llm',llmProv,
+            '<option value="gateway"'+(llmProv==='gateway'?' selected':'')+'>OpenClaw Gateway (default)</option>'+
+            '<option value="zai"'+(llmProv==='zai'?' selected':'')+'>Z.AI GLM-5-turbo</option>'+
+            '<option value="zai/glm-5.1"'+((llmProv==='zai/glm-5.1')?' selected':'')+'>Z.AI GLM-5.1</option>'+
+            '<option value="zai/glm-5-turbo"'+((llmProv==='zai/glm-5-turbo')?' selected':'')+'>Z.AI GLM-5-turbo (direct)</option>'+
+            '<option value="groq"'+(llmProv==='groq'?' selected':'')+'>Groq (Llama / Qwen)</option>'+
+            '<option value="gemini"'+(llmProv==='gemini'?' selected':'')+'>Google Gemini</option>'+
+            '<option value="hume_evi"'+(llmProv==='hume_evi'?' selected':'')+'>Hume EVI</option>'+
+            '<option value="elevenlabs"'+(llmProv==='elevenlabs'?' selected':'')+'>ElevenLabs AI</option>'+
+            '<option value="openai"'+(llmProv==='openai'?' selected':'')+'>OpenAI</option>',
+            [{id:'gateway',label:'OpenClaw Gateway (default)'}])+
         '</select></div>'+
         '<div class="fg"><label class="fl">TTS Provider</label><select id="be-tts" onchange="Builder._renderVoiceGrid(this.value,null)">'+
-          '<option value="supertonic"'+(ttsProv==='supertonic'?' selected':'')+'>Supertonic (Free &middot; Local)</option>'+
-          '<option value="groq"'+(ttsProv==='groq'?' selected':'')+'>Groq Orpheus (Fast &middot; Cloud)</option>'+
-          '<option value="resemble"'+(ttsProv==='resemble'?' selected':'')+'>Resemble AI (Premium &middot; Cloud)</option>'+
-          '<option value="qwen3"'+(ttsProv==='qwen3'?' selected':'')+'>Qwen3 Voice Clone (Cloud)</option>'+
-          '<option value="hume"'+(ttsProv==='hume'?' selected':'')+'>Hume EVI</option>'+
-          '<option value="elevenlabs"'+(ttsProv==='elevenlabs'?' selected':'')+'>ElevenLabs</option>'+
+          this._catOpts('tts',ttsProv,
+            '<option value="supertonic"'+(ttsProv==='supertonic'?' selected':'')+'>Supertonic (Free &middot; Local)</option>'+
+            '<option value="groq"'+(ttsProv==='groq'?' selected':'')+'>Groq Orpheus (Fast &middot; Cloud)</option>'+
+            '<option value="resemble"'+(ttsProv==='resemble'?' selected':'')+'>Resemble AI (Premium &middot; Cloud)</option>'+
+            '<option value="qwen3"'+(ttsProv==='qwen3'?' selected':'')+'>Qwen3 Voice Clone (Cloud)</option>'+
+            '<option value="hume"'+(ttsProv==='hume'?' selected':'')+'>Hume EVI</option>'+
+            '<option value="elevenlabs"'+(ttsProv==='elevenlabs'?' selected':'')+'>ElevenLabs</option>')+
         '</select></div>'+
       '</div>'+
       '<div class="fg"><label class="fl">Voice</label>'+
@@ -1758,6 +1798,22 @@ const Tests={
 };
 
 // Providers
+// Service Catalog helper (WO-3.3) — single fetch, cached, graceful fallback.
+// The admin panel becomes a renderer over /api/services/catalog instead of
+// hardcoding provider lists. Callers pass a static fallback so a failed fetch
+// (or an old backend without the endpoint) still shows sensible options.
+const Catalog={
+  _data:null,
+  async get(force){
+    if(this._data&&!force)return this._data;
+    try{const r=await fetch('/api/services/catalog');if(r.ok){this._data=await r.json();return this._data}}catch(e){}
+    return this._data||{services:[],credential_status:{}};
+  },
+  // Return [{id,name,...descriptor}] for a service type, or [] if unavailable.
+  list(type,data){return ((data||this._data||{}).services||[]).filter(s=>s.service===type)},
+  cred(id,data){return ((data||this._data||{}).credential_status||{})[id]||null}
+};
+
 // Agent Framework — cards per registered gateway (WO-2.2)
 const Framework={
   gateways:[], active:null, health:{}, profiles:[],
@@ -1923,7 +1979,42 @@ const Providers={
         stt:d.stt?.provider||'webspeech'
       };
     }catch(e){this.sel={llm:'gateway',tts:'supertonic',stt:'webspeech'}}
+    // WO-3.3 — source provider options from the Service Catalog (with the
+    // hardcoded lists as a graceful fallback if the catalog is unavailable).
+    await this._buildFromCatalog();
     this.render();
+  },
+  // Merge catalog descriptors over the static lists: keep the nice static
+  // detail text where an id matches, add any provider the catalog reports that
+  // the static list is missing (so resemble/qwen3/plugins never drift out).
+  async _buildFromCatalog(){
+    // Capture the hardcoded lists ONCE so re-loads always fall back cleanly
+    // (this.PROV gets reassigned from the catalog below).
+    if(!this._static)this._static={llm:this.PROV.llm,tts:this.PROV.tts,stt:this.PROV.stt};
+    const STATIC=this._static;
+    try{
+      const c=await Catalog.get();
+      const merge=(type,extraKeep)=>{
+        const desc=Catalog.list(type,c);
+        if(!desc.length)return STATIC[type];
+        const byId={};STATIC[type].forEach(p=>byId[p.id]=p);
+        return desc.map(s=>{
+          const st=byId[s.id];
+          let detail=st?st.detail:'';
+          if(!detail){const m=s.meta||{};detail=(m.latency?m.latency+' latency. ':'')+(m.note||m.api||s.source||'');}
+          return {id:s.id,name:s.name||(st&&st.name)||s.id,detail:detail||'—'};
+        });
+      };
+      // LLM options in the profile also include the gateway pseudo-provider,
+      // which the catalog doesn't list — keep it pinned at the top.
+      const llm=merge('llm');
+      const hasGateway=llm.some(p=>p.id==='gateway');
+      this.PROV={
+        llm:hasGateway?llm:[STATIC.llm.find(p=>p.id==='gateway')].concat(llm),
+        tts:merge('tts'),
+        stt:merge('stt')
+      };
+    }catch(e){/* keep static PROV */}
   },
   render(){
     const mkCol=(type,label,items)=>
@@ -1972,9 +2063,322 @@ const Providers={
     const results=[];
     try{const d=await(await fetch('/api/admin/gateway/status')).json();results.push('LLM: '+(d.ok||d.healthy||d.connected?'OK':'FAIL'))}catch{results.push('LLM: error')}
     try{const d=await(await fetch('/health/ready')).json();results.push('TTS: '+(d.details?.tts?.healthy?'OK':'FAIL'))}catch{results.push('TTS: error')}
-    results.push('STT: OK (browser)');
+    // ADMIN-BUG-4 — honest STT check. WebSpeech is a browser API (nothing to
+    // probe server-side); cloud providers are checked by real key presence
+    // (labeled as such — not a live vendor ping).
+    const stt=this.sel.stt;
+    if(stt==='webspeech'){results.push('STT: browser API (can’t test server-side)')}
+    else if(stt==='whisper'){results.push('STT(whisper): local, no key')}
+    else{
+      try{
+        const c=await Catalog.get(true);
+        const d=Catalog.list('stt',c).find(s=>s.id===stt);
+        const hasKey=d&&d.health&&d.health.has_key;
+        results.push('STT('+stt+'): '+(hasKey?'key present':'no key')+' (key check only)');
+      }catch{results.push('STT('+stt+'): error')}
+    }
     $('prov-status').textContent=results.join(' | ');
     toast(results.join(' | '),'blue');
+  }
+};
+
+
+// Voice: TTS (WO-3.1) — provider/voice override, fallback-chain editor, test-speak
+const TTS={
+  profileId:null, providers:[], voicesByProv:{}, sel:{provider:'supertonic',voice:''},
+  fallback:{chain:{},voice_gender:{},provider_ids:[]}, credStatus:{},
+  async load(){
+    const el=$('tts-content');
+    el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      const[cat,provR,profR,fbR]=await Promise.all([
+        Catalog.get(true),
+        fetch('/api/tts/providers').then(r=>r.ok?r.json():{providers:[]}).catch(()=>({providers:[]})),
+        fetch('/api/profiles/active').then(r=>r.ok?r.json():null).catch(()=>null),
+        fetch('/api/admin/tts-fallback').then(r=>r.ok?r.json():null).catch(()=>null)
+      ]);
+      this.credStatus=(cat&&cat.credential_status)||{};
+      // Prefer the live registry (voices, status); fall back to catalog tts ids.
+      let provs=(provR&&provR.providers)||[];
+      if(!provs.length){provs=Catalog.list('tts',cat).map(s=>({provider_id:s.id,name:s.name,voices:[],status:s.health&&s.health.healthy?'active':'inactive'}))}
+      this.providers=provs;
+      this.voicesByProv={};
+      provs.forEach(p=>{
+        const id=p.provider_id||p.id;
+        const vs=(p.voices||[]).map(v=>{
+          if(typeof v==='string')return {id:v,label:v};
+          return {id:v.id||v.voice_id||v.name||'',label:v.name||v.id||v.voice_id||''};
+        }).filter(v=>v.id);
+        this.voicesByProv[id]=vs;
+      });
+      if(profR){
+        this.profileId=profR.id;
+        this.sel.provider=profR.voice?.tts_provider||provR.default_provider||'supertonic';
+        this.sel.voice=profR.voice?.voice_id||'';
+        $('tts-active').innerHTML='Active profile: <span style="color:var(--green)">'+esc(profR.id)+'</span>';
+      }
+      if(fbR){this.fallback={chain:fbR.chain||{},voice_gender:fbR.voice_gender||{},provider_ids:fbR.provider_ids||[]}}
+      this.render();
+    }catch(e){el.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;&#xFE0F;</div>'+esc(e.message)+'</div>'}
+  },
+  _voiceOpts(pid,selected){
+    const vs=this.voicesByProv[pid]||[];
+    if(!vs.length)return '<option value="">(provider default)</option>';
+    return '<option value="">(provider default)</option>'+vs.map(v=>'<option value="'+esc(v.id)+'"'+(v.id===selected?' selected':'')+'>'+esc(v.label)+'</option>').join('');
+  },
+  render(){
+    const provOpts=this.providers.map(p=>{const id=p.provider_id||p.id;return '<option value="'+esc(id)+'"'+(id===this.sel.provider?' selected':'')+'>'+esc(p.name||id)+'</option>'}).join('');
+    // ── Active-profile override ──
+    let html='<div class="box" style="padding:16px;margin-bottom:16px">'+
+      '<div class="sect-label" style="margin-top:0">Active Profile Voice</div>'+
+      '<div class="g2" style="margin-bottom:10px">'+
+        '<div class="fg"><label class="fl">TTS Provider</label><select id="tts-prov" onchange="TTS.onProv(this.value)">'+provOpts+'</select></div>'+
+        '<div class="fg"><label class="fl">Voice</label><select id="tts-voice">'+this._voiceOpts(this.sel.provider,this.sel.voice)+'</select></div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;align-items:center">'+
+        '<button class="btn btn-g" onclick="TTS.saveOverride()">Save to Active Profile</button>'+
+        '<span id="tts-ov-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div>'+
+      (this.profileId?'':'<div style="font-size:11px;color:var(--yellow);margin-top:6px">No active profile loaded — save disabled.</div>')+
+    '</div>';
+    // ── Provider cards: key status + test-speak ──
+    html+='<div class="sect-label">Providers &mdash; status &amp; test</div><div class="g2" style="align-items:start;gap:12px">';
+    html+=this.providers.map(p=>{
+      const id=p.provider_id||p.id;
+      const active=(p.status||'active')==='active';
+      const ring='<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+(active?'var(--green)':'var(--red)')+'"></span>';
+      const needsKey=p.requires_api_key;
+      const keyChip=needsKey?('<span class="badge '+(p.has_key===false?'b-gray':'b-blue')+'" style="font-size:10px">'+(p.has_key===false?'no key':'key set')+'</span>'):'<span class="badge b-gray" style="font-size:10px">no key needed</span>';
+      const vopts=this._voiceOpts(id,'');
+      return '<div class="box" style="padding:12px">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+ring+'<span style="font-weight:600;color:var(--bright)">'+esc(p.name||id)+'</span>'+keyChip+'</div>'+
+        '<div style="font-size:11px;color:var(--dim);margin-top:3px">'+esc(id)+(p.latency?' &middot; '+esc(p.latency):'')+(p.cost_per_minute!=null?' &middot; $'+esc(String(p.cost_per_minute))+'/min':'')+'</div>'+
+        '<div style="display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap">'+
+          '<select id="tts-test-voice-'+esc(id)+'" style="background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:12px;max-width:150px">'+vopts+'</select>'+
+          '<button class="btn btn-o btn-sm" onclick="TTS.testSpeak(\''+esc(id)+'\')">&#x25B6; Test speak</button>'+
+          '<span id="tts-test-status-'+esc(id)+'" style="font-size:11px;color:var(--dim)"></span>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+    html+='</div>';
+    // ── Fallback chain editor ──
+    html+=this._fallbackEditor();
+    $('tts-content').innerHTML=html;
+  },
+  onProv(pid){
+    this.sel.provider=pid;
+    const v=$('tts-voice');if(v)v.innerHTML=this._voiceOpts(pid,'');
+  },
+  async saveOverride(){
+    if(!this.profileId){toast('No active profile','red');return}
+    const provider=$('tts-prov')?.value; const voice=$('tts-voice')?.value||undefined;
+    const st=$('tts-ov-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/profiles/'+encodeURIComponent(this.profileId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:{tts_provider:provider,voice_id:voice}})});
+      const d=await r.json();
+      if(d.id||d.name){if(st)st.textContent='Saved (refresh voice app to apply)';toast('TTS saved to '+this.profileId,'green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async testSpeak(pid){
+    const voice=$('tts-test-voice-'+pid)?.value||undefined;
+    const st=$('tts-test-status-'+pid);if(st)st.textContent='Generating...';
+    try{
+      const body={text:'This is a test of the '+pid+' voice.',provider:pid};
+      if(voice)body.voice=voice;
+      const r=await fetch('/api/tts/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(!r.ok){const e=await r.json().catch(()=>({}));if(st)st.textContent=e.error||('HTTP '+r.status);toast(e.error||'TTS failed','red');return}
+      const blob=await r.blob();
+      const url=URL.createObjectURL(blob);
+      const a=new Audio(url);
+      a.onended=()=>URL.revokeObjectURL(url);
+      a.onerror=()=>{if(st)st.textContent='playback error';URL.revokeObjectURL(url)};
+      await a.play();
+      if(st)st.textContent='Playing '+(r.headers.get('X-TTS-Provider')||pid);
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  _fallbackEditor(){
+    const ids=this.fallback.provider_ids.length?this.fallback.provider_ids:this.providers.map(p=>p.provider_id||p.id);
+    const chain=this.fallback.chain||{};
+    let h='<div class="box" style="padding:16px;margin-top:16px">'+
+      '<div class="sect-label" style="margin-top:0">Fallback Chain</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:10px">When a provider fails, the next hop is tried (followed transitively, cycle-checked on save). Takes effect on the next utterance &mdash; no restart.</div>';
+    h+=ids.map(id=>{
+      const cur=chain[id]||'';
+      const opts='<option value="">(no fallback)</option>'+ids.filter(o=>o!==id).map(o=>'<option value="'+esc(o)+'"'+(o===cur?' selected':'')+'>'+esc(o)+'</option>').join('');
+      return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">'+
+        '<span style="min-width:120px;font-size:12px;color:var(--text)">'+esc(id)+'</span>'+
+        '<span style="color:var(--dim)">&rarr;</span>'+
+        '<select id="tts-fb-'+esc(id)+'" style="background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:5px 9px;color:var(--text);font-size:12px">'+opts+'</select>'+
+      '</div>';
+    }).join('');
+    h+='<div style="display:flex;gap:8px;align-items:center;margin-top:10px">'+
+        '<button class="btn btn-g btn-sm" onclick="TTS.saveFallback()">Save Chain</button>'+
+        '<span id="tts-fb-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div></div>';
+    return h;
+  },
+  async saveFallback(){
+    const ids=this.fallback.provider_ids.length?this.fallback.provider_ids:this.providers.map(p=>p.provider_id||p.id);
+    const chain={};
+    ids.forEach(id=>{const v=$('tts-fb-'+id)?.value;if(v)chain[id]=v});
+    const st=$('tts-fb-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/admin/tts-fallback',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain:chain,voice_gender:this.fallback.voice_gender})});
+      const d=await r.json();
+      if(d.ok){this.fallback.chain=d.chain||chain;if(st)st.textContent='Saved';toast('Fallback chain saved','green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  }
+};
+
+
+// Voice: STT & Wake (WO-3.2) — provider per profile, wake phrases, honest tests
+const STT={
+  profileId:null, sel:'webspeech', wake:[], descriptors:[], credStatus:{},
+  // STT provider id -> vault credential id (where the key is managed via vault).
+  VAULT_CRED:{deepgram:'deepgram',groq_whisper:'groq_tts'},
+  async load(){
+    const el=$('stt-content');
+    el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      const[cat,profR]=await Promise.all([
+        Catalog.get(true),
+        fetch('/api/profiles/active').then(r=>r.ok?r.json():null).catch(()=>null)
+      ]);
+      this.descriptors=Catalog.list('stt',cat);
+      this.credStatus=(cat&&cat.credential_status)||{};
+      if(!this.descriptors.length){
+        this.descriptors=[{id:'webspeech',name:'Web Speech API'},{id:'deepgram',name:'Deepgram'},{id:'groq_whisper',name:'Groq Whisper'},{id:'external',name:'External STT'}];
+      }
+      if(profR){
+        this.profileId=profR.id;
+        this.sel=profR.stt?.provider||'webspeech';
+        this.wake=Array.isArray(profR.stt?.wake_words)?profR.stt.wake_words:[];
+        $('stt-active').innerHTML='Active profile: <span style="color:var(--green)">'+esc(profR.id)+'</span>';
+      }
+      this.render();
+    }catch(e){el.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;&#xFE0F;</div>'+esc(e.message)+'</div>'}
+  },
+  _keyState(id){
+    // Returns {managed:bool, hasKey:bool, credId:string|null, label:string}
+    const cid=this.VAULT_CRED[id];
+    if(cid){const c=this.credStatus[cid];return {managed:true,hasKey:!!(c&&c.has_value),credId:cid,label:(c&&c.name)||cid}}
+    const d=this.descriptors.find(s=>s.id===id);
+    const h=d&&d.health||{};
+    if(id==='external')return {managed:false,hasKey:!!h.has_key,credId:null,label:'STT_API_URL / STT_API_KEY (env)'};
+    return {managed:false,hasKey:true,credId:null,label:''};
+  },
+  render(){
+    // ── Provider radio list ──
+    let html='<div class="box" style="padding:16px;margin-bottom:16px">'+
+      '<div class="sect-label" style="margin-top:0">STT Provider (active profile)</div>'+
+      '<div class="prov-list">';
+    html+=this.descriptors.map(s=>{
+      const id=s.id;
+      const ks=this._keyState(id);
+      let chip='';
+      if(ks.managed)chip='<span class="badge '+(ks.hasKey?'b-blue':'b-gray')+'" style="font-size:10px">'+(ks.hasKey?'key set':'no key')+'</span>';
+      else if(id==='external')chip='<span class="badge '+(ks.hasKey?'b-blue':'b-gray')+'" style="font-size:10px">'+(ks.hasKey?'env set':'env unset')+'</span>';
+      else if(id==='webspeech'||id==='whisper')chip='<span class="badge b-gray" style="font-size:10px">no key needed</span>';
+      const note=(s.meta&&s.meta.note)?s.meta.note:'';
+      return '<div class="prov-item'+(this.sel===id?' sel':'')+'" id="si-'+esc(id)+'" onclick="STT.select(\''+esc(id)+'\')">'+
+        '<div class="prov-radio"></div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div class="prov-info-name">'+esc(s.name||id)+' '+chip+'</div>'+
+          '<div class="prov-info-detail">'+esc(note||id)+'</div>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+    html+='</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:12px">'+
+        '<button class="btn btn-g" onclick="STT.save()">Save to Active Profile</button>'+
+        '<button class="btn btn-o" onclick="STT.testSel()">Test Selected</button>'+
+        '<span id="stt-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div>'+
+      (this.profileId?'':'<div style="font-size:11px;color:var(--yellow);margin-top:6px">No active profile loaded — save disabled.</div>')+
+    '</div>';
+    // ── Key management (vault-backed providers only) ──
+    html+='<div class="box" style="padding:16px;margin-bottom:16px">'+
+      '<div class="sect-label" style="margin-top:0">API Keys</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:10px">Cloud STT keys are stored in the vault (same store as the Connections tab). External STT uses env vars (<code>STT_API_URL</code> / <code>STT_API_KEY</code>) and is shown read-only here.</div>';
+    const keyed=this.descriptors.filter(s=>this.VAULT_CRED[s.id]||s.id==='external');
+    html+=keyed.map(s=>{
+      const id=s.id;const ks=this._keyState(id);
+      if(!ks.managed){
+        return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">'+
+          '<span style="min-width:130px;font-size:12px">'+esc(s.name||id)+'</span>'+
+          '<span class="badge '+(ks.hasKey?'b-blue':'b-gray')+'" style="font-size:10px">'+(ks.hasKey?'env set':'env unset')+'</span>'+
+          '<span style="font-size:11px;color:var(--dim)">'+esc(ks.label)+' — read-only</span>'+
+        '</div>';
+      }
+      return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">'+
+        '<span style="min-width:130px;font-size:12px">'+esc(s.name||id)+'</span>'+
+        '<span class="badge '+(ks.hasKey?'b-blue':'b-gray')+'" style="font-size:10px">'+(ks.hasKey?'key set':'no key')+'</span>'+
+        '<input type="password" id="stt-key-'+esc(id)+'" placeholder="'+(ks.hasKey?'replace key…':'set key…')+'" autocomplete="off" style="flex:1;min-width:150px;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-family:var(--mono);font-size:12px">'+
+        '<button class="btn btn-o btn-sm" onclick="STT.saveKey(\''+esc(id)+'\')">Save Key</button>'+
+        '<span id="stt-key-status-'+esc(id)+'" style="font-size:11px;color:var(--dim)"></span>'+
+      '</div>';
+    }).join('')||'<div style="font-size:12px;color:var(--dim)">No keyed STT providers.</div>';
+    html+='</div>';
+    // ── Wake phrases ──
+    html+='<div class="box" style="padding:16px">'+
+      '<div class="sect-label" style="margin-top:0">Wake Words</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:8px">Comma-separated phrases that activate this agent. Empty = platform default.</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+        '<input type="text" id="stt-wake" value="'+esc(this.wake.join(', '))+'" placeholder="wake up, hey jarvis" style="flex:1;min-width:200px;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-size:13px">'+
+        '<button class="btn btn-g" onclick="STT.saveWake()">Save Wake Words</button>'+
+        '<span id="stt-wake-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div></div>';
+    $('stt-content').innerHTML=html;
+  },
+  select(id){
+    this.sel=id;
+    document.querySelectorAll('[id^="si-"]').forEach(el=>el.classList.remove('sel'));
+    $('si-'+id)?.classList.add('sel');
+  },
+  async save(){
+    if(!this.profileId){toast('No active profile','red');return}
+    const st=$('stt-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/profiles/'+encodeURIComponent(this.profileId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({stt:{provider:this.sel}})});
+      const d=await r.json();
+      if(d.id||d.name){if(st)st.textContent='Saved (refresh voice app to apply)';toast('STT provider saved','green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async saveKey(id){
+    const cid=this.VAULT_CRED[id];if(!cid){toast('Key managed via env (read-only)','yellow');return}
+    const val=$('stt-key-'+id)?.value.trim();
+    if(!val){toast('Enter a key','yellow');return}
+    const st=$('stt-key-status-'+id);if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/vault/credentials/'+encodeURIComponent(cid),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:val})});
+      const d=await r.json();
+      if(d.ok){if(st)st.textContent=d.message||'Saved';toast('Key saved for '+id,'green');const inp=$('stt-key-'+id);if(inp)inp.value='';this.load()}
+      else{if(st)st.textContent=d.message||d.error||'Failed';toast(d.message||d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async saveWake(){
+    if(!this.profileId){toast('No active profile','red');return}
+    const raw=($('stt-wake')?.value||'').trim();
+    const words=raw?raw.split(',').map(w=>w.trim()).filter(Boolean):[];
+    const st=$('stt-wake-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/profiles/'+encodeURIComponent(this.profileId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({stt:{wake_words:words.length?words:null}})});
+      const d=await r.json();
+      if(d.id||d.name){this.wake=words;if(st)st.textContent='Saved';toast('Wake words saved','green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async testSel(){
+    const id=this.sel;const st=$('stt-status');
+    // ADMIN-BUG-4 — honest STT test (no hardcoded pass).
+    if(id==='webspeech'){if(st)st.textContent='Web Speech is a browser API — can’t test server-side';toast('WebSpeech: browser API (client-side)','blue');return}
+    if(id==='whisper'){if(st)st.textContent='Local whisper — no key required';toast('whisper: local, no key','blue');return}
+    const ks=this._keyState(id);
+    const msg=id+': '+(ks.hasKey?(ks.managed?'key present':'env set'):'not configured')+' (key check only)';
+    if(st)st.textContent=msg;toast(msg,ks.hasKey?'green':'yellow');
   }
 };
 

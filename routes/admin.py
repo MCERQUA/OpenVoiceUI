@@ -1081,3 +1081,99 @@ def admin_gateway_configure(gateway_id):
                         'changes': result.get('changes', [])})
     return jsonify({'ok': False, 'status': status or 'error',
                     'error': result.get('detail', 'configure failed')}), 400
+
+
+# ---------------------------------------------------------------------------
+# TTS fallback policy — chain + voice-gender map (WO-3.1)
+# ---------------------------------------------------------------------------
+# The fallback chain + voice-gender map live in config/tts-fallback.json and are
+# read THROUGH services.tts_fallback at runtime (services/tts.py), so an edit
+# here takes effect on the next utterance with no restart. These endpoints are
+# admin-gated by app.py (they live under /api/admin/).
+
+_TTS_FALLBACK_CONFIG_PATH = _PROJECT_ROOT / 'config' / 'tts-fallback.json'
+
+
+def _registered_tts_ids() -> set:
+    """The set of registered TTS provider ids — the only valid chain members."""
+    try:
+        from tts_providers import list_providers
+        ids = set()
+        for p in list_providers(include_inactive=True, probe=False):
+            pid = p.get('provider_id') or p.get('id')
+            if pid:
+                ids.add(pid)
+        return ids
+    except Exception as exc:
+        logger.warning("could not enumerate TTS providers: %s", exc)
+        return set()
+
+
+@admin_bp.route('/api/admin/tts-fallback', methods=['GET'])
+def get_tts_fallback():
+    """Return the current TTS fallback policy + the valid provider id set.
+
+    Response:
+      {"chain": {...}, "voice_gender": {...}, "provider_ids": [...]}
+    """
+    from services.tts_fallback import load_tts_fallback
+    policy = load_tts_fallback()
+    return jsonify({
+        'chain': policy.get('chain', {}),
+        'voice_gender': policy.get('voice_gender', {}),
+        'provider_ids': sorted(_registered_tts_ids()),
+    })
+
+
+@admin_bp.route('/api/admin/tts-fallback', methods=['PUT'])
+def update_tts_fallback():
+    """Replace the TTS fallback policy (config/tts-fallback.json).
+
+    Body: {"chain": {...}, "voice_gender": {...}}
+    Validates every provider id against the live registry and rejects a chain
+    with a cycle BEFORE writing. Writes in place, then invalidates the loader
+    cache so the change is live on the next utterance.
+    """
+    from services.tts_fallback import validate_fallback_policy, invalidate
+
+    data = request.get_json(silent=True) or {}
+    policy = {
+        'chain': data.get('chain', {}),
+        'voice_gender': data.get('voice_gender', {}),
+    }
+
+    valid_ids = _registered_tts_ids()
+    if not valid_ids:
+        return jsonify({'ok': False, 'error': 'TTS provider registry unavailable — '
+                                              'cannot validate fallback chain'}), 503
+
+    err = validate_fallback_policy(policy, valid_ids)
+    if err:
+        return jsonify({'ok': False, 'error': err}), 400
+
+    # Preserve the _comment header if the existing file has one.
+    out = {}
+    try:
+        existing = json.loads(_TTS_FALLBACK_CONFIG_PATH.read_text())
+        if isinstance(existing, dict) and existing.get('_comment'):
+            out['_comment'] = existing['_comment']
+    except Exception:
+        pass
+    out['chain'] = policy['chain']
+    out['voice_gender'] = policy['voice_gender']
+
+    try:
+        # Atomic write — this is a plain repo/config file (NOT the openclaw.json
+        # single-file bind mount), so tmp+rename is safe and preferred here.
+        tmp = _TTS_FALLBACK_CONFIG_PATH.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(out, indent=2))
+        tmp.replace(_TTS_FALLBACK_CONFIG_PATH)
+    except Exception as exc:
+        logger.error("Failed to write tts-fallback.json: %s", exc)
+        return jsonify({'ok': False, 'error': 'write failed — see server logs'}), 500
+
+    invalidate()  # drop the mtime cache so the next utterance reads the new policy
+    logger.info("TTS fallback policy updated (%d chain hops, %d voices)",
+                len(policy['chain']), len(policy['voice_gender']))
+    return jsonify({'ok': True, 'chain': policy['chain'],
+                    'voice_gender': policy['voice_gender']})

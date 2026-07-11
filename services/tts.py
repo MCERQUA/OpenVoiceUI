@@ -195,33 +195,16 @@ def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) 
 # Fallback order when a provider fails (provider_id → next fallback_id).
 # The chain is followed TRANSITIVELY with cycle protection (TTS-7): e.g.
 # resemble → groq → supertonic, elevenlabs → groq → supertonic, groq →
-# supertonic. Kept as plain data so a later admin phase can make it
-# config-editable — this dict is the loadable default.
-_FALLBACK_CHAIN = {
-    'groq': 'supertonic',
-    'qwen3': 'groq',
-    'qwen3-local': 'groq',
-    'resemble': 'groq',
-    'elevenlabs': 'groq',
-}
+# supertonic. The chain + voice-gender map now live in config/tts-fallback.json
+# (WO-3.1) and are read THROUGH services.tts_fallback at call time so an admin
+# edit takes effect on the next utterance with no restart. The inline defaults
+# in services.tts_fallback._DEFAULT_FALLBACK are the guaranteed fallback.
+from services.tts_fallback import (  # noqa: E402
+    get_fallback_chain, get_voice_gender_map,
+)
 
 _MAX_RETRIES = 2
 _RETRY_DELAYS = (0.5, 1.0, 1.5, 2.0)  # seconds between retries
-
-# Voice gender/character mapping across providers — keeps voice consistent on fallback.
-# Maps (source_provider, voice) → (fallback_provider) → fallback_voice.
-_VOICE_GENDER = {
-    # Groq Orpheus voices
-    'autumn': 'F', 'diana': 'F', 'hannah': 'F',
-    'austin': 'M', 'daniel': 'M', 'troy': 'M',
-    # ElevenLabs voices (common ones)
-    'rachel': 'F', 'drew': 'M', 'clyde': 'M', 'paul': 'M',
-    'domi': 'F', 'bella': 'F', 'antoni': 'M', 'elli': 'F',
-    'josh': 'M', 'arnold': 'M', 'adam': 'M', 'sam': 'M',
-    # Supertonic voices
-    'M1': 'M', 'M2': 'M', 'M3': 'M', 'M4': 'M', 'M5': 'M',
-    'F1': 'F', 'F2': 'F', 'F3': 'F', 'F4': 'F', 'F5': 'F',
-}
 
 
 # Groq structured error codes (from groq_provider "[groq:<code>]") that are
@@ -263,7 +246,7 @@ def _classify_http_error(err_str: str) -> Optional[str]:
 
 def _map_voice_to_fallback(voice: str, src_provider: str, dst_provider: str) -> str:
     """Map a voice from one provider to the closest equivalent on another."""
-    gender = _VOICE_GENDER.get(voice, 'M')  # default male if unknown
+    gender = get_voice_gender_map().get(voice, 'M')  # default male if unknown
     if dst_provider == 'supertonic':
         return 'M1' if gender == 'M' else 'F1'
     if dst_provider == 'groq':
@@ -384,7 +367,7 @@ def generate_tts_b64(
     tried = {tts_provider}
     current = tts_provider
     while not resemble_no_fallback:
-        fallback_id = _FALLBACK_CHAIN.get(current)
+        fallback_id = get_fallback_chain().get(current)
         if not fallback_id or fallback_id in tried:
             break
         tried.add(fallback_id)
