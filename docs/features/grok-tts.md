@@ -2,10 +2,24 @@
 
 Cloud text-to-speech via xAI (`POST https://api.x.ai/v1/tts`).
 
-## Enable
+**Single source of truth:** implement and fix TTS logic in `tts_providers/grok_provider.py` (`GrokProvider`).
+`providers/tts/grok_provider.py` (`GrokTTSProvider`) is a thin registry adapter only — keep it in sync by delegating, do not fork HTTP client code.
+
+Higher-level: [VISION.md](../../VISION.md) · [ARCHITECTURE.md](../../ARCHITECTURE.md) · [SECURITY.md](../../SECURITY.md) (env-only keys).
+
+## Enable (5-line quick start)
+
+```bash
+# 1 — key from console.x.ai (never commit real keys)
+export XAI_API_KEY=your-xai-api-key
+# 2 — optional presence check (exit 0 even without keys; values redacted)
+bash scripts/check-runtime.sh
+# 3 — unit tests (mocked HTTP; no live xAI)
+pytest -q tests/test_grok_tts_provider.py
+```
 
 1. Get an API key from [console.x.ai](https://console.x.ai/team/default/api-keys).
-2. Set in `.env`:
+2. Set in `.env` (placeholder only in git):
 
 ```bash
 XAI_API_KEY=your-xai-api-key
@@ -59,6 +73,17 @@ Do **not** commit private Team custom voice IDs into the repository. Operators m
 
 ```bash
 pytest -q tests/test_grok_tts_provider.py
+XAI_API_KEY= pytest -q tests/test_grok_tts_provider.py  # missing key paths must still pass (mocked)
 ```
 
-Mocks only — no live xAI network in CI.
+Mocks only — no live xAI network in CI. Never print real secrets in test output.
+
+## Voice tech radar (manual, no cron required)
+
+```bash
+python3 scripts/voice_tech_radar.py --help
+python3 scripts/voice_tech_radar.py          # writes docs/radar/YYYY-MM-DD.md
+python3 scripts/voice_tech_radar.py --stdout  # dry-run to terminal
+```
+
+Exit code is always 0 (ops-friendly).

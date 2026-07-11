@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Print which runtime-related env vars are set (values redacted).
 # Safe for logs — does not print secrets.
+#
+# Always exits 0 so CI / boot scripts can call it without keys present:
+#   bash scripts/check-runtime.sh
+# Missing XAI_API_KEY is reported as "unset" — not a hard failure.
 
 set -u
 

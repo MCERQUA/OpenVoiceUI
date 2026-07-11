@@ -58,6 +58,14 @@ The system prompt and user input are currently concatenated in the same message 
 - **Error Handling:** Generic error messages only — no internal details in HTTP responses
 - **CORS:** Strict origin matching (no wildcards)
 
+## Secrets & API keys (env-only)
+
+- **Never commit real API keys** (`XAI_API_KEY`, `GROQ_API_KEY`, ElevenLabs, OpenAI, etc.).
+- Load keys from environment or local `.env` (gitignored). Templates live in `.env.example` with placeholders only (`your-xai-api-key`).
+- Fail closed when a key is missing — never fall back to hard-coded secrets or bake keys into Docker images / CI logs / docs.
+- Provider health and `scripts/check-runtime.sh` may report *presence* of env vars; they must **redact values** (never print secrets).
+- TTS specifically: Grok / xAI uses `XAI_API_KEY` only — see [docs/features/grok-tts.md](docs/features/grok-tts.md).
+
 ## For Contributors
 
 Before submitting security-related PRs, please review:

@@ -95,6 +95,62 @@ class TestGrokProviderCanonical:
             with pytest.raises(RuntimeError, match="grok:401"):
                 p.generate_speech("nope")
 
+    def test_generate_speech_http_500_path(self):
+        p = self._make("secret-key")
+        fake_resp = MagicMock()
+        fake_resp.status_code = 500
+        fake_resp.content = b""
+        fake_resp.text = "internal error"
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.post.return_value = fake_resp
+
+        with patch("tts_providers.grok_provider.httpx.Client", return_value=mock_client):
+            with pytest.raises(RuntimeError, match="grok:500"):
+                p.generate_speech("oops")
+
+    def test_generate_speech_empty_body_errors(self):
+        p = self._make("secret-key")
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.content = b""
+        fake_resp.text = ""
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.post.return_value = fake_resp
+
+        with patch("tts_providers.grok_provider.httpx.Client", return_value=mock_client):
+            with pytest.raises(RuntimeError, match="empty"):
+                p.generate_speech("hi")
+
+    def test_health_check_missing_key(self):
+        p = self._make("k")
+        p.api_key = ""
+        h = p.health_check()
+        assert h["ok"] is False
+        assert "XAI_API_KEY" in h["detail"]
+
+    def test_default_voice_arg_is_eve_in_request(self):
+        p = self._make("secret-key")
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.content = b"ID3data"
+        fake_resp.text = ""
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.post.return_value = fake_resp
+
+        with patch("tts_providers.grok_provider.httpx.Client", return_value=mock_client):
+            p.generate_speech("Hello")
+        _args, kwargs = mock_client.post.call_args
+        assert kwargs["json"]["voice_id"] == "eve"
+
     def test_list_voices_parses_api_payload(self):
         p = self._make("secret-key")
         fake_resp = MagicMock()

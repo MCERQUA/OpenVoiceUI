@@ -188,16 +188,18 @@ def conversation_history():
 def _parse_sms_file(text: str) -> dict:
     """Parse one SMS ledger markdown file into a dict.
 
-    Format:
+    Format (EXAMPLE only — fictitious E.164s for docs; not real personal numbers):
         # SMS — in — 2026-05-18T18:28:49.793999+00:00
         - tenant: test-dev
-        - from: +14374559131
-        - to: +16476991930
+        - from: +15555550100   # EXAMPLE / fictitious
+        - to: +15555550199     # EXAMPLE / fictitious
         - twilio_sid: (local)
 
         ## Body
 
         <message text>
+
+    Do not put real personal phone numbers in this docstring or committed fixtures.
     """
     direction = ''
     timestamp = ''
