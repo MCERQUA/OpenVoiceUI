@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026.4.3 -->
+<!-- openvoiceui-version: 2026.7.12 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -19,9 +19,13 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   overflow:hidden;
   box-shadow:0 0 40px rgba(0,0,0,0.6);
 }
-@media(max-width:768px){
+/* Mobile keeps the DESKTOP VIEW: the 40px #os-container inset IS the global padding that
+   clears the OVU UI buttons — it must NOT be retightened on mobile. (Mike 2026-07-12:
+   "keep the desktop view for mobile, it doesn't need to be responsive.") The old rule
+   below dropped it to 4-8px, losing the padding on phones. Kept as a comment, not deleted. */
+/* @media(max-width:768px){
   #os-container{top:8px;left:4px;right:4px;bottom:4px;border-radius:8px;}
-}
+} */
 
 #app{width:100%;height:100%;position:relative}
 
@@ -338,7 +342,7 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
 /* ── Mobile / small container responsive ──
    Thresholds must match JS getBreakpoint() (480=phone, 1024=tablet ceiling)
    so icon sizing/grid math and CSS layout never disagree. */
-@media (max-width:768px) {
+@media (max-width:0px) { /* DISABLED 2026-07-12 (Mike): keep desktop view on mobile — no icon/taskbar shrink */
   /* Desktop icons — smaller grid */
   .desktop-icon{width:56px!important}
   .desktop-icon .icon-img{width:32px!important;height:32px!important}
@@ -386,7 +390,7 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   #dock .dock-icon svg{width:28px!important;height:28px!important}
   #dock{padding:2px 4px!important;gap:1px!important;border-radius:10px!important}
 }
-@media (max-width:480px) {
+@media (max-width:0px) { /* DISABLED 2026-07-12 (Mike): keep desktop view on mobile — no phone shrink */
   .desktop-icon{width:48px!important}
   .desktop-icon .icon-img{width:26px!important;height:26px!important}
   .desktop-icon .icon-label{font-size:8px!important;max-width:46px!important}
@@ -870,6 +874,7 @@ let iconPositions = {};         // desktop (>1024px)
 let iconPositionsTablet = {};   // tablet (481-1024px)
 let iconPositionsPhone = {};    // phone (≤480px)
 let currentBreakpoint = 'desktop'; // set in init after loadState
+let _lastDesktopH = 0; // last desktop height; resize handler only re-columns icons when this changes >48px (2026-07-12: stop every-resize reflow losing icon edge-padding)
 let dragState = null;
 let selectedIcons = new Set();
 let startMenuOpen = false;
@@ -885,9 +890,9 @@ let recentPages = []; // most-recently-opened page ids, newest first — Start M
 
 // Breakpoint helpers
 function getBreakpoint() {
-  const w = window.innerWidth;
-  if (w <= 480) return 'phone';
-  if (w <= 1024) return 'tablet';
+  // Mike 2026-07-12: keep the DESKTOP VIEW at ALL sizes — no phone/tablet re-layout.
+  // Nothing changes on mobile except straggler icons re-aligning (buildDesktopIcons
+  // auto-arrange); icon size, spacing, positions, and the 40px global padding stay desktop.
   return 'desktop';
 }
 function getActivePositions() {
@@ -1219,12 +1224,19 @@ function buildDesktopIcons() {
   desktop.querySelectorAll('.desktop-icon').forEach(el => el.remove());
   const isRightToLeft = currentTheme === 'mac';
   const container = document.getElementById('os-container');
-  const isSmall = container && container.offsetWidth <= 480; // matches getBreakpoint() phone threshold
+  // ORIGINAL geometry, restored verbatim 2026-07-12 (Mike, 4th ask: NO resizing,
+  // NO readjusting, phone renders the SAME vertical-column grid as desktop —
+  // this is the exact pre-2026-07-11-overhaul math that behaves right everywhere).
+  // Do NOT add safe-area reserves or force desktop cells on phone here again.
+  const isSmall = container && container.offsetWidth < 500;
   const startX = isRightToLeft ? desktop.offsetWidth - (isSmall ? 65 : 90) : 10;
   const startY = getDesktopTop() + 10;
   const colH = getDesktopHeight() - 20;
-  const cellW = isSmall ? 60 : (currentTheme === 'mac' ? 95 : 80);
-  const cellH = isSmall ? 60 : (currentTheme === 'mac' ? 95 : 80);
+  // Cell spacing +~10 each axis over original (Mike 2026-07-12, two asks):
+  // vertical clearance for two-line labels + "a little more spacing on all
+  // sides" — it cleared but was tight. Layout/order otherwise the original.
+  const cellW = isSmall ? 68 : (currentTheme === 'mac' ? 105 : 90);
+  const cellH = isSmall ? 82 : (currentTheme === 'mac' ? 114 : 102);
   const maxPerCol = Math.max(1, Math.floor(colH / cellH));
 
   DESKTOP_ITEMS.forEach((item, i) => {
@@ -1251,6 +1263,7 @@ function buildDesktopIcons() {
     el.innerHTML = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
     desktop.appendChild(el);
   });
+  _lastDesktopH = getDesktopHeight(); // keep the resize-handler height baseline in sync after any rebuild
 }
 
 // Delegated icon listeners — attached once to #desktop, never re-attached on
@@ -2977,11 +2990,17 @@ let _resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(() => {
-    buildDesktopIcons();
     const container = document.getElementById('os-container');
     const cw = container.offsetWidth;
     const dh = getDesktopHeight();
     const dTop = getDesktopTop();
+    // Re-column icons ONLY when the desktop HEIGHT changed enough (>48px) to matter.
+    // The old code rebuilt on EVERY resize, so horizontal/tiny resizes reflowed the grid
+    // and lost the icon edge-padding (Mike 2026-07-12). This keeps icons stable within a
+    // size class, still re-columns on a real vertical shrink so bottom-row icons don't
+    // clip below the fold (host-clone caveat), and leaves breakpoint crosses to the
+    // dedicated breakpoint resize handler.
+    if (Math.abs(dh - _lastDesktopH) > 48) buildDesktopIcons();
     windows.forEach(w => {
       if (w.el.classList.contains('maximized')) {
         w.el.style.width = cw + 'px';
