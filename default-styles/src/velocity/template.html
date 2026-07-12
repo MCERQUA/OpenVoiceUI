@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apex Grand Circuit — Race Operations</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Saira:ital,wght@0,600;0,700;1,600;1,700;1,800&family=Titillium+Web:wght@400;600;700&family=Chivo+Mono:wght@400;500;700&display=swap');
+
+/* ================================================================
+   VELOCITY — Motorsport / Pit-Wall Telemetry Dark
+   Every color flows through these tokens. Do not hardcode hex
+   values in component rules; extend the palette here instead.
+   ================================================================ */
+:root {
+  --bg: #0b0c0e;
+  --surface: #131418;
+  --surface-2: #1b1d22;
+  --border: #2a2d34;
+  --text: #c9ccd3;
+  --text-secondary: #8f939c;
+  --text-muted: #63676f;
+  --heading: #f4f5f7;
+  --brand: #e10600;
+  --brand-contrast: #ffffff;
+  --accent: #c7ccd6;
+  --success: #2fd071;
+  --warning: #ffb020;
+  --danger: #ff453a;
+  --scrollbar: #3a3d45;
+  --radius: 4px;
+  --radius-sm: 2px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.45);
+  --font-display: 'Saira', 'Titillium Web', system-ui, sans-serif;
+  --font-body: 'Titillium Web', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Chivo Mono', ui-monospace, 'SF Mono', monospace;
+  /* Derived — brand step-up for text on dark, tints for chips/rings */
+  --brand-bright: #ff5347;
+  --brand-tint: rgba(225, 6, 0, 0.14);
+  --accent-tint: rgba(199, 204, 214, 0.10);
+  --success-tint: rgba(47, 208, 113, 0.12);
+  --warning-tint: rgba(255, 176, 32, 0.12);
+  --danger-tint: rgba(255, 69, 58, 0.12);
+  --focus-ring: rgba(225, 6, 0, 0.28);
+  --carbon-dot: rgba(255, 255, 255, 0.025);
+  --checker-light: rgba(244, 245, 247, 0.16);
+  --speedline: rgba(225, 6, 0, 0.22);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  /* Carbon-fiber weave: two offset dot layers over deep carbon */
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(var(--carbon-dot) 1px, transparent 1px),
+    radial-gradient(var(--carbon-dot) 1px, transparent 1px);
+  background-size: 6px 6px, 6px 6px;
+  background-position: 0 0, 3px 3px;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--brand-tint); color: var(--heading); }
+
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--heading);
+}
+
+a { color: var(--brand-bright); text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1.5px var(--brand);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Layout shell ---------- */
+.page { max-width: 1160px; margin: 0 auto; }
+
+.section { margin-bottom: 32px; }
+
+.section-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px;
+}
+
+.section-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+
+.section-hint { font-size: 13px; color: var(--text-muted); font-style: normal; }
+
+/* Checkered-flag divider strip — the signature Velocity motif */
+.checker {
+  height: 10px;
+  background-image: conic-gradient(var(--checker-light) 90deg, transparent 90deg 180deg,
+    var(--checker-light) 180deg 270deg, transparent 270deg);
+  background-size: 20px 20px;
+  margin: 0 0 32px;
+}
+
+/* ---------- Entrance animation (launch off the grid: slide from left) ---------- */
+@keyframes launch-in {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.anim { opacity: 0; animation: launch-in 0.4s var(--ease-out) forwards; }
+.d1 { animation-delay: 0.04s; }
+.d2 { animation-delay: 0.09s; }
+.d3 { animation-delay: 0.14s; }
+.d4 { animation-delay: 0.19s; }
+.d5 { animation-delay: 0.24s; }
+.d6 { animation-delay: 0.29s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim { animation: none; opacity: 1; transform: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Page header ---------- */
+.page-header {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0 22px;
+  margin-bottom: 0;
+  overflow: hidden;
+}
+
+/* Speed-lines streak behind the header only — never behind body text */
+.page-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, var(--speedline), transparent 34%) 0 18% / 100% 2px no-repeat,
+    linear-gradient(90deg, var(--speedline), transparent 22%) 0 46% / 100% 1px no-repeat,
+    linear-gradient(90deg, var(--speedline), transparent 12%) 0 74% / 100% 1px no-repeat;
+  pointer-events: none;
+}
+
+.page-header > * { position: relative; }
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brand-bright);
+  margin-bottom: 8px;
+}
+
+.eyebrow .live-dot {
+  width: 7px; height: 7px; border-radius: 999px;
+  background: var(--brand); box-shadow: 0 0 0 3px var(--brand-tint);
+}
+
+h1.page-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--heading); /* explicit — serve-time fallbacks must never decide this */
+}
+
+.page-title .red { color: var(--brand-bright); }
+
+.page-subtitle { margin-top: 6px; font-size: 14px; color: var(--text-secondary); max-width: 58ch; }
+
+.header-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* ---------- Buttons — slanted parallelograms, lateral motion ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 11px 22px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  cursor: pointer;
+  transition: background 0.14s var(--ease-out), border-color 0.14s var(--ease-out),
+              color 0.14s var(--ease-out), transform 0.14s var(--ease-out);
+  white-space: nowrap;
+}
+.btn svg { flex: none; }
+.btn:hover { transform: translateX(2px); }
+.btn:active { transform: translateX(1px); }
+
+.btn-primary { background: var(--brand); color: var(--brand-contrast); }
+.btn-primary:hover { background: color-mix(in srgb, var(--brand) 82%, white); }
+
+.btn-secondary {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--heading);
+}
+.btn-secondary:hover { background: var(--surface-2); border-color: var(--accent); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  clip-path: none;
+}
+.btn-ghost:hover { background: var(--surface-2); color: var(--heading); }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  padding: 20px;
+}
+
+.card-featured { box-shadow: var(--shadow), inset 3px 0 0 var(--brand); }
+
+.card-title { font-size: 15px; font-weight: 700; letter-spacing: -0.005em; margin-bottom: 4px; }
+
+.card-sub { font-size: 13px; color: var(--text-secondary); }
+
+/* ---------- KPI tiles ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.kpi { display: flex; flex-direction: column; gap: 10px; }
+
+.kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+.kpi-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.icon-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px; height: 32px;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+  flex: none;
+}
+.icon-chip.brand   { background: var(--brand-tint);   color: var(--brand-bright); }
+.icon-chip.silver  { background: var(--accent-tint);  color: var(--accent); }
+.icon-chip.success { background: var(--success-tint); color: var(--success); }
+.icon-chip.warning { background: var(--warning-tint); color: var(--warning); }
+.icon-chip.danger  { background: var(--danger-tint);  color: var(--danger); }
+
+.kpi-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: var(--heading);
+}
+.kpi-value .unit { font-size: 15px; font-weight: 500; color: var(--text-muted); margin-left: 4px; }
+
+.kpi-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.delta.up   { background: var(--success-tint); color: var(--success); }
+.delta.down { background: var(--danger-tint);  color: var(--danger); }
+.delta.flat { background: var(--accent-tint);  color: var(--text-secondary); }
+
+.kpi-caption { font-size: 12px; color: var(--text-muted); }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badge::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.badge.on-track { background: var(--success-tint); color: var(--success); }
+.badge.pit      { background: var(--warning-tint); color: var(--warning); }
+.badge.dnf      { background: var(--danger-tint);  color: var(--danger); }
+.badge.queued   { background: var(--accent-tint);  color: var(--text-secondary); }
+.badge.fastest  { background: var(--brand-tint);   color: var(--brand-bright); }
+
+/* ---------- Position chips (P1 / P2 / P3…) ---------- */
+.pos {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 26px;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 800;
+  font-size: 13px;
+  flex: none;
+}
+.pos.p1 { background: var(--brand);     color: var(--brand-contrast); }
+.pos.p2 { background: var(--accent);    color: var(--bg); }
+.pos.p3 { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); clip-path: none; border-radius: var(--radius-sm); }
+.pos.pn { background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border); clip-path: none; border-radius: var(--radius-sm); }
+
+/* ---------- Table ---------- */
+.table-card { padding: 0; overflow: hidden; }
+
+.table-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.table-scroll { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 640px;
+}
+
+thead th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  background: var(--surface-2);
+  padding: 10px 16px;
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 13px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13.5px;
+  vertical-align: middle;
+}
+
+tbody tr { transition: background 0.14s var(--ease-out); }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr.leader td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+
+.driver-name { color: var(--heading); font-weight: 600; }
+.driver-meta { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+
+td.num, th.num { text-align: right; }
+td.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--heading);
+}
+td.num.gap { color: var(--text-secondary); }
+td.num .best { color: var(--brand-bright); font-weight: 700; }
+
+/* ---------- Forms ---------- */
+.form-row {
+  display: grid;
+  grid-template-columns: 2fr 1.4fr auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.field label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.field input,
+.field select {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--heading);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  width: 100%;
+  transition: border-color 0.14s var(--ease-out), box-shadow 0.14s var(--ease-out);
+}
+
+.field input::placeholder { color: var(--text-muted); }
+
+.field input:hover, .field select:hover { border-color: var(--scrollbar); }
+
+.field input:focus, .field select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23c7ccd6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+/* ---------- Progress bars ---------- */
+.bar-row { display: flex; flex-direction: column; gap: 6px; }
+
+.bar-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+
+.bar-name { font-size: 13px; font-weight: 600; color: var(--heading); }
+
+.bar-val {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.bar-track { height: 8px; background: var(--surface-2); border-radius: var(--radius-sm); overflow: hidden; }
+
+.bar-fill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--brand) 70%, color-mix(in srgb, var(--brand) 55%, white));
+}
+.bar-fill.ok   { background: linear-gradient(90deg, var(--success) 70%, color-mix(in srgb, var(--success) 60%, white)); }
+.bar-fill.warn { background: linear-gradient(90deg, var(--warning) 70%, color-mix(in srgb, var(--warning) 60%, white)); }
+.bar-fill.crit { background: linear-gradient(90deg, var(--danger) 70%, color-mix(in srgb, var(--danger) 60%, white)); }
+
+/* ---------- Activity timeline ---------- */
+.timeline { display: flex; flex-direction: column; }
+
+.tl-item {
+  display: flex;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+.tl-item:first-child { border-top: 0; padding-top: 4px; }
+
+.tl-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px; height: 30px;
+  clip-path: polygon(5px 0, 100% 0, calc(100% - 5px) 100%, 0 100%);
+  flex: none;
+  margin-top: 2px;
+}
+.tl-icon.brand   { background: var(--brand-tint);   color: var(--brand-bright); }
+.tl-icon.success { background: var(--success-tint); color: var(--success); }
+.tl-icon.warning { background: var(--warning-tint); color: var(--warning); }
+.tl-icon.silver  { background: var(--accent-tint);  color: var(--accent); }
+
+.tl-body { min-width: 0; }
+.tl-text { font-size: 13.5px; }
+.tl-text strong { color: var(--heading); font-weight: 700; }
+.tl-time {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* ---------- Card grid (upcoming heats) ---------- */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.heat-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 12px;
+}
+
+.heat-num {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+  color: var(--heading);
+  text-transform: uppercase;
+}
+.heat-num .slash { color: var(--brand-bright); }
+
+.heat-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.fact .k { color: var(--text-muted); }
+.fact .v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--heading);
+}
+
+/* Two-column zone: bars + timeline */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  margin-top: 40px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.footer .mono { font-family: var(--font-mono); }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .form-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Mobile width law: the host's 25px body padding is the ONLY horizontal
+   inset. Wrappers and sections carry ZERO side padding at <=640px. */
+@media (max-width: 640px) {
+  .page, .section { padding-left: 0; padding-right: 0; }
+  h1.page-title { font-size: 24px; }
+  .kpi-value { font-size: 28px; }
+  .card { padding: 16px; }
+  .table-head-row { padding: 14px 16px; }
+  thead th, tbody td { padding-left: 12px; padding-right: 12px; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ PAGE HEADER ============ -->
+  <header class="page-header anim">
+    <div>
+      <div class="eyebrow">
+        <span class="live-dot"></span>
+        Pit Wall &mdash; Live Session
+      </div>
+      <h1 class="page-title">Apex Grand Circuit <span class="red">// Race Ops</span></h1>
+      <p class="page-subtitle">Saturday endurance program &mdash; timing, fleet health and grid control for the 1.2&nbsp;km outdoor circuit. All figures update from trackside telemetry.</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-secondary" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export telemetry
+      </button>
+      <button class="btn btn-primary" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        Start session
+      </button>
+    </div>
+  </header>
+
+  <!-- Checkered-flag divider -->
+  <div class="checker anim d1" role="presentation"></div>
+
+  <!-- ============ KPI ROW ============ -->
+  <section class="section anim d1" aria-label="Key metrics">
+    <div class="kpi-grid">
+
+      <div class="card card-featured kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Best Lap Today</span>
+          <span class="icon-chip brand">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="9" y1="2" x2="15" y2="2"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">42.187<span class="unit">s</span></div>
+        <div class="kpi-foot">
+          <span class="delta up">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            -0.412s
+          </span>
+          <span class="kpi-caption">vs. track record 41.902</span>
+        </div>
+      </div>
+
+      <div class="card kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Karts Operational</span>
+          <span class="icon-chip success">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">18<span class="unit">/ 20</span></div>
+        <div class="kpi-foot">
+          <span class="delta flat">steady</span>
+          <span class="kpi-caption">2 in service bay</span>
+        </div>
+      </div>
+
+      <div class="card kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Sessions Today</span>
+          <span class="icon-chip silver">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">26</div>
+        <div class="kpi-foot">
+          <span class="delta up">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            +4
+          </span>
+          <span class="kpi-caption">vs. last Saturday</span>
+        </div>
+      </div>
+
+      <div class="card kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Revenue Today</span>
+          <span class="icon-chip warning">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">$4,820</div>
+        <div class="kpi-foot">
+          <span class="delta down">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            -6%
+          </span>
+          <span class="kpi-caption">rain delay 10:00&ndash;11:30</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ TIMING TABLE ============ -->
+  <section class="section anim d2" aria-label="Heat timing">
+    <div class="card table-card">
+      <div class="table-head-row">
+        <div>
+          <h2 class="card-title">Heat 14 &mdash; Grid &amp; Timing</h2>
+          <div class="card-sub">Endurance qualifier &middot; 12 laps &middot; damp line drying</div>
+        </div>
+        <span class="badge fastest">Lap record pace</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Pos</th>
+              <th>Driver</th>
+              <th class="num">Kart</th>
+              <th class="num">Best Lap</th>
+              <th class="num">Gap</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="leader">
+              <td><span class="pos p1">P1</span></td>
+              <td><div class="driver-name">M. Okafor</div><div class="driver-meta">LIC-2211 &middot; Senior</div></td>
+              <td class="num">07</td>
+              <td class="num"><span class="best">42.187</span></td>
+              <td class="num gap">&mdash;</td>
+              <td><span class="badge on-track">On track</span></td>
+            </tr>
+            <tr>
+              <td><span class="pos p2">P2</span></td>
+              <td><div class="driver-name">S. Lindqvist</div><div class="driver-meta">LIC-1847 &middot; Senior</div></td>
+              <td class="num">12</td>
+              <td class="num">42.559</td>
+              <td class="num gap">+0.372</td>
+              <td><span class="badge on-track">On track</span></td>
+            </tr>
+            <tr>
+              <td><span class="pos p3">P3</span></td>
+              <td><div class="driver-name">A. Ferrand</div><div class="driver-meta">LIC-2093 &middot; Inter</div></td>
+              <td class="num">03</td>
+              <td class="num">43.104</td>
+              <td class="num gap">+0.917</td>
+              <td><span class="badge pit">In pit</span></td>
+            </tr>
+            <tr>
+              <td><span class="pos pn">P4</span></td>
+              <td><div class="driver-name">J. Tanaka</div><div class="driver-meta">LIC-1560 &middot; Inter</div></td>
+              <td class="num">15</td>
+              <td class="num">43.688</td>
+              <td class="num gap">+1.501</td>
+              <td><span class="badge on-track">On track</span></td>
+            </tr>
+            <tr>
+              <td><span class="pos pn">P5</span></td>
+              <td><div class="driver-name">R. Castellanos</div><div class="driver-meta">LIC-2318 &middot; Rookie</div></td>
+              <td class="num">09</td>
+              <td class="num">44.930</td>
+              <td class="num gap">+2.743</td>
+              <td><span class="badge queued">Queued</span></td>
+            </tr>
+            <tr>
+              <td><span class="pos pn">P6</span></td>
+              <td><div class="driver-name">L. Moreau</div><div class="driver-meta">LIC-1722 &middot; Inter</div></td>
+              <td class="num">18</td>
+              <td class="num">45.212</td>
+              <td class="num gap">+3.025</td>
+              <td><span class="badge dnf">DNF &mdash; lap 8</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BOOKING FORM ============ -->
+  <section class="section anim d3" aria-label="Book a session">
+    <div class="section-head">
+      <h2 class="section-title">Grid Entry</h2>
+      <span class="section-hint">Walk-ins join the next open heat &middot; <a href="#waiver">waiver required</a></span>
+    </div>
+    <div class="card">
+      <form class="form-row" onsubmit="return false">
+        <div class="field">
+          <label for="driver-name">Driver name</label>
+          <input id="driver-name" type="text" placeholder="e.g. Dana Whitfield" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="session-type">Session type</label>
+          <select id="session-type">
+            <option>Arrive &amp; drive &mdash; 10 min</option>
+            <option>Qualifying sprint &mdash; 8 laps</option>
+            <option>Endurance stint &mdash; 30 min</option>
+            <option>Junior academy &mdash; coached</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add to grid
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ FLEET HEALTH + PIT-WALL FEED ============ -->
+  <section class="section anim d4" aria-label="Fleet and activity">
+    <div class="split">
+
+      <div class="card">
+        <h2 class="card-title" style="margin-bottom: 2px;">Fleet Health &mdash; Bay 2</h2>
+        <div class="card-sub" style="margin-bottom: 18px;">Consumables on the active endurance fleet</div>
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div class="bar-row">
+            <div class="bar-meta">
+              <span class="bar-name">Kart 07 &mdash; tyre wear</span>
+              <span class="bar-val">82% remaining</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill ok" style="width: 82%;"></div></div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-meta">
+              <span class="bar-name">Kart 12 &mdash; fuel load</span>
+              <span class="bar-val">64%</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill" style="width: 64%;"></div></div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-meta">
+              <span class="bar-name">Kart 03 &mdash; brake pads</span>
+              <span class="bar-val">38% &mdash; service soon</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill warn" style="width: 38%;"></div></div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-meta">
+              <span class="bar-name">Kart 18 &mdash; chain tension</span>
+              <span class="bar-val">17% &mdash; pulled from grid</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill crit" style="width: 17%;"></div></div>
+          </div>
+        </div>
+        <div style="margin-top: 18px; display: flex; gap: 10px; flex-wrap: wrap;">
+          <button class="btn btn-secondary" type="button">Open service log</button>
+          <button class="btn btn-ghost" type="button">Dismiss alerts</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title" style="margin-bottom: 2px;">Pit-Wall Feed</h2>
+        <div class="card-sub" style="margin-bottom: 10px;">Live operations log</div>
+        <div class="timeline">
+          <div class="tl-item">
+            <span class="tl-icon brand">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </span>
+            <div class="tl-body">
+              <div class="tl-text"><strong>M. Okafor</strong> set a new session-best lap of <strong>42.187</strong> on kart 07.</div>
+              <span class="tl-time">14:32:08</span>
+            </div>
+          </div>
+          <div class="tl-item">
+            <span class="tl-icon warning">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </span>
+            <div class="tl-body">
+              <div class="tl-text"><strong>Kart 18</strong> flagged by marshal at turn 4 &mdash; chain tension fault, retired from heat 14.</div>
+              <span class="tl-time">14:21:44</span>
+            </div>
+          </div>
+          <div class="tl-item">
+            <span class="tl-icon success">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </span>
+            <div class="tl-body">
+              <div class="tl-text"><strong>Bay 2</strong> cleared kart 11 back to the rotation after front-end alignment.</div>
+              <span class="tl-time">14:05:19</span>
+            </div>
+          </div>
+          <div class="tl-item">
+            <span class="tl-icon silver">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </span>
+            <div class="tl-body">
+              <div class="tl-text"><strong>Group booking</strong> confirmed: Hartwell Logistics team event, 16 drivers, 16:30 slot.</div>
+              <span class="tl-time">13:48:52</span>
+            </div>
+          </div>
+          <div class="tl-item">
+            <span class="tl-icon silver">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6"/><path d="M5.2 11.2l4.2 4.2"/><circle cx="12" cy="17" r="3"/><path d="M18.8 11.2l-4.2 4.2"/></svg>
+            </span>
+            <div class="tl-body">
+              <div class="tl-text"><strong>Track state</strong> upgraded from damp to drying line &mdash; slick compound released.</div>
+              <span class="tl-time">13:30:00</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ UPCOMING HEATS ============ -->
+  <section class="section anim d5" aria-label="Upcoming heats">
+    <div class="section-head">
+      <h2 class="section-title">Upcoming Heats</h2>
+      <span class="section-hint">Next three on the board</span>
+    </div>
+    <div class="card-grid">
+
+      <div class="card card-featured">
+        <div class="heat-top">
+          <span class="heat-num">Heat <span class="slash">15</span></span>
+          <span class="badge on-track">Grid forming</span>
+        </div>
+        <div class="card-sub">Endurance qualifier &mdash; group B. Top four advance to the 17:00 final.</div>
+        <div class="heat-facts">
+          <div class="fact"><span class="k">Start</span><span class="v">15:10</span></div>
+          <div class="fact"><span class="k">Drivers</span><span class="v">8 / 10</span></div>
+          <div class="fact"><span class="k">Laps</span><span class="v">12</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="heat-top">
+          <span class="heat-num">Heat <span class="slash">16</span></span>
+          <span class="badge queued">Scheduled</span>
+        </div>
+        <div class="card-sub">Junior academy &mdash; coached laps with instructor karts on circuit.</div>
+        <div class="heat-facts">
+          <div class="fact"><span class="k">Start</span><span class="v">15:45</span></div>
+          <div class="fact"><span class="k">Drivers</span><span class="v">6 / 6</span></div>
+          <div class="fact"><span class="k">Laps</span><span class="v">10</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="heat-top">
+          <span class="heat-num">Heat <span class="slash">17</span></span>
+          <span class="badge queued">Scheduled</span>
+        </div>
+        <div class="card-sub">Corporate sprint &mdash; Hartwell Logistics team event, split grid.</div>
+        <div class="heat-facts">
+          <div class="fact"><span class="k">Start</span><span class="v">16:30</span></div>
+          <div class="fact"><span class="k">Drivers</span><span class="v">16 / 16</span></div>
+          <div class="fact"><span class="k">Laps</span><span class="v">8</span></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer anim d6">
+    <span>Apex Grand Circuit &mdash; race operations board. Timing data via trackside loop, refreshed each lap.</span>
+    <span class="mono">SESSION 2026-07-11 &middot; BUILD V1</span>
+  </footer>
+
+</div>
+</body>
+</html>

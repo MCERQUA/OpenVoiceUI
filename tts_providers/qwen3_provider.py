@@ -62,6 +62,12 @@ def _fal_request(api_key: str, endpoint: str, payload: dict,
     }
     with httpx.Client(timeout=httpx.Timeout(timeout, connect=10.0)) as client:
         resp = client.post(endpoint, json=payload, headers=headers)
+        # JamBot Books: record the fal.ai call (guarded, fire-and-forget).
+        try:
+            from services.jambot_books_hook import record_provider_call
+            record_provider_call('fal', endpoint=endpoint, status=resp.status_code)
+        except Exception:
+            pass
         resp.raise_for_status()
         return resp.json()
 

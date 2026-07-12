@@ -49,7 +49,7 @@ class GroqTTSProvider(TTSProvider):
                 model=self.model,
                 voice=voice,
                 input=text,
-                response_format="mp3",
+                response_format="wav",  # Groq Orpheus now ONLY accepts wav; mp3 → 400 (2026-06-15)
             )
             return response.read()
         except Exception as exc:

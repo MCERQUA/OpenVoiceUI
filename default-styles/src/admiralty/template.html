@@ -1,0 +1,1031 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackwater Harbor Yacht Club — Club Operations</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Public+Sans:wght@400;500;600;700&family=Courier+Prime:wght@400;700&display=swap');
+
+/* ================================================================
+   ADMIRALTY — Navy & Gold Heritage Classic
+   Every color flows through these tokens. Do not hardcode hex
+   values in component rules; extend the palette here instead.
+   ================================================================ */
+:root {
+  --bg: #faf6ee;
+  --surface: #fffdf7;
+  --surface-2: #f3ecdc;
+  --border: #ddd3bc;
+  --text: #35435c;
+  --text-secondary: #5d6b84;
+  --text-muted: #8b95a8;
+  --heading: #16263d;
+  --brand: #1e3a5f;
+  --brand-contrast: #faf6ee;
+  --accent: #a17c1a;
+  --success: #2e6b4f;
+  --warning: #b26a0b;
+  --danger: #9e2b25;
+  --scrollbar: #c9bda0;
+  --radius: 6px;
+  --radius-sm: 3px;
+  --shadow: 0 1px 2px rgba(22, 38, 61, 0.05), 0 4px 14px rgba(22, 38, 61, 0.06);
+  --shadow-lift: 0 2px 4px rgba(22, 38, 61, 0.06), 0 10px 26px rgba(22, 38, 61, 0.10);
+  --font-display: 'Playfair Display', 'Georgia', serif;
+  --font-body: 'Public Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Courier Prime', ui-monospace, 'Courier New', monospace;
+  /* Derived tints — low-opacity backdrops for chips, icons, badges */
+  --brand-tint: rgba(30, 58, 95, 0.09);
+  --accent-tint: rgba(161, 124, 26, 0.12);
+  --success-tint: rgba(46, 107, 79, 0.11);
+  --warning-tint: rgba(178, 106, 11, 0.11);
+  --danger-tint: rgba(158, 43, 37, 0.10);
+  --focus-ring: rgba(30, 58, 95, 0.18);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--accent-tint); color: var(--heading); }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+a { color: var(--brand); text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--accent); }
+
+h1 { color: var(--heading); }
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1.5px var(--brand);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Layout shell ---------- */
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.section { margin-bottom: 32px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--heading);
+}
+
+.section-hint { font-size: 12.5px; color: var(--text-muted); }
+
+/* Small-caps micro-label — the Admiralty signature */
+.label-caps {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---------- Entrance animation (opacity/transform only) ---------- */
+@keyframes settle-in {
+  from { opacity: 0; transform: translateY(9px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim {
+  opacity: 0;
+  animation: settle-in 0.5s var(--ease-out) forwards;
+}
+.d1 { animation-delay: 0.05s; }
+.d2 { animation-delay: 0.10s; }
+.d3 { animation-delay: 0.15s; }
+.d4 { animation-delay: 0.20s; }
+.d5 { animation-delay: 0.25s; }
+.d6 { animation-delay: 0.30s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim { animation: none; opacity: 1; transform: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Page header — double-rule masthead ---------- */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 22px;
+  margin-bottom: 32px;
+  border-bottom: 3px double var(--scrollbar);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.eyebrow .tick {
+  display: inline-block;
+  width: 22px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 29px;
+  font-weight: 700;
+  letter-spacing: 0.002em;
+  line-height: 1.18;
+  color: var(--heading);
+}
+
+.page-subtitle {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 58ch;
+}
+
+.header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out),
+              color 0.15s var(--ease-out), transform 0.15s var(--ease-out),
+              box-shadow 0.15s var(--ease-out);
+  white-space: nowrap;
+}
+.btn svg { flex: none; }
+.btn:active { transform: translateY(0.5px); }
+
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  border-color: var(--brand);
+  box-shadow: 0 1px 2px rgba(22, 38, 61, 0.16);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--brand) 84%, var(--heading));
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--heading);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(22, 38, 61, 0.04);
+}
+.btn-secondary:hover {
+  background: var(--surface-2);
+  border-color: var(--scrollbar);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { background: var(--surface-2); color: var(--heading); }
+
+.btn-sm { padding: 7px 12px; font-size: 12px; }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card-pad { padding: 22px; }
+
+/* ---------- KPI stat grid ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.kpi {
+  padding: 20px;
+  transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out),
+              border-color 0.15s var(--ease-out);
+}
+.kpi:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+  border-color: var(--scrollbar);
+}
+
+.kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.kpi-icon {
+  width: 32px; height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.kpi-icon.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.kpi-icon.is-success { background: var(--success-tint); color: var(--success); }
+.kpi-icon.is-warning { background: var(--warning-tint); color: var(--warning); }
+
+.kpi-value {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  line-height: 1.05;
+  color: var(--heading);
+}
+
+.kpi-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.delta.up   { color: var(--success); background: var(--success-tint); }
+.delta.down { color: var(--danger);  background: var(--danger-tint); }
+
+/* ---------- Two-column body ---------- */
+.cols {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .cols { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); }
+}
+
+/* ---------- Table — the ledger ---------- */
+.table-card { overflow: hidden; }
+
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table-title-wrap { min-width: 0; }
+
+.table-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--heading);
+}
+
+.table-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+
+.table-scroll { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  min-width: 560px;
+}
+
+thead th {
+  background: var(--surface-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  color: var(--text);
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 0.12s var(--ease-out); }
+tbody tr:hover { background: var(--surface-2); }
+
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num { font-family: var(--font-mono); font-size: 13.5px; color: var(--heading); }
+
+.ledger-id {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.cell-main { font-weight: 500; color: var(--heading); }
+.cell-sub  { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badge::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.badge.b-success { color: var(--success); background: var(--success-tint); }
+.badge.b-warning { color: var(--warning); background: var(--warning-tint); }
+.badge.b-danger  { color: var(--danger);  background: var(--danger-tint); }
+.badge.b-accent  { color: var(--accent);  background: var(--accent-tint); }
+.badge.b-neutral { color: var(--text-secondary); background: var(--surface-2); }
+
+/* ---------- Featured card — gold double rule ---------- */
+.featured { border-top: 3px double var(--accent); }
+
+/* ---------- Progress bars ---------- */
+.progress-row { margin-bottom: 18px; }
+.progress-row:last-child { margin-bottom: 0; }
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 7px;
+  gap: 12px;
+}
+
+.progress-name { font-size: 13.5px; font-weight: 500; color: var(--heading); }
+
+.progress-pct {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.progress-track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+  transition: width 0.5s var(--ease-out);
+}
+.progress-fill.is-success { background: var(--success); }
+.progress-fill.is-warning { background: var(--warning); }
+.progress-fill.is-accent  { background: var(--accent); }
+
+/* ---------- Activity timeline ---------- */
+.activity { list-style: none; }
+
+.activity li {
+  display: flex;
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.activity li:first-child { padding-top: 2px; }
+.activity li:last-child { border-bottom: none; padding-bottom: 2px; }
+
+.act-icon {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.act-icon.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.act-icon.is-success { background: var(--success-tint); color: var(--success); }
+.act-icon.is-warning { background: var(--warning-tint); color: var(--warning); }
+.act-icon.is-danger  { background: var(--danger-tint);  color: var(--danger); }
+
+.act-body { min-width: 0; }
+.act-text { font-size: 13.5px; color: var(--text); }
+.act-text strong { font-weight: 600; color: var(--heading); }
+.act-time {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ---------- Form ---------- */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+@media (min-width: 640px) {
+  .form-row { grid-template-columns: 1.4fr 1fr auto; align-items: end; }
+}
+
+.field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 7px;
+}
+
+.input, .select {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--heading);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.input::placeholder { color: var(--text-muted); }
+.input:hover, .select:hover { border-color: var(--scrollbar); }
+.input:focus, .select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235d6b84' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+.form-hint { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+
+/* ---------- Card grid — stewards on duty ---------- */
+.steward-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+  gap: 16px;
+}
+
+.steward-card {
+  padding: 20px;
+  transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out),
+              border-color 0.15s var(--ease-out);
+}
+.steward-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+  border-color: var(--scrollbar);
+}
+
+.steward-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.crest {
+  flex: none;
+  width: 40px; height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--brand-tint);
+  color: var(--brand);
+  border: 1px solid var(--border);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.crest.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.crest.is-success { background: var(--success-tint); color: var(--success); }
+
+.steward-name {
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--heading);
+}
+
+.steward-role { font-size: 12.5px; color: var(--text-muted); margin-top: 1px; }
+
+.steward-stats {
+  display: flex;
+  gap: 22px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.steward-stat .v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--heading);
+}
+.steward-stat .k {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  margin-top: 40px;
+  padding-top: 18px;
+  border-top: 3px double var(--scrollbar);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.footer .mono { font-family: var(--font-mono); font-size: 12px; }
+
+/* ---------- Small-screen refinements ---------- */
+/* Mobile width rule: the host wrapper's 25px safe-area padding is the ONLY
+   horizontal inset on phones. Wrappers/sections get ZERO side padding here;
+   cards keep only a 16px internal pad. Never stack padded containers. */
+@media (max-width: 640px) {
+  .page, .section { padding-left: 0; padding-right: 0; }
+  .card-pad, .kpi, .steward-card { padding: 16px; }
+  .table-toolbar { padding: 14px 16px; }
+  thead th, tbody td { padding-left: 14px; padding-right: 14px; }
+  .kpi-grid, .steward-grid { gap: 12px; }
+}
+
+@media (max-width: 480px) {
+  .page-title { font-size: 24px; }
+  .kpi-value { font-size: 26px; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ Page header ============ -->
+  <header class="page-header anim">
+    <div>
+      <span class="eyebrow"><span class="tick"></span>Club Operations<span class="tick"></span></span>
+      <h1 class="page-title">Blackwater Harbor Yacht Club</h1>
+      <p class="page-subtitle">Season ledger, week of July 6 &ndash; 12 &middot; Moorings, memberships, and the regatta calendar at a glance. Est. 1911.</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export ledger
+      </button>
+      <button class="btn btn-secondary" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Calendar
+      </button>
+      <button class="btn btn-primary" type="button">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New member
+      </button>
+    </div>
+  </header>
+
+  <!-- ============ KPI stat cards ============ -->
+  <section class="section">
+    <div class="kpi-grid">
+      <div class="card kpi anim d1">
+        <div class="kpi-top">
+          <span class="label-caps">Dues collected</span>
+          <span class="kpi-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">$412,600</div>
+        <div class="kpi-meta"><span class="delta up">&#9650; 8.2%</span> vs last season</div>
+      </div>
+
+      <div class="card kpi anim d2">
+        <div class="kpi-top">
+          <span class="label-caps">Active members</span>
+          <span class="kpi-icon is-accent">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">486</div>
+        <div class="kpi-meta"><span class="delta up">&#9650; 14</span> new this quarter</div>
+      </div>
+
+      <div class="card kpi anim d3">
+        <div class="kpi-top">
+          <span class="label-caps">Moorings occupied</span>
+          <span class="kpi-icon is-success">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="21"/><path d="M5 12H3a9 9 0 0 0 18 0h-2"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">92%</div>
+        <div class="kpi-meta"><span class="delta up">&#9650; 4.5%</span> 118 of 128 berths</div>
+      </div>
+
+      <div class="card kpi anim d4">
+        <div class="kpi-top">
+          <span class="label-caps">Renewals overdue</span>
+          <span class="kpi-icon is-warning">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">11</div>
+        <div class="kpi-meta"><span class="delta down">&#9660; 3</span> notices sent Monday</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Ledger table + right rail ============ -->
+  <section class="section cols">
+
+    <!-- Membership ledger table -->
+    <div class="card table-card anim d3">
+      <div class="table-toolbar">
+        <div class="table-title-wrap">
+          <div class="table-title">Membership ledger</div>
+          <div class="table-sub">Renewals &amp; berth assignments &middot; sorted by due date</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost btn-sm" type="button">Filter</button>
+          <button class="btn btn-secondary btn-sm" type="button">Full ledger</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Vessel</th>
+              <th>Status</th>
+              <th class="num">Dues</th>
+              <th class="num">Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="cell-main">Eleanor Whitcombe</div>
+                <div class="cell-sub"><span class="ledger-id">M-0112</span> &middot; Full member since 1998</div>
+              </td>
+              <td>Meridian Star &middot; 42 ft</td>
+              <td><span class="badge b-success">Paid</span></td>
+              <td class="num">$4,850</td>
+              <td class="num">Jul 01</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Charles &amp; Anne Pemberton</div>
+                <div class="cell-sub"><span class="ledger-id">M-0347</span> &middot; Family membership</div>
+              </td>
+              <td>Windward Grace &middot; 36 ft</td>
+              <td><span class="badge b-warning">Pending</span></td>
+              <td class="num">$3,200</td>
+              <td class="num">Jul 15</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Harborview Sailing School</div>
+                <div class="cell-sub"><span class="ledger-id">C-0021</span> &middot; Corporate berth block</div>
+              </td>
+              <td>Fleet of 6 &middot; dinghies</td>
+              <td><span class="badge b-accent">Committee review</span></td>
+              <td class="num">$11,400</td>
+              <td class="num">Jul 18</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Rutherford Vance III</div>
+                <div class="cell-sub"><span class="ledger-id">M-0089</span> &middot; Life member</div>
+              </td>
+              <td>Sovereign &middot; 58 ft</td>
+              <td><span class="badge b-danger">Overdue</span></td>
+              <td class="num">$6,150</td>
+              <td class="num">Jun 30</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Marguerite Delacroix</div>
+                <div class="cell-sub"><span class="ledger-id">M-0501</span> &middot; New member, sponsored</div>
+              </td>
+              <td>Petite &Eacute;toile &middot; 28 ft</td>
+              <td><span class="badge b-success">Paid</span></td>
+              <td class="num">$2,750</td>
+              <td class="num">Jul 05</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Dr. Samuel Okonkwo</div>
+                <div class="cell-sub"><span class="ledger-id">M-0233</span> &middot; Full member since 2011</div>
+              </td>
+              <td>Second Wind &middot; 39 ft</td>
+              <td><span class="badge b-neutral">Waitlist berth</span></td>
+              <td class="num">$4,850</td>
+              <td class="num">Jul 22</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Right rail: season goals + log -->
+    <div style="display:grid; gap:20px;">
+
+      <div class="card card-pad featured anim d4">
+        <div class="section-head" style="margin-bottom:18px;">
+          <h2 class="section-title" style="font-size:16px;">Season goals</h2>
+          <span class="section-hint">1911 Fund</span>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Dues collection</span>
+            <span class="progress-pct">$412k / $480k</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" style="width:86%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Clubhouse restoration fund</span>
+            <span class="progress-pct">$68k / $120k</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-accent" style="width:57%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Junior sailing enrollment</span>
+            <span class="progress-pct">74 / 80</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-success" style="width:92%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Regatta sponsorships</span>
+            <span class="progress-pct">9 / 16</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-warning" style="width:56%"></div></div>
+        </div>
+      </div>
+
+      <div class="card card-pad anim d5">
+        <div class="section-head" style="margin-bottom:8px;">
+          <h2 class="section-title" style="font-size:16px;">Harbormaster's log</h2>
+          <a href="#">Full log</a>
+        </div>
+        <ul class="activity">
+          <li>
+            <span class="act-icon is-success">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text"><strong>Berth D-14</strong> inspection passed &mdash; Meridian Star cleared for season</div>
+              <div class="act-time">Today, 09:42</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-accent">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text"><strong>Commodore's Cup</strong> entries open &mdash; 22 vessels registered on day one</div>
+              <div class="act-time">Today, 08:15</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-warning">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">Small-craft advisory posted for <strong>Saturday</strong> &mdash; junior regatta may shorten course</div>
+              <div class="act-time">Yesterday, 16:03</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-danger">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text"><strong>M-0089</strong> dues 10 days past terms &mdash; second notice issued by the secretary</div>
+              <div class="act-time">Yesterday, 11:20</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">New application: <strong>Marguerite Delacroix</strong>, sponsored by E. Whitcombe</div>
+              <div class="act-time">Tue, 14:47</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Member lookup form ============ -->
+  <section class="section anim d5">
+    <div class="card card-pad">
+      <div class="section-head" style="margin-bottom:18px;">
+        <h2 class="section-title" style="font-size:16px;">Registry lookup</h2>
+        <span class="section-hint">Search by member, vessel, or berth</span>
+      </div>
+      <form class="form-row" onsubmit="return false;">
+        <div class="field">
+          <label for="q">Member or vessel name</label>
+          <input class="input" id="q" type="text" placeholder="e.g. Whitcombe or Meridian Star" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="type">Registry section</label>
+          <select class="select" id="type">
+            <option>All sections</option>
+            <option>Full members</option>
+            <option>Family memberships</option>
+            <option>Life members</option>
+            <option>Corporate &amp; schools</option>
+            <option>Berth waitlist</option>
+          </select>
+        </div>
+        <div class="field">
+          <button class="btn btn-primary" type="submit" style="width:100%;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Search registry
+          </button>
+        </div>
+      </form>
+      <p class="form-hint">Searches the member registry, berth assignments, and dues ledger back to the 2019 season.</p>
+    </div>
+  </section>
+
+  <!-- ============ Stewards card grid ============ -->
+  <section class="section anim d6">
+    <div class="section-head">
+      <h2 class="section-title">Stewards on duty</h2>
+      <span class="section-hint">Clubhouse &amp; waterfront, today</span>
+    </div>
+    <div class="steward-grid">
+      <div class="card steward-card">
+        <div class="steward-top">
+          <span class="crest">HG</span>
+          <div>
+            <div class="steward-name">Capt. Helena Grant</div>
+            <div class="steward-role">Harbormaster &middot; waterfront &amp; moorings</div>
+          </div>
+        </div>
+        <div class="steward-stats">
+          <div class="steward-stat"><div class="v">118</div><div class="k">Berths</div></div>
+          <div class="steward-stat"><div class="v">07:00</div><div class="k">On watch</div></div>
+          <div class="steward-stat"><div class="v">12 yrs</div><div class="k">Service</div></div>
+        </div>
+      </div>
+
+      <div class="card steward-card">
+        <div class="steward-top">
+          <span class="crest is-accent">TA</span>
+          <div>
+            <div class="steward-name">Thomas Abernathy</div>
+            <div class="steward-role">Club secretary &middot; registry &amp; dues</div>
+          </div>
+        </div>
+        <div class="steward-stats">
+          <div class="steward-stat"><div class="v">486</div><div class="k">Members</div></div>
+          <div class="steward-stat"><div class="v">11</div><div class="k">Notices</div></div>
+          <div class="steward-stat"><div class="v">8 yrs</div><div class="k">Service</div></div>
+        </div>
+      </div>
+
+      <div class="card steward-card">
+        <div class="steward-top">
+          <span class="crest is-success">RM</span>
+          <div>
+            <div class="steward-name">Rosa Martinez</div>
+            <div class="steward-role">Sailing director &middot; junior program</div>
+          </div>
+        </div>
+        <div class="steward-stats">
+          <div class="steward-stat"><div class="v">74</div><div class="k">Juniors</div></div>
+          <div class="steward-stat"><div class="v">6</div><div class="k">Coaches</div></div>
+          <div class="steward-stat"><div class="v">4 yrs</div><div class="k">Service</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Footer ============ -->
+  <footer class="footer anim d6">
+    <span>Blackwater Harbor Yacht Club &mdash; private operations ledger. Figures posted by the club secretary each morning.</span>
+    <span class="mono">admiralty &middot; canvas style v1</span>
+  </footer>
+
+</div>
+</body>
+</html>

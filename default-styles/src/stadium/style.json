@@ -1,0 +1,32 @@
+{
+  "id": "stadium",
+  "name": "Stadium",
+  "tagline": "Game night. Floodlights on. Broadcast-grade.",
+  "description": "A sports-broadcast graphics package: floodlit night-navy surfaces, pitch-green brand, scoreboard-gold highlights, huge Anton varsity headlines and Oxanium stat figures. ESPN lower-thirds and jumbotron energy — with tables and body copy that stay dead readable.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#0a1420",
+    "surface": "#101d2e",
+    "surface-2": "#16283c",
+    "border": "#1f3650",
+    "text": "#c9d7e4",
+    "text-secondary": "#8fa7bc",
+    "text-muted": "#607c95",
+    "heading": "#f2f7fb",
+    "brand": "#16a34a",
+    "brand-contrast": "#04160b",
+    "accent": "#facc15",
+    "success": "#22c55e",
+    "warning": "#f97316",
+    "danger": "#ef4444",
+    "scrollbar": "#2c4763",
+    "radius": "6px",
+    "radius-sm": "3px",
+    "shadow": "0 2px 8px rgba(2, 8, 16, 0.5), 0 12px 32px rgba(2, 8, 16, 0.4)",
+    "font-display": "'Anton', 'Roboto Condensed', 'Arial Narrow', sans-serif",
+    "font-body": "'Roboto Condensed', 'Arial Narrow', system-ui, sans-serif",
+    "font-mono": "'Oxanium', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Anton&family=Roboto+Condensed:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Oxanium:wght@500;600;700&display=swap"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "admiralty",
+  "name": "Admiralty",
+  "tagline": "Navy and gold heritage classic",
+  "description": "The New England yacht club aesthetic: cream paper, deep navy type, burnished gold keylines and Playfair Display headings. Engraved-invitation formality — double-rule borders, small-caps labels, crest-like precision — running a thoroughly modern dashboard.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#faf6ee",
+    "surface": "#fffdf7",
+    "surface-2": "#f3ecdc",
+    "border": "#ddd3bc",
+    "text": "#35435c",
+    "text-secondary": "#5d6b84",
+    "text-muted": "#8b95a8",
+    "heading": "#16263d",
+    "brand": "#1e3a5f",
+    "brand-contrast": "#faf6ee",
+    "accent": "#a17c1a",
+    "success": "#2e6b4f",
+    "warning": "#b26a0b",
+    "danger": "#9e2b25",
+    "scrollbar": "#c9bda0",
+    "radius": "6px",
+    "radius-sm": "3px",
+    "shadow": "0 1px 2px rgba(22, 38, 61, 0.05), 0 4px 14px rgba(22, 38, 61, 0.06)",
+    "font-display": "'Playfair Display', 'Georgia', serif",
+    "font-body": "'Public Sans', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Courier Prime', ui-monospace, 'Courier New', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Public+Sans:wght@400;500;600;700&family=Courier+Prime:wght@400;700&display=swap"
+  }
+}

@@ -85,11 +85,18 @@ def update_credential(cred_id):
 
     # Handle model selection update
     if cred_id == '_model_selection':
-        set_model_selection(
+        result = set_model_selection(
             username,
             primary=data.get('primary'),
             fallback=data.get('fallback'),
         )
+        # set_model_selection now returns {'ok': bool, 'error': str} — honor a
+        # real write failure instead of always reporting success (ADMIN-BUG-1).
+        if isinstance(result, dict) and not result.get('ok'):
+            return jsonify({
+                'ok': False,
+                'message': result.get('error', 'Model selection update failed'),
+            }), 500
         return jsonify({'ok': True, 'message': 'Model selection updated'})
 
     value = data.get('value')
@@ -567,19 +574,29 @@ def platform_setup_delete(provider_id):
 # ---------------------------------------------------------------------------
 
 def _oauth_callback_html(success: bool, message: str) -> str:
-    """Return HTML that closes the popup and notifies the parent window."""
+    """Return HTML that closes the popup and notifies the parent window.
+
+    `message` can carry attacker-controlled text (the provider's `error` query
+    param on this public, unauthenticated callback) — it MUST be escaped for the
+    HTML context and JSON-encoded for the inline-script context (reflected XSS).
+    """
+    import html as _html
     status = 'success' if success else 'error'
+    safe_html_message = _html.escape(str(message))
+    # json.dumps gives a quoted JS string literal; also neutralise "</script>"
+    # sequences which would otherwise terminate the inline script block.
+    safe_js_message = json.dumps(str(message)).replace('</', '<\\/')
     return f"""<!DOCTYPE html>
 <html><head><title>OAuth {status}</title></head>
 <body style="background:#1a1a2e;color:#e0e0e0;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
 <div style="text-align:center">
 <h2>{'Connected' if success else 'Connection Failed'}</h2>
-<p>{message}</p>
+<p>{safe_html_message}</p>
 <p style="color:#888">This window will close automatically...</p>
 </div>
 <script>
 if (window.opener) {{
-    window.opener.postMessage({{type:'oauth_callback',status:'{status}',message:'{message}'}}, '*');
+    window.opener.postMessage({{type:'oauth_callback',status:'{status}',message:{safe_js_message}}}, '*');
 }}
 setTimeout(function(){{ window.close(); }}, 2000);
 </script>

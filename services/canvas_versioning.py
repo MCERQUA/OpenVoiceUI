@@ -33,6 +33,14 @@ logger = logging.getLogger(__name__)
 MAX_VERSIONS_PER_PAGE = 20          # Keep last N versions per page
 CHECK_INTERVAL_SECONDS = 15         # How often to scan for changes
 VERSIONS_DIRNAME = '.versions'      # Subdirectory name inside canvas-pages
+# Which asset types get version history. HTML pages + small text/vector assets
+# (svg icons, json, css, js, md). Large binaries (png/jpg/glb/mp4/pdf) are
+# deliberately EXCLUDED — versioning them would bloat .versions/ and the disk
+# (2026-07-08: a non-HTML svg icon vanished on wilson with NO version safety net —
+# versioning was *.html-only; this closes that gap without the binary-bloat risk).
+# Files above MAX_VERSION_BYTES are skipped regardless of type.
+VERSIONED_SUFFIXES = {'.html', '.svg', '.json', '.css', '.js', '.md', '.txt', '.xml', '.csv', '.yaml', '.yml'}
+MAX_VERSION_BYTES = 2_000_000       # 2 MB — skip versioning files larger than this
 
 # ---------------------------------------------------------------------------
 # Internal state
@@ -62,24 +70,30 @@ def _content_hash(data: bytes) -> str:
 def _save_version(filename: str, old_content: bytes) -> Path | None:
     """Save old_content as a timestamped version file."""
     try:
-        stem = Path(filename).stem
+        p = Path(filename)
+        stem = p.stem
+        suffix = p.suffix or '.html'   # preserve original extension (svg/json/… not just html)
         timestamp = int(time.time())
-        version_name = f'{stem}.{timestamp}.html'
+        version_name = f'{stem}.{timestamp}{suffix}'
         version_path = _versions_dir() / version_name
         version_path.write_bytes(old_content)
         logger.info(f'Canvas version saved: {version_name} ({len(old_content)} bytes)')
-        _cleanup_versions(stem)
+        _cleanup_versions(stem, suffix)
         return version_path
     except Exception as exc:
         logger.error(f'Failed to save canvas version for {filename}: {exc}')
         return None
 
 
-def _cleanup_versions(page_stem: str) -> None:
-    """Keep only the latest MAX_VERSIONS_PER_PAGE versions for a page."""
+def _cleanup_versions(page_stem: str, suffix: str = '.html') -> None:
+    """Keep only the latest MAX_VERSIONS_PER_PAGE versions for a page+type.
+
+    Keyed on (stem, suffix) so foo.html and foo.svg keep independent histories
+    and don't prune each other.
+    """
     vdir = _versions_dir()
     versions = sorted(
-        vdir.glob(f'{page_stem}.*.html'),
+        vdir.glob(f'{page_stem}.*{suffix}'),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -95,8 +109,12 @@ def _initial_scan() -> None:
     """Scan all existing pages and record their hashes (no versioning on startup)."""
     if not CANVAS_PAGES_DIR.exists():
         return
-    for page_path in CANVAS_PAGES_DIR.glob('*.html'):
+    for page_path in CANVAS_PAGES_DIR.iterdir():
+        if not page_path.is_file() or page_path.suffix.lower() not in VERSIONED_SUFFIXES:
+            continue
         try:
+            if page_path.stat().st_size > MAX_VERSION_BYTES:
+                continue
             content = page_path.read_bytes()
             _file_hashes[page_path.name] = _content_hash(content)
             _file_contents[page_path.name] = content
@@ -110,8 +128,15 @@ def _check_for_changes() -> None:
         return
 
     current_files = set()
-    for page_path in CANVAS_PAGES_DIR.glob('*.html'):
+    for page_path in CANVAS_PAGES_DIR.iterdir():
+        if not page_path.is_file() or page_path.suffix.lower() not in VERSIONED_SUFFIXES:
+            continue
         filename = page_path.name
+        try:
+            if page_path.stat().st_size > MAX_VERSION_BYTES:
+                continue
+        except OSError:
+            continue
         current_files.add(filename)
         try:
             content = page_path.read_bytes()

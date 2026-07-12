@@ -43,10 +43,12 @@ MODELS = {
 DEFAULT_MODEL = "chatterbox-turbo"
 
 # Timeouts
-STREAM_TIMEOUT = 120.0   # Max wait for full streaming response. Resemble's custom-clone
-                         # base model is slow (~53ms/char → a long ~1500-char chunk needs
-                         # ~80s); 30s used to cut long replies off mid-stream → silence.
-                         # 120s lets a full reply finish so the clone voice always speaks. (2026-06-07)
+STREAM_TIMEOUT = 30.0    # Max wait for one streaming request (TTS-2). Was 120s, which
+                         # — combined with up to 6 retries — let a hung Resemble cluster
+                         # head-of-line-block the ordered audio flush for MINUTES. tts.py
+                         # chunks Resemble at 400 chars (~21s at ~53ms/char), so a single
+                         # request finishes well under 30s; a request that doesn't is hung,
+                         # and bailing fast to retry/fallback beats blocking the whole reply.
 CONNECT_TIMEOUT = 10.0   # TCP connect timeout
 API_TIMEOUT = 15.0       # For voice listing / non-synthesis calls
 
@@ -493,6 +495,13 @@ class ResembleProvider(TTSProvider):
                 f"(request_id={req_id}, voice={voice_uuid[:12]}, "
                 f"text_len={len(text)}, model={model or 'default'}): {body}"
             )
+            try:
+                from services.jambot_books_hook import record_provider_call
+                record_provider_call('resemble', endpoint='/stream', op='tts',
+                                     units=str(len(text)), status=status,
+                                     model=model or 'chatterbox')
+            except Exception:
+                pass
             raise RuntimeError(
                 f"Resemble API error {status} (request_id={req_id}): {body}"
             )
@@ -517,6 +526,16 @@ class ResembleProvider(TTSProvider):
 
         elapsed = int((time.time() - t) * 1000)
         logger.info(f"[Resemble] Generated {len(audio_bytes)} bytes in {elapsed}ms")
+
+        # JamBot Books: Resemble synthesis uses httpx but its client isn't an
+        # SDK we attach() to, so record the call explicitly (file-drop leg).
+        try:
+            from services.jambot_books_hook import record_provider_call
+            record_provider_call('resemble', endpoint='/stream', op='tts',
+                                 units=str(len(text[:2000])), status=200,
+                                 model=model or 'chatterbox')
+        except Exception:
+            pass  # never break a voice turn
 
         if len(audio_bytes) < 100:
             raise RuntimeError(

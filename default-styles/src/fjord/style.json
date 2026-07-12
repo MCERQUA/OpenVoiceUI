@@ -1,0 +1,32 @@
+{
+  "id": "fjord",
+  "name": "Fjord",
+  "tagline": "Scandinavian minimal — cool air, quiet precision",
+  "description": "Nordic design-studio restraint: cool near-white surfaces, deep charcoal-slate type, a muted glacial petrol brand and a single birch-evergreen accent. Hairline borders, almost no shadow, exact 4/8px rhythm — nothing decorative, everything considered.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#f7f9fa",
+    "surface": "#ffffff",
+    "surface-2": "#eef2f4",
+    "border": "#dde4e8",
+    "text": "#2e3a41",
+    "text-secondary": "#5b6a73",
+    "text-muted": "#8b99a1",
+    "heading": "#1c262c",
+    "brand": "#35617a",
+    "brand-contrast": "#ffffff",
+    "accent": "#2f6b4f",
+    "success": "#2e7d54",
+    "warning": "#a8721f",
+    "danger": "#b2453c",
+    "scrollbar": "#c3ced4",
+    "radius": "6px",
+    "radius-sm": "4px",
+    "shadow": "0 1px 2px rgba(28, 38, 44, 0.05)",
+    "font-display": "'Outfit', 'Karla', system-ui, sans-serif",
+    "font-body": "'Karla', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Fira Code', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Karla:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+  }
+}

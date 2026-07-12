@@ -1,0 +1,32 @@
+{
+  "id": "aurora",
+  "name": "Aurora",
+  "tagline": "Northern lights over an arctic night",
+  "description": "Standing under the borealis in Tromsø: a near-black arctic-blue sky with slow-drifting ribbons of living green and ice-cyan light, a static CSS starfield, frost-glass cards with glowing top edges, and Unbounded's wide cosmic display face. Flashy in the sky, crisp on the surface.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#070d16",
+    "surface": "#0d1826",
+    "surface-2": "#122236",
+    "border": "#1e3a52",
+    "text": "#cfe0ec",
+    "text-secondary": "#8fabc2",
+    "text-muted": "#5f7d99",
+    "heading": "#f2fbfd",
+    "brand": "#34d399",
+    "brand-contrast": "#041912",
+    "accent": "#67e8f9",
+    "success": "#4ade80",
+    "warning": "#fbbf24",
+    "danger": "#f87171",
+    "scrollbar": "#26445f",
+    "radius": "14px",
+    "radius-sm": "9px",
+    "shadow": "0 1px 2px rgba(2, 6, 12, 0.55), 0 14px 36px rgba(2, 6, 12, 0.45)",
+    "font-display": "'Unbounded', 'Albert Sans', system-ui, sans-serif",
+    "font-body": "'Albert Sans', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Sometype Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&family=Albert+Sans:wght@400;500;600;700&family=Sometype+Mono:wght@400;500&display=swap"
+  }
+}

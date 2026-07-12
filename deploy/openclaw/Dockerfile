@@ -1,5 +1,12 @@
 FROM node:22-bookworm-slim
 
+# Source-commit provenance — readable via `docker inspect` so the drift detector
+# reads the baked commit directly instead of guessing. Does NOT change the
+# OPENCLAW_VERSION pin below — that stays under bump-openclaw-version.sh control.
+# Passed by jambot-build-images.sh as: --build-arg SOURCE_COMMIT=$(git rev-parse --short HEAD)
+ARG SOURCE_COMMIT=unknown
+LABEL com.jambot.source_commit=$SOURCE_COMMIT
+
 # System packages for native Node modules (canvas, sharp, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \

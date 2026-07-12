@@ -1,0 +1,1150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Southgate Athletic Club — Game Night Operations</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Roboto+Condensed:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Oxanium:wght@500;600;700&display=swap');
+
+/* ================================================================
+   STADIUM — Sports Broadcast / Game Night
+   Every color flows through these tokens. Do not hardcode hex
+   values in component rules; extend the palette here instead.
+   ================================================================ */
+:root {
+  --bg: #0a1420;
+  --surface: #101d2e;
+  --surface-2: #16283c;
+  --border: #1f3650;
+  --text: #c9d7e4;
+  --text-secondary: #8fa7bc;
+  --text-muted: #607c95;
+  --heading: #f2f7fb;
+  --brand: #16a34a;
+  --brand-contrast: #04160b;
+  --accent: #facc15;
+  --success: #22c55e;
+  --warning: #f97316;
+  --danger: #ef4444;
+  --scrollbar: #2c4763;
+  --radius: 6px;
+  --radius-sm: 3px;
+  --shadow: 0 2px 8px rgba(2, 8, 16, 0.5), 0 12px 32px rgba(2, 8, 16, 0.4);
+  --shadow-lift: 0 4px 12px rgba(2, 8, 16, 0.55), 0 18px 44px rgba(2, 8, 16, 0.45);
+  --font-display: 'Anton', 'Roboto Condensed', 'Arial Narrow', sans-serif;
+  --font-body: 'Roboto Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --font-mono: 'Oxanium', ui-monospace, 'SF Mono', monospace;
+  /* Derived tints — semantic colors at low opacity for chips/badges */
+  --brand-tint: rgba(22, 163, 74, 0.14);
+  --accent-tint: rgba(250, 204, 21, 0.12);
+  --success-tint: rgba(34, 197, 94, 0.14);
+  --warning-tint: rgba(249, 115, 22, 0.14);
+  --danger-tint: rgba(239, 68, 68, 0.14);
+  --focus-ring: rgba(22, 163, 74, 0.28);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  /* Floodlight wash — one subtle radial from the top, nothing more */
+  background-image: radial-gradient(ellipse 90% 55% at 50% -10%, rgba(22, 163, 74, 0.07), transparent 70%);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--brand-tint); color: var(--heading); }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+h1 { color: var(--heading); }
+
+a { color: var(--accent); text-decoration: none; font-weight: 600; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1.5px var(--brand);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Layout shell ---------- */
+.page { max-width: 1160px; margin: 0 auto; }
+
+.section { margin-bottom: 32px; }
+
+/* ---------- Broadcast lower-third section headers ---------- */
+.lower-third {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.lt-bar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: var(--brand);
+  transform: skewX(-12deg);
+  padding: 6px 18px 6px 14px;
+  border-radius: var(--radius-sm);
+}
+.lt-bar .lt-label {
+  transform: skewX(12deg);
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--brand-contrast);
+  white-space: nowrap;
+}
+.lt-tail {
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, var(--brand), transparent);
+  border-radius: 999px;
+  min-width: 24px;
+}
+.lt-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- Entrance animation (opacity/transform only) ---------- */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-12px) skewX(-12deg); }
+  to   { opacity: 1; transform: translateX(0) skewX(-12deg); }
+}
+.anim { opacity: 0; animation: rise-in 0.45s var(--ease-out) forwards; }
+.lt-bar.anim { animation-name: slide-in; }
+.d1 { animation-delay: 0.04s; }
+.d2 { animation-delay: 0.09s; }
+.d3 { animation-delay: 0.14s; }
+.d4 { animation-delay: 0.19s; }
+.d5 { animation-delay: 0.24s; }
+.d6 { animation-delay: 0.29s; }
+.d7 { animation-delay: 0.34s; }
+
+/* ---------- LIVE badge pulse ---------- */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.75); }
+}
+.badge-live::before { animation: live-pulse 1.6s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim, .lt-bar.anim { animation: none; opacity: 1; }
+  .badge-live::before { animation: none; }
+  * { transition-duration: 0.01ms !important; }
+}
+
+/* ---------- Page header ---------- */
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 20px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.masthead::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 180px;
+  height: 3px;
+  background: var(--accent);
+}
+.mast-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.mast-club {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+.mast-title {
+  font-family: var(--font-display);
+  font-size: clamp(30px, 5vw, 40px);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.05;
+  color: var(--heading);
+}
+.mast-title .gold { color: var(--accent); }
+.mast-sub {
+  margin-top: 8px;
+  font-size: 14.5px;
+  color: var(--text-secondary);
+  max-width: 560px;
+}
+.mast-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+.badge-live    { background: var(--danger-tint);  color: var(--danger); }
+.badge-success { background: var(--success-tint); color: var(--success); }
+.badge-warning { background: var(--warning-tint); color: var(--warning); }
+.badge-danger  { background: var(--danger-tint);  color: var(--danger); }
+.badge-brand   { background: var(--brand-tint);   color: var(--success); }
+.badge-gold    { background: var(--accent-tint);  color: var(--accent); }
+.badge-muted   { background: var(--surface-2);    color: var(--text-secondary); }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 150ms var(--ease-out), background 150ms var(--ease-out),
+              border-color 150ms var(--ease-out), color 150ms var(--ease-out),
+              box-shadow 150ms var(--ease-out);
+  text-decoration: none;
+}
+.btn svg { width: 15px; height: 15px; flex: none; }
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  box-shadow: 0 2px 10px rgba(22, 163, 74, 0.3);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--brand) 84%, var(--heading));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(22, 163, 74, 0.38);
+}
+.btn-secondary {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--heading);
+}
+.btn-secondary:hover { border-color: var(--brand); color: var(--success); }
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { background: var(--surface-2); color: var(--heading); }
+
+/* ---------- KPI stat blocks ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+.kpi {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 20px 16px;
+  overflow: hidden;
+  transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
+}
+.kpi::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--brand);
+}
+.kpi.kpi-leader::before { background: var(--accent); }
+.kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+.kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.kpi-chip {
+  width: 32px; height: 32px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-tint);
+  color: var(--success);
+  flex: none;
+}
+.kpi-leader .kpi-chip { background: var(--accent-tint); color: var(--accent); }
+.kpi-chip svg { width: 17px; height: 17px; }
+.kpi-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--heading);
+}
+.kpi-value .unit {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-left: 3px;
+}
+.kpi-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+.delta svg { width: 11px; height: 11px; }
+.delta-up   { background: var(--success-tint); color: var(--success); }
+.delta-down { background: var(--danger-tint);  color: var(--danger); }
+.delta-gold { background: var(--accent-tint);  color: var(--accent); }
+.kpi-caption { font-size: 12px; color: var(--text-muted); }
+
+/* ---------- Main split: leaderboard + side column ---------- */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* ---------- Card base ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.card-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--heading);
+}
+.card-body { padding: 18px 20px; }
+
+/* ---------- Leaderboard table ---------- */
+.table-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 620px;
+}
+thead th {
+  background: var(--surface-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 120ms var(--ease-out); }
+tbody tr:hover { background: var(--surface-2); }
+.rank {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-muted);
+  width: 44px;
+}
+tr.leader .rank { color: var(--accent); }
+.team-cell { min-width: 170px; }
+.team-name {
+  font-weight: 600;
+  color: var(--heading);
+  display: block;
+}
+.team-sub { font-size: 12px; color: var(--text-muted); }
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+  color: var(--text);
+  white-space: nowrap;
+}
+tr.leader .num.pts { color: var(--accent); }
+
+/* ---------- Form row ---------- */
+.form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.field input,
+.field select {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--heading);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  width: 100%;
+  transition: border-color 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
+}
+.field input::placeholder { color: var(--text-muted); }
+.field input:hover, .field select:hover { border-color: var(--scrollbar); }
+.field input:focus, .field select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238fa7bc' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+/* ---------- Progress bars ---------- */
+.progress-item { margin-bottom: 16px; }
+.progress-item:last-child { margin-bottom: 0; }
+.progress-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.progress-name { font-size: 13.5px; font-weight: 600; color: var(--heading); }
+.progress-frac {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.progress-track {
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--brand);
+  border-radius: 999px;
+}
+.progress-fill.gold { background: var(--accent); }
+.progress-fill.warn { background: var(--warning); }
+
+/* ---------- Activity timeline ---------- */
+.timeline { list-style: none; }
+.timeline li {
+  display: flex;
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.timeline li:first-child { padding-top: 4px; }
+.timeline li:last-child { border-bottom: none; padding-bottom: 4px; }
+.tl-icon {
+  width: 30px; height: 30px;
+  border-radius: 999px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tl-icon svg { width: 15px; height: 15px; }
+.tl-icon.brand   { background: var(--brand-tint);   color: var(--success); }
+.tl-icon.gold    { background: var(--accent-tint);  color: var(--accent); }
+.tl-icon.warning { background: var(--warning-tint); color: var(--warning); }
+.tl-icon.danger  { background: var(--danger-tint);  color: var(--danger); }
+.tl-body { min-width: 0; }
+.tl-text { font-size: 13.5px; color: var(--text); }
+.tl-text strong { color: var(--heading); font-weight: 600; }
+.tl-time { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+/* ---------- Matchup (VS) card grid ---------- */
+.matchup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.matchup {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
+}
+.matchup:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+.matchup-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--surface-2);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.matchup-league {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.matchup-body {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px;
+}
+.side { text-align: center; min-width: 0; }
+.side .crest {
+  width: 40px; height: 40px;
+  margin: 0 auto 8px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-tint);
+  color: var(--success);
+}
+.side.away .crest { background: var(--surface-2); color: var(--text-secondary); }
+.side .crest svg { width: 20px; height: 20px; }
+.side .side-name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side .side-record {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.vs {
+  position: relative;
+  background: var(--brand);
+  transform: skewX(-12deg);
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+}
+.vs span {
+  display: block;
+  transform: skewX(12deg);
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--brand-contrast);
+}
+.matchup-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px 14px;
+}
+.matchup-when {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  margin-top: 40px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.footer .foot-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.footer .foot-mark svg { width: 14px; height: 14px; color: var(--brand); }
+
+/* ---------- Responsive ----------
+   HARD RULE: the host injects a 25px safe area on html/body — that is
+   the ONLY horizontal inset on phones. No wrapper side padding here. */
+@media (max-width: 900px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .form-row { grid-template-columns: minmax(0, 1fr); }
+  .form-row .btn { justify-content: center; }
+}
+@media (max-width: 640px) {
+  .page, .section { padding-left: 0; padding-right: 0; }
+  /* lower-third hint is nowrap on desktop; on phones it must shrink + wrap
+     or it forces horizontal page overflow (375px QA: scrollWidth 414 bug) */
+  .lower-third { flex-wrap: wrap; }
+  .lt-hint { white-space: normal; min-width: 0; flex: 1 1 100%; }
+  .masthead { align-items: flex-start; flex-direction: column; }
+  .card-head { flex-wrap: wrap; }
+  .card-body { padding: 16px; }
+  .kpi { padding: 16px; }
+  .matchup-body { padding: 16px 12px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ MASTHEAD ============ -->
+  <header class="masthead anim d1">
+    <div>
+      <div class="mast-eyebrow">
+        <span class="mast-club">Southgate Athletic Club</span>
+        <span class="badge badge-live">Live · Court 2</span>
+      </div>
+      <h1 class="mast-title">Game Night <span class="gold">Operations</span></h1>
+      <p class="mast-sub">Friday, March 14 — Winter League week 9 of 12. Four courts in rotation, 86 players checked in, broadcast feed running on the lobby board.</p>
+    </div>
+    <div class="mast-actions">
+      <button class="btn btn-secondary" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export sheet
+      </button>
+      <button class="btn btn-primary" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Start next match
+      </button>
+    </div>
+  </header>
+
+  <!-- ============ KPI ROW ============ -->
+  <section class="section anim d2" aria-label="Tonight's key numbers">
+    <div class="kpi-grid">
+
+      <div class="kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Players checked in</span>
+          <span class="kpi-chip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">86<span class="unit">/ 92</span></div>
+        <div class="kpi-foot">
+          <span class="delta delta-up">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            +12
+          </span>
+          <span class="kpi-caption">vs. last Friday</span>
+        </div>
+      </div>
+
+      <div class="kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Court utilization</span>
+          <span class="kpi-chip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="1"/><line x1="12" y1="4" x2="12" y2="20"/><circle cx="12" cy="12" r="3"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">94<span class="unit">%</span></div>
+        <div class="kpi-foot">
+          <span class="delta delta-up">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            +6%
+          </span>
+          <span class="kpi-caption">all four courts active</span>
+        </div>
+      </div>
+
+      <div class="kpi kpi-leader">
+        <div class="kpi-top">
+          <span class="kpi-label">Season attendance record</span>
+          <span class="kpi-chip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21 1.18.54 2.03 2.03 2.03 3.79"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">312</div>
+        <div class="kpi-foot">
+          <span class="delta delta-gold">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>
+            New record
+          </span>
+          <span class="kpi-caption">set tonight, 7:40 PM</span>
+        </div>
+      </div>
+
+      <div class="kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">League revenue · March</span>
+          <span class="kpi-chip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">$18.4<span class="unit">k</span></div>
+        <div class="kpi-foot">
+          <span class="delta delta-down">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            -3%
+          </span>
+          <span class="kpi-caption">two team renewals pending</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ LEADERBOARD + SIDE COLUMN ============ -->
+  <section class="section">
+    <div class="lower-third">
+      <span class="lt-bar anim d2"><span class="lt-label">Division A Standings</span></span>
+      <span class="lt-tail"></span>
+      <span class="lt-hint">Week 9 · updated live</span>
+    </div>
+
+    <div class="split">
+
+      <!-- Leaderboard table -->
+      <div class="card anim d3">
+        <div class="card-head">
+          <span class="card-title">Team Leaderboard</span>
+          <a href="#standings">Full standings</a>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="rank">#</th>
+                <th>Team</th>
+                <th style="text-align:right">W</th>
+                <th style="text-align:right">L</th>
+                <th style="text-align:right">Pts</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="leader">
+                <td class="rank">1</td>
+                <td class="team-cell">
+                  <span class="team-name">Northside Chargers</span>
+                  <span class="team-sub">Capt. D. Okafor · Court 1</span>
+                </td>
+                <td class="num">8</td>
+                <td class="num">1</td>
+                <td class="num pts">24</td>
+                <td><span class="badge badge-gold">Leader</span></td>
+              </tr>
+              <tr>
+                <td class="rank">2</td>
+                <td class="team-cell">
+                  <span class="team-name">Dockyard Wolves</span>
+                  <span class="team-sub">Capt. M. Reyes · Court 3</span>
+                </td>
+                <td class="num">7</td>
+                <td class="num">2</td>
+                <td class="num">21</td>
+                <td><span class="badge badge-brand">Playing</span></td>
+              </tr>
+              <tr>
+                <td class="rank">3</td>
+                <td class="team-cell">
+                  <span class="team-name">Eastgate Ravens</span>
+                  <span class="team-sub">Capt. S. Lindqvist · Court 2</span>
+                </td>
+                <td class="num">6</td>
+                <td class="num">3</td>
+                <td class="num">19</td>
+                <td><span class="badge badge-brand">Playing</span></td>
+              </tr>
+              <tr>
+                <td class="rank">4</td>
+                <td class="team-cell">
+                  <span class="team-name">Millbrook Titans</span>
+                  <span class="team-sub">Capt. J. Carter · bench</span>
+                </td>
+                <td class="num">5</td>
+                <td class="num">4</td>
+                <td class="num">15</td>
+                <td><span class="badge badge-warning">Fee pending</span></td>
+              </tr>
+              <tr>
+                <td class="rank">5</td>
+                <td class="team-cell">
+                  <span class="team-name">Harbor City Comets</span>
+                  <span class="team-sub">Capt. A. Nasser · bench</span>
+                </td>
+                <td class="num">4</td>
+                <td class="num">5</td>
+                <td class="num">13</td>
+                <td><span class="badge badge-muted">Resting</span></td>
+              </tr>
+              <tr>
+                <td class="rank">6</td>
+                <td class="team-cell">
+                  <span class="team-name">Redline Rockets</span>
+                  <span class="team-sub">Capt. T. Brooks · roster short</span>
+                </td>
+                <td class="num">2</td>
+                <td class="num">7</td>
+                <td class="num">7</td>
+                <td><span class="badge badge-danger">Forfeit risk</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Side column: season progress + activity -->
+      <div>
+        <div class="card anim d4" style="margin-bottom: 18px;">
+          <div class="card-head">
+            <span class="card-title">Season Progress</span>
+            <span class="badge badge-muted">Wk 9 / 12</span>
+          </div>
+          <div class="card-body">
+            <div class="progress-item">
+              <div class="progress-meta">
+                <span class="progress-name">Division A fixtures</span>
+                <span class="progress-frac">41 / 54</span>
+              </div>
+              <div class="progress-track"><div class="progress-fill" style="width:76%"></div></div>
+            </div>
+            <div class="progress-item">
+              <div class="progress-meta">
+                <span class="progress-name">Division B fixtures</span>
+                <span class="progress-frac">36 / 48</span>
+              </div>
+              <div class="progress-track"><div class="progress-fill" style="width:75%"></div></div>
+            </div>
+            <div class="progress-item">
+              <div class="progress-meta">
+                <span class="progress-name">Youth league</span>
+                <span class="progress-frac">30 / 30</span>
+              </div>
+              <div class="progress-track"><div class="progress-fill gold" style="width:100%"></div></div>
+            </div>
+            <div class="progress-item">
+              <div class="progress-meta">
+                <span class="progress-name">Referee certifications</span>
+                <span class="progress-frac">9 / 16</span>
+              </div>
+              <div class="progress-track"><div class="progress-fill warn" style="width:56%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card anim d5">
+          <div class="card-head">
+            <span class="card-title">Courtside Feed</span>
+            <a href="#feed">All events</a>
+          </div>
+          <div class="card-body" style="padding-top: 8px; padding-bottom: 10px;">
+            <ul class="timeline">
+              <li>
+                <span class="tl-icon gold">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21 1.18.54 2.03 2.03 2.03 3.79"/></svg>
+                </span>
+                <div class="tl-body">
+                  <span class="tl-text"><strong>Attendance record broken</strong> — 312 through the gate, lobby board updated.</span>
+                  <span class="tl-time">7:40 PM · front desk</span>
+                </div>
+              </li>
+              <li>
+                <span class="tl-icon brand">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </span>
+                <div class="tl-body">
+                  <span class="tl-text"><strong>Dockyard Wolves</strong> win game 2 on Court 3, 21–17. Standings updated.</span>
+                  <span class="tl-time">7:28 PM · scorekeeper</span>
+                </div>
+              </li>
+              <li>
+                <span class="tl-icon warning">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                </span>
+                <div class="tl-body">
+                  <span class="tl-text"><strong>Millbrook Titans</strong> league fee reminder sent — due before week 10 tip-off.</span>
+                  <span class="tl-time">7:05 PM · billing</span>
+                </div>
+              </li>
+              <li>
+                <span class="tl-icon danger">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </span>
+                <div class="tl-body">
+                  <span class="tl-text"><strong>Court 4 shot clock</strong> flagged intermittent — maintenance ticket #482 opened.</span>
+                  <span class="tl-time">6:52 PM · facilities</span>
+                </div>
+              </li>
+              <li>
+                <span class="tl-icon brand">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                </span>
+                <div class="tl-body">
+                  <span class="tl-text"><strong>3 walk-in registrations</strong> added to the Division B waitlist.</span>
+                  <span class="tl-time">6:31 PM · front desk</span>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ REGISTRATION FORM ============ -->
+  <section class="section">
+    <div class="lower-third">
+      <span class="lt-bar anim d4"><span class="lt-label">Quick Registration</span></span>
+      <span class="lt-tail"></span>
+      <span class="lt-hint">Walk-ins · waitlist</span>
+    </div>
+    <div class="card anim d5">
+      <div class="card-body">
+        <form class="form-row" onsubmit="return false">
+          <div class="field">
+            <label for="player-name">Player name</label>
+            <input id="player-name" type="text" placeholder="e.g. Jordan Ellis" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="division">Division</label>
+            <select id="division">
+              <option>Division A — competitive</option>
+              <option>Division B — intermediate</option>
+              <option>Youth league — U16</option>
+              <option>Drop-in · open gym</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" type="submit">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add player
+          </button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ UPCOMING MATCHUPS ============ -->
+  <section class="section">
+    <div class="lower-third">
+      <span class="lt-bar anim d5"><span class="lt-label">Up Next</span></span>
+      <span class="lt-tail"></span>
+      <span class="lt-hint">Court assignments · tonight</span>
+    </div>
+    <div class="matchup-grid">
+
+      <article class="matchup anim d5">
+        <div class="matchup-strip">
+          <span class="matchup-league">Division A · Court 1</span>
+          <span class="badge badge-brand">On deck</span>
+        </div>
+        <div class="matchup-body">
+          <div class="side home">
+            <span class="crest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </span>
+            <span class="side-name">Chargers</span>
+            <span class="side-record">8–1</span>
+          </div>
+          <div class="vs"><span>VS</span></div>
+          <div class="side away">
+            <span class="crest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </span>
+            <span class="side-name">Comets</span>
+            <span class="side-record">4–5</span>
+          </div>
+        </div>
+        <div class="matchup-foot">
+          <span class="matchup-when">8:15 PM</span>
+          <button class="btn btn-ghost" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Scoresheet
+          </button>
+        </div>
+      </article>
+
+      <article class="matchup anim d6">
+        <div class="matchup-strip">
+          <span class="matchup-league">Division A · Court 4</span>
+          <span class="badge badge-warning">Clock check</span>
+        </div>
+        <div class="matchup-body">
+          <div class="side home">
+            <span class="crest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+            </span>
+            <span class="side-name">Titans</span>
+            <span class="side-record">5–4</span>
+          </div>
+          <div class="vs"><span>VS</span></div>
+          <div class="side away">
+            <span class="crest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>
+            </span>
+            <span class="side-name">Rockets</span>
+            <span class="side-record">2–7</span>
+          </div>
+        </div>
+        <div class="matchup-foot">
+          <span class="matchup-when">8:15 PM</span>
+          <button class="btn btn-ghost" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Scoresheet
+          </button>
+        </div>
+      </article>
+
+      <article class="matchup anim d7">
+        <div class="matchup-strip">
+          <span class="matchup-league">Division B · Court 2</span>
+          <span class="badge badge-muted">9:00 PM</span>
+        </div>
+        <div class="matchup-body">
+          <div class="side home">
+            <span class="crest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3"/><line x1="12" y1="7" x2="12" y2="17"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            </span>
+            <span class="side-name">Wolves B</span>
+            <span class="side-record">6–3</span>
+          </div>
+          <div class="vs"><span>VS</span></div>
+          <div class="side away">
+            <span class="crest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </span>
+            <span class="side-name">Ravens B</span>
+            <span class="side-record">5–4</span>
+          </div>
+        </div>
+        <div class="matchup-foot">
+          <span class="matchup-when">9:00 PM</span>
+          <button class="btn btn-ghost" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Scoresheet
+          </button>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer anim d7">
+    <span class="foot-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      Southgate Athletic Club
+    </span>
+    <span>Ops board refreshed 7:42 PM · scorekeeper feed live · <a href="#support">facilities support</a></span>
+  </footer>
+
+</div>
+</body>
+</html>

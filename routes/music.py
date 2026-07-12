@@ -238,6 +238,37 @@ def get_music_files(playlist="library"):
     return files
 
 
+def get_latest_generated_track():
+    """Return the most-recently-generated track dict (by file mtime), or None.
+
+    'The last track you made' has no other authoritative source — metadata
+    created_date is date-only, and the playlist is sorted alphabetically. File
+    mtime is the only reliable recency signal. Adds 'url' + 'download_url'.
+    """
+    music_extensions = {".mp3", ".wav", ".ogg", ".m4a", ".webm"}
+    try:
+        candidates = [
+            f for f in GENERATED_MUSIC_DIR.iterdir()
+            if f.is_file() and f.suffix.lower() in music_extensions
+        ]
+    except FileNotFoundError:
+        return None
+    if not candidates:
+        return None
+    newest = max(candidates, key=lambda f: f.stat().st_mtime)
+    metadata = load_generated_music_metadata()
+    meta = metadata.get(newest.name, {})
+    return {
+        "filename": newest.name,
+        "title": meta.get("title", newest.stem),
+        "artist": meta.get("artist", "Jam-Bot"),
+        "url": f"/generated_music/{newest.name}",
+        "download_url": f"/generated_music/{newest.name}?download=1",
+        "created_date": meta.get("created_date", ""),
+        "mtime": newest.stat().st_mtime,
+    }
+
+
 def _build_dj_hints(track):
     """Build a DJ hints string from track metadata."""
     title = track.get("title", track["name"])
@@ -275,23 +306,47 @@ _AUDIO_MIME_TYPES = {
 }
 
 
+def _download_name_for(music_dir, music_path, metadata_loader):
+    """Build a friendly download filename from track metadata title, else the stem."""
+    try:
+        meta = (metadata_loader() or {}).get(music_path.name, {})
+        title = (meta.get("title") or "").strip()
+    except Exception:
+        title = ""
+    base = title or music_path.stem
+    # Keep it filesystem/HTTP-header safe
+    safe = re.sub(r"[^\w\- ]+", "", base).strip().replace(" ", "-") or music_path.stem
+    return f"{safe}{music_path.suffix.lower()}"
+
+
 @music_bp.route("/music/<filename>")
 def serve_music_file(filename):
-    """Serve library music files."""
+    """Serve library music files. ?download=1 forces a save-to-disk download."""
     music_path = _safe_path(MUSIC_DIR, filename)
     if music_path is None or not music_path.exists():
         return jsonify({"error": "Track not found"}), 404
     mime_type = _AUDIO_MIME_TYPES.get(music_path.suffix.lower(), "audio/mpeg")
+    if request.args.get("download"):
+        return send_file(
+            music_path, mimetype=mime_type, as_attachment=True,
+            download_name=_download_name_for(MUSIC_DIR, music_path, load_music_metadata),
+        )
     return send_file(music_path, mimetype=mime_type)
 
 
 @music_bp.route("/generated_music/<filename>")
 def serve_generated_music_file(filename):
-    """Serve AI-generated music files."""
+    """Serve AI-generated music files. ?download=1 forces a save-to-disk download."""
     music_path = _safe_path(GENERATED_MUSIC_DIR, filename)
     if music_path is None or not music_path.exists():
         return jsonify({"error": "Generated track not found"}), 404
     mime_type = _AUDIO_MIME_TYPES.get(music_path.suffix.lower(), "audio/mpeg")
+    if request.args.get("download"):
+        return send_file(
+            music_path, mimetype=mime_type, as_attachment=True,
+            download_name=_download_name_for(
+                GENERATED_MUSIC_DIR, music_path, load_generated_music_metadata),
+        )
     return send_file(music_path, mimetype=mime_type)
 
 
@@ -344,6 +399,19 @@ def handle_music():
             "playlist": "external",
             "source": provider,
             "response": f"Now streaming '{title}' from {provider}.",
+        })
+
+    # ── LATEST ────────────────────────────────────────────────────────────
+    # "The last track you made" — authoritative newest-by-mtime generated song.
+    if action == "latest":
+        latest = get_latest_generated_track()
+        if not latest:
+            return jsonify({"action": "latest", "track": None,
+                            "response": "No generated tracks yet."})
+        return jsonify({
+            "action": "latest",
+            "track": latest,
+            "response": f"Latest generated track: '{latest['title']}'.",
         })
 
     # ── SPOTIFY ───────────────────────────────────────────────────────────
@@ -796,7 +864,20 @@ def delete_track(playlist, filename):
     if not track_path.exists():
         return jsonify({"error": "Track not found"}), 404
 
-    track_path.unlink()
+    # Soft-delete: rename to a .deleted sibling instead of hard-removing (NEVER-DELETE
+    # house rule — matches routes/suno.py delete_song + routes/workspace.py). The
+    # .deleted suffix is not in the music-extension whitelist the list endpoints scan,
+    # so archived tracks are excluded automatically. Collision-safe: if a .deleted
+    # target already exists, append a timestamp so no prior archive is clobbered.
+    renamed = track_path.with_suffix(track_path.suffix + ".deleted")
+    if renamed.exists():
+        renamed = track_path.with_suffix(track_path.suffix + f".{int(time.time())}.deleted")
+    try:
+        track_path.rename(renamed)
+        print(f"🎵 Archived track: {safe_filename} -> {renamed.name}")
+    except Exception as e:
+        print(f"Error archiving track {safe_filename}: {e}")
+        return jsonify({"error": str(e)}), 500
 
     # Remove from metadata if present
     metadata = load_meta()

@@ -140,20 +140,21 @@ class SupertonicProvider(TTSProvider):
         # ── API mode ──────────────────────────────────────────────────────────
         # Preferred: call the shared supertonic-tts microservice.
         # Models are loaded once system-wide; no per-process ONNX loading.
+        #
+        # LAZY (TTS-3): __init__ must NEVER make a blocking network call — with the
+        # provider singleton this runs once, but a readiness/health probe or a
+        # cold first-sentence must not eat a 3s health GET (and then, on local
+        # fallback, a multi-second in-process ONNX load). If SUPERTONIC_API_URL is
+        # set we assume API mode and let the FIRST generate reveal an outage (the
+        # tts.py fallback chain handles a down service in <1s). No health GET here.
         if _API_URL:
-            try:
-                import requests
-                resp = requests.get(f"{_API_URL}/health", timeout=3)
-                if resp.ok:
-                    self._use_api = True
-                    self._api_url = _API_URL
-                    self.onnx_dir = onnx_dir or self.DEFAULT_ONNX_DIR
-                    self.voice_styles_dir = ""
-                    self._status = 'active'
-                    logger.info(f"SupertonicProvider: API mode → {_API_URL}")
-                    return
-            except Exception as e:
-                logger.warning(f"SupertonicProvider: API at {_API_URL} unreachable ({e}), trying local")
+            self._use_api = True
+            self._api_url = _API_URL
+            self.onnx_dir = onnx_dir or self.DEFAULT_ONNX_DIR
+            self.voice_styles_dir = ""
+            self._status = 'active'
+            logger.info(f"SupertonicProvider: API mode → {_API_URL} (lazy — no init health GET)")
+            return
 
         self._use_api = False
 
@@ -184,14 +185,11 @@ class SupertonicProvider(TTSProvider):
             logger.warning(f"SupertonicProvider: {self._init_error}")
             return
 
-        try:
-            self._create_tts_instance(self.default_voice)
-            self._status = 'active'
-            logger.info(f"SupertonicProvider: local mode, voice '{default_voice}'")
-        except Exception as e:
-            self._status = 'error'
-            self._init_error = str(e)
-            logger.error(f"SupertonicProvider initialization failed: {e}")
+        # LAZY (TTS-3): dirs exist → mark active but DO NOT load ONNX models here.
+        # The first generate_speech() lazily creates (and caches) the SupertonicTTS
+        # instance via _create_tts_instance(), so __init__ stays fast/non-blocking.
+        self._status = 'active'
+        logger.info(f"SupertonicProvider: local mode ready (voice '{default_voice}', ONNX loads on first use)")
 
     def _get_voice_style_path(self, voice: str) -> str:
         """
@@ -339,6 +337,14 @@ class SupertonicProvider(TTSProvider):
                     raise RuntimeError(f"Supertonic API error {resp.status_code}: {resp.text[:200]}")
                 audio_bytes = resp.content
                 logger.info(f"API: {len(audio_bytes)} bytes for voice '{voice}'")
+                # JamBot Books: shared supertonic-tts container call (cost 0, local).
+                try:
+                    from services.jambot_books_hook import record_provider_call
+                    record_provider_call('supertonic', endpoint='/tts', op='tts-api',
+                                         units=str(len(text)), status=resp.status_code,
+                                         model='supertonic')
+                except Exception:
+                    pass
                 return audio_bytes
 
             # ── Local mode: load ONNX in-process ─────────────────────────────
@@ -347,6 +353,13 @@ class SupertonicProvider(TTSProvider):
                 text=text, lang=lang, speed=speed, total_step=total_step
             )
             logger.info(f"Local: {len(audio_bytes)} bytes for voice '{voice}'")
+            # JamBot Books: in-process ONNX supertonic (cost 0, local).
+            try:
+                from services.jambot_books_hook import record_provider_call
+                record_provider_call('supertonic', endpoint='/local', op='tts-local',
+                                     units=str(len(text)), status=200, model='supertonic')
+            except Exception:
+                pass
             return audio_bytes
 
         except Exception as e:

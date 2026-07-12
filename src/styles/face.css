@@ -351,6 +351,8 @@
             z-index: -1;
             opacity: 0;
             transition: opacity 0.3s ease;
+            /* bar height changes every frame — keep that layout work scoped here */
+            contain: layout style;
         }
         .visualizer-container.active { opacity: 1; }
         .visualizer-container.top {
@@ -404,6 +406,8 @@
             opacity: 0;
             transition: opacity 0.3s ease;
             pointer-events: none;
+            /* bar width changes every frame — keep that layout work scoped here */
+            contain: layout style;
         }
         .side-visualizer.active { opacity: 1; }
         .side-visualizer.left { right: 100%; margin-right: 8px; align-items: flex-end; }
