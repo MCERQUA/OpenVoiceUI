@@ -29,11 +29,11 @@
             --neutral-900: #1a1a2e;
 
             /* ── Surfaces ── */
-            --bg-deep: #050508;
-            --bg-panel: #0a0a12;
-            --bg-surface: #0f1018;
-            --bg-elevated: #141420;
-            --bg-hover: #1a1a2e;
+            --bg-deep: #0d0f1a;
+            --bg-panel: #151729;
+            --bg-surface: #1a1d30;
+            --bg-elevated: #222540;
+            --bg-hover: #2a2e4a;
 
             /* Backward-compat aliases */
             --dark-bg: var(--bg-deep);
@@ -124,9 +124,16 @@
             top: 0; left: 0;
             width: 100%; height: 100%;
             background-image:
-                linear-gradient(var(--border-subtle) 1px, transparent 1px),
-                linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+                linear-gradient(rgba(0, 136, 255, 0.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 136, 255, 0.06) 1px, transparent 1px);
             background-size: 50px 50px;
             pointer-events: none;
             z-index: -1;
+        }
+
+        /* ── Mobile responsive base ── */
+        @media (max-width: 768px) {
+            body {
+                font-size: 14px;
+            }
         }

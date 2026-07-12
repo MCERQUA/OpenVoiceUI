@@ -24,7 +24,7 @@ import socket
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -70,6 +70,42 @@ failed_songs_queue: list = []     # [{job_id, kind, brand, reason, failed_at}, .
 _suno_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Per-call provider receipt (JamFlow Watch live pulse)
+#
+# Host-side provider calls emit one JSONL row per call via provider-call-log.sh
+# so the Watch map lights the provider node the instant a call happens. This
+# container can't reach the host's canonical provider-calls dir, but the
+# monitoring-events mount (host: /home/mike/monitoring/events) is RW — receipts
+# drop into a provider-calls/ subdir there, same one-line schema, and the Watch
+# tailer scans that drop dir too. Best-effort: NEVER blocks or fails a
+# generation; on containers without the mount the write is invisible/harmless.
+# ---------------------------------------------------------------------------
+PROVIDER_RECEIPTS_DIR = Path(os.environ.get(
+    'PROVIDER_RECEIPTS_DIR', '/app/runtime/monitoring-events/provider-calls'))
+_RECEIPT_TENANT = os.environ.get('JAMBOT_TENANT') or os.environ.get('HOST_TENANT', '') or 'unknown'
+
+
+def _provider_receipt(op: str, units: str = '1') -> None:
+    """Append one {ts,provider,tenant,op,units} receipt row — fire-and-forget."""
+    try:
+        PROVIDER_RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(timezone.utc)
+        row = json.dumps({'ts': now.isoformat(timespec='seconds'),
+                          'provider': 'suno', 'tenant': _RECEIPT_TENANT,
+                          'op': op, 'units': units})
+        with open(PROVIDER_RECEIPTS_DIR / f"suno-{now.strftime('%Y-%m-%d')}.jsonl", 'a') as f:
+            f.write(row + '\n')
+    except Exception:  # never let telemetry touch the generation path
+        pass
+    # JamBot Books: also record as an api_call to the host-tailed books queue
+    # (the receipt path above is unmounted on most containers; this one isn't).
+    try:
+        from services.jambot_books_hook import record_provider_call
+        record_provider_call('suno', endpoint='/generate', op=op, units=units)
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # Jingle style presets — proven 2026-05-05. The recipe is:
@@ -153,7 +189,8 @@ def _save_generated_metadata(metadata: dict) -> None:
 
 def _add_song_to_metadata(filename: str, title: str, prompt: str, style: str,
                           duration: float = 0, song_id: str = '',
-                          kind: str = 'song', extra: dict = None) -> None:
+                          kind: str = 'song', extra: dict = None,
+                          task_id: str = '') -> None:
     """Write a new song entry to generated_metadata.json in the format music.py expects.
 
     `kind` is 'song' (full track) or 'jingle' (10-15s logo jingle). `extra` is merged
@@ -173,6 +210,7 @@ def _add_song_to_metadata(filename: str, title: str, prompt: str, style: str,
         'made_by': 'Clawdbot',
         'created_date': datetime.now().strftime('%Y-%m-%d'),
         'suno_id': song_id,
+        'task_id': task_id,
         'kind': kind,
     }
     if extra:
@@ -288,8 +326,45 @@ def handle_suno():
         elif action == 'credits':
             return _action_credits()
 
+        # --- Studio editing / processing actions (2026-06-25) ---------------
+        elif action == 'extend':
+            return _action_extend(_q, body)
+
+        elif action == 'cover':
+            return _action_cover(_q, body)
+
+        elif action == 'add_vocals':
+            return _action_add_vocals(_q, body)
+
+        elif action == 'add_instrumental':
+            return _action_add_instrumental(_q, body)
+
+        elif action == 'replace_section':
+            return _action_replace_section(_q, body)
+
+        elif action == 'generate_lyrics':
+            return _action_generate_lyrics(_q, body)
+
+        elif action == 'timestamped_lyrics':
+            return _action_timestamped_lyrics(_q, body)
+
+        elif action == 'wav_convert':
+            return _action_wav_convert(_q, body)
+
+        elif action == 'stem_separate':
+            return _action_stem_separate(_q, body)
+
+        elif action == 'style_boost':
+            return _action_style_boost(_q, body)
+
+        elif action == 'music_video':
+            return _action_music_video(_q, body)
+
+        elif action == 'song_details':
+            return _action_song_details(_q, body)
+
         else:
-            return jsonify({'action': 'error', 'response': f"Unknown action '{action}'. Use: generate, jingle, sfx, list_jingles, jingle_styles, status, list, credits"})
+            return jsonify({'action': 'error', 'response': f"Unknown action '{action}'. Use: generate, jingle, sfx, list_jingles, jingle_styles, status, list, credits, extend, cover, add_vocals, add_instrumental, replace_section, generate_lyrics, timestamped_lyrics, wav_convert, stem_separate, style_boost, music_video, song_details"})
 
     except Exception as exc:
         logger.exception('Suno endpoint error')
@@ -401,6 +476,7 @@ def _action_generate(_q, body: dict):
                     'task_id': task_id,
                     'created_at': time.time(),
                 }
+                _provider_receipt('song')   # live Watch pulse — task accepted, credits committed
                 return jsonify({
                     'action': 'generating',
                     'job_id': job_id,
@@ -502,6 +578,7 @@ def _action_sfx(_q, body: dict):
                     'task_id': task_id,
                     'created_at': time.time(),
                 }
+                _provider_receipt('sfx')   # live Watch pulse — task accepted, credits committed
                 return jsonify({
                     'action': 'generating',
                     'job_id': job_id,
@@ -650,6 +727,7 @@ def _action_jingle(_q, body: dict):
             'instrumental': instrumental,
             'repeat': repeat,
         }
+        _provider_receipt('jingle')   # live Watch pulse — task accepted, credits committed
         return jsonify({
             'action': 'generating',
             'job_id': job_id,
@@ -831,6 +909,7 @@ def _action_status(job_id: str):
                                 song_id=song_id,
                                 kind=kind,
                                 extra=extra,
+                                task_id=task_id,
                             )
 
                         # Update job
@@ -924,6 +1003,567 @@ def _action_credits():
 
 
 # ---------------------------------------------------------------------------
+# Studio editing / processing helpers + handlers (2026-06-25)
+#
+# These wrap sunoapi.org edit/process endpoints (extend, cover, add vocals,
+# add/strip instrumental, replace section, lyrics, timestamped lyrics, WAV,
+# stem separation, style boost, music video, song details). Endpoint paths
+# confirmed against docs.sunoapi.org (2026-06-25). They follow the same
+# job-tracking pattern as _action_generate: POST → store taskId in suno_jobs →
+# the caller polls action=status. Operations that produce audio (extend, cover,
+# add_vocals, add_instrumental, replace_section) return a taskId in the standard
+# /generate shape, so the existing _action_status poller downloads + saves them.
+#
+# Identity resolution: most edit/process endpoints need a Suno {taskId, audioId}
+# pair. We resolve these from generated_metadata.json (suno_id == audioId,
+# task_id == parent taskId, persisted since 2026-06-25). Upload-based endpoints
+# (cover, add_vocals, add_instrumental) instead take a public uploadUrl, which
+# we build from the song's web URL via PUBLIC_BASE_URL/DOMAIN.
+# ---------------------------------------------------------------------------
+
+# Public base used to build absolute uploadUrl values that sunoapi.org can fetch.
+_PUBLIC_BASE_URL = (
+    os.environ.get('PUBLIC_BASE_URL')
+    or (f'https://{_domain}' if _domain else '')
+).rstrip('/')
+
+
+def _suno_headers() -> dict:
+    return {'Authorization': f'Bearer {SUNO_API_KEY}', 'Content-Type': 'application/json'}
+
+
+def _resolve_song(_q, body: dict) -> dict:
+    """Resolve a song reference from request params into a normalized dict.
+
+    Accepts any of: filename, audio_id (suno_id), task_id, song_url.
+    Returns {filename, audio_id, task_id, title, style, lyrics, upload_url, meta}.
+    Looks up generated_metadata.json by filename when available to backfill
+    audio_id / task_id / title / style / lyrics.
+    """
+    filename = (_q('filename') or body.get('filename', '')).strip()
+    audio_id = (_q('audio_id') or body.get('audio_id', '')).strip()
+    task_id = (_q('task_id') or body.get('task_id', '')).strip()
+    song_url = (_q('song_url') or body.get('song_url', '')).strip()
+
+    meta = {}
+    metadata = _load_generated_metadata()
+
+    # If we only got a URL, derive the filename from its last path segment.
+    if not filename and song_url:
+        filename = song_url.rstrip('/').split('/')[-1]
+
+    if filename and filename in metadata:
+        meta = metadata[filename]
+        audio_id = audio_id or meta.get('suno_id', '')
+        task_id = task_id or meta.get('task_id', '')
+
+    # Build an absolute uploadUrl Suno can fetch.
+    upload_url = ''
+    if song_url.startswith('http'):
+        upload_url = song_url
+    elif filename:
+        web_path = f'/generated_music/{filename}'
+        if _PUBLIC_BASE_URL:
+            upload_url = f'{_PUBLIC_BASE_URL}{web_path}'
+
+    return {
+        'filename': filename,
+        'audio_id': audio_id,
+        'task_id': task_id,
+        'title': meta.get('title', '') or (Path(filename).stem if filename else ''),
+        'style': meta.get('style', '') or meta.get('genre', ''),
+        'lyrics': meta.get('lyrics', ''),
+        'upload_url': upload_url,
+        'meta': meta,
+    }
+
+
+def _submit_suno_job(endpoint: str, request_body: dict, kind: str,
+                     job_extra: dict = None, op: str = None,
+                     est_seconds: int = 60, response_msg: str = None):
+    """POST a generation-style request, register a job, return the standard JSON.
+
+    `endpoint` is the path under SUNO_API_BASE. Used by all audio-producing
+    studio actions (extend, cover, add_vocals, add_instrumental, replace_section)
+    which return a taskId in the /generate shape the action=status poller reads.
+    """
+    if SUNO_CALLBACK_URL:
+        request_body.setdefault('callBackUrl', SUNO_CALLBACK_URL)
+
+    logger.info(f'Suno {kind}: POST {endpoint} body={json.dumps(request_body)[:300]}')
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}{endpoint}',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno {kind} response: {resp.status_code} {resp.text[:300]}')
+
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+
+        data = resp.json()
+        if data.get('code') != 200 or not data.get('data', {}).get('taskId'):
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+
+        task_id = data['data']['taskId']
+        job_id = str(uuid.uuid4())
+        job = {
+            'status': 'generating',
+            'prompt': request_body.get('prompt', ''),
+            'title': request_body.get('title', '') or kind.title(),
+            'style': request_body.get('style', '') or request_body.get('tags', ''),
+            'task_id': task_id,
+            'created_at': time.time(),
+            'kind': kind,
+        }
+        if job_extra:
+            job.update(job_extra)
+        suno_jobs[job_id] = job
+        _provider_receipt(op or kind)
+        return jsonify({
+            'action': 'generating',
+            'job_id': job_id,
+            'task_id': task_id,
+            'kind': kind,
+            'response': response_msg or f'{kind.replace("_", " ").title()} started — check back shortly.',
+            'estimated_seconds': est_seconds,
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_extend(_q, body: dict):
+    """Extend/continue an existing song. POST /api/v1/generate/extend."""
+    src = _resolve_song(_q, body)
+    if not src['audio_id']:
+        return jsonify({'action': 'error', 'response': 'Need a song with a known Suno audio id to extend.'})
+
+    prompt = (_q('prompt') or body.get('prompt', '')).strip()
+    style = (_q('style') or body.get('style', '')).strip() or src['style'] or 'Same style as original'
+    title = (_q('title') or body.get('title', '')).strip() or src['title'] or 'Extended Track'
+    model = (_q('model') or body.get('model', '')).strip() or 'V5'
+
+    continue_at_raw = _q('continue_at') or body.get('continue_at', '')
+    request_body = {
+        'audioId': src['audio_id'],
+        'model': model,
+    }
+    if src['task_id']:
+        request_body['taskId'] = src['task_id']
+
+    # defaultParamFlag=true → we provide prompt/style/title/continueAt.
+    if prompt or continue_at_raw not in (None, ''):
+        request_body['defaultParamFlag'] = True
+        request_body['prompt'] = prompt or 'Continue the song naturally'
+        request_body['style'] = style
+        request_body['title'] = title
+        try:
+            request_body['continueAt'] = float(continue_at_raw)
+        except (TypeError, ValueError):
+            request_body['continueAt'] = 0
+    else:
+        request_body['defaultParamFlag'] = False
+
+    return _submit_suno_job(
+        '/api/v1/generate/extend', request_body, 'extend',
+        job_extra={'title': title, 'style': style},
+        op='extend',
+        response_msg=f"Extending '{title}' — check back in ~60s.",
+    )
+
+
+def _action_cover(_q, body: dict):
+    """Generate a cover/remix in a new style. POST /api/v1/generate/upload-cover."""
+    src = _resolve_song(_q, body)
+    if not src['upload_url']:
+        return jsonify({'action': 'error', 'response': 'Need a public song URL to cover — set PUBLIC_BASE_URL/DOMAIN or pass song_url.'})
+
+    prompt = (_q('prompt') or body.get('prompt', '')).strip()
+    style = (_q('style') or body.get('style', '')).strip()
+    title = (_q('title') or body.get('title', '')).strip() or (f"{src['title']} (Cover)" if src['title'] else 'Cover')
+    model = (_q('model') or body.get('model', '')).strip() or 'V5'
+    instrumental_raw = _q('instrumental') or body.get('instrumental', False)
+    instrumental = instrumental_raw if isinstance(instrumental_raw, bool) else str(instrumental_raw).lower() in ('true', '1', 'yes')
+
+    # Custom mode when an explicit style is supplied (lets us steer the remix).
+    custom_mode = bool(style)
+    request_body = {
+        'uploadUrl': src['upload_url'],
+        'customMode': custom_mode,
+        'instrumental': instrumental,
+        'model': model,
+    }
+    if custom_mode:
+        request_body['style'] = style
+        request_body['title'] = title
+        if not instrumental:
+            request_body['prompt'] = prompt or 'Reimagine this song in the new style'
+    else:
+        request_body['prompt'] = (prompt or 'Cover version')[:500]
+
+    return _submit_suno_job(
+        '/api/v1/generate/upload-cover', request_body, 'cover',
+        job_extra={'title': title, 'style': style},
+        op='cover',
+        response_msg=f"Generating cover of '{src['title'] or 'track'}' — check back in ~60s.",
+    )
+
+
+def _action_add_vocals(_q, body: dict):
+    """Add vocals to an instrumental track. POST /api/v1/generate/add-vocals."""
+    src = _resolve_song(_q, body)
+    if not src['upload_url']:
+        return jsonify({'action': 'error', 'response': 'Need a public song URL to add vocals — set PUBLIC_BASE_URL/DOMAIN or pass song_url.'})
+
+    prompt = (_q('prompt') or body.get('prompt', '')).strip()
+    if not prompt:
+        return jsonify({'action': 'error', 'response': 'Describe the vocals/lyrics to add (prompt is required).'})
+    style = (_q('style') or body.get('style', '')).strip() or src['style'] or 'Pop'
+    title = (_q('title') or body.get('title', '')).strip() or (f"{src['title']} (Vocals)" if src['title'] else 'Vocal Version')
+    model = (_q('model') or body.get('model', '')).strip() or 'V5'
+    vocal_gender = (_q('vocal_gender') or body.get('vocal_gender', '')).strip().lower()
+
+    request_body = {
+        'uploadUrl': src['upload_url'],
+        'prompt': prompt,
+        'title': title,
+        'style': style,
+        'negativeTags': (_q('negative_tags') or body.get('negative_tags', '')) or 'low quality, off-key, distorted',
+        'model': model,
+    }
+    if vocal_gender in ('m', 'f'):
+        request_body['vocalGender'] = vocal_gender
+
+    return _submit_suno_job(
+        '/api/v1/generate/add-vocals', request_body, 'add_vocals',
+        job_extra={'title': title, 'style': style},
+        op='add_vocals',
+        response_msg=f"Adding vocals to '{src['title'] or 'track'}' — check back in ~60s.",
+    )
+
+
+def _action_add_instrumental(_q, body: dict):
+    """Generate an instrumental backing for an a-cappella/vocal track.
+    POST /api/v1/generate/add-instrumental."""
+    src = _resolve_song(_q, body)
+    if not src['upload_url']:
+        return jsonify({'action': 'error', 'response': 'Need a public song URL — set PUBLIC_BASE_URL/DOMAIN or pass song_url.'})
+
+    tags = (_q('tags') or body.get('tags', '')).strip() or (_q('style') or body.get('style', '')).strip() or src['style'] or 'instrumental backing'
+    title = (_q('title') or body.get('title', '')).strip() or (f"{src['title']} (Instrumental)" if src['title'] else 'Instrumental Version')
+    model = (_q('model') or body.get('model', '')).strip() or 'V5'
+
+    request_body = {
+        'uploadUrl': src['upload_url'],
+        'title': title,
+        'tags': tags,
+        'negativeTags': (_q('negative_tags') or body.get('negative_tags', '')) or 'vocals, singing, lyrics',
+        'model': model,
+    }
+
+    return _submit_suno_job(
+        '/api/v1/generate/add-instrumental', request_body, 'add_instrumental',
+        job_extra={'title': title, 'style': tags},
+        op='add_instrumental',
+        response_msg=f"Building instrumental for '{src['title'] or 'track'}' — check back in ~60s.",
+    )
+
+
+def _action_replace_section(_q, body: dict):
+    """Replace a section of a song. POST /api/v1/generate/replace-section."""
+    src = _resolve_song(_q, body)
+    if not (src['audio_id'] and src['task_id']):
+        return jsonify({'action': 'error', 'response': 'Replace section needs a song with both Suno task id and audio id (re-generate or pick a newer track).'})
+
+    prompt = (_q('prompt') or body.get('prompt', '')).strip()
+    if not prompt:
+        return jsonify({'action': 'error', 'response': 'Describe the replacement content (prompt is required).'})
+    title = (_q('title') or body.get('title', '')).strip() or src['title'] or 'Edited Track'
+    tags = (_q('tags') or body.get('tags', '')).strip() or (_q('style') or body.get('style', '')).strip() or src['style'] or 'Same style'
+    full_lyrics = (_q('full_lyrics') or body.get('full_lyrics', '')) or src['lyrics'] or prompt
+
+    try:
+        start_s = round(float(_q('start_time') or body.get('start_time', 0)), 2)
+        end_s = round(float(_q('end_time') or body.get('end_time', 0)), 2)
+    except (TypeError, ValueError):
+        return jsonify({'action': 'error', 'response': 'start_time and end_time must be numbers (seconds).'})
+    if not (end_s > start_s):
+        return jsonify({'action': 'error', 'response': 'end_time must be greater than start_time.'})
+
+    request_body = {
+        'taskId': src['task_id'],
+        'audioId': src['audio_id'],
+        'prompt': prompt,
+        'tags': tags,
+        'title': title,
+        'infillStartS': start_s,
+        'infillEndS': end_s,
+        'fullLyrics': full_lyrics,
+    }
+
+    return _submit_suno_job(
+        '/api/v1/generate/replace-section', request_body, 'replace_section',
+        job_extra={'title': title, 'style': tags},
+        op='replace_section',
+        response_msg=f"Replacing {start_s}-{end_s}s of '{title}' — check back in ~60s.",
+    )
+
+
+def _action_generate_lyrics(_q, body: dict):
+    """Generate lyrics from a prompt. POST /api/v1/lyrics.
+
+    Lyrics come back asynchronously via callback; the studio polls the
+    timestamped/record endpoints — but for the common case we return the taskId
+    so the UI can fetch results. We DON'T register an audio job (no audio).
+    """
+    prompt = (_q('prompt') or body.get('prompt', '')).strip()
+    if not prompt:
+        return jsonify({'action': 'error', 'response': 'Need a prompt describing the lyrics you want.'})
+
+    request_body = {'prompt': prompt[:200]}
+    if SUNO_CALLBACK_URL:
+        request_body['callBackUrl'] = SUNO_CALLBACK_URL
+
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}/api/v1/lyrics',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno generate_lyrics response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200 or not data.get('data', {}).get('taskId'):
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        task_id = data['data']['taskId']
+        _provider_receipt('generate_lyrics')
+        return jsonify({
+            'action': 'lyrics_generating',
+            'task_id': task_id,
+            'kind': 'lyrics',
+            'response': 'Writing lyrics — fetch results with action=song_details&task_id=...',
+            'estimated_seconds': 15,
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_timestamped_lyrics(_q, body: dict):
+    """Get timestamped (per-word) lyrics for an existing track.
+    POST /api/v1/generate/get-timestamped-lyrics."""
+    src = _resolve_song(_q, body)
+    task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
+    audio_id = src['audio_id'] or (_q('audio_id') or body.get('audio_id', '')).strip()
+    if not (task_id and audio_id):
+        return jsonify({'action': 'error', 'response': 'Timestamped lyrics need both Suno task id and audio id for the track.'})
+
+    request_body = {'taskId': task_id, 'audioId': audio_id}
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}/api/v1/generate/get-timestamped-lyrics',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno timestamped_lyrics response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        _provider_receipt('timestamped_lyrics')
+        return jsonify({
+            'action': 'timestamped_lyrics',
+            'data': data.get('data', {}),
+            'response': 'Got timestamped lyrics.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_wav_convert(_q, body: dict):
+    """Convert an existing track to lossless WAV. POST /api/v1/wav/generate."""
+    src = _resolve_song(_q, body)
+    task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
+    audio_id = src['audio_id'] or (_q('audio_id') or body.get('audio_id', '')).strip()
+    if not (task_id and audio_id):
+        return jsonify({'action': 'error', 'response': 'WAV conversion needs both Suno task id and audio id for the track.'})
+
+    request_body = {'taskId': task_id, 'audioId': audio_id}
+    if SUNO_CALLBACK_URL:
+        request_body['callBackUrl'] = SUNO_CALLBACK_URL
+    return _submit_process_job(
+        '/api/v1/wav/generate', request_body, 'wav_convert',
+        op='wav_convert', est_seconds=20,
+        response_msg='Converting to WAV — results delivered when ready.',
+    )
+
+
+def _action_stem_separate(_q, body: dict):
+    """Separate vocals from music (or full stem split).
+    POST /api/v1/vocal-removal/generate."""
+    src = _resolve_song(_q, body)
+    task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
+    audio_id = src['audio_id'] or (_q('audio_id') or body.get('audio_id', '')).strip()
+    if not (task_id and audio_id):
+        return jsonify({'action': 'error', 'response': 'Stem separation needs both Suno task id and audio id for the track.'})
+
+    sep_type = (_q('type') or body.get('type', '')).strip() or 'separate_vocal'
+    if sep_type not in ('separate_vocal', 'split_stem'):
+        sep_type = 'separate_vocal'
+
+    request_body = {'taskId': task_id, 'audioId': audio_id, 'type': sep_type}
+    if SUNO_CALLBACK_URL:
+        request_body['callBackUrl'] = SUNO_CALLBACK_URL
+    return _submit_process_job(
+        '/api/v1/vocal-removal/generate', request_body, 'stem_separate',
+        op='stem_separate', est_seconds=40,
+        response_msg=('Splitting into stems — results delivered when ready.'
+                      if sep_type == 'split_stem' else
+                      'Separating vocals from music — results delivered when ready.'),
+    )
+
+
+def _action_style_boost(_q, body: dict):
+    """Boost/enhance a style description. POST /api/v1/style/generate.
+
+    Synchronous-ish: returns an enhanced style string. Takes free text in
+    `content`/`style`/`prompt`.
+    """
+    content = (_q('content') or body.get('content', '')
+               or _q('style') or body.get('style', '')
+               or _q('prompt') or body.get('prompt', '')).strip()
+    if not content:
+        return jsonify({'action': 'error', 'response': 'Need a style description to boost.'})
+
+    request_body = {'content': content[:200]}
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}/api/v1/style/generate',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno style_boost response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        result = data.get('data', {})
+        boosted = result.get('result') or result.get('content') or result
+        _provider_receipt('style_boost')
+        return jsonify({
+            'action': 'style_boost',
+            'data': result,
+            'boosted_style': boosted,
+            'response': 'Style enhanced.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_music_video(_q, body: dict):
+    """Generate a music video for a track. POST /api/v1/mp4/generate."""
+    src = _resolve_song(_q, body)
+    task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
+    audio_id = src['audio_id'] or (_q('audio_id') or body.get('audio_id', '')).strip()
+    if not (task_id and audio_id):
+        return jsonify({'action': 'error', 'response': 'Music video needs both Suno task id and audio id for the track.'})
+
+    request_body = {'taskId': task_id, 'audioId': audio_id}
+    author = (_q('author') or body.get('author', '')).strip()
+    domain_name = (_q('domain_name') or body.get('domain_name', '')).strip()
+    if author:
+        request_body['author'] = author[:50]
+    if domain_name:
+        request_body['domainName'] = domain_name[:50]
+    if SUNO_CALLBACK_URL:
+        request_body['callBackUrl'] = SUNO_CALLBACK_URL
+    return _submit_process_job(
+        '/api/v1/mp4/generate', request_body, 'music_video',
+        op='music_video', est_seconds=90,
+        response_msg='Rendering music video — this can take a couple minutes.',
+    )
+
+
+def _action_song_details(_q, body: dict):
+    """Get full Suno metadata for a generation task.
+    GET /api/v1/generate/record-info?taskId=..."""
+    src = _resolve_song(_q, body)
+    task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
+    if not task_id:
+        return jsonify({'action': 'error', 'response': 'Need a Suno task id (or a song that has one) for details.'})
+    try:
+        resp = http_requests.get(
+            f'{SUNO_API_BASE}/api/v1/generate/record-info',
+            headers={'Authorization': f'Bearer {SUNO_API_KEY}'},
+            params={'taskId': task_id},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        return jsonify({
+            'action': 'song_details',
+            'data': data.get('data', {}),
+            'response': 'Fetched song details.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _submit_process_job(endpoint: str, request_body: dict, kind: str,
+                        op: str = None, est_seconds: int = 30,
+                        response_msg: str = None):
+    """POST a process request (WAV/stem/video) that returns a taskId but whose
+    output is NOT a normal song download. Registers a lightweight job so the UI
+    can show it in the queue; results are delivered via callback / song_details.
+    """
+    logger.info(f'Suno {kind}: POST {endpoint} body={json.dumps(request_body)[:300]}')
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}{endpoint}',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno {kind} response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200 or not data.get('data', {}).get('taskId'):
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        task_id = data['data']['taskId']
+        job_id = str(uuid.uuid4())
+        suno_jobs[job_id] = {
+            'status': 'generating',
+            'title': kind.replace('_', ' ').title(),
+            'task_id': task_id,
+            'created_at': time.time(),
+            'kind': kind,
+            'process_only': True,  # status poller won't try to download as music
+        }
+        _provider_receipt(op or kind)
+        return jsonify({
+            'action': 'generating',
+            'job_id': job_id,
+            'task_id': task_id,
+            'kind': kind,
+            'response': response_msg or f'{kind.replace("_", " ").title()} started.',
+            'estimated_seconds': est_seconds,
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+# ---------------------------------------------------------------------------
 # Webhook callback (sunoapi.org POSTs here when song is done)
 # ---------------------------------------------------------------------------
 
@@ -932,7 +1572,15 @@ def _action_credits():
 def suno_callback():
     """Webhook from sunoapi.org — downloads song and queues frontend notification."""
     try:
-        # Verify HMAC signature when a webhook secret is configured
+        # Verify HMAC signature when a webhook secret is configured.
+        # NOTE: SUNO_WEBHOOK_SECRET is NOT provisioned in the fleet .env template
+        # yet (verified 2026-07-11), so we cannot fail-closed without breaking
+        # every tenant's song delivery. Until the secret is provisioned
+        # fleet-wide, an unsigned callback is accepted but constrained: the
+        # download is SSRF-checked, restricted to https, and hard-capped at
+        # SUNO_MAX_DOWNLOAD_BYTES (50 MB). TODO: add SUNO_WEBHOOK_SECRET to
+        # templates/.env then flip this to a 503 fail-closed.
+        _require_https = not SUNO_WEBHOOK_SECRET
         if SUNO_WEBHOOK_SECRET:
             sig_header = request.headers.get('X-Suno-Signature', '')
             payload = request.get_data()
@@ -940,6 +1588,12 @@ def suno_callback():
             if not hmac.compare_digest(sig_header, expected):
                 logger.warning('Suno callback rejected: invalid signature')
                 return jsonify({'status': 'forbidden'}), 403
+        else:
+            logger.warning(
+                'Suno callback accepted UNSIGNED — SUNO_WEBHOOK_SECRET not configured. '
+                'Download restricted to https + %d byte cap. Provision the secret '
+                'fleet-wide to fail closed.', SUNO_MAX_DOWNLOAD_BYTES
+            )
 
         data = request.json or {}
         logger.info(f'Suno callback: {json.dumps(data, indent=2)[:500]}')
@@ -1000,6 +1654,10 @@ def suno_callback():
                     if audio_url and not save_path.exists():
                         if not _is_safe_download_url(audio_url):
                             continue
+                        # Unsigned callbacks: only https audio URLs are allowed.
+                        if _require_https and not audio_url.lower().startswith('https://'):
+                            logger.warning('Unsigned Suno callback: rejecting non-https audioUrl')
+                            continue
                         try:
                             audio_resp = http_requests.get(audio_url, timeout=60, stream=True)
                             if audio_resp.status_code == 200:
@@ -1050,7 +1708,8 @@ def suno_callback():
                                     extra['lyrics'] = song_lyrics
 
                                 _add_song_to_metadata(filename, song_title, prompt, style,
-                                                      duration, song_id, kind=kind, extra=extra)
+                                                      duration, song_id, kind=kind, extra=extra,
+                                                      task_id=task_id)
 
                                 completed_songs_queue.append({
                                     'song_id': song_id,

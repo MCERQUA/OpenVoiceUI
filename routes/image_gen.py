@@ -16,6 +16,7 @@ import base64
 import json
 import logging
 import os
+import threading
 import time
 import requests as http
 from flask import Blueprint, jsonify, request
@@ -70,9 +71,16 @@ def _load_manifest():
     return []
 
 
+_manifest_lock = threading.Lock()
+
+
 def _save_manifest(entries):
+    """Atomic write (tmp + replace) so a concurrent reader never sees a
+    truncated file. Callers doing read-modify-write hold _manifest_lock."""
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    AI_DESIGNS_MANIFEST.write_text(json.dumps(entries, indent=2))
+    tmp = AI_DESIGNS_MANIFEST.with_suffix('.json.tmp')
+    tmp.write_text(json.dumps(entries, indent=2))
+    tmp.replace(AI_DESIGNS_MANIFEST)
 
 
 def _save_generated_image(mime_type: str, b64_data: str) -> str:
@@ -107,6 +115,13 @@ def _generate_gemini(model, prompt, images):
     }
     url = f'{GEMINI_BASE}/{model}:generateContent?key={GEMINI_KEY}'
     resp = http.post(url, json=payload, timeout=90)
+    # JamBot Books: in-container Gemini image gen (requests, no SDK to attach).
+    try:
+        from services.jambot_books_hook import record_provider_call
+        record_provider_call('gemini', endpoint=f'/{model}:generateContent', op='image',
+                             units='1', status=resp.status_code, model=model)
+    except Exception:
+        pass
     resp.raise_for_status()
     result = resp.json()
 
@@ -210,6 +225,13 @@ def _generate_huggingface(model_id, prompt, quality='standard', aspect='1:1'):
         'Content-Type': 'application/json',
     }
     resp = http.post(url, json=payload, headers=headers, timeout=120)
+    # JamBot Books: record the Hugging Face inference call (guarded).
+    try:
+        from services.jambot_books_hook import record_provider_call
+        record_provider_call('hf', endpoint='/' + model_id, status=resp.status_code,
+                             model=model_id)
+    except Exception:
+        pass
     resp.raise_for_status()
 
     # HF Inference API returns raw image bytes
@@ -229,6 +251,13 @@ def _generate_imagen(model, prompt, aspect='1:1'):
     }
     url = f'{GEMINI_BASE}/{model}:predict?key={GEMINI_KEY}'
     resp = http.post(url, json=payload, timeout=90)
+    # JamBot Books: in-container Imagen gen (same Google generativelanguage API + key).
+    try:
+        from services.jambot_books_hook import record_provider_call
+        record_provider_call('gemini', endpoint=f'/{model}:predict', op='image',
+                             units='1', status=resp.status_code, model=model)
+    except Exception:
+        pass
     resp.raise_for_status()
     result = resp.json()
 
@@ -341,11 +370,12 @@ def save_design():
     if not url:
         return jsonify({'error': 'url is required'}), 400
 
-    entries = _load_manifest()
-    # Avoid duplicates — remove existing entry for same URL first
-    entries = [e for e in entries if e.get('url') != url]
-    entries.insert(0, {'url': url, 'name': name, 'ts': ts})
-    _save_manifest(entries)
+    with _manifest_lock:
+        entries = _load_manifest()
+        # Avoid duplicates — remove existing entry for same URL first
+        entries = [e for e in entries if e.get('url') != url]
+        entries.insert(0, {'url': url, 'name': name, 'ts': ts})
+        _save_manifest(entries)
     logger.info('ai-designs manifest: saved %d entries', len(entries))
     return jsonify({'ok': True, 'count': len(entries)})
 
@@ -358,7 +388,8 @@ def delete_saved_design():
     if not url:
         return jsonify({'error': 'url is required'}), 400
 
-    entries = _load_manifest()
-    entries = [e for e in entries if e.get('url') != url]
-    _save_manifest(entries)
+    with _manifest_lock:
+        entries = _load_manifest()
+        entries = [e for e in entries if e.get('url') != url]
+        _save_manifest(entries)
     return jsonify({'ok': True, 'count': len(entries)})

@@ -397,6 +397,17 @@ if [ -d "${AGENT_TEMPLATE_DIR}" ] && [ -d "${OPENCLAW_DIR}" ]; then
         echo "    { id: \"openvoiceui\", workspace: \"${AGENT_DEST_DIR}\", model: { primary: \"your-model\" } }"
         echo "  Then set VOICE_SESSION_PREFIX=voice-openvoiceui in your .env"
     fi
+
+    # transcripts: let the agent READ its own voice transcripts. They are written by the
+    # OpenVoiceUI app (its runtime transcripts dir) but the agent only sees its workspace —
+    # so without this link a transcript/note "sent to the AI" is invisible to it. Runs whether
+    # the agent workspace is fresh or pre-existing (idempotent). Added 2026-06-11.
+    if [ -d "${AGENT_DEST_DIR}" ]; then
+        mkdir -p "${WWW_DIR}/transcripts"
+        chown -R "${RUN_USER}:${RUN_USER}" "${WWW_DIR}/transcripts" 2>/dev/null || true
+        ln -sfn "${WWW_DIR}/transcripts" "${AGENT_DEST_DIR}/transcripts"
+        echo "  Linked transcripts into agent workspace (${AGENT_DEST_DIR}/transcripts → ${WWW_DIR}/transcripts)"
+    fi
 elif [ ! -d "${OPENCLAW_DIR}" ]; then
     echo "  OpenClaw not configured yet (~/.openclaw missing) — skipping agent setup"
     echo "  Run setup again after configuring OpenClaw, or manually copy setup/openvoiceui-agent/"

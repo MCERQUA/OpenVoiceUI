@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026.4.3 -->
+<!-- openvoiceui-version: 2026.7.12 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -10,7 +10,7 @@
    BASE STYLES
    ══════════════════════════════════════════════════════════════ */
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%!important;height:100%!important;overflow:hidden!important;background:#111!important;font-family:Tahoma,sans-serif!important;padding:0!important;color:#fff!important}
+html,body{width:100%!important;height:100%!important;overflow:hidden!important;background:#0d0f1a!important;font-family:Tahoma,sans-serif!important;padding:0!important;color:#fff!important}
 
 #os-container{
   position:absolute;
@@ -19,6 +19,13 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   overflow:hidden;
   box-shadow:0 0 40px rgba(0,0,0,0.6);
 }
+/* Mobile keeps the DESKTOP VIEW: the 40px #os-container inset IS the global padding that
+   clears the OVU UI buttons — it must NOT be retightened on mobile. (Mike 2026-07-12:
+   "keep the desktop view for mobile, it doesn't need to be responsive.") The old rule
+   below dropped it to 4-8px, losing the padding on phones. Kept as a comment, not deleted. */
+/* @media(max-width:768px){
+  #os-container{top:8px;left:4px;right:4px;bottom:4px;border-radius:8px;}
+} */
 
 #app{width:100%;height:100%;position:relative}
 
@@ -146,8 +153,9 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
 .sm-item{
   padding:5px 12px;cursor:pointer;
   font-size:12px;display:flex;align-items:center;gap:8px;
-  white-space:nowrap;
+  white-space:nowrap;position:relative;
 }
+.sm-item.has-sub::after{content:'▶';position:absolute;right:8px;font-size:8px;opacity:.6}
 .sm-item .sm-icon{width:24px;height:24px;flex-shrink:0}
 .sm-item .sm-icon svg{width:100%;height:100%}
 .sm-separator{margin:2px 0;border:none}
@@ -331,8 +339,10 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   border-radius:6px;
 }
 
-/* ── Mobile / small container responsive ── */
-@media (max-width:600px) {
+/* ── Mobile / small container responsive ──
+   Thresholds must match JS getBreakpoint() (480=phone, 1024=tablet ceiling)
+   so icon sizing/grid math and CSS layout never disagree. */
+@media (max-width:0px) { /* DISABLED 2026-07-12 (Mike): keep desktop view on mobile — no icon/taskbar shrink */
   /* Desktop icons — smaller grid */
   .desktop-icon{width:56px!important}
   .desktop-icon .icon-img{width:32px!important;height:32px!important}
@@ -380,7 +390,7 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   #dock .dock-icon svg{width:28px!important;height:28px!important}
   #dock{padding:2px 4px!important;gap:1px!important;border-radius:10px!important}
 }
-@media (max-width:400px) {
+@media (max-width:0px) { /* DISABLED 2026-07-12 (Mike): keep desktop view on mobile — no phone shrink */
   .desktop-icon{width:48px!important}
   .desktop-icon .icon-img{width:26px!important;height:26px!important}
   .desktop-icon .icon-label{font-size:8px!important;max-width:46px!important}
@@ -716,7 +726,6 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   font-family:'Ubuntu','Segoe UI',sans-serif;
   font-size:13px;
 }
-.theme-ubuntu #mac-menubar .apple-logo{display:none}
 .theme-ubuntu #mac-menubar .menu-item:first-of-type{font-weight:bold}
 .theme-ubuntu #dock{
   display:flex;
@@ -830,6 +839,10 @@ const ICONS = {
   recycle:`<svg viewBox="0 0 48 48"><rect x="14" y="6" width="20" height="4" rx="2" fill="#7f8c8d"/><rect x="20" y="4" width="8" height="4" rx="1" fill="#95a5a6"/><rect x="10" y="10" width="28" height="3" rx="1" fill="#95a5a6"/><path d="M13 13h22l-2 31H15z" fill="#bdc3c7"/><path d="M13 13h22l-1 4H14z" fill="#aab4be"/><line x1="20" y1="20" x2="19" y2="40" stroke="#95a5a6" stroke-width="1.5"/><line x1="24" y1="20" x2="24" y2="40" stroke="#95a5a6" stroke-width="1.5"/><line x1="28" y1="20" x2="29" y2="40" stroke="#95a5a6" stroke-width="1.5"/></svg>`,
   'recycle-full':`<svg viewBox="0 0 48 48"><rect x="14" y="6" width="20" height="4" rx="2" fill="#7f8c8d"/><rect x="20" y="4" width="8" height="4" rx="1" fill="#95a5a6"/><rect x="10" y="10" width="28" height="3" rx="1" fill="#95a5a6"/><path d="M13 13h22l-2 31H15z" fill="#bdc3c7"/><path d="M13 13h22l-1 4H14z" fill="#aab4be"/><rect x="17" y="15" width="5" height="8" rx="1" fill="#e8e8e8" transform="rotate(-10 19 19)"/><rect x="25" y="14" width="5" height="9" rx="1" fill="#d0d0d0" transform="rotate(5 27 18)"/><rect x="20" y="17" width="4" height="7" rx="1" fill="#f0f0f0" transform="rotate(-3 22 20)"/></svg>`,
   document:`<svg viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><line x1="16" y1="22" x2="34" y2="22" stroke="#ddd" stroke-width="1.5"/><line x1="16" y1="28" x2="34" y2="28" stroke="#ddd" stroke-width="1.5"/><line x1="16" y1="34" x2="28" y2="34" stroke="#ddd" stroke-width="1.5"/></svg>`,
+  image:`<svg viewBox="0 0 48 48"><rect x="4" y="6" width="40" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><circle cx="16" cy="18" r="4.5" fill="#f5c842"/><path d="M8 36l11-13 8 9 5-6 12 10v2a2 2 0 01-2 2H10a2 2 0 01-2-2v-2z" fill="#5dade2"/></svg>`,
+  video:`<svg viewBox="0 0 48 48"><rect x="4" y="10" width="40" height="28" rx="3" fill="#1a1a2e"/><path d="M20 18l12 8-12 8z" fill="#fff"/><rect x="4" y="10" width="40" height="5" fill="#0d0d1a"/><circle cx="9" cy="12.5" r="1.2" fill="#e63030"/><circle cx="14" cy="12.5" r="1.2" fill="#f5c842"/><circle cx="19" cy="12.5" r="1.2" fill="#34d399"/></svg>`,
+  pdf:`<svg viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><rect x="9" y="26" width="24" height="14" rx="2" fill="#e63030"/><text x="21" y="36" text-anchor="middle" font-family="system-ui,sans-serif" font-size="9" font-weight="800" fill="#fff">PDF</text></svg>`,
+  archive:`<svg viewBox="0 0 48 48"><rect x="6" y="8" width="36" height="32" rx="2" fill="#e8b84b" stroke="#c99a35" stroke-width="1"/><rect x="20" y="8" width="8" height="32" fill="#c99a35" opacity="0.5"/><rect x="20" y="8" width="8" height="4" fill="#c99a35"/><rect x="20" y="16" width="8" height="4" fill="#c99a35"/><rect x="20" y="24" width="8" height="4" fill="#c99a35"/><circle cx="24" cy="33" r="3" fill="#7f8c8d"/></svg>`,
   internet:`<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="20" fill="#3498db"/><circle cx="24" cy="24" r="20" fill="none" stroke="#2980b9" stroke-width="1"/><ellipse cx="24" cy="24" rx="10" ry="20" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><line x1="4" y1="24" x2="44" y2="24" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><ellipse cx="24" cy="15" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/><ellipse cx="24" cy="33" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/></svg>`,
   music:`<svg viewBox="0 0 48 48"><circle cx="14" cy="36" r="6" fill="#e74c3c"/><circle cx="14" cy="36" r="2" fill="#c0392b"/><circle cx="34" cy="32" r="6" fill="#e74c3c"/><circle cx="34" cy="32" r="2" fill="#c0392b"/><rect x="18" y="8" width="3" height="28" fill="#2c3e50" rx="1"/><rect x="38" y="4" width="3" height="28" fill="#2c3e50" rx="1"/><rect x="18" y="6" width="23" height="5" fill="#2c3e50" rx="1"/></svg>`,
   game:`<svg viewBox="0 0 48 48"><rect x="4" y="14" width="40" height="22" rx="11" fill="#2c3e50"/><rect x="4" y="14" width="40" height="11" rx="11" fill="#34495e"/><circle cx="14" cy="25" r="3.5" fill="#ecf0f1"/><rect x="11.5" y="23.5" width="5" height="1.5" rx=".5" fill="#bdc3c7"/><rect x="13.2" y="21.5" width="1.5" height="5" rx=".5" fill="#bdc3c7"/><circle cx="34" cy="22" r="2.5" fill="#e74c3c"/><circle cx="38" cy="26" r="2.5" fill="#3498db"/><circle cx="30" cy="26" r="2.5" fill="#2ecc71"/><circle cx="34" cy="30" r="2.5" fill="#f39c12"/></svg>`,
@@ -861,6 +874,7 @@ let iconPositions = {};         // desktop (>1024px)
 let iconPositionsTablet = {};   // tablet (481-1024px)
 let iconPositionsPhone = {};    // phone (≤480px)
 let currentBreakpoint = 'desktop'; // set in init after loadState
+let _lastDesktopH = 0; // last desktop height; resize handler only re-columns icons when this changes >48px (2026-07-12: stop every-resize reflow losing icon edge-padding)
 let dragState = null;
 let selectedIcons = new Set();
 let startMenuOpen = false;
@@ -872,12 +886,13 @@ let knownPages = [];       // all page IDs we've ever seen
 let _manifestTimer = null;
 let wallpaperUrl = null;   // server URL of custom desktop wallpaper
 let savedPageCategories = {}; // { pageId: catId } — persists drag-to-folder assignments across fetchManifest cycles
+let recentPages = []; // most-recently-opened page ids, newest first — Start Menu shows the last 2
 
 // Breakpoint helpers
 function getBreakpoint() {
-  const w = window.innerWidth;
-  if (w <= 480) return 'phone';
-  if (w <= 1024) return 'tablet';
+  // Mike 2026-07-12: keep the DESKTOP VIEW at ALL sizes — no phone/tablet re-layout.
+  // Nothing changes on mobile except straggler icons re-aligning (buildDesktopIcons
+  // auto-arrange); icon size, spacing, positions, and the 40px global padding stay desktop.
   return 'desktop';
 }
 function getActivePositions() {
@@ -886,8 +901,13 @@ function getActivePositions() {
   return iconPositions;
 }
 
-// Save state to server (debounced)
+// Save state to server (debounced). _stateDirty guards fetchManifest from
+// clobbering unsaved local changes (drag positions, etc.) — a 30s manifest
+// poll landing between a drag and its debounced save used to silently
+// discard the drag.
+let _stateDirty = false;
 function saveState() {
+  _stateDirty = true;
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(_doSaveState, 500);
 }
@@ -895,27 +915,30 @@ function _doSaveState() {
   // Always save full state to master desktop entry (iconPositions = desktop positions)
   const state = JSON.stringify({
     theme: currentTheme, iconPositions, recycleBin,
-    customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories,
+    customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories, recentPages,
   });
-  fetch('/api/canvas/manifest/page/desktop', {
-    method: 'PATCH',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({description: state}),
-  }).catch(() => {});
+  const saves = [
+    fetch('/api/canvas/manifest/page/desktop', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({description: state}),
+    }).catch(() => {}),
+  ];
   // Save breakpoint-specific positions to their own manifest entries
   if (currentBreakpoint === 'tablet') {
-    fetch('/api/canvas/manifest/page/desktop-tablet', {
+    saves.push(fetch('/api/canvas/manifest/page/desktop-tablet', {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsTablet})}),
-    }).catch(() => {});
+    }).catch(() => {}));
   } else if (currentBreakpoint === 'phone') {
-    fetch('/api/canvas/manifest/page/desktop-phone', {
+    saves.push(fetch('/api/canvas/manifest/page/desktop-phone', {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsPhone})}),
-    }).catch(() => {});
+    }).catch(() => {}));
   }
+  Promise.all(saves).finally(() => { _stateDirty = false; });
 }
 
 // Load state from server — fetch all three breakpoint entries in parallel
@@ -940,6 +963,7 @@ async function loadState() {
           if (state.knownPages) knownPages = state.knownPages;
           if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
           if (state.savedPageCategories) savedPageCategories = state.savedPageCategories;
+          if (state.recentPages) recentPages = state.recentPages;
         }
       } catch(e) {}
     }
@@ -970,6 +994,7 @@ async function loadState() {
    MANIFEST SYNC — fetch pages dynamically from server
    ══════════════════════════════════════════════════════════════ */
 async function fetchManifest(forceSync) {
+  if (_stateDirty && !forceSync) return; // unsaved local changes — don't clobber
   try {
     const url = '/api/canvas/manifest' + (forceSync ? '?sync=1' : '');
     const resp = await fetch(url);
@@ -1067,6 +1092,13 @@ function setTheme(theme) {
   currentTheme = theme;
   saveState();
   document.getElementById('app').className = 'theme-' + theme;
+  // Ubuntu previously hid .apple-logo (the only click target that opens the
+  // Start Menu in the top-menubar themes) with no working substitute — the
+  // taskbar's #start-btn is ALSO hidden for mac/ubuntu, so there was no way
+  // to open Settings from Ubuntu at all. Relabel the first menu-item to
+  // something theme-appropriate and keep .apple-logo functional everywhere.
+  const firstMenuItem = document.querySelector('#mac-menubar .menu-item:first-of-type');
+  if (firstMenuItem) firstMenuItem.textContent = theme === 'ubuntu' ? 'Activities' : (theme === 'mac' ? 'Finder' : 'Files');
   updateClock();
   buildDesktopIcons();
   buildDock();
@@ -1188,15 +1220,23 @@ function getIconName(item) {
 
 function buildDesktopIcons() {
   const desktop = document.getElementById('desktop');
+  bindDesktopIconListeners();
   desktop.querySelectorAll('.desktop-icon').forEach(el => el.remove());
   const isRightToLeft = currentTheme === 'mac';
   const container = document.getElementById('os-container');
+  // ORIGINAL geometry, restored verbatim 2026-07-12 (Mike, 4th ask: NO resizing,
+  // NO readjusting, phone renders the SAME vertical-column grid as desktop —
+  // this is the exact pre-2026-07-11-overhaul math that behaves right everywhere).
+  // Do NOT add safe-area reserves or force desktop cells on phone here again.
   const isSmall = container && container.offsetWidth < 500;
   const startX = isRightToLeft ? desktop.offsetWidth - (isSmall ? 65 : 90) : 10;
   const startY = getDesktopTop() + 10;
   const colH = getDesktopHeight() - 20;
-  const cellW = isSmall ? 60 : (currentTheme === 'mac' ? 95 : 80);
-  const cellH = isSmall ? 60 : (currentTheme === 'mac' ? 95 : 80);
+  // Cell spacing +~10 each axis over original (Mike 2026-07-12, two asks):
+  // vertical clearance for two-line labels + "a little more spacing on all
+  // sides" — it cleared but was tight. Layout/order otherwise the original.
+  const cellW = isSmall ? 68 : (currentTheme === 'mac' ? 105 : 90);
+  const cellH = isSmall ? 82 : (currentTheme === 'mac' ? 114 : 102);
   const maxPerCol = Math.max(1, Math.floor(colH / cellH));
 
   DESKTOP_ITEMS.forEach((item, i) => {
@@ -1221,17 +1261,45 @@ function buildDesktopIcons() {
       ? `<img src="${item.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
       : getIcon(recycleIcon);
     el.innerHTML = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
-    el.addEventListener('mousedown', (e) => onIconMouseDown(e, item));
-    el.addEventListener('touchstart', (e) => onIconTouchStart(e, item), {passive:false});
-    el.addEventListener('dblclick', (e) => { e.stopPropagation(); onIconDblClick(item); });
     desktop.appendChild(el);
+  });
+  _lastDesktopH = getDesktopHeight(); // keep the resize-handler height baseline in sync after any rebuild
+}
+
+// Delegated icon listeners — attached once to #desktop, never re-attached on
+// rebuild. buildDesktopIcons() destroys/recreates icon DOM every manifest
+// poll; per-icon listeners would otherwise be re-registered every cycle.
+let _desktopIconListenersBound = false;
+function bindDesktopIconListeners() {
+  if (_desktopIconListenersBound) return;
+  _desktopIconListenersBound = true;
+  const desktop = document.getElementById('desktop');
+  desktop.addEventListener('mousedown', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) onIconMouseDown(e, item);
+  });
+  desktop.addEventListener('touchstart', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) onIconTouchStart(e, item);
+  }, {passive:false});
+  desktop.addEventListener('dblclick', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) { e.stopPropagation(); onIconDblClick(item); }
   });
 }
 
 function onIconTouchStart(e, item) {
   e.preventDefault();
   const touch = e.touches[0];
-  const el = e.currentTarget;
+  // e.currentTarget is #desktop (delegated listener) — find the actual icon.
+  const el = e.target.closest('.desktop-icon');
+  if (!el) return;
   const startX = touch.clientX, startY = touch.clientY;
   const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
   let moved = false;
@@ -1293,7 +1361,9 @@ function onIconMouseDown(e, item) {
   selectedIcons.add(item.id);
   updateIconSelection();
 
-  const el = e.currentTarget;
+  // e.currentTarget is #desktop (delegated listener) — find the actual icon.
+  const el = e.target.closest('.desktop-icon');
+  if (!el) return;
   const startX = e.clientX, startY = e.clientY;
   const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
   let moved = false;
@@ -1455,28 +1525,21 @@ function createWindow(opts) {
     ? {close:'', min:'', max:''}
     : {close:'\u00D7', min:'\u2013', max:'\u25A1'};
 
-  el.innerHTML = `
-    <div class="titlebar" onmousedown="startWindowDrag(event,${id})">
-      <div class="titlebar-btns">
+  const btnsHtml = `<div class="titlebar-btns">
         <button class="tb-btn close" onclick="closeWindow(${id})" title="Close">${btnSymbols.close}</button>
         <button class="tb-btn min" onclick="minimizeWindow(${id})" title="Minimize">${btnSymbols.min}</button>
         <button class="tb-btn max" onclick="maximizeWindow(${id})" title="Maximize">${btnSymbols.max}</button>
-      </div>
-      <div class="titlebar-title">${opts.title || 'Window'}</div>
-      ${!isMacLike ? '<div class="titlebar-btns"><button class="tb-btn min" onclick="minimizeWindow('+id+')" title="Minimize">\u2013</button><button class="tb-btn max" onclick="maximizeWindow('+id+')" title="Maximize">\u25A1</button><button class="tb-btn close" onclick="closeWindow('+id+')" title="Close">\u00D7</button></div>' : ''}
+      </div>`;
+  const titlebarInnerHtml = isMacLike
+    ? `${btnsHtml}<div class="titlebar-title">${opts.title || 'Window'}</div>`
+    : `<div class="titlebar-title">${opts.title || 'Window'}</div>${btnsHtml}`;
+
+  el.innerHTML = `
+    <div class="titlebar" onmousedown="startWindowDrag(event,${id})">
+      ${titlebarInnerHtml}
     </div>
     <div class="win-body">${opts.content || ''}</div>
   `;
-
-  // For non-mac-like themes, remove the first set of buttons (left-side ones)
-  if (!isMacLike) {
-    const firstBtns = el.querySelector('.titlebar-btns');
-    if (firstBtns) firstBtns.remove();
-  } else {
-    // For mac-like, remove the second set (right-side)
-    const allBtns = el.querySelectorAll('.titlebar-btns');
-    if (allBtns.length > 1) allBtns[1].remove();
-  }
 
   // Add resize handles
   ['n','s','e','w','nw','ne','sw','se'].forEach(dir => {
@@ -2129,6 +2192,7 @@ function closeAllMenus() {
   document.getElementById('start-menu').classList.remove('show');
   contextMenuOpen = false;
   startMenuOpen = false;
+  hideStartFlyoutNow();
 }
 
 function arrangeIcons() {
@@ -2150,6 +2214,78 @@ function toggleStartMenu() {
   buildStartMenu();
   menu.classList.add('show');
   startMenuOpen = true;
+}
+
+/* ── Start Menu category flyouts (real Windows-style nested submenus) ──
+   Reuses the existing .ctx-submenu hover-flyout look (see CONTEXT MENU
+   section) but appended to #app instead of nested in the row, because
+   #start-menu / .sm-left clip overflow (needed for their own scrollbars)
+   and would otherwise chop the flyout off. */
+let _smFlyoutEl = null;
+let _smFlyoutHideTimer = null;
+let _smFlyoutCatId = null;
+
+function showStartCategoryFlyout(anchorEl, catId) {
+  clearTimeout(_smFlyoutHideTimer);
+  if (_smFlyoutCatId === catId && _smFlyoutEl) return;
+  hideStartFlyoutNow();
+  _smFlyoutCatId = catId;
+
+  const pages = Object.entries(PAGES)
+    .filter(([id, p]) => p.cat === catId && !recycleBin.includes(id))
+    .sort((a, b) => a[1].name.localeCompare(b[1].name));
+
+  const el = document.createElement('div');
+  el.className = 'ctx-submenu sm-flyout';
+  el.style.display = 'block';
+  el.style.position = 'absolute';
+  // .ctx-submenu's base rule has no z-index of its own — it normally relies
+  // on being DOM-nested inside #context-menu (z-index:10000). This flyout is
+  // appended to #app as a SIBLING of #start-menu instead (see comment above),
+  // so it needs an explicit z-index above #start-menu's 9500 or it renders
+  // behind the menu it's supposed to expand out of.
+  el.style.zIndex = '9600';
+
+  let html = '';
+  if (!pages.length) {
+    html += '<div class="ctx-item" style="opacity:.5;cursor:default">(empty)</div>';
+  } else {
+    pages.slice(0, 30).forEach(([pid, p]) => {
+      html += `<div class="ctx-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><span style="display:inline-block;width:16px;height:16px;vertical-align:-3px;margin-right:6px">${getIcon(getPageIconType(catId, pid, p.name))}</span>${p.name}</div>`;
+    });
+  }
+  html += '<div class="ctx-separator"></div>';
+  html += `<div class="ctx-item" onclick="openExplorer('${catId}');closeAllMenus()"><em>Open Folder…</em></div>`;
+  el.innerHTML = html;
+
+  el.addEventListener('mouseenter', () => clearTimeout(_smFlyoutHideTimer));
+  el.addEventListener('mouseleave', scheduleHideStartFlyout);
+
+  const app = document.getElementById('app');
+  app.appendChild(el);
+
+  const appRect = app.getBoundingClientRect();
+  const anchorRect = anchorEl.getBoundingClientRect();
+  const flyoutW = el.offsetWidth || 180;
+  let left = anchorRect.right - appRect.left;
+  if (left + flyoutW > appRect.width) {
+    left = anchorRect.left - appRect.left - flyoutW; // flip left if it would overflow the right edge
+  }
+  el.style.left = Math.max(0, left) + 'px';
+  el.style.top = Math.max(0, Math.min(anchorRect.top - appRect.top, appRect.height - el.offsetHeight)) + 'px';
+
+  _smFlyoutEl = el;
+}
+
+function scheduleHideStartFlyout() {
+  clearTimeout(_smFlyoutHideTimer);
+  _smFlyoutHideTimer = setTimeout(hideStartFlyoutNow, 250);
+}
+
+function hideStartFlyoutNow() {
+  if (_smFlyoutEl) { _smFlyoutEl.remove(); _smFlyoutEl = null; }
+  _smFlyoutCatId = null;
+  clearTimeout(_smFlyoutHideTimer);
 }
 
 function buildStartMenu() {
@@ -2182,7 +2318,7 @@ function buildStartMenu() {
     html += '<div class="ctx-item" onclick="openThemeSettings();closeAllMenus()">'+(isMac?'System Preferences...':(isUbuntu?'Settings...':'Control Panel'))+'</div>';
     html += '<div class="ctx-separator"></div>';
     Object.keys(CATEGORIES).forEach(catId => {
-      html += `<div class="ctx-item" onclick="openExplorer('${catId}');closeAllMenus()">${CATEGORIES[catId].name}</div>`;
+      html += `<div class="ctx-item has-sub" onmouseenter="showStartCategoryFlyout(this,'${catId}')" onmouseleave="scheduleHideStartFlyout()" onclick="openExplorer('${catId}');closeAllMenus()">${CATEGORIES[catId].name}</div>`;
     });
     html += '<div class="ctx-separator"></div>';
     html += '<div class="ctx-item" onclick="openCanvasPage(\'file-explorer\');closeAllMenus()">'+(isMac?'Open Finder':(isUbuntu?'Files':'File Manager'))+'</div>';
@@ -2204,17 +2340,18 @@ function buildStartMenu() {
 
   html += '<div class="sm-body">';
   html += '<div class="sm-left">';
-  // Recent/pinned pages
-  const pinned = ['bored-arcade','civ-sim','music-library','wolf3d-engine','office-hub'];
-  pinned.forEach(pid => {
+  // Recently opened pages — real usage (see openCanvasPage), filtered against
+  // both PAGES (still exists) AND recycleBin (not trashed) so a recycled page
+  // can't keep showing up here just because the manifest hasn't purged it yet.
+  const recent = recentPages.filter(pid => PAGES[pid] && !recycleBin.includes(pid)).slice(0, 2);
+  recent.forEach(pid => {
     const p = PAGES[pid];
-    if (!p) return;
-    html += `<div class="sm-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><div class="sm-icon">${getIcon('document')}</div>${p.name}</div>`;
+    html += `<div class="sm-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><div class="sm-icon">${getIcon(getPageIconType(p.cat, pid, p.name))}</div>${p.name}</div>`;
   });
   html += '<div class="sm-separator"></div>';
-  // All Programs submenu - show categories
+  // All Programs submenu - show categories, hover expands a flyout of pages in it
   Object.keys(CATEGORIES).forEach(catId => {
-    html += `<div class="sm-item" onclick="openExplorer('${catId}');closeAllMenus()"><div class="sm-icon">${getIcon('folder')}</div>${CATEGORIES[catId].name}</div>`;
+    html += `<div class="sm-item has-sub" onmouseenter="showStartCategoryFlyout(this,'${catId}')" onmouseleave="scheduleHideStartFlyout()" onclick="openExplorer('${catId}');closeAllMenus()"><div class="sm-icon">${getIcon('folder')}</div>${CATEGORIES[catId].name}</div>`;
   });
   html += '</div>';
 
@@ -2440,6 +2577,18 @@ function buildExplorerGrid(catId) {
 function getPageIconType(cat, pageId, pageName) {
   const n = (pageName || pageId || '').toLowerCase();
   const pid = (pageId || '').toLowerCase();
+  // File-type icons — a literal extension on the id/name (e.g. an uploaded
+  // image/video/audio/pdf surfaced as a desktop shortcut) is a stronger
+  // signal than name-keyword guessing, so it's checked first.
+  const extMatch = pid.match(/\.([a-z0-9]+)$/) || n.match(/\.([a-z0-9]+)$/);
+  if (extMatch) {
+    const ext = extMatch[1];
+    if (['png','jpg','jpeg','gif','webp','svg','bmp','avif'].includes(ext)) return 'image';
+    if (['mp4','mov','webm','avi','mkv'].includes(ext)) return 'video';
+    if (['mp3','wav','m4a','ogg','flac'].includes(ext)) return 'music';
+    if (ext === 'pdf') return 'pdf';
+    if (['zip','tar','gz','rar','7z'].includes(ext)) return 'archive';
+  }
   // Specific page ID overrides — precise icons for known pages
   const pidMap = {
     'voice-studio':'voice','music-library':'music','song-tagger':'music',
@@ -2461,7 +2610,7 @@ function getPageIconType(cat, pageId, pageName) {
   if (/voice.studio|voice.clone/.test(n)) return 'voice';
   if (/music|song|audio|tts|suno/.test(n)) return 'music';
   if (/game|arcade|wolf|doom|quake|duke|play|shooter|civ.sim|bored/.test(n)) return 'game';
-  if (/video|film|remotion/.test(n)) return 'folder';
+  if (/video|film|remotion/.test(n)) return 'video';
   if (/book|doc|ref|guide|manual/.test(n)) return 'book';
   if (/tool|build|code|dev|api|terminal/.test(n)) return 'tools';
   if (/crm|contact|lead/.test(n)) return 'crm';
@@ -2587,6 +2736,12 @@ function refreshExplorers() {
    OPEN CANVAS PAGE
    ══════════════════════════════════════════════════════════════ */
 function openCanvasPage(pageId, newWindow) {
+  // Track for the Start Menu's recent-pages row — real usage, not a
+  // hardcoded shortlist (that list used to keep showing pages long after
+  // they'd been recycled, since it only checked PAGES[pid] existence and
+  // never checked recycleBin membership).
+  recentPages = [pageId, ...recentPages.filter(id => id !== pageId)].slice(0, 2);
+  saveState();
   if (newWindow) {
     window.open('/pages/' + pageId + '.html', '_blank');
     return;
@@ -2601,7 +2756,7 @@ function openCanvasPage(pageId, newWindow) {
     type: 'canvas-action',
     action: 'navigate',
     page: pageId,
-  }, '*');
+  }, window.location.origin);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -2610,7 +2765,7 @@ function openCanvasPage(pageId, newWindow) {
 function openRecycleBin() {
   const title = currentTheme === 'mac' ? 'Trash' : 'Recycle Bin';
   let content = '<div class="recycle-toolbar">';
-  content += '<button onclick="emptyRecycleBin();this.closest(\'.win-body\').querySelector(\'.explorer-content\').innerHTML=buildRecycleContent()">Empty</button>';
+  content += '<button onclick="emptyRecycleBin()">Empty</button>';
   content += '<button onclick="restoreAll();this.closest(\'.win-body\').querySelector(\'.explorer-content\').innerHTML=buildRecycleContent()">Restore All</button>';
   content += '</div>';
   content += '<div class="explorer-content">' + buildRecycleContent() + '</div>';
@@ -2666,8 +2821,13 @@ function showRecycleItemMenu(e, id) {
     {label:'Restore', action:()=>restoreItem(id)},
     '---',
     {label:isMac?'Delete Immediately\u2026':'Delete Permanently\u2026', action:()=>{
-      showConfirmModal('Permanently delete "'+name+'"? This cannot be undone.', (ok)=>{
+      showConfirmModal('Permanently delete "'+name+'"? This cannot be undone.', async (ok)=>{
         if (!ok) return;
+        // Archive server-side (renames .html to .bak, removes manifest entry) \u2014
+        // see emptyRecycleBin() for why this is required, not optional.
+        if (PAGES[id]) {
+          await fetch(`/api/canvas/manifest/page/${id}`, {method: 'DELETE'}).catch(() => {});
+        }
         recycleBin = recycleBin.filter(i => i !== id);
         if (PAGES[id]) delete PAGES[id];
         knownPages = knownPages.filter(k => k !== id);
@@ -2714,10 +2874,20 @@ function restoreAll() {
   refreshRecycleBin();
 }
 
-function emptyRecycleBin() {
+async function emptyRecycleBin() {
   if (recycleBin.length === 0) return;
-  // Remove permanently from known pages so they don't resurface
-  recycleBin.forEach(id => {
+  // Archive real canvas pages server-side (DELETE renames the .html to .bak
+  // and removes the manifest entry — see routes/canvas.py handle_page_metadata).
+  // Without this, only local browser state was cleared: the next fetchManifest()
+  // poll would see the page is still known to the server, treat it as a "new"
+  // page (it's no longer in knownPages), and silently re-add it to the desktop —
+  // recycled items were resurrecting instead of actually going away.
+  const ids = recycleBin.slice();
+  await Promise.all(ids.map(id => {
+    if (!PAGES[id]) return Promise.resolve(); // not a real canvas page (folder/system pseudo-id)
+    return fetch(`/api/canvas/manifest/page/${id}`, {method: 'DELETE'}).catch(() => {});
+  }));
+  ids.forEach(id => {
     if (PAGES[id]) delete PAGES[id];
     knownPages = knownPages.filter(k => k !== id);
   });
@@ -2820,11 +2990,17 @@ let _resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(() => {
-    buildDesktopIcons();
     const container = document.getElementById('os-container');
     const cw = container.offsetWidth;
     const dh = getDesktopHeight();
     const dTop = getDesktopTop();
+    // Re-column icons ONLY when the desktop HEIGHT changed enough (>48px) to matter.
+    // The old code rebuilt on EVERY resize, so horizontal/tiny resizes reflowed the grid
+    // and lost the icon edge-padding (Mike 2026-07-12). This keeps icons stable within a
+    // size class, still re-columns on a real vertical shrink so bottom-row icons don't
+    // clip below the fold (host-clone caveat), and leaves breakpoint crosses to the
+    // dedicated breakpoint resize handler.
+    if (Math.abs(dh - _lastDesktopH) > 48) buildDesktopIcons();
     windows.forEach(w => {
       if (w.el.classList.contains('maximized')) {
         w.el.style.width = cw + 'px';
@@ -2923,17 +3099,58 @@ function applyWallpaper(url) {
   wallpaperUrl = url || null;
   const desktop = document.getElementById('desktop');
   if (url) {
-    // Include a dark fallback color so nothing shows through while the image loads
-    desktop.style.background = 'url(' + url + ') center/cover no-repeat #1a1a1a';
+    // Set each property explicitly rather than relying on the `center/cover`
+    // shorthand — background-size:cover + background-position:center is
+    // inherently resize-safe (the browser recomputes it on every reflow,
+    // no JS needed), this just removes any shorthand-parsing ambiguity.
+    desktop.style.backgroundImage = `url(${url})`;
+    desktop.style.backgroundSize = 'cover';
+    desktop.style.backgroundPosition = 'center center';
+    desktop.style.backgroundRepeat = 'no-repeat';
+    desktop.style.backgroundColor = '#1a1a1a'; // fallback while the image loads
   } else {
     desktop.style.background = '';
   }
 }
 
+// Cap any wallpaper upload to a sane display resolution and re-encode it —
+// the user should never be able to load a multi-MB/multi-thousand-pixel
+// source image straight onto the desktop background. Downsizing happens
+// client-side (canvas) BEFORE upload so the oversized original never even
+// gets sent — /api/upload is the shared generic upload endpoint used by
+// lots of other features and must not be made lossy for everyone else.
+const WALLPAPER_MAX_DIM = 2560; // no desktop resolution needs more for a cover background
+const WALLPAPER_JPEG_QUALITY = 0.85;
+
+function optimizeWallpaperImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl);
+      let { width: w, height: h } = img;
+      const scale = Math.min(1, WALLPAPER_MAX_DIM / Math.max(w, h));
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        resolve(blob ? new File([blob], 'wallpaper.jpg', {type: 'image/jpeg'}) : file);
+      }, 'image/jpeg', WALLPAPER_JPEG_QUALITY);
+    };
+    img.onerror = () => { URL.revokeObjectURL(objUrl); resolve(file); }; // fall back to original on any decode failure
+    img.src = objUrl;
+  });
+}
+
 async function uploadWallpaper(file) {
   if (!file) return;
+  const optimized = await optimizeWallpaperImage(file);
   const fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', optimized);
   try {
     const opts = { method: 'POST', body: fd };
     if(window._canvasAuthToken) opts.headers = { 'Authorization': 'Bearer ' + window._canvasAuthToken };

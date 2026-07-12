@@ -26,9 +26,13 @@ Endpoints registered:
   GET   /api/airadio/library
 """
 
+import base64
+import hashlib
+import json
 import logging
 import mimetypes
 import os
+import re
 from pathlib import Path
 
 import requests as http_requests
@@ -365,11 +369,31 @@ def _bridge_response(result):
     return jsonify(payload), status
 
 
+_AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".ogg", ".webm", ".flac")
+
+
+def _norm_title(s: str) -> str:
+    """Lowercase, collapse non-alphanumerics to single hyphens. Used to match a
+    spoken/slugified title (`ship-that-shit`, `Ship That Shit`) to a file."""
+    return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")
+
+
+def _in_base(candidate: Path, base_dir: Path) -> bool:
+    """True if candidate resolves inside base_dir (path-traversal guard)."""
+    try:
+        candidate.resolve().relative_to(base_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def _resolve_local_song(filename: str, playlist: str):
     """
-    Look up a local audio track by filename in either the library or the
-    generated playlist. Returns (Path, metadata_dict) or (None, None) if
-    not found / playlist invalid / path-traversal attempt.
+    Look up a local audio track in either the library or the generated
+    playlist. Accepts an exact filename, a stem without extension, OR the
+    song's title (fuzzy) — matching what the skill/voice-tag promises. Returns
+    (Path, metadata_dict) or (None, None) if not found / playlist invalid /
+    path-traversal attempt.
     """
     if not filename:
         return None, None
@@ -384,17 +408,39 @@ def _resolve_local_song(filename: str, playlist: str):
 
     # Strict containment — reject `..`, absolute paths, anything not in base.
     safe_name = Path(filename).name
-    if safe_name != filename:
+    if safe_name != filename or not base_dir.is_dir():
         return None, None
 
-    candidate = (base_dir / safe_name).resolve()
-    try:
-        candidate.relative_to(base_dir.resolve())
-    except ValueError:
+    # 1. Exact filename as given (already has a real extension).
+    cand = base_dir / safe_name
+    if _in_base(cand, base_dir) and cand.is_file():
+        return cand, meta.get(safe_name, {})
+
+    # 2. Stem given without extension → try the known audio extensions.
+    stem = Path(safe_name).suffix.lower() in _AUDIO_EXTS and Path(safe_name).stem or safe_name
+    for ext in _AUDIO_EXTS:
+        cand = base_dir / (stem + ext)
+        if _in_base(cand, base_dir) and cand.is_file():
+            return cand, meta.get(cand.name, {})
+
+    # 3. Fuzzy: normalize the query and match against each file's stem AND its
+    #    metadata title. Exact-normalized hit wins; otherwise first containment.
+    want = _norm_title(stem)
+    if not want:
         return None, None
-    if not candidate.is_file():
-        return None, None
-    return candidate, meta.get(safe_name, {})
+    fallback = None
+    for f in sorted(base_dir.iterdir()):
+        if not f.is_file() or f.suffix.lower() not in _AUDIO_EXTS:
+            continue
+        m = meta.get(f.name, {})
+        norms = {_norm_title(f.stem)}
+        if m.get("title"):
+            norms.add(_norm_title(m["title"]))
+        if want in norms:
+            return f, m
+        if fallback is None and any(want in n or n in want for n in norms if n):
+            fallback = (f, m)
+    return fallback if fallback else (None, None)
 
 
 def _resolve_image_path(raw_path: str):
@@ -447,39 +493,134 @@ def _resolve_image_path(raw_path: str):
     return None
 
 
-def _stream_song(local_path: Path, fields: dict):
+# Keys AI-Radio's push-song `meta` schema actually accepts (see
+# /mnt/system/base/airadio/app/api/agent/push-song/route.ts). Everything else
+# the bridge tracks internally (source, playlist, playlistId, ...) is dropped
+# here so it never reaches — nor is silently mangled by — the server validator.
+_AIRADIO_META_KEYS = (
+    "title", "artist", "genre", "duration",
+    "isPublic", "sunoId", "sourceHash", "cover",
+)
+
+
+def _encode_cover_data_url(cover_path: str) -> str | None:
+    """Read a local image file and return a `data:` URL, or None if unreadable.
+
+    AI-Radio's push-song decodes a `meta.cover` data URL into a song_cover
+    image. Used so an agent can attach artwork in the same call that uploads
+    the audio."""
+    try:
+        p = Path(cover_path)
+        if not p.is_file():
+            return None
+        raw = p.read_bytes()
+        if not raw:
+            return None
+        mime, _ = mimetypes.guess_type(str(p))
+        if not mime or not mime.startswith("image/"):
+            mime = "image/png"
+        return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+    except OSError as exc:
+        logger.warning("AI-Radio cover read failed for %s: %s", cover_path, exc)
+        return None
+
+
+_COVER_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def _find_sibling_cover(song_path: Path) -> str | None:
+    """Return artwork that lives next to the song, or None.
+
+    Looks for `<stem>.<img>` beside the audio file, then a `covers/<stem>.<img>`
+    subdir. This is what makes covers AUTOMATIC: save artwork as `<song>.png`
+    alongside `<song>.mp3` and every push attaches it with no explicit
+    cover_path and no change to the voice-tag."""
+    for ext in _COVER_EXTS:
+        cand = song_path.with_suffix(ext)
+        if cand.is_file():
+            return str(cand)
+    covers_dir = song_path.parent / "covers"
+    if covers_dir.is_dir():
+        for ext in _COVER_EXTS:
+            cand = covers_dir / (song_path.stem + ext)
+            if cand.is_file():
+                return str(cand)
+    return None
+
+
+def _build_song_meta(fields: dict, audio_bytes: bytes, cover_path: str | None) -> dict:
+    """Translate the bridge's flat field dict into AI-Radio's `meta` JSON shape.
+
+    AI-Radio's /api/agent/push-song expects multipart `audio` (File) + `meta`
+    (JSON string). `duration` MUST be an int; an optional cover travels as a
+    `data:` URL inside meta; absent a sunoId we hash the bytes into a
+    sourceHash so re-pushes dedupe instead of piling up duplicate rows."""
+    meta: dict = {}
+    for k in _AIRADIO_META_KEYS:
+        if fields.get(k) not in (None, ""):
+            meta[k] = fields[k]
+
+    # server schema is z.number().int(); callers hand us a string.
+    if "duration" in meta:
+        try:
+            meta["duration"] = int(float(meta["duration"]))
+        except (TypeError, ValueError):
+            del meta["duration"]
+
+    if not meta.get("sunoId") and not meta.get("sourceHash"):
+        meta["sourceHash"] = hashlib.sha256(audio_bytes).hexdigest()
+
+    if cover_path and not meta.get("cover"):
+        cov = _encode_cover_data_url(cover_path)
+        if cov:
+            meta["cover"] = cov
+
+    return meta
+
+
+def _stream_song(local_path: Path, fields: dict, cover_path: str | None = None):
     """
     POST a song file to AI-Radio's /api/agent/push-song as multipart/form-data.
 
-    `fields` is a dict of metadata fields (title, source, etc.) that travel
-    alongside the audio bytes. AI-Radio dedupes via the `sourceHash` it
-    computes server-side.
+    AI-Radio expects field `audio` (the File) + field `meta` (a JSON string) —
+    NOT `file` + flat form fields. `fields` is the bridge's internal flat
+    metadata dict; `_build_song_meta` reshapes it to the contract the deployed
+    server validates, so every caller (push-song, push-playlist) hits it
+    correctly. AI-Radio dedupes via sunoId/sourceHash.
     """
+    raw = local_path.read_bytes()
     mime, _ = mimetypes.guess_type(str(local_path))
     if not mime:
         mime = "audio/mpeg"
-    with open(local_path, "rb") as fh:
-        files = {"file": (local_path.name, fh, mime)}
-        return _airadio_call(
-            "POST",
-            "/api/agent/push-song",
-            files=files,
-            data=fields or None,
-        )
+    # No explicit cover? Auto-attach artwork sitting next to the song.
+    if not cover_path:
+        cover_path = _find_sibling_cover(local_path)
+    meta = _build_song_meta(fields, raw, cover_path)
+    files = {"audio": (local_path.name, raw, mime)}
+    return _airadio_call(
+        "POST",
+        "/api/agent/push-song",
+        files=files,
+        data={"meta": json.dumps(meta)},
+    )
 
 
 def _stream_image(local_path: Path, fields: dict):
-    """POST an image file to AI-Radio's /api/agent/set-image."""
+    """POST an image file to AI-Radio's /api/agent/set-image.
+
+    The server expects multipart `image` (the File) + `meta` (a JSON string of
+    `{target, targetId?}`) — NOT `file` + flat fields. `fields` already carries
+    the right keys, so we just JSON-encode it under `meta`."""
     mime, _ = mimetypes.guess_type(str(local_path))
     if not mime:
         mime = "application/octet-stream"
     with open(local_path, "rb") as fh:
-        files = {"file": (local_path.name, fh, mime)}
+        files = {"image": (local_path.name, fh, mime)}
         return _airadio_call(
             "POST",
             "/api/agent/set-image",
             files=files,
-            data=fields or None,
+            data={"meta": json.dumps(fields or {})},
         )
 
 
@@ -541,7 +682,7 @@ def push_song():
             fields[dst_key] = str(meta[src_key])
 
     print(f"📻 push-song: {local_path.name} → AI-Radio (playlist={playlist})")
-    result = _stream_song(local_path, fields)
+    result = _stream_song(local_path, fields, cover_path=cover_path)
     if not result["ok"]:
         return _bridge_response(result)
 

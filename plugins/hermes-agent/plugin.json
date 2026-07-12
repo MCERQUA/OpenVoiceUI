@@ -1,7 +1,7 @@
 {
   "id": "hermes-agent",
   "name": "Hermes Agent",
-  "version": "1.1.0",
+  "version": "1.3.1",
   "description": "Self-improving AI agent with auto-generated skills, deep memory search, and autonomous tasks. Adds a standalone Hermes agent mode with full voice support.",
   "author": "Nous Research / OpenVoiceUI",
   "type": "gateway",

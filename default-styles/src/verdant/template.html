@@ -1,0 +1,1010 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hawthorn &amp; Fern — Distillery Operations</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+/* ================================================================
+   VERDANT — Dark Botanical Luxe
+   Deep green-black surfaces, warm ivory serif type, restrained
+   emerald and antique-brass hairlines. Every color flows through
+   these tokens — never hardcode hex in component rules.
+   ================================================================ */
+:root {
+  --bg: #0c120f;
+  --surface: #121a15;
+  --surface-2: #18231c;
+  --border: #26332b;
+  --text: #ddd8c9;
+  --text-secondary: #a9a795;
+  --text-muted: #85887a;
+  --heading: #f4efe2;
+  --brand: #10b981;
+  --brand-contrast: #06281c;
+  --accent: #c9973f;
+  --success: #34d399;
+  --warning: #e3b341;
+  --danger: #e5655c;
+  --scrollbar: #33413a;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 36px rgba(2, 8, 5, 0.5);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.4), 0 20px 44px rgba(2, 8, 5, 0.6);
+  --font-display: 'Cormorant Garamond', 'Georgia', serif;
+  --font-body: 'Work Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  /* Derived tints — brass hairlines and low-opacity semantic backdrops */
+  --border-gold: rgba(201, 151, 63, 0.26);
+  --border-gold-strong: rgba(201, 151, 63, 0.45);
+  --accent-tint: rgba(201, 151, 63, 0.10);
+  --brand-tint: rgba(16, 185, 129, 0.10);
+  --success-tint: rgba(52, 211, 153, 0.12);
+  --warning-tint: rgba(227, 179, 65, 0.12);
+  --danger-tint: rgba(229, 101, 92, 0.11);
+  --focus-ring: rgba(16, 185, 129, 0.22);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+  /* Host injects 25px body padding — no side padding added here. */
+  background-image:
+    radial-gradient(1100px 460px at 22% -8%, rgba(16, 185, 129, 0.055), transparent 62%),
+    radial-gradient(900px 420px at 88% 4%, rgba(201, 151, 63, 0.045), transparent 60%);
+  background-repeat: no-repeat;
+}
+
+h1 { color: var(--heading); }         /* explicit — never rely on inheritance */
+a  { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+::selection { background: rgba(16, 185, 129, 0.28); color: var(--heading); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-gold-strong); }
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Layout shell ---------- */
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.section { margin-bottom: 44px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 600;
+  color: var(--heading);
+  line-height: 1.2;
+}
+
+.section-hint { font-size: 13px; color: var(--text-muted); }
+
+/* Thin brass rule used to close sections quietly */
+.gold-rule {
+  border: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-gold-strong), transparent 70%);
+  margin: 6px 0 0;
+}
+
+/* ---------- Entrance animation (opacity/transform only) ---------- */
+@keyframes settle-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim {
+  opacity: 0;
+  animation: settle-in 0.5s var(--ease-out) forwards;
+}
+.d1 { animation-delay: 0.06s; }
+.d2 { animation-delay: 0.13s; }
+.d3 { animation-delay: 0.20s; }
+.d4 { animation-delay: 0.27s; }
+.d5 { animation-delay: 0.34s; }
+.d6 { animation-delay: 0.41s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim { animation: none; opacity: 1; transform: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Page header ---------- */
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 40px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+.eyebrow .dot {
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: var(--brand);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--heading);
+}
+
+.page-subtitle {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 58ch;
+}
+
+.header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.18s var(--ease-out), border-color 0.18s var(--ease-out),
+              color 0.18s var(--ease-out), transform 0.18s var(--ease-out),
+              box-shadow 0.18s var(--ease-out);
+}
+.btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(16, 185, 129, 0.16);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--brand) 88%, var(--heading));
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45), 0 10px 24px rgba(16, 185, 129, 0.22);
+}
+
+.btn-secondary {
+  background: transparent;
+  border-color: rgba(201, 151, 63, 0.55);
+  color: var(--heading);
+}
+.btn-secondary:hover {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { background: var(--surface-2); color: var(--heading); }
+
+/* ---------- KPI tiles ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border-gold);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px;
+  transition: transform 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out),
+              border-color 0.18s var(--ease-out);
+}
+.kpi:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+  border-color: var(--border-gold-strong);
+}
+
+.kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.kpi-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.icon-chip {
+  width: 34px; height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--accent-tint);
+  color: var(--accent);
+  flex: none;
+}
+.icon-chip svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon-chip.emerald { background: var(--brand-tint); color: var(--brand); }
+
+.kpi-value {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--heading);
+  line-height: 1.1;
+}
+
+.kpi-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.delta svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.delta.up   { background: var(--success-tint); color: var(--success); }
+.delta.down { background: var(--danger-tint); color: var(--danger); }
+.delta.flat { background: var(--warning-tint); color: var(--warning); }
+
+.kpi-caption { font-size: 12px; color: var(--text-muted); }
+
+/* ---------- Split layout: table + side column ---------- */
+/* minmax(0, …) is required — the table card must be able to shrink. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+@media (min-width: 920px) {
+  .split { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); align-items: start; }
+}
+
+/* ---------- Card ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border-gold);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  transition: transform 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out),
+              border-color 0.18s var(--ease-out);
+}
+.card:hover { border-color: var(--border-gold-strong); }
+.card-pad { padding: 24px; }
+
+.card-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--heading);
+  line-height: 1.25;
+}
+.card-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
+
+/* ---------- Table ---------- */
+.table-card { overflow: hidden; }
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.table-scroll { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 560px;
+}
+
+thead th {
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 11px 22px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 13px 22px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr { transition: background 0.15s var(--ease-out); }
+tbody tr:hover { background: var(--surface-2); }
+
+.cell-primary { color: var(--heading); font-weight: 500; }
+.cell-sub { display: block; font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+.cell-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+th.cell-num { text-align: right; }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badge::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.badge.ok    { background: var(--success-tint); color: var(--success); }
+.badge.warn  { background: var(--warning-tint); color: var(--warning); }
+.badge.bad   { background: var(--danger-tint); color: var(--danger); }
+.badge.brand { background: var(--brand-tint); color: var(--brand); }
+.badge.gold  { background: var(--accent-tint); color: var(--accent); }
+
+/* ---------- Progress bars ---------- */
+.stock-row { margin-bottom: 18px; }
+.stock-row:last-child { margin-bottom: 0; }
+
+.stock-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.stock-name { font-size: 13px; font-weight: 500; color: var(--heading); }
+.stock-frac {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.bar {
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+}
+.bar-fill.warn { background: var(--warning); }
+.bar-fill.bad  { background: var(--danger); }
+
+/* ---------- Form ---------- */
+.form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+@media (max-width: 720px) {
+  .form-row { grid-template-columns: minmax(0, 1fr); }
+  .form-row .btn { width: 100%; justify-content: center; }
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--heading);
+  margin-bottom: 6px;
+}
+
+.input, .select {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: border-color 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out);
+}
+.input::placeholder { color: var(--text-muted); }
+.input:hover, .select:hover { border-color: var(--scrollbar); }
+.input:focus, .select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2385887a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+/* ---------- Activity timeline ---------- */
+.timeline { list-style: none; }
+
+.timeline li {
+  display: flex;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.timeline li:first-child { padding-top: 4px; }
+.timeline li:last-child { border-bottom: 0; padding-bottom: 4px; }
+
+.tl-icon {
+  width: 32px; height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.tl-icon svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tl-icon.emerald { background: var(--brand-tint); color: var(--brand); }
+.tl-icon.amber   { background: var(--warning-tint); color: var(--warning); }
+.tl-icon.rose    { background: var(--danger-tint); color: var(--danger); }
+
+.tl-body { min-width: 0; }
+.tl-text { font-size: 13.5px; color: var(--text); }
+.tl-text strong { color: var(--heading); font-weight: 600; }
+.tl-time { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+/* ---------- Blend card grid ---------- */
+.blend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.blend-card { padding: 24px; }
+.blend-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+
+.blend-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.blend-notes { font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
+
+.blend-stats {
+  display: flex;
+  gap: 22px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.blend-stat .num {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--heading);
+  line-height: 1.15;
+}
+.blend-stat .lbl {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.footer .mono { font-family: var(--font-mono); font-size: 11.5px; }
+
+/* ---------- Small-screen refinements ---------- */
+/* Mobile width rule (hard): the host wrapper's 25px safe-area padding is the
+   ONLY horizontal inset on phones. Wrappers/sections get ZERO side padding;
+   cards keep only 16px internal padding. Never stack padded containers. */
+@media (max-width: 640px) {
+  .page, .section { padding-left: 0; padding-right: 0; }
+  .card-pad, .kpi, .blend-card { padding: 16px; }
+  .table-toolbar { padding: 14px 16px; }
+  thead th, tbody td { padding-left: 14px; padding-right: 14px; }
+  .kpi-grid, .blend-grid { gap: 14px; }
+  .section { margin-bottom: 36px; }
+}
+
+@media (max-width: 480px) {
+  .page-title { font-size: 30px; }
+  .kpi-value { font-size: 30px; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1; justify-content: center; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ Page header ============ -->
+  <header class="page-header anim">
+    <div>
+      <span class="eyebrow"><span class="dot"></span>Distillery Operations</span>
+      <h1 class="page-title">Hawthorn &amp; Fern</h1>
+      <p class="page-subtitle">Botanical distillery &amp; members' conservatory — week of 6–12 July. Batches, cellar stock, and the members' book at a glance. Updated 11 minutes ago.</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        Export ledger
+      </button>
+      <button class="btn btn-secondary" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        Tasting calendar
+      </button>
+      <button class="btn btn-primary" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        New batch
+      </button>
+    </div>
+  </header>
+
+  <!-- ============ KPI tiles ============ -->
+  <section class="section anim d1" aria-label="Key figures">
+    <div class="kpi-grid">
+
+      <div class="kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Monthly revenue</span>
+          <span class="icon-chip emerald" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 2v20"/><path d="M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 1.8 2.6 5 3.2 5 1.5 5 3.3-2.2 3-5 3-5-1.1-5-3"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">£84,210</div>
+        <div class="kpi-meta">
+          <span class="delta up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>12.4%</span>
+          <span class="kpi-caption">vs June</span>
+        </div>
+      </div>
+
+      <div class="kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Bottles laid down</span>
+          <span class="icon-chip" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M10 2h4"/><path d="M10 2v5.5L6.8 12A5.6 5.6 0 0 0 6 15v4a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-4a5.6 5.6 0 0 0-.8-3L14 7.5V2"/><path d="M7 15h10"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">1,268</div>
+        <div class="kpi-meta">
+          <span class="delta up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>6.1%</span>
+          <span class="kpi-caption">this month</span>
+        </div>
+      </div>
+
+      <div class="kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Members' book</span>
+          <span class="icon-chip" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M21 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">642</div>
+        <div class="kpi-meta">
+          <span class="delta up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>18 new</span>
+          <span class="kpi-caption">waitlist 210</span>
+        </div>
+      </div>
+
+      <div class="kpi">
+        <div class="kpi-top">
+          <span class="kpi-label">Tastings booked</span>
+          <span class="icon-chip emerald" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M8 22h8"/><path d="M12 15v7"/><path d="M5 3h14l-1.5 6.6a6 6 0 0 1-11 0Z"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">57</div>
+        <div class="kpi-meta">
+          <span class="delta flat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>0.0%</span>
+          <span class="kpi-caption">next 14 days</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Batch ledger + cellar stock ============ -->
+  <section class="section anim d2" aria-label="Batch ledger and cellar stock">
+    <div class="split">
+
+      <!-- Batch ledger table -->
+      <div class="card table-card">
+        <div class="table-toolbar">
+          <div>
+            <h2 class="card-title">Batch ledger</h2>
+            <p class="card-sub">Copper still no. 2 · current season</p>
+          </div>
+          <button class="btn btn-ghost" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M7 12h10M10 18h4"/></svg>
+            Filter
+          </button>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Batch</th>
+                <th scope="col">Botanist</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="cell-num">Bottles</th>
+                <th scope="col" class="cell-num">ABV</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="cell-primary">Conservatory Dry No. 12</span><span class="cell-sub">HF-2026-112 · juniper, fern tip, angelica</span></td>
+                <td>E. Ashworth</td>
+                <td><span class="badge ok">Bottled</span></td>
+                <td class="cell-num">420</td>
+                <td class="cell-num">43.0%</td>
+              </tr>
+              <tr>
+                <td><span class="cell-primary">Greenhouse Reserve</span><span class="cell-sub">HF-2026-113 · oak-rested, orris, bay</span></td>
+                <td>M. Okafor</td>
+                <td><span class="badge warn">Resting</span></td>
+                <td class="cell-num">280</td>
+                <td class="cell-num">46.2%</td>
+              </tr>
+              <tr>
+                <td><span class="cell-primary">Night Garden</span><span class="cell-sub">HF-2026-114 · elderflower, black cardamom</span></td>
+                <td>E. Ashworth</td>
+                <td><span class="badge brand">Distilling</span></td>
+                <td class="cell-num">—</td>
+                <td class="cell-num">—</td>
+              </tr>
+              <tr>
+                <td><span class="cell-primary">Brass Bell Navy</span><span class="cell-sub">HF-2026-109 · navy strength, grains of paradise</span></td>
+                <td>T. Laurent</td>
+                <td><span class="badge bad">Quality hold</span></td>
+                <td class="cell-num">150</td>
+                <td class="cell-num">57.1%</td>
+              </tr>
+              <tr>
+                <td><span class="cell-primary">Winter Fern (cask 4)</span><span class="cell-sub">HF-2026-101 · members' allocation</span></td>
+                <td>M. Okafor</td>
+                <td><span class="badge gold">Allocated</span></td>
+                <td class="cell-num">96</td>
+                <td class="cell-num">48.4%</td>
+              </tr>
+              <tr>
+                <td><span class="cell-primary">Conservatory Dry No. 11</span><span class="cell-sub">HF-2026-104 · trade orders, London</span></td>
+                <td>T. Laurent</td>
+                <td><span class="badge ok">Shipped</span></td>
+                <td class="cell-num">612</td>
+                <td class="cell-num">43.0%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Cellar stock progress -->
+      <div class="card card-pad">
+        <div style="margin-bottom: 18px;">
+          <h2 class="card-title">Botanical cellar</h2>
+          <p class="card-sub">Stock against seasonal par levels</p>
+        </div>
+
+        <div class="stock-row">
+          <div class="stock-head">
+            <span class="stock-name">Juniper, Macedonian</span>
+            <span class="stock-frac">142 / 160 kg</span>
+          </div>
+          <div class="bar"><div class="bar-fill" style="width: 89%;"></div></div>
+        </div>
+
+        <div class="stock-row">
+          <div class="stock-head">
+            <span class="stock-name">Angelica root</span>
+            <span class="stock-frac">38 / 50 kg</span>
+          </div>
+          <div class="bar"><div class="bar-fill" style="width: 76%;"></div></div>
+        </div>
+
+        <div class="stock-row">
+          <div class="stock-head">
+            <span class="stock-name">Orris, Florentine</span>
+            <span class="stock-frac">11 / 24 kg</span>
+          </div>
+          <div class="bar"><div class="bar-fill warn" style="width: 46%;"></div></div>
+        </div>
+
+        <div class="stock-row">
+          <div class="stock-head">
+            <span class="stock-name">Elderflower, dried</span>
+            <span class="stock-frac">4 / 18 kg</span>
+          </div>
+          <div class="bar"><div class="bar-fill bad" style="width: 22%;"></div></div>
+        </div>
+
+        <div class="stock-row">
+          <div class="stock-head">
+            <span class="stock-name">Citrus peel, bergamot</span>
+            <span class="stock-frac">27 / 30 kg</span>
+          </div>
+          <div class="bar"><div class="bar-fill" style="width: 90%;"></div></div>
+        </div>
+
+        <hr class="gold-rule" style="margin-top: 22px;">
+        <p style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">
+          Reorder is raised automatically below 30% of par. Two lines flagged this week —
+          <a href="#procurement">review procurement</a>.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Reserve a still slot (form) ============ -->
+  <section class="section anim d3" id="procurement" aria-label="Reserve a still slot">
+    <div class="section-head">
+      <h2 class="section-title">Reserve a still slot</h2>
+      <span class="section-hint">Slots release Mondays at 09:00</span>
+    </div>
+    <div class="card card-pad">
+      <form class="form-row" onsubmit="return false;">
+        <div class="field">
+          <label for="blend-name">Working blend name</label>
+          <input class="input" id="blend-name" type="text" placeholder="e.g. Glasshouse Citrus No. 3" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="still-select">Still &amp; week</label>
+          <select class="select" id="still-select">
+            <option>Copper No. 1 — w/c 13 July</option>
+            <option selected>Copper No. 2 — w/c 20 July</option>
+            <option>Column still — w/c 27 July</option>
+            <option>Copper No. 1 — w/c 3 August</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          Reserve slot
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ Activity + signature blends ============ -->
+  <section class="section anim d4" aria-label="Recent activity and signature blends">
+    <div class="split">
+
+      <!-- Signature blends card grid -->
+      <div>
+        <div class="section-head">
+          <h2 class="section-title">Signature blends</h2>
+          <span class="section-hint">Performance, trailing 90 days</span>
+        </div>
+        <div class="blend-grid">
+
+          <div class="card blend-card">
+            <div class="blend-head">
+              <div>
+                <h3 class="card-title">Conservatory Dry</h3>
+                <p class="card-sub">House pour · est. 2021</p>
+              </div>
+              <span class="badge ok">In stock</span>
+            </div>
+            <p class="blend-notes">Bright juniper opening, fern-tip greenness, a long angelica finish. The pour every membership begins with.</p>
+            <div class="blend-stats">
+              <div class="blend-stat"><div class="num">2,340</div><div class="lbl">Bottles</div></div>
+              <div class="blend-stat"><div class="num">£38,900</div><div class="lbl">Revenue</div></div>
+              <div class="blend-stat"><div class="num">4.9</div><div class="lbl">Rating</div></div>
+            </div>
+          </div>
+
+          <div class="card blend-card">
+            <div class="blend-head">
+              <div>
+                <h3 class="card-title">Greenhouse Reserve</h3>
+                <p class="card-sub">Oak-rested · small batch</p>
+              </div>
+              <span class="badge warn">Low stock</span>
+            </div>
+            <p class="blend-notes">Six months in ex-vermouth oak: orris, bay leaf, and a warm brass-toned depth. Members' cabinets only.</p>
+            <div class="blend-stats">
+              <div class="blend-stat"><div class="num">610</div><div class="lbl">Bottles</div></div>
+              <div class="blend-stat"><div class="num">£21,350</div><div class="lbl">Revenue</div></div>
+              <div class="blend-stat"><div class="num">4.8</div><div class="lbl">Rating</div></div>
+            </div>
+          </div>
+
+          <div class="card blend-card">
+            <div class="blend-head">
+              <div>
+                <h3 class="card-title">Night Garden</h3>
+                <p class="card-sub">Seasonal · autumn release</p>
+              </div>
+              <span class="badge brand">Pre-order</span>
+            </div>
+            <p class="blend-notes">Elderflower and black cardamom over a soft wheat base — the conservatory at closing time, bottled.</p>
+            <div class="blend-stats">
+              <div class="blend-stat"><div class="num">418</div><div class="lbl">Pre-orders</div></div>
+              <div class="blend-stat"><div class="num">£17,140</div><div class="lbl">Committed</div></div>
+              <div class="blend-stat"><div class="num">Sep</div><div class="lbl">Release</div></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Activity timeline -->
+      <div>
+        <div class="section-head">
+          <h2 class="section-title">House activity</h2>
+          <a href="#" class="section-hint">View all</a>
+        </div>
+        <div class="card card-pad">
+          <ul class="timeline">
+            <li>
+              <span class="tl-icon emerald" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+              </span>
+              <div class="tl-body">
+                <p class="tl-text"><strong>Conservatory Dry No. 12</strong> passed sensory panel — 420 bottles moved to the cellar.</p>
+                <p class="tl-time">Today, 09:42</p>
+              </div>
+            </li>
+            <li>
+              <span class="tl-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+              </span>
+              <div class="tl-body">
+                <p class="tl-text"><strong>18 new members</strong> admitted from the waitlist for the autumn intake.</p>
+                <p class="tl-time">Today, 08:15</p>
+              </div>
+            </li>
+            <li>
+              <span class="tl-icon amber" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+              </span>
+              <div class="tl-body">
+                <p class="tl-text"><strong>Elderflower stock</strong> fell below reorder threshold — procurement drafted for approval.</p>
+                <p class="tl-time">Yesterday, 17:20</p>
+              </div>
+            </li>
+            <li>
+              <span class="tl-icon rose" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+              </span>
+              <div class="tl-body">
+                <p class="tl-text"><strong>Brass Bell Navy</strong> placed on quality hold — cloudiness at proofing, retest booked.</p>
+                <p class="tl-time">Yesterday, 14:05</p>
+              </div>
+            </li>
+            <li>
+              <span class="tl-icon emerald" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M8 22h8"/><path d="M12 15v7"/><path d="M5 3h14l-1.5 6.6a6 6 0 0 1-11 0Z"/></svg>
+              </span>
+              <div class="tl-body">
+                <p class="tl-text"><strong>Private tasting</strong> for the Aldgate table confirmed — twelve covers, cellar room.</p>
+                <p class="tl-time">Tuesday, 19:30</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Footer ============ -->
+  <footer class="footer anim d5">
+    <span>Hawthorn &amp; Fern Distillery Co. — internal ledger. Figures unaudited.</span>
+    <span class="mono">Ledger HF-OPS · synced 11 min ago</span>
+  </footer>
+
+</div>
+</body>
+</html>

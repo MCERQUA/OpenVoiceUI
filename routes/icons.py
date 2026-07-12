@@ -10,6 +10,12 @@ Generated icons:
   POST /api/icons/generate                      → generate icon via Gemini
   GET  /api/icons/generated                     → list user's generated icons
   GET  /api/icons/generated/<filename>          → serve a generated icon
+
+Global generated-icon library (cross-tenant reuse):
+  GET /api/icons/global-library                  → list/search every tenant's generated icons
+  GET /api/icons/global-library/image/<tenant>/<filename> → serve any tenant's generated icon
+  See _search_global_icons() — generate_icon_image() checks this BEFORE calling
+  Gemini so a close-enough existing icon gets reused instead of a fresh API call.
 """
 
 import os
@@ -34,6 +40,98 @@ LUCIDE_DIR = Path('/mnt/system/base/icons/lucide')
 
 # ── Per-user generated icons ──
 GENERATED_DIR = RUNTIME_DIR / 'icons' / 'generated'
+
+# ── Global cross-tenant icon library ──
+# Every tenant's OpenVoiceUI container already mounts /mnt/clients:ro (used
+# elsewhere for cross-tenant workspace browsing) — so a live glob over every
+# tenant's own generated-icons dir gives us a real-time shared library with
+# NO new volume mounts, no fleet redeploy, and no copy/migration step: the
+# existing icons already on disk for every tenant are searchable the moment
+# this ships.
+GLOBAL_ICONS_ROOT = Path('/mnt/clients')
+THIS_TENANT = os.getenv('JAMBOT_TENANT', 'unknown')
+_TENANT_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,63}$')
+_ICON_FILENAME_RE = re.compile(r'^[A-Za-z0-9_.-]+\.(png|jpg|jpeg|webp)$')
+
+_global_icon_cache = {'built_at': 0.0, 'items': []}
+_GLOBAL_ICON_CACHE_TTL = 60  # seconds — matches the manifest sync throttle pattern elsewhere
+
+
+def _scan_global_icons():
+    """Glob every tenant's generated-icons dir and load each icon's metadata.
+    Cached for _GLOBAL_ICON_CACHE_TTL so repeated searches don't re-stat
+    hundreds of files across every tenant on each call."""
+    now = time.time()
+    if now - _global_icon_cache['built_at'] < _GLOBAL_ICON_CACHE_TTL and _global_icon_cache['items']:
+        return _global_icon_cache['items']
+
+    items = []
+    if GLOBAL_ICONS_ROOT.exists():
+        for png_path in GLOBAL_ICONS_ROOT.glob('*/openvoiceui/icons/generated/*.png'):
+            try:
+                tenant = png_path.parts[len(GLOBAL_ICONS_ROOT.parts)]
+                if not _TENANT_NAME_RE.match(tenant):
+                    continue
+                meta_path = png_path.with_name(png_path.name + '.meta.json')
+                prompt, generated_at = '', ''
+                if meta_path.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text())
+                        prompt = meta.get('prompt', '')
+                        generated_at = meta.get('generated_at', '')
+                    except Exception:
+                        pass
+                name = png_path.stem
+                items.append({
+                    'tenant': tenant,
+                    'filename': png_path.name,
+                    'name': name,
+                    'prompt': prompt,
+                    'generated_at': generated_at,
+                    'url': f'/api/icons/global-library/image/{tenant}/{png_path.name}',
+                })
+            except Exception:
+                continue
+
+    _global_icon_cache['items'] = items
+    _global_icon_cache['built_at'] = now
+    return items
+
+
+def _score_icon_match(query, item):
+    """Same lightweight substring/word scoring style as the desktop's
+    findPageByName — no embeddings/vector DB needed for icon-prompt text."""
+    q = query.lower().strip()
+    name = (item.get('name') or '').lower().replace('-', ' ').replace('_', ' ')
+    prompt = (item.get('prompt') or '').lower()
+
+    if q == name or q == prompt:
+        return 100
+    score = 0
+    if prompt and (q in prompt or prompt in q):
+        score = max(score, 70 + min(len(prompt), 25))
+    if name and (q in name or name in q):
+        score = max(score, 65 + min(len(name), 25))
+    for word in q.split():
+        if len(word) > 3 and (word in prompt or word in name):
+            score = max(score, 45 + len(word))
+    return score
+
+
+def search_global_icons(query, limit=10, min_score=0):
+    """Search every tenant's generated icons by prompt/name. Returns a
+    score-sorted list, highest first. min_score=0 returns everything scored
+    (list view); callers wanting "close enough to reuse" pass a real threshold."""
+    items = _scan_global_icons()
+    if not query:
+        return sorted(items, key=lambda i: i.get('generated_at', ''), reverse=True)[:limit]
+    scored = []
+    for item in items:
+        s = _score_icon_match(query, item)
+        if s >= min_score:
+            scored.append({**item, 'score': s})
+    scored.sort(key=lambda i: i['score'], reverse=True)
+    return scored[:limit]
 
 # ── Gemini config ──
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
@@ -187,39 +285,73 @@ def serve_icon(name):
 #  AI ICON GENERATION (Gemini)
 # ══════════════════════════════════════════════════════════════
 
-@icons_bp.route('/api/icons/generate', methods=['POST'])
-def generate_icon():
+# Default style for generated icons — modern glassmorphic 3D, matching the
+# rest of the desktop's move away from flat/retro toward an Apple-style look.
+# Override per-call with the `style` param (e.g. retro/pixel-art for games).
+DEFAULT_ICON_STYLE = (
+    'modern 3D glassmorphic app icon, frosted translucent glass material, '
+    'soft rounded squircle shape, subtle depth and drop shadow, vibrant '
+    'gradient accent color, macOS Big Sur / visionOS app icon style'
+)
+
+
+class IconGenerationError(Exception):
+    """Raised by generate_icon_image() on any failure — callers (HTTP route
+    or internal auto-gen hook) decide how to surface it."""
+    def __init__(self, message, status=502):
+        super().__init__(message)
+        self.status = status
+
+
+# A fresh generation costs a real Gemini API call (and, per today's live
+# testing, can hit per-minute rate limits) — reusing a close-enough existing
+# icon from any tenant is free and instant. 78 is a deliberately high bar:
+# icons are usually specific to one page's purpose, so only a near-identical
+# prompt/name match should be reused rather than a loosely-related one.
+ICON_REUSE_MIN_SCORE = 78
+
+
+def generate_icon_image(prompt, name=None, style=None, allow_reuse=True):
     """
-    Generate a custom icon via Gemini image generation.
+    Core icon-generation logic — callable directly (used by the auto-gen
+    hook in routes/canvas.py) or via the /api/icons/generate HTTP route.
 
-    POST body:
-      { "prompt": "description of icon",
-        "name": "optional-filename-slug",
-        "style": "optional style override" }
-
-    Returns:
-      { "url": "/api/icons/generated/my-icon.png",
-        "name": "my-icon",
-        "prompt": "..." }
+    Checks the global cross-tenant icon library for a close-enough existing
+    match BEFORE calling Gemini (see ICON_REUSE_MIN_SCORE) unless
+    allow_reuse=False. Returns a dict: {url, name, filename, prompt, size,
+    reused (bool), source_tenant (if reused)}.
+    Raises IconGenerationError on any failure.
     """
-    if not GEMINI_API_KEY:
-        return jsonify({'error': 'GEMINI_API_KEY not configured'}), 500
-
-    data = request.get_json(silent=True) or {}
-    user_prompt = data.get('prompt', '').strip()
+    user_prompt = (prompt or '').strip()
     if not user_prompt:
-        return jsonify({'error': 'Missing "prompt" field'}), 400
+        raise IconGenerationError('Missing prompt', status=400)
 
-    name_slug = data.get('name', '').strip()
-    style = data.get('style', '').strip()
+    if allow_reuse:
+        matches = search_global_icons(user_prompt, limit=1, min_score=ICON_REUSE_MIN_SCORE)
+        if matches:
+            m = matches[0]
+            return {
+                'url': m['url'],
+                'name': m['name'],
+                'filename': m['filename'],
+                'prompt': user_prompt,
+                'size': 0,
+                'reused': True,
+                'source_tenant': m['tenant'],
+                'matched_prompt': m.get('prompt', ''),
+            }
+
+    if not GEMINI_API_KEY:
+        raise IconGenerationError('GEMINI_API_KEY not configured', status=500)
+
+    name_slug = (name or '').strip()
+    style = (style or '').strip()
 
     # Build the generation prompt
     # NOTE: NEVER say "transparent background" — AI models render checkerboard patterns
     # instead of real alpha. Use a solid chroma-key color that we remove in post-processing.
     # The green bg is ALWAYS appended regardless of custom style — background removal depends on it.
-    base_style = style or (
-        'Windows XP style icon, clean vector art, vibrant colors, slight 3D shading'
-    )
+    base_style = style or DEFAULT_ICON_STYLE
     # Strip any "transparent" from custom styles — it causes checkerboard
     base_style = base_style.replace('transparent background', 'solid background')
     style_instruction = f'{base_style}, solid bright green (#00FF00) background'
@@ -255,7 +387,7 @@ def generate_icon():
         resp.raise_for_status()
         result = resp.json()
     except requests.RequestException as e:
-        return jsonify({'error': f'Gemini API error: {str(e)}'}), 502
+        raise IconGenerationError(f'Gemini API error: {str(e)}', status=502)
 
     # Extract image from response
     image_data = None
@@ -273,10 +405,7 @@ def generate_icon():
         pass
 
     if not image_data:
-        return jsonify({
-            'error': 'Gemini did not return an image',
-            'raw': result.get('candidates', [{}])[0].get('content', {}).get('parts', []),
-        }), 502
+        raise IconGenerationError('Gemini did not return an image', status=502)
 
     # Remove background → real PNG alpha transparency
     # Save original as backup first, then process
@@ -312,15 +441,38 @@ def generate_icon():
         'mime': mime_type,
     }, indent=2))
 
-    url = f'/api/icons/generated/{filename}'
-
-    return jsonify({
-        'url': url,
+    return {
+        'url': f'/api/icons/generated/{filename}',
         'name': safe_name,
         'filename': filename,
         'prompt': user_prompt,
         'size': len(image_data),
-    })
+    }
+
+
+@icons_bp.route('/api/icons/generate', methods=['POST'])
+def generate_icon():
+    """
+    Generate a custom icon via Gemini image generation.
+
+    POST body:
+      { "prompt": "description of icon",
+        "name": "optional-filename-slug",
+        "style": "optional style override" }
+
+    Returns:
+      { "url": "/api/icons/generated/my-icon.png",
+        "name": "my-icon",
+        "prompt": "..." }
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        result = generate_icon_image(
+            data.get('prompt', ''), name=data.get('name', ''), style=data.get('style', ''),
+        )
+    except IconGenerationError as e:
+        return jsonify({'error': str(e)}), e.status
+    return jsonify(result)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -354,15 +506,81 @@ def list_generated():
 
 @icons_bp.route('/api/icons/generated/<filename>')
 def serve_generated(filename):
-    """Serve a generated icon.
+    """Serve a generated icon — desktop-size THUMBNAIL by default.
 
-    NO-CACHE: see docs/jambot/no-cache-policy.md. Agents regenerate icons —
-    a 1-hour cache here used to hide updates for an hour. Live updates win;
-    optimize the source images for size instead.
+    NO-CACHE stays (see docs/jambot/no-cache-policy.md: agents regenerate
+    icons; live updates win) — but the policy's own instruction is
+    "optimize the source images for size instead", which was never done:
+    Gemini originals run 0.5-1.7MB while the desktop renders icons at
+    <=96px, so a desktop load pulled hundreds of MB uncached (the
+    slow-desktop report, 2026-07-12). We now serve a 192px derivative
+    (~15KB) regenerated whenever the source is newer; the ORIGINAL is
+    never modified (paid AI content is permanent). ?full=1 → original.
     """
     safe = re.sub(r'[^\w.\-]', '', filename)
-    path = _ensure_generated_dir() / safe
+    gen_dir = _ensure_generated_dir()
+    path = gen_dir / safe
     if not path.exists():
+        return jsonify({'error': 'Not found'}), 404
+    if request.args.get('full') not in ('1', 'true'):
+        try:
+            thumb_dir = gen_dir / '.thumbs'
+            thumb_dir.mkdir(exist_ok=True)
+            thumb = thumb_dir / safe
+            if (not thumb.exists()
+                    or thumb.stat().st_mtime < path.stat().st_mtime):
+                img = Image.open(path)
+                img.thumbnail((192, 192))
+                img.save(thumb, optimize=True)
+            if thumb.exists() and thumb.stat().st_size > 0:
+                path = thumb
+        except Exception:
+            # fail-soft: SVGs / odd formats / PIL errors → serve the original
+            pass
+    resp = send_file(str(path))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
+
+
+# ══════════════════════════════════════════════════════════════
+#  GLOBAL CROSS-TENANT ICON LIBRARY
+# ══════════════════════════════════════════════════════════════
+
+@icons_bp.route('/api/icons/global-library')
+def global_library():
+    """List/search every tenant's generated icons. ?q=<term>&limit=60
+
+    This is what the icon-library canvas page calls, and what makes the
+    library "live" for every client — it's a real-time glob over the
+    already-shared /mnt/clients:ro mount, not a copied/synced snapshot, so
+    an icon generated by any tenant a moment ago shows up immediately
+    (bounded only by the _GLOBAL_ICON_CACHE_TTL, 60s)."""
+    q = request.args.get('q', '').strip()
+    limit = min(int(request.args.get('limit', 60)), 200)
+    results = search_global_icons(q, limit=limit, min_score=0)
+    return jsonify({
+        'query': q,
+        'count': len(results),
+        'this_tenant': THIS_TENANT,
+        'icons': results,
+    })
+
+
+@icons_bp.route('/api/icons/global-library/image/<tenant>/<filename>')
+def serve_global_library_image(tenant, filename):
+    """Serve a generated icon from ANY tenant's workspace (via the existing
+    /mnt/clients:ro mount). Both path segments are strictly validated against
+    fixed charsets before touching the filesystem, and the resolved path is
+    verified to still be under that tenant's own generated-icons directory —
+    cross-tenant read access here is intentional (that's the whole feature),
+    but must not become a path-traversal hole into unrelated tenant data."""
+    if not _TENANT_NAME_RE.match(tenant) or not _ICON_FILENAME_RE.match(filename):
+        return jsonify({'error': 'Invalid path'}), 400
+    base = (GLOBAL_ICONS_ROOT / tenant / 'openvoiceui' / 'icons' / 'generated').resolve()
+    path = (base / filename).resolve()
+    if not str(path).startswith(str(base) + os.sep) or not path.exists():
         return jsonify({'error': 'Not found'}), 404
     resp = send_file(str(path))
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'

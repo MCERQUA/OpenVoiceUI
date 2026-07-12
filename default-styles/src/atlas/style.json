@@ -1,0 +1,32 @@
+{
+  "id": "atlas",
+  "name": "Atlas",
+  "tagline": "Vintage cartography, field-journal warmth",
+  "description": "An expedition atlas brought to the dashboard: aged parchment, ink-sepia type, double-keyline map frames and compass-red accents. Crimson Pro serif headings over Alegreya Sans body — scholarly, adventurous, and still a crisp working tool.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#f7f1e3",
+    "surface": "#fdfaf1",
+    "surface-2": "#efe6d0",
+    "border": "#d9cbaa",
+    "text": "#4a3c28",
+    "text-secondary": "#7a6a4f",
+    "text-muted": "#9c8b6c",
+    "heading": "#3b2f20",
+    "brand": "#6b4f2a",
+    "brand-contrast": "#f9f4e6",
+    "accent": "#9a3412",
+    "success": "#4d7c0f",
+    "warning": "#b45309",
+    "danger": "#b91c1c",
+    "scrollbar": "#c4b18a",
+    "radius": "6px",
+    "radius-sm": "4px",
+    "shadow": "0 1px 2px rgba(59, 47, 32, 0.06), 0 4px 12px rgba(59, 47, 32, 0.08)",
+    "font-display": "'Crimson Pro', 'Georgia', serif",
+    "font-body": "'Alegreya Sans', 'Gill Sans', system-ui, sans-serif",
+    "font-mono": "'Cousine', ui-monospace, 'Courier New', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,600;0,700;1,600&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;1,400&family=Cousine:wght@400;700&display=swap"
+  }
+}

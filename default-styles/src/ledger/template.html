@@ -1,0 +1,1097 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halloway &amp; Grange — Client Statement</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+/* ================================================================
+   LEDGER — Private-Banking Broadsheet
+   Cream paper, near-black ink, forest green, a thread of aged gold.
+   Every color flows through these tokens. Do not hardcode hex in
+   component rules; extend the palette here instead.
+   ================================================================ */
+:root {
+  --bg: #faf7f0;
+  --surface: #fffdf8;
+  --surface-2: #f3efe3;
+  --border: #e5dfcd;
+  --text: #38352b;
+  --text-secondary: #6d6858;
+  --text-muted: #98927e;
+  --heading: #1c1a14;
+  --brand: #14532d;
+  --brand-contrast: #fffdf8;
+  --accent: #a16207;
+  --success: #166534;
+  --warning: #b45309;
+  --danger: #991b1b;
+  --scrollbar: #d8d1bc;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --shadow: 0 1px 2px rgba(28, 26, 20, 0.04), 0 3px 12px rgba(28, 26, 20, 0.05);
+  --shadow-lift: 0 2px 4px rgba(28, 26, 20, 0.05), 0 8px 20px rgba(28, 26, 20, 0.07);
+  --font-display: 'Libre Caslon Text', 'Georgia', 'Times New Roman', serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+  /* Derived tints — low-opacity washes for chips and badge backdrops */
+  --brand-tint: rgba(20, 83, 45, 0.08);
+  --accent-tint: rgba(161, 98, 7, 0.10);
+  --success-tint: rgba(22, 101, 52, 0.09);
+  --warning-tint: rgba(180, 83, 9, 0.10);
+  --danger-tint: rgba(153, 27, 27, 0.08);
+  --focus-ring: rgba(20, 83, 45, 0.18);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--brand-tint); color: var(--heading); }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+h1 { color: var(--heading); }
+
+a { color: var(--brand); text-decoration: none; font-weight: 500; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1.5px var(--brand);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Layout shell ---------- */
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.section { margin-bottom: 40px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--heading);
+}
+
+.section-hint { font-size: 13px; color: var(--text-muted); }
+
+/* Small-caps micro-label — the Ledger signature */
+.smallcaps {
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---------- Entrance animation (opacity/transform only) ---------- */
+@keyframes settle-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim {
+  opacity: 0;
+  animation: settle-in 0.5s var(--ease-out) forwards;
+}
+.d1 { animation-delay: 0.05s; }
+.d2 { animation-delay: 0.11s; }
+.d3 { animation-delay: 0.17s; }
+.d4 { animation-delay: 0.23s; }
+.d5 { animation-delay: 0.29s; }
+.d6 { animation-delay: 0.35s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim { animation: none; opacity: 1; transform: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Masthead / page header ---------- */
+.masthead {
+  padding-bottom: 22px;
+  margin-bottom: 40px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+/* Classic statement double rule: thick gold over thin ink hairline */
+.masthead::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 4px;
+  height: 3px;
+  background: var(--accent);
+}
+
+.masthead-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+.eyebrow .rule {
+  display: inline-block;
+  width: 26px; height: 1px;
+  background: var(--accent);
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 29px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--heading);
+}
+
+.page-subtitle {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 58ch;
+}
+.page-subtitle em {
+  font-family: var(--font-display);
+  font-style: italic;
+}
+
+.header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out),
+              color 0.15s var(--ease-out), transform 0.15s var(--ease-out),
+              box-shadow 0.15s var(--ease-out);
+  white-space: nowrap;
+}
+.btn svg { flex: none; }
+.btn:active { transform: translateY(0.5px); }
+
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  box-shadow: 0 1px 2px rgba(28, 26, 20, 0.14);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--brand) 85%, var(--heading));
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--heading);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(28, 26, 20, 0.04);
+}
+.btn-secondary:hover {
+  background: var(--surface-2);
+  border-color: var(--scrollbar);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { background: var(--surface-2); color: var(--heading); }
+
+.btn-sm { padding: 7px 13px; font-size: 12.5px; }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card-pad { padding: 24px; }
+
+/* ---------- KPI stat grid ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.kpi {
+  padding: 20px;
+  transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.kpi:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+
+.kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.kpi-icon {
+  width: 32px; height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.kpi-icon.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.kpi-icon.is-success { background: var(--success-tint); color: var(--success); }
+.kpi-icon.is-warning { background: var(--warning-tint); color: var(--warning); }
+
+.kpi-value {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: 29px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  color: var(--heading);
+}
+
+.kpi-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.delta.up   { color: var(--success); background: var(--success-tint); }
+.delta.down { color: var(--danger);  background: var(--danger-tint); }
+
+/* ---------- Two-column body ---------- */
+.cols {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .cols { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); }
+}
+
+/* ---------- Statement table ---------- */
+.table-card { overflow: hidden; }
+
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+/* thin double rule under the statement head */
+.table-toolbar::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 3px;
+  height: 1px;
+  background: var(--border);
+}
+
+.table-title-wrap { min-width: 0; }
+
+.table-title {
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--heading);
+}
+
+.table-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
+
+.table-scroll { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  min-width: 580px;
+}
+
+thead th {
+  background: var(--surface-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 13px 22px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  color: var(--text);
+}
+tbody tr { transition: background 0.12s var(--ease-out); }
+tbody tr:hover { background: var(--surface-2); }
+
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num { font-family: var(--font-mono); font-size: 12.5px; color: var(--heading); }
+td.num.neg { color: var(--danger); }
+
+.ref-id {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.cell-main { font-weight: 500; color: var(--heading); }
+.cell-sub  { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+
+/* Totals row — set like a statement footer */
+tfoot td {
+  background: var(--surface-2);
+  padding: 13px 22px;
+  border-top: 1px solid var(--border);
+  box-shadow: inset 0 3px 0 var(--surface-2), inset 0 4px 0 var(--border);
+}
+tfoot .total-label {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--heading);
+}
+tfoot td.num {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--heading);
+}
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badge::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.badge.b-success { color: var(--success); background: var(--success-tint); }
+.badge.b-warning { color: var(--warning); background: var(--warning-tint); }
+.badge.b-danger  { color: var(--danger);  background: var(--danger-tint); }
+.badge.b-accent  { color: var(--accent);  background: var(--accent-tint); }
+.badge.b-neutral { color: var(--text-secondary); background: var(--surface-2); }
+
+/* ---------- Progress bars ---------- */
+.progress-row { margin-bottom: 20px; }
+.progress-row:last-child { margin-bottom: 0; }
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  gap: 12px;
+}
+
+.progress-name { font-size: 13.5px; font-weight: 500; color: var(--heading); }
+
+.progress-pct {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+  transition: width 0.5s var(--ease-out);
+}
+.progress-fill.is-accent  { background: var(--accent); }
+.progress-fill.is-success { background: var(--success); }
+.progress-fill.is-warning { background: var(--warning); }
+
+/* ---------- Activity ledger (timeline) ---------- */
+.activity { list-style: none; }
+
+.activity li {
+  display: flex;
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.activity li:first-child { padding-top: 2px; }
+.activity li:last-child { border-bottom: none; padding-bottom: 2px; }
+
+.act-icon {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.act-icon.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.act-icon.is-success { background: var(--success-tint); color: var(--success); }
+.act-icon.is-warning { background: var(--warning-tint); color: var(--warning); }
+.act-icon.is-danger  { background: var(--danger-tint);  color: var(--danger); }
+
+.act-body { min-width: 0; }
+.act-text { font-size: 13.5px; color: var(--text); }
+.act-text strong { font-weight: 600; color: var(--heading); }
+.act-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* ---------- Form ---------- */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 640px) {
+  .form-row { grid-template-columns: 1.4fr 1fr auto; align-items: end; }
+}
+
+.field label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 7px;
+}
+
+.input, .select {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--heading);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: border-color 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.input::placeholder { color: var(--text-muted); }
+.input:hover, .select:hover { border-color: var(--scrollbar); }
+.input:focus, .select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236d6858' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+.form-hint { font-size: 12px; color: var(--text-muted); margin-top: 12px; }
+
+/* ---------- Advisor / mandate card grid ---------- */
+.mandate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.mandate-card {
+  padding: 22px;
+  transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out),
+              border-color 0.15s var(--ease-out);
+}
+.mandate-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lift);
+  border-color: var(--scrollbar);
+}
+
+.mandate-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.monogram {
+  flex: none;
+  width: 38px; height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.monogram.is-accent  { background: var(--accent-tint);  color: var(--accent); }
+.monogram.is-success { background: var(--success-tint); color: var(--success); }
+
+.mandate-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--heading);
+}
+
+.mandate-role { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+
+.mandate-stats {
+  display: flex;
+  gap: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.mandate-stat .v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--heading);
+}
+.mandate-stat .k {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* ---------- Featured card: gold thread on top ---------- */
+.featured { position: relative; overflow: hidden; }
+.featured::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--accent);
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  margin-top: 48px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.footer::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 0; right: 0;
+  height: 1px;
+  background: var(--border);
+}
+.footer .mono { font-family: var(--font-mono); font-size: 11px; }
+
+/* ---------- Small-screen refinements ---------- */
+/* Mobile width rule: the host wrapper's 25px safe-area padding is the ONLY
+   horizontal inset on phones. Wrappers/sections get ZERO side padding here;
+   cards keep only a 16px internal pad. Never stack padded containers. */
+@media (max-width: 640px) {
+  .page, .section { padding-left: 0; padding-right: 0; }
+  .card-pad, .kpi, .mandate-card { padding: 16px; }
+  .table-toolbar { padding: 14px 16px; }
+  thead th, tbody td, tfoot td { padding-left: 14px; padding-right: 14px; }
+  .kpi-grid, .mandate-grid { gap: 14px; }
+  .section { margin-bottom: 32px; }
+}
+
+@media (max-width: 480px) {
+  .page-title { font-size: 24px; }
+  .kpi-value { font-size: 25px; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ Masthead ============ -->
+  <header class="masthead anim">
+    <div class="masthead-row">
+      <div>
+        <span class="eyebrow"><span class="rule"></span>Quarterly Statement<span class="rule"></span></span>
+        <h1 class="page-title">Halloway &amp; Grange</h1>
+        <p class="page-subtitle"><em>Private Wealth Counsel</em> — Client statement for the quarter ending 30 June. Prepared for the Ashcombe family accounts. Figures reconciled 9 July.</p>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-ghost" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Print
+        </button>
+        <button class="btn btn-secondary" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download PDF
+        </button>
+        <button class="btn btn-primary" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New instruction
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ KPI statement figures ============ -->
+  <section class="section">
+    <div class="kpi-grid">
+      <div class="card kpi anim d1">
+        <div class="kpi-top">
+          <span class="smallcaps">Assets under counsel</span>
+          <span class="kpi-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-4h6v4"/><path d="M9 12h.01M15 12h.01"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">$4.86M</div>
+        <div class="kpi-meta"><span class="delta up">&#9650; 3.2%</span> vs Q1 close</div>
+      </div>
+
+      <div class="card kpi anim d2">
+        <div class="kpi-top">
+          <span class="smallcaps">Net inflows, Q2</span>
+          <span class="kpi-icon is-success">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">$182,500</div>
+        <div class="kpi-meta"><span class="delta up">&#9650; $41k</span> above plan</div>
+      </div>
+
+      <div class="card kpi anim d3">
+        <div class="kpi-top">
+          <span class="smallcaps">Income received</span>
+          <span class="kpi-icon is-accent">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.6-1-1.7-1.5-3-1.5-2 0-3.5 1.1-3.5 2.5S10 12.8 12 13s3.5 1 3.5 2.5S14 18 12 18c-1.3 0-2.4-.5-3-1.5"/><line x1="12" y1="6" x2="12" y2="8"/><line x1="12" y1="18" x2="12" y2="20"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">$28,340</div>
+        <div class="kpi-meta"><span class="delta up">&#9650; 6.8%</span> dividends &amp; coupons</div>
+      </div>
+
+      <div class="card kpi anim d4">
+        <div class="kpi-top">
+          <span class="smallcaps">Pending settlements</span>
+          <span class="kpi-icon is-warning">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </span>
+        </div>
+        <div class="kpi-value">3</div>
+        <div class="kpi-meta"><span class="delta down">&#9660; 1 overdue</span> requires instruction</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Statement table + right rail ============ -->
+  <section class="section cols">
+
+    <!-- Transactions — set like a statement -->
+    <div class="card table-card anim d3">
+      <div class="table-toolbar">
+        <div class="table-title-wrap">
+          <div class="table-title">Statement of transactions</div>
+          <div class="table-sub">1 April – 30 June · Ashcombe Family Trust, account 4417</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost btn-sm" type="button">Filter</button>
+          <button class="btn btn-secondary btn-sm" type="button">Full ledger</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Entry</th>
+              <th>Counterparty</th>
+              <th>Status</th>
+              <th class="num">Amount</th>
+              <th class="num">Value date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="cell-main">Municipal bond purchase — 2034 series</div>
+                <div class="cell-sub"><span class="ref-id">TX-88124</span> · fixed income sleeve</div>
+              </td>
+              <td>Fairfield County Utility</td>
+              <td><span class="badge b-success">Settled</span></td>
+              <td class="num neg">(120,000.00)</td>
+              <td class="num">Jun 26</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Quarterly dividend — consumer staples</div>
+                <div class="cell-sub"><span class="ref-id">TX-88097</span> · equity income sleeve</div>
+              </td>
+              <td>Orchard Mills Holdings</td>
+              <td><span class="badge b-success">Settled</span></td>
+              <td class="num">8,412.50</td>
+              <td class="num">Jun 20</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Capital call — private credit fund II</div>
+                <div class="cell-sub"><span class="ref-id">TX-88141</span> · alternatives sleeve</div>
+              </td>
+              <td>Kestrel Ridge Partners</td>
+              <td><span class="badge b-warning">Pending</span></td>
+              <td class="num neg">(75,000.00)</td>
+              <td class="num">Jul 12</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Treasury bill maturity — 26-week</div>
+                <div class="cell-sub"><span class="ref-id">TX-88103</span> · cash management</div>
+              </td>
+              <td>US Treasury Direct</td>
+              <td><span class="badge b-success">Settled</span></td>
+              <td class="num">250,000.00</td>
+              <td class="num">Jun 12</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Wire transfer — property tax escrow</div>
+                <div class="cell-sub"><span class="ref-id">TX-88156</span> · awaiting signatory</div>
+              </td>
+              <td>Beacon Hill Escrow Co.</td>
+              <td><span class="badge b-danger">Overdue</span></td>
+              <td class="num neg">(18,940.00)</td>
+              <td class="num">Jul 8</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-main">Management fee — Q2, as agreed</div>
+                <div class="cell-sub"><span class="ref-id">TX-88160</span> · 0.65% p.a., prorated</div>
+              </td>
+              <td>Halloway &amp; Grange LLP</td>
+              <td><span class="badge b-neutral">Scheduled</span></td>
+              <td class="num neg">(7,897.50)</td>
+              <td class="num">Jul 15</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td class="total-label" colspan="3">Net movement, period</td>
+              <td class="num">36,575.00</td>
+              <td class="num"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Right rail: allocation progress + activity ledger -->
+    <div style="display:grid; gap:20px;">
+
+      <div class="card card-pad featured anim d4">
+        <div class="section-head" style="margin-bottom:20px;">
+          <h2 class="section-title" style="font-size:15.5px;">Mandate allocation</h2>
+          <span class="section-hint">vs policy targets</span>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Fixed income</span>
+            <span class="progress-pct">38% / 40%</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" style="width:95%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Global equities</span>
+            <span class="progress-pct">34% / 35%</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-success" style="width:97%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Alternatives</span>
+            <span class="progress-pct">14% / 15%</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-accent" style="width:93%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-head">
+            <span class="progress-name">Cash &amp; equivalents</span>
+            <span class="progress-pct">14% / 10%</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill is-warning" style="width:100%"></div></div>
+        </div>
+      </div>
+
+      <div class="card card-pad anim d5">
+        <div class="section-head" style="margin-bottom:10px;">
+          <h2 class="section-title" style="font-size:15.5px;">Recent entries</h2>
+          <a href="#">Full record</a>
+        </div>
+        <ul class="activity">
+          <li>
+            <span class="act-icon is-success">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text"><strong>TX-88124</strong> settled — municipal bond purchase confirmed</div>
+              <div class="act-time">Today · 09:42</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-accent">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">Q2 statement drafted for the <strong>Ashcombe Family Trust</strong></div>
+              <div class="act-time">Today · 08:15</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-warning">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">Capital call <strong>TX-88141</strong> due Jul 12 — countersignature requested</div>
+              <div class="act-time">Yesterday · 16:03</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon is-danger">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">Escrow wire <strong>TX-88156</strong> past value date — signatory absent</div>
+              <div class="act-time">Yesterday · 11:20</div>
+            </div>
+          </li>
+          <li>
+            <span class="act-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </span>
+            <div class="act-body">
+              <div class="act-text">Annual review scheduled with <strong>E. Ashcombe</strong> — 24 July, 10:00</div>
+              <div class="act-time">Tue · 14:47</div>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Record lookup form ============ -->
+  <section class="section anim d5">
+    <div class="card card-pad">
+      <div class="section-head" style="margin-bottom:20px;">
+        <h2 class="section-title" style="font-size:15.5px;">Record lookup</h2>
+        <span class="section-hint">Search entries by reference or counterparty</span>
+      </div>
+      <form class="form-row" onsubmit="return false;">
+        <div class="field">
+          <label for="q">Reference or counterparty</label>
+          <input class="input" id="q" type="text" placeholder="e.g. TX-88124 or Kestrel Ridge" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="sleeve">Portfolio sleeve</label>
+          <select class="select" id="sleeve">
+            <option>All sleeves</option>
+            <option>Fixed income</option>
+            <option>Global equities</option>
+            <option>Alternatives</option>
+            <option>Cash management</option>
+          </select>
+        </div>
+        <div class="field">
+          <button class="btn btn-primary" type="submit" style="width:100%;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Search
+          </button>
+        </div>
+      </form>
+      <p class="form-hint">Searches the full ledger, statements, and correspondence from the last 84 months.</p>
+    </div>
+  </section>
+
+  <!-- ============ Mandate card grid ============ -->
+  <section class="section anim d6">
+    <div class="section-head">
+      <h2 class="section-title">Accounts under mandate</h2>
+      <span class="section-hint">3 active mandates · reviewed quarterly</span>
+    </div>
+    <div class="mandate-grid">
+      <div class="card mandate-card">
+        <div class="mandate-top">
+          <span class="monogram">AT</span>
+          <div>
+            <div class="mandate-name">Ashcombe Family Trust</div>
+            <div class="mandate-role">Discretionary · est. 2011 · acct 4417</div>
+          </div>
+        </div>
+        <div class="mandate-stats">
+          <div class="mandate-stat"><div class="v">$3.12M</div><div class="k">Value</div></div>
+          <div class="mandate-stat"><div class="v">+4.1%</div><div class="k">YTD</div></div>
+          <div class="mandate-stat"><div class="v">Low</div><div class="k">Risk band</div></div>
+        </div>
+      </div>
+
+      <div class="card mandate-card">
+        <div class="mandate-top">
+          <span class="monogram is-accent">EA</span>
+          <div>
+            <div class="mandate-name">E. Ashcombe Personal</div>
+            <div class="mandate-role">Advisory · est. 2016 · acct 4522</div>
+          </div>
+        </div>
+        <div class="mandate-stats">
+          <div class="mandate-stat"><div class="v">$1.28M</div><div class="k">Value</div></div>
+          <div class="mandate-stat"><div class="v">+6.3%</div><div class="k">YTD</div></div>
+          <div class="mandate-stat"><div class="v">Med</div><div class="k">Risk band</div></div>
+        </div>
+      </div>
+
+      <div class="card mandate-card">
+        <div class="mandate-top">
+          <span class="monogram is-success">GS</span>
+          <div>
+            <div class="mandate-name">Grandchildren's Scholars Fund</div>
+            <div class="mandate-role">Custodial · est. 2021 · acct 4610</div>
+          </div>
+        </div>
+        <div class="mandate-stats">
+          <div class="mandate-stat"><div class="v">$462k</div><div class="k">Value</div></div>
+          <div class="mandate-stat"><div class="v">+5.7%</div><div class="k">YTD</div></div>
+          <div class="mandate-stat"><div class="v">Low</div><div class="k">Risk band</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Footer ============ -->
+  <footer class="footer anim d6">
+    <span>Halloway &amp; Grange LLP — Private Wealth Counsel. Figures unaudited; E&amp;OE. Statements render nightly.</span>
+    <span class="mono">ledger · canvas style v1</span>
+  </footer>
+
+</div>
+</body>
+</html>

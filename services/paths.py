@@ -14,7 +14,13 @@ GENERATED_MUSIC_DIR = RUNTIME_DIR / "generated_music"
 FACES_DIR = RUNTIME_DIR / "faces"
 FACE_MANIFEST_PATH = RUNTIME_DIR / "face-manifest.json"
 TRANSCRIPTS_DIR = RUNTIME_DIR / "transcripts"
-DB_PATH = RUNTIME_DIR / "usage.db"
+# usage.db holds conversation_log (the table the session-recovery prime reads on
+# reconnect) + usage tracking. Default location lives in the container's writable
+# layer, which is WIPED on a container *recreate* (compose up with a new image /
+# --force-recreate) — that silently destroys conversation history and kills the
+# graceful "[SESSION_RECOVERED]" pickup. OVUI_DB_PATH points it at a bind-mounted
+# dir (/app/runtime/db) so history survives recreates. See docs/jambot.
+DB_PATH = Path(os.getenv("OVUI_DB_PATH", str(RUNTIME_DIR / "usage.db")))
 CANVAS_MANIFEST_PATH = RUNTIME_DIR / "canvas-manifest.json"
 VOICE_CLONES_DIR = RUNTIME_DIR / "voice-clones"
 VOICE_SESSION_FILE = str(RUNTIME_DIR / ".voice-session-counter")

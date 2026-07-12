@@ -172,7 +172,12 @@ class WebSpeechSTT {
         // Request mic permission and keep the stream alive.
         try {
             if (!this._micStream) {
-                this._micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                // echoCancellation lets the browser's AEC subtract speaker output
+                // (TTS playback) from the mic signal — first-line defence against
+                // the agent hearing its own voice (issue #78).
+                this._micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
             }
         } catch (e) {
             console.error('Mic access failed:', e.name, e.message);

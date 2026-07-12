@@ -15,11 +15,13 @@ persistent: True (maintains a live WS connection)
 
 import asyncio
 import base64
+import concurrent.futures
 import hashlib
 import json
 import logging
 import os
 import queue
+import re as _re
 import threading
 import time
 import uuid
@@ -138,9 +140,79 @@ class _WSClosedError(Exception):
     pass
 
 
+class _ActivityQueue:
+    """Transparent wrapper around the caller's event_queue that timestamps
+    every put() so the outer stream_to_queue() watchdog can tell a genuinely
+    stalled run from one that is merely LONG.
+
+    Each subagent continuation legitimately resets a fresh ~300s inner budget
+    (_stream_events), so a single fixed 320s outer wait fired mid-turn and,
+    worse, did not cancel the coroutine — which kept running and later put a
+    SECOND terminal event on the abandoned queue (WS-7). By tracking the last
+    put() we only time out on true inactivity: deltas AND the periodic
+    heartbeats _stream_events emits both refresh the clock.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.last_activity = time.time()
+
+    def put(self, *args, **kwargs):
+        self.last_activity = time.time()
+        return self._inner.put(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 # ---------------------------------------------------------------------------
 # Subscription — per-request state
 # ---------------------------------------------------------------------------
+
+
+def _strip_internal_markers(text):
+    """Remove openclaw-internal reply markers (NO_REPLY / ANNOUNCE_SKIP /
+    REPLY_SKIP) that can leak into the visible text of a COALESCED followup
+    turn (queue mode collect merges several queued payloads — including
+    silent system turns — into one reply). Pure-marker responses are already
+    suppressed by is_system_response(); this handles the mixed case
+    ("Teal.\\n\\nNO_REPLY", observed test-dev 2026-07-02)."""
+    if not text:
+        return text
+    cleaned = _re.sub(r'(?:^|\n)\s*(?:NO_REPLY|ANNOUNCE_SKIP|REPLY_SKIP)\s*(?=$|\n)',
+                      '', text).strip()
+    return cleaned or text
+
+
+# ---------------------------------------------------------------------------
+# Proactive delivery — subagent completions that finish AFTER the originating
+# HTTP stream closed. The orphan continuation (see EventDispatcher orphan
+# tracking + GatewayConnection._run_orphan_continuation) nudges the idle main
+# agent, collects its reply, and hands the text to this handler. server.py
+# registers push_proactive_message() here at startup; it broadcasts over the
+# persistent /ws/clawdbot browser sockets with server-generated TTS.
+# ---------------------------------------------------------------------------
+
+_PROACTIVE_HANDLER = None
+
+
+def set_proactive_handler(fn):
+    """Register a callable(text, session_key) that delivers an agent-initiated
+    message to connected browsers. Called from a daemon thread — must not
+    assume a Flask request context."""
+    global _PROACTIVE_HANDLER
+    _PROACTIVE_HANDLER = fn
+
+
+# One nudge text for all three call sites (two in-stream, one orphan) so the
+# agent contract stays consistent with templates/AGENTS.md Step 3.
+_SUBAGENT_NUDGE_MSG = (
+    "[SUBAGENT_COMPLETE] The background task just finished. Read its result, "
+    "verify the output actually exists, then give the user ONE brief spoken "
+    "sentence about what was done. If it produced a canvas page, open it by "
+    "including [CANVAS:page-name] in your reply. Do not narrate your checking "
+    "steps — just the outcome."
+)
 
 
 class Subscription:
@@ -185,12 +257,121 @@ class EventDispatcher:
         self._run_to_chat: dict[str, str] = {}
         self._reader_task: asyncio.Task | None = None
         self._send_lock: asyncio.Lock = asyncio.Lock()
-        self._aborted_runs: set[str] = set()  # runIds from aborted runs — never deliver to new subs
+        # runIds from aborted runs — never deliver to new subs. An
+        # insertion-ordered dict (runId → insert ts) so overflow eviction
+        # drops the OLDEST-inserted entries, not lexicographically-smallest
+        # UUIDs (WS-11).
+        self._aborted_runs: dict[str, float] = {}
+        # Learned alias→canonical session key map. OVUI subscribes with the
+        # SHORT alias it passed to chat.send ('main', 'recovery-<epoch>', …)
+        # but gateway events carry the CANONICAL key
+        # ('agent:openvoiceui:main'). Strict == comparisons therefore NEVER
+        # matched, silently disabling followup-run routing and session-scoped
+        # fallback delivery (found 2026-07-02, phatty bare-final incident).
+        # Learned from runId-routed events, which pair a sub (alias) with the
+        # event's canonical key authoritatively.
+        self._canonical_keys: dict[str, str] = {}
+        # Orphan subagent completion tracking. When a subagent lifecycle.end
+        # arrives and NO live subscription exists (the originating HTTP stream
+        # timed out / aborted, or the spawn came from cron), the in-stream
+        # continuation nudge in _stream_events can never fire. The hook below
+        # (set by GatewayConnection) runs the orphan continuation instead.
+        self._orphan_hook = None                      # callable(parent_alias)
+        self._orphan_debounce: dict[str, asyncio.Task] = {}  # parent → pending task
+        self._orphan_last_fired: dict[str, float] = {}       # parent → ts cooldown
+        self._last_sub_alias: str | None = None       # newest subscribe() alias
+
+    ORPHAN_DEBOUNCE_S = 5      # batch: wait for sibling subagents to finish
+    ORPHAN_COOLDOWN_S = 60     # never nudge the same session more than 1/min
+
+    def set_orphan_hook(self, fn):
+        self._orphan_hook = fn
+
+    def _prune_orphan_bookkeeping(self, now):
+        """Drop stale orphan bookkeeping so the dicts don't leak (WS-11).
+        Cooldown timestamps older than 1h are irrelevant; completed debounce
+        tasks are done and safe to forget."""
+        cutoff = now - 3600
+        for k in [k for k, ts in self._orphan_last_fired.items() if ts < cutoff]:
+            self._orphan_last_fired.pop(k, None)
+        for k in [k for k, t in self._orphan_debounce.items()
+                  if t is None or t.done()]:
+            self._orphan_debounce.pop(k, None)
+
+    def _alias_for_canonical(self, canonical: str) -> str | None:
+        """Best-effort map a canonical sessionKey (or spawnedBy value like
+        'agent:openvoiceui:main') back to the short alias chat.send uses."""
+        if not canonical:
+            return None
+        for alias, canon in self._canonical_keys.items():
+            if canon == canonical:
+                return alias
+        parts = canonical.split(':')
+        if parts[0] == 'agent' and len(parts) >= 3:
+            return ':'.join(parts[2:])
+        return canonical
+
+    def _note_orphan_subagent_end(self, payload: dict):
+        """A subagent lifecycle.end arrived with no live subscription to
+        deliver it to. Debounce per parent session, then fire the orphan
+        continuation hook so the main agent announces the result."""
+        if self._orphan_hook is None:
+            return
+        stream = match_stream(payload.get('stream', ''))
+        phase = payload.get('data', {}).get('phase', '')
+        if stream != 'lifecycle' or phase != 'end':
+            return
+        parent = (self._alias_for_canonical(payload.get('spawnedBy', ''))
+                  or self._last_sub_alias or 'main')
+        now = time.time()
+        self._prune_orphan_bookkeeping(now)
+        if now - self._orphan_last_fired.get(parent, 0) < self.ORPHAN_COOLDOWN_S:
+            logger.info(f"### ORPHAN SUBAGENT END: cooldown active for {parent} — skipped")
+            return
+        pending = self._orphan_debounce.get(parent)
+        if pending and not pending.done():
+            pending.cancel()
+        logger.info(f"### ORPHAN SUBAGENT END: scheduling continuation for session {parent}")
+        self._orphan_debounce[parent] = asyncio.ensure_future(
+            self._fire_orphan_after_debounce(parent))
+
+    async def _fire_orphan_after_debounce(self, parent: str):
+        try:
+            await asyncio.sleep(self.ORPHAN_DEBOUNCE_S)
+        except asyncio.CancelledError:
+            return
+        # A live subscription may have appeared meanwhile (user sent a new
+        # message) — the normal in-stream path owns delivery in that case.
+        for sub in self._subscriptions.values():
+            if sub.state != Subscription.DONE and self._sk_match_alias(parent, sub.session_key):
+                logger.info(f"### ORPHAN continuation cancelled — live sub exists for {parent}")
+                return
+        self._orphan_last_fired[parent] = time.time()
+        try:
+            self._orphan_hook(parent)
+        except Exception as e:
+            logger.error(f"### ORPHAN hook failed: {e}")
+
+    @staticmethod
+    def _sk_match_alias(a: str, b: str) -> bool:
+        return bool(a) and bool(b) and (a == b or a.endswith(':' + b) or b.endswith(':' + a))
+
+    def _sk_match(self, event_sk: str, sub_sk: str) -> bool:
+        """True when an event's canonical sessionKey refers to sub's session."""
+        if not event_sk or event_sk == sub_sk:
+            return True
+        canon = self._canonical_keys.get(sub_sk)
+        if canon:
+            return event_sk == canon
+        # Not learned yet (no runId-routed event has paired them) — best-effort
+        # suffix match on the alias segment.
+        return event_sk.endswith(':' + sub_sk)
 
     def subscribe(self, chat_id: str, session_key: str) -> Subscription:
         """Create and register a new subscription."""
         sub = Subscription(chat_id, session_key)
         self._subscriptions[chat_id] = sub
+        self._last_sub_alias = session_key
         return sub
 
     def unsubscribe(self, chat_id: str):
@@ -200,7 +381,7 @@ class EventDispatcher:
             sub.state = Subscription.DONE
             if sub.run_id:
                 self._run_to_chat.pop(sub.run_id, None)
-                self._aborted_runs.discard(sub.run_id)
+                self._aborted_runs.pop(sub.run_id, None)
 
     def start(self, ws):
         """Start the reader loop for a new WS connection."""
@@ -287,12 +468,13 @@ class EventDispatcher:
                 # delivered to new subscriptions (prevents stale replays).
                 canonical_state = match_state(event_state)
                 if canonical_evt == 'chat' and canonical_state == 'aborted' and event_run_id:
-                    self._aborted_runs.add(event_run_id)
+                    self._aborted_runs[event_run_id] = time.time()
                     logger.info(f"### ABORTED run tracked: {event_run_id[:12]}")
-                    # Cap set size to prevent unbounded growth
+                    # Cap size to prevent unbounded growth — evict the
+                    # oldest-inserted half (dict preserves insertion order).
                     if len(self._aborted_runs) > 100:
-                        oldest = sorted(self._aborted_runs)[:50]
-                        self._aborted_runs -= set(oldest)
+                        for _old in list(self._aborted_runs)[:50]:
+                            self._aborted_runs.pop(_old, None)
 
                 if event_run_id:
                     # Direct mapping — deliver to the sub that owns this runId
@@ -300,6 +482,16 @@ class EventDispatcher:
                     if chat_id:
                         sub = self._subscriptions.get(chat_id)
                         if sub and sub.state != Subscription.DONE:
+                            # Learn the alias→canonical session key pairing
+                            # (used by _sk_match for followup/fallback routing)
+                            if (event_session_key and sub.session_key
+                                    and event_session_key != sub.session_key):
+                                self._canonical_keys[sub.session_key] = event_session_key
+                                # Drop the oldest half on overflow (LRU-ish)
+                                # rather than wiping the whole alias map (WS-11).
+                                if len(self._canonical_keys) > 50:
+                                    for _old in list(self._canonical_keys)[:25]:
+                                        self._canonical_keys.pop(_old, None)
                             await sub.event_queue.put(data)
                             return
 
@@ -322,7 +514,7 @@ class EventDispatcher:
                     if queued:
                         chosen = queued[0]
                         # Only match if session keys align (prevents cross-session routing)
-                        if not event_session_key or event_session_key == chosen.session_key:
+                        if self._sk_match(event_session_key, chosen.session_key):
                             chosen.run_id = event_run_id
                             chosen.state = Subscription.ACTIVE
                             self._run_to_chat[event_run_id] = chosen.chat_id
@@ -347,12 +539,19 @@ class EventDispatcher:
                         if sub.state == Subscription.ACTIVE:
                             await sub.event_queue.put(data)
                             return
+                    # No live subscription — the originating stream is gone
+                    # (timeout/abort/cron spawn). If this is a completion,
+                    # schedule the orphan continuation so the main agent
+                    # still announces the result to the user.
+                    self._note_orphan_subagent_end(payload)
+                    return
 
                 # Fallback: deliver to single active sub WITH session key match
                 if event_session_key:
                     for sub in self._subscriptions.values():
                         if (sub.state == Subscription.ACTIVE
-                                and sub.session_key == event_session_key):
+                                and self._sk_match(event_session_key,
+                                                   sub.session_key)):
                             await sub.event_queue.put(data)
                             return
                 else:
@@ -369,6 +568,26 @@ class EventDispatcher:
                     and sub.state in (Subscription.ACTIVE, Subscription.PENDING)):
                 return sub
         return None
+
+    def demote_to_queued(self, chat_id: str):
+        """Return a sub to QUEUED state so followup-run events can attach.
+
+        Used when a chat.send got an ACK+runId but the gateway then emitted a
+        bare final (no text, zero events for that runId) — the signature of a
+        message that was COALESCED into the followup queue of a busy session
+        (queue mode "collect"). The queued payload will run later as a brand
+        new run with a runId we've never seen; the unknown-runId routing in
+        _route() only attaches those events to subs in QUEUED state, so the
+        sub must be demoted (its dead runId mapping cleared) to receive them.
+        """
+        sub = self._subscriptions.get(chat_id)
+        if not sub:
+            return
+        if sub.run_id:
+            self._run_to_chat.pop(sub.run_id, None)
+            self._aborted_runs.pop(sub.run_id, None)
+        sub.run_id = None
+        sub.state = Subscription.QUEUED
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +650,9 @@ class GatewayConnection:
                 asyncio.set_event_loop(self._loop)
                 self._ws_lock = asyncio.Lock()
                 self._dispatcher = EventDispatcher()
+                self._dispatcher.set_orphan_hook(
+                    lambda parent: asyncio.ensure_future(
+                        self._run_orphan_continuation(parent)))
                 ready.set()
                 self._loop.run_forever()
 
@@ -459,15 +681,22 @@ class GatewayConnection:
         nonce = challenge_data.get('payload', {}).get('nonce', '')
         scopes = ["operator.admin", "operator.read", "operator.write"]
         identity = _load_device_identity()
+        # Identify as what we ARE: a backend gateway-client bridging a voice/web user.
+        # The old client_id/mode of "cli" leaked into agent-visible metadata and the
+        # agent greeted Mike with "you're coming in from the CLI" while he was on
+        # voice (2026-07-11). client_id is ENUM-VALIDATED (GATEWAY_CLIENT_IDS) — "gateway-client"
+        # is the allowed backend-bridge id; mode "backend" from GATEWAY_CLIENT_MODES.
+        # NOTE: the device signature binds client_id|client_mode — keep the
+        # _sign_device_connect args and build_connect_params in lockstep.
         device_block = _sign_device_connect(
-            identity, "cli", "cli", "operator", scopes, self.auth_token, nonce
+            identity, "gateway-client", "backend", "operator", scopes, self.auth_token, nonce
         )
 
         # Step 2 — send connect with protocol range (not pinned)
         params = build_connect_params(
             auth_token=self.auth_token,
-            client_id="cli",
-            client_mode="cli",
+            client_id="gateway-client",
+            client_mode="backend",
             platform="linux",
             user_agent="openvoice-ui-voice/1.0.0",
             scopes=scopes,
@@ -507,6 +736,13 @@ class GatewayConnection:
         self._connected = True
         self._backoff_idx = 0
         self._dispatcher.start(ws)
+        # Supervise the reader: without this the connection only comes back
+        # lazily on the next chat.send, leaving the orphan-completion watcher
+        # deaf after any gateway restart/blip. Bind the supervisor to THIS
+        # (ws, reader_task) generation so it can tell a passive drop (its ws is
+        # still current) from a newer connect having taken over (ws replaced).
+        reader_task = self._dispatcher._reader_task
+        asyncio.ensure_future(self._supervise_reader(ws, reader_task))
         if server_version:
             self._server_version = server_version
             logger.info(
@@ -520,6 +756,58 @@ class GatewayConnection:
                 )
         else:
             logger.info(f"### Persistent WS connected + handshake done in {t_ms}ms")
+
+    async def _supervise_reader(self, ws, reader_task):
+        """Reconnect the persistent WS when the reader loop dies.
+
+        Bound to the specific (ws, reader_task) generation it was spawned for.
+        When that reader ends (gateway restart, network blip, deliberate
+        disconnect), re-establish so subagent lifecycle broadcasts keep
+        flowing between user messages.
+
+        WS-1: on a PASSIVE drop the reader loop returns without clearing
+        _connected/_ws (only _disconnect() does that, and it is never called
+        for a passive drop). The old supervisor then saw the stale
+        _connected==True, concluded "a newer connect took over," and exited
+        WITHOUT reconnecting — leaving the persistent WS dead but reading
+        healthy, so the orphan-completion watcher went deaf until the next
+        user chat.send. The fix compares ws OBJECT IDENTITY: if self._ws is
+        still THIS ws, no newer connect happened — this is a real drop, so we
+        clear the stale state ourselves and reconnect.
+        """
+        if reader_task is None:
+            return
+        try:
+            await asyncio.wait({reader_task})
+        except Exception:
+            pass
+        # A newer _connect() already installed a different live ws — that
+        # connection owns its own supervisor; this generation is retired.
+        if self._ws is not None and self._ws is not ws:
+            return
+        # This IS the current generation and its reader just died (passive
+        # drop): clear the stale connection state so _ensure_connected() below
+        # actually reconnects instead of short-circuiting on _connected==True.
+        # (A deliberate _disconnect() already set _ws=None/_connected=False —
+        # that path also lands here and simply reconnects, matching prior
+        # behaviour.)
+        if self._ws is ws:
+            self._connected = False
+            self._last_disconnect_time = time.time()
+        while True:
+            # Bail if a newer connection came up while we waited/slept.
+            if self._connected and self._ws is not None and self._ws is not ws:
+                return
+            await asyncio.sleep(5)
+            if self._connected and self._ws is not None and self._ws is not ws:
+                return
+            try:
+                logger.info("### WS supervisor: reader died — reconnecting")
+                await self._ensure_connected()
+                return  # new supervisor spawned by _connect
+            except Exception as e:
+                logger.warning(f"### WS supervisor reconnect failed: {e} — retrying in 30s")
+                await asyncio.sleep(30)
 
     async def _disconnect(self):
         self._connected = False
@@ -543,13 +831,20 @@ class GatewayConnection:
     async def _ensure_connected(self):
         async with self._ws_lock:
             if self._connected and self._ws is not None:
-                try:
-                    pong_waiter = await self._ws.ping()
-                    await asyncio.wait_for(pong_waiter, timeout=5.0)
+                # Cheap, NON-blocking liveness check (no ping/pong roundtrip —
+                # that added worst-case 5s ahead of EVERY chat.send on the hot
+                # path). We only inspect the socket's own close state: a client
+                # that already saw the close frame reports a non-None
+                # close_code. If it looks closed, fall through to reconnect
+                # instead of handing a dead ws to the caller (WS-6 — closes the
+                # WS-1 window even faster than waiting for the supervisor). A
+                # socket that is dead but hasn't observed the close yet is
+                # still caught on send/recv by _do_stream, which reconnects and
+                # re-sends the same message.
+                if getattr(self._ws, 'close_code', None) is None:
                     return
-                except Exception:
-                    logger.warning("### Persistent WS ping failed, reconnecting...")
-                    await self._disconnect()
+                logger.info("### _ensure_connected: socket reports closed — reconnecting")
+                self._connected = False
 
             backoff = self.BACKOFF_DELAYS[min(self._backoff_idx, len(self.BACKOFF_DELAYS) - 1)]
             elapsed = time.time() - self._last_disconnect_time
@@ -573,6 +868,99 @@ class GatewayConnection:
                         await asyncio.sleep(delay)
 
             raise RuntimeError(f"Failed to connect to Gateway after {max_attempts} attempts")
+
+    async def _run_orphan_continuation(self, session_key):
+        """Nudge the idle main agent after an orphaned subagent completion,
+        collect its reply, and hand it to the registered proactive handler.
+
+        Runs on the gateway loop thread. The originating HTTP stream is gone,
+        so the reply cannot ride the normal NDJSON path — server.py's
+        push_proactive_message broadcasts it over /ws/clawdbot instead.
+        """
+        if _PROACTIVE_HANDLER is None:
+            logger.info("### ORPHAN continuation skipped — no proactive handler registered")
+            return
+        try:
+            await asyncio.sleep(3)  # let the gateway announce-back settle in session
+            if not self._connected or not self._ws or not self._dispatcher:
+                logger.warning("### ORPHAN continuation skipped — gateway not connected")
+                return
+            cont_chat_id = str(uuid.uuid4())
+            sub = self._dispatcher.subscribe(cont_chat_id, session_key)
+            try:
+                await self._dispatcher.send(self._ws, {
+                    "type": "req",
+                    "id": f"chat-{cont_chat_id}",
+                    "method": "chat.send",
+                    "params": {
+                        "message": _PROMPT_ARMOR + _SUBAGENT_NUDGE_MSG,
+                        "sessionKey": session_key,
+                        "idempotencyKey": cont_chat_id,
+                    },
+                })
+                logger.info(f"### ORPHAN CONTINUATION: nudge sent "
+                            f"(session={session_key}, chat_id={cont_chat_id[:8]})")
+                collected_text = ''
+                prev_len = 0
+                deadline = time.time() + 180
+                while time.time() < deadline:
+                    try:
+                        data = await asyncio.wait_for(sub.event_queue.get(), timeout=10.0)
+                    except asyncio.TimeoutError:
+                        continue
+                    if data.get('_type') == 'ws_closed':
+                        logger.warning("### ORPHAN continuation: WS closed mid-collect")
+                        return
+                    if data.get('type') == 'res':
+                        continue
+                    if data.get('type') != 'event':
+                        continue
+                    payload = data.get('payload', {})
+                    canonical_evt = match_event(data.get('event', ''))
+                    if canonical_evt == 'agent':
+                        stream = match_stream(payload.get('stream', ''))
+                        if stream == 'assistant':
+                            d = payload.get('data', {})
+                            full_text = d.get('text', '')
+                            if full_text and len(full_text) > prev_len:
+                                prev_len = len(full_text)
+                                collected_text = full_text
+                        elif stream == 'lifecycle':
+                            sk = payload.get('sessionKey', '')
+                            phase = payload.get('data', {}).get('phase', '')
+                            if phase == 'end' and not is_subagent_session_key(sk) and collected_text:
+                                break
+                    elif canonical_evt == 'chat':
+                        state = match_state(payload.get('state', ''))
+                        sk = payload.get('sessionKey', '')
+                        if sk and is_subagent_session_key(sk):
+                            continue
+                        if state in ('aborted', 'error'):
+                            logger.warning(f"### ORPHAN continuation: run {state}")
+                            return
+                        if state == 'final':
+                            if not collected_text and 'message' in payload:
+                                content = extract_text_content(
+                                    payload['message'].get('content', ''))
+                                if content and content.strip():
+                                    collected_text = content
+                            break
+            finally:
+                self._dispatcher.unsubscribe(cont_chat_id)
+
+            text = _strip_internal_markers(collected_text or '')
+            if not text or is_system_response(text):
+                logger.info("### ORPHAN continuation: no user-facing text — nothing to push")
+                return
+            logger.info(f"### ORPHAN continuation: pushing proactive message "
+                        f"({len(text)} chars): {text[:120]}")
+            handler = _PROACTIVE_HANDLER
+            threading.Thread(
+                target=lambda: handler(text, session_key),
+                name='proactive-push', daemon=True,
+            ).start()
+        except Exception as e:
+            logger.error(f"### ORPHAN continuation failed: {e}")
 
     async def _send_abort(self, run_id, session_key, reason="voice-disconnect"):
         """Send chat.abort for a specific run via the dispatcher's send lock."""
@@ -707,12 +1095,34 @@ class GatewayConnection:
         subagent_ends = 0         # Count subagent lifecycle.end events
         continuation_sent = False  # True after we send a continuation nudge
         continuation_sub = None    # Subscription for continuation chat.send
+        saw_run_event = False      # True once ANY agent/delta event arrived for our run
+        followup_demoted = False   # True after a bare final demoted us to QUEUED (waiting for followup run)
+        # Max wait for the coalesced followup run. Balance: a legit followup
+        # fires when the active turn ends (typically <60s of remaining work);
+        # but if the active run got user-aborted, openclaw DROPS its queued
+        # followups and nothing ever comes — so cap the silence and let the
+        # route-level history-aware fallback answer instead.
+        _FOLLOWUP_WAIT_S = 75
 
         while time.time() - start_time < timeout:
             try:
                 data = await asyncio.wait_for(sub.event_queue.get(), timeout=5.0)
             except asyncio.TimeoutError:
                 elapsed = int(time.time() - start_time)
+                # Demoted-wait expiry: our message was coalesced into a busy
+                # session's followup queue but no followup run reached us in
+                # time (e.g. another queued sub got the coalesced turn). Give
+                # up QUIETLY: no abort (an abort could kill the coalesced turn
+                # that is answering someone), no retry (the payload is still
+                # queued server-side — a re-send would duplicate it). The
+                # route-level fallback answers this turn instead.
+                if followup_demoted and elapsed > _FOLLOWUP_WAIT_S and not saw_run_event:
+                    logger.warning(
+                        f"### FOLLOWUP WAIT expired ({elapsed}s) — no followup run "
+                        f"attached; returning null (no abort, no retry)")
+                    event_queue.put({'type': 'text_done', 'response': None,
+                                     'actions': captured_actions})
+                    return
                 if subagent_active and not collected_text:
                     if elapsed % 30 < 6:
                         logger.info(f"### Waiting for subagent announce-back... ({elapsed}s elapsed)")
@@ -755,6 +1165,12 @@ class GatewayConnection:
             if data.get('type') == 'event' and canonical_evt == 'agent':
                 payload = data.get('payload', {})
                 canonical_stream = match_stream(payload.get('stream', ''))
+                # Any agent-stream event for our run proves the run actually
+                # executed — distinguishes a genuine empty final (GLM
+                # thinking-only leak: lifecycle events DID flow) from a
+                # queued-coalesced bare final (ZERO events ever).
+                if payload.get('runId') and payload.get('runId') == sub.run_id:
+                    saw_run_event = True
 
                 if canonical_stream == 'assistant':
                     d = payload.get('data', {})
@@ -844,8 +1260,7 @@ class GatewayConnection:
                                 _cleanup_ids.append(cont_chat_id)
                             cont_msg = (
                                 _PROMPT_ARMOR +
-                                "[SUBAGENT_COMPLETE] The background task just finished. "
-                                "Check the result and give a brief update on what was done."
+                                _SUBAGENT_NUDGE_MSG
                             )
                             cont_request = {
                                 "type": "req",
@@ -939,7 +1354,7 @@ class GatewayConnection:
                                 event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
                                 return
                             logger.info(f"### ✓✓✓ AI RESPONSE (lifecycle end): {collected_text[:200]}...")
-                            event_queue.put({'type': 'text_done', 'response': collected_text, 'actions': captured_actions})
+                            event_queue.put({'type': 'text_done', 'response': _strip_internal_markers(collected_text), 'actions': captured_actions})
                             return
 
             # ── Chat events ───────────────────────────────────────────────
@@ -1006,6 +1421,29 @@ class GatewayConnection:
                         if content and content.strip():
                             final_text = content
 
+                    # Diagnostic (log-only): classify no-visible-text finals.
+                    # GLM occasionally returns a completion whose content is
+                    # ONLY thinking block(s) — the known "thinking-only" empty
+                    # class (thinkingDefault:"off" reduces but doesn't
+                    # eliminate it). Tag these distinctly so log analysis can
+                    # separate them from true zero-content finals.
+                    if not final_text:
+                        try:
+                            _raw_content = (payload.get('message') or {}).get('content')
+                            if isinstance(_raw_content, list):
+                                _think_chars = sum(
+                                    len(b.get('thinking') or b.get('text') or '')
+                                    for b in _raw_content
+                                    if isinstance(b, dict) and b.get('type') == 'thinking'
+                                )
+                                if _think_chars:
+                                    logger.warning(
+                                        f"### THINKING-ONLY FINAL: {_think_chars} chars of "
+                                        f"thinking, zero visible text (GLM thinking leak)"
+                                    )
+                        except Exception:
+                            pass  # diagnostic only — never affect the flow
+
                     if final_text:
                         if is_system_response(final_text):
                             logger.info(f"### Suppressing system response (chat final): {final_text!r}")
@@ -1033,7 +1471,7 @@ class GatewayConnection:
                             main_lifecycle_ended = False
                             continue
                         logger.info(f"### ✓✓✓ AI RESPONSE (chat final): {final_text[:200]}...")
-                        event_queue.put({'type': 'text_done', 'response': final_text, 'actions': captured_actions})
+                        event_queue.put({'type': 'text_done', 'response': _strip_internal_markers(final_text), 'actions': captured_actions})
                         return
 
                     # Also check if any captured actions suggest subagent activity
@@ -1052,13 +1490,42 @@ class GatewayConnection:
                             logger.info("### SUBAGENT detected via captured_actions (late detection)")
                         continue
                     else:
-                        # MiniMax-M2.7-highspeed reliably produces "chat.final
-                        # with no text" in a subset of turns (15+ events in a
-                        # 30-min window observed). openclaw's server-side
-                        # model-fallback only triggers on timeout (300s), not
-                        # on empty-final — so the user turn dies silently.
-                        # Signal the caller to retry chat.send once more; a
-                        # second MiniMax attempt usually returns real text.
+                        # ── Bare final, ZERO events for our run: message was
+                        # QUEUED, not answered (root cause of the 2026-07-02
+                        # phatty amnesia + 2026-06-30 src collapse family).
+                        # When chat.send lands on a session that is busy (or
+                        # still finalizing the previous turn), openclaw queue
+                        # mode "collect" coalesces the payload into a followup
+                        # turn and emits an immediate bare final for OUR runId.
+                        # The payload then runs later under a BRAND-NEW runId
+                        # (verified live on test-dev 2026-07-02). The old code
+                        # treated this as an empty response: abort (which can
+                        # KILL the queued turn doing real work) + re-send
+                        # (which DUPLICATES the queued payload) → double-empty
+                        # → "session poisoned" → history-less fallback reply →
+                        # the client-facing amnesia. Instead: demote this sub
+                        # to QUEUED so the dispatcher's unknown-runId routing
+                        # attaches the followup run's events to us, and keep
+                        # streaming — the user gets the real answer with full
+                        # session context.
+                        if not saw_run_event and not followup_demoted:
+                            followup_demoted = True
+                            self._dispatcher.demote_to_queued(chat_id)
+                            chat_final_seen = False
+                            lifecycle_ended = False
+                            run_was_aborted = False
+                            collected_text = ''
+                            prev_text_len = 0
+                            start_time = time.time()  # fresh window for the followup run
+                            logger.warning(
+                                "### BARE FINAL (0 events for run) — gateway queued the "
+                                "message behind a busy session; demoted to QUEUED and "
+                                "waiting for the followup run (no abort, no retry)")
+                            continue
+                        # Genuine empty final — the run DID execute (lifecycle
+                        # events flowed) but produced no visible text (e.g. the
+                        # GLM thinking-only leak). Safe to retry: the payload
+                        # is NOT sitting in a queue, so a re-send won't duplicate.
                         logger.warning("### chat.final with no text (no subagent) — signaling retry")
                         await self._send_abort(sub.run_id or chat_id, session_key, "empty-response")
                         return 'empty-final'
@@ -1088,8 +1555,22 @@ class GatewayConnection:
                     break
                 await asyncio.sleep(0.1)
             else:
-                # Force-unsubscribe the stale sub if it didn't clear
+                # Force-unsubscribe the stale sub if it didn't clear — and
+                # signal its stream loop so the old HTTP request exits NOW
+                # instead of zombie-heartbeating to the 300s hard timeout
+                # (the unsubscribe unmaps the runId, so the gateway's
+                # chat:aborted event can no longer reach it).
                 logger.warning(f"### Abort-before-send: force-unsubscribing stale {existing_sub.chat_id[:8]}")
+                try:
+                    existing_sub.event_queue.put_nowait({
+                        'type': 'event', 'event': 'chat',
+                        'payload': {'state': 'aborted',
+                                    'runId': existing_sub.run_id or '',
+                                    'sessionKey': session_key,
+                                    'stopReason': 'pre-send-cleanup'},
+                    })
+                except Exception:
+                    pass
                 self._dispatcher.unsubscribe(existing_sub.chat_id)
             # Brief settle after abort so Z.AI processes the state change
             await asyncio.sleep(0.2)
@@ -1097,6 +1578,9 @@ class GatewayConnection:
         ws = self._ws
         chat_id = str(uuid.uuid4())
         sub = self._dispatcher.subscribe(chat_id, session_key)
+        _cleanup_ids = []  # MUST init before the try — the finally below iterates it;
+        # if chat.send (inside the try, below) throws before the old in-try init,
+        # the finally hit UnboundLocalError and masked the real error (fix 2026-06-14).
         try:
             full_message = _PROMPT_ARMOR + message
             logger.debug(f"[GW] Sending to gateway ({len(full_message)} chars). User part: {repr(message[:120])}")
@@ -1112,7 +1596,6 @@ class GatewayConnection:
             }
             logger.info(f"### Sending chat message (agent={agent_id or 'main'}): {message[:100]}")
             await self._dispatcher.send(ws, chat_request)
-            _cleanup_ids = []
             result = await self._stream_events(
                 sub, event_queue, session_key,
                 captured_actions, agent_id=agent_id,
@@ -1186,17 +1669,46 @@ class GatewayConnection:
             traceback.print_exc()
             event_queue.put({'type': 'error', 'error': str(e)})
 
+    # Watchdog: declare an outer timeout only after this many seconds with NO
+    # activity on the event queue (deltas or heartbeats). A live-but-long run
+    # keeps refreshing the clock, so legitimate multi-continuation turns are no
+    # longer killed mid-flight (WS-7).
+    _STREAM_IDLE_LIMIT_S = 320
+    _STREAM_POLL_S = 10
+
     def stream_to_queue(self, event_queue, message, session_key,
                         captured_actions=None, agent_id=None):
         if captured_actions is None:
             captured_actions = []
         self._ensure_started()
+        aq = _ActivityQueue(event_queue)
         future = asyncio.run_coroutine_threadsafe(
-            self._do_stream(event_queue, message, session_key, captured_actions, agent_id=agent_id),
+            self._do_stream(aq, message, session_key, captured_actions, agent_id=agent_id),
             self._loop
         )
         try:
-            future.result(timeout=320)
+            while True:
+                try:
+                    future.result(timeout=self._STREAM_POLL_S)
+                    return  # coroutine completed
+                except concurrent.futures.TimeoutError:
+                    idle = time.time() - aq.last_activity
+                    if idle >= self._STREAM_IDLE_LIMIT_S:
+                        logger.error(
+                            f"### Gateway stream watchdog: no events for "
+                            f"{int(idle)}s — cancelling run (session={session_key})")
+                        # Cancel the coroutine so it can't keep running and
+                        # later double-emit a terminal event on the abandoned
+                        # queue. run_coroutine_threadsafe's future.cancel()
+                        # raises CancelledError inside the task at its next
+                        # await (CancelledError is BaseException, so the
+                        # coroutine's `except Exception` guards don't swallow
+                        # it — it unwinds cleanly).
+                        future.cancel()
+                        event_queue.put({'type': 'error',
+                                         'error': 'Gateway stream timed out (inactivity)'})
+                        return
+                    # Still producing — keep waiting.
         except Exception as e:
             logger.error(f"Gateway stream error: {e}")
             event_queue.put({'type': 'error', 'error': str(e)})
@@ -1273,6 +1785,9 @@ class OpenClawGateway(GatewayBase):
 
     gateway_id = "openclaw"
     persistent = True
+    capabilities = frozenset({
+        "streaming", "steer", "sessions", "tool-events", "config-rpc", "reset",
+    })
 
     def __init__(self):
         self._router = GatewayRouter()
@@ -1282,6 +1797,91 @@ class OpenClawGateway(GatewayBase):
 
     def is_healthy(self) -> bool:
         return self.is_configured()
+
+    def check_health(self) -> tuple:
+        """Reachability + latency via a cheap TCP connect to the gateway socket.
+
+        No RPC handshake, no vendor API — just prove the gateway port accepts a
+        connection and time it. Falls back to is_configured() truthiness if the
+        URL can't be parsed. (WO-2.1)
+        """
+        if not self.is_configured():
+            return (False, None)
+        import socket as _socket
+        from urllib.parse import urlparse
+        url = os.getenv('CLAWDBOT_GATEWAY_URL', 'ws://127.0.0.1:18791')
+        parsed = urlparse(url)
+        host = parsed.hostname or '127.0.0.1'
+        port = parsed.port or 18791
+        t0 = time.time()
+        try:
+            with _socket.create_connection((host, port), timeout=2.0):
+                pass
+            return (True, round((time.time() - t0) * 1000, 1))
+        except OSError:
+            return (False, None)
+
+    def get_config_schema(self) -> dict:
+        """OpenClaw config schema: primary/fallback model refs + per-provider keys.
+
+        Model refs are 'provider/model-id' strings; provider keys route through
+        the vault credential env (config-rpc applies them hot). Built from the
+        loadable LLM catalog so a new provider shows up with no code change.
+        """
+        from services.ai_providers import build_llm_config_schema
+        fields = [
+            {"id": "primary", "type": "text", "label": "Primary model (provider/model-id)",
+             "required": False, "placeholder": "zai/glm-5-turbo"},
+            {"id": "fallback", "type": "text", "label": "Fallback model (provider/model-id)",
+             "required": False, "placeholder": "zai_fb/glm-5-turbo"},
+        ]
+        fields.extend(build_llm_config_schema().get("fields", []))
+        return {"fields": fields, "editable": True, "transport": "config-rpc"}
+
+    def configure(self, partial: dict) -> dict:
+        """Apply a model/key change via the existing config.patch RPC path.
+
+        Reuses routes.admin's effective-config read + partial builder + RPC
+        (imported lazily to avoid an import cycle) so this is the SAME hardened,
+        schema-validated write the AI-Models tab uses — not a duplicate. (WO-2.1)
+
+        Accepts the same shape as PUT /api/admin/ai-config:
+            {"primary": "...", "fallback": "...", "keys": {"anthropic": "sk-..."}}
+        """
+        try:
+            from routes.admin import (
+                _get_effective_config, _build_ai_config_partial, _run_rpc,
+                _oc_config_writable, _write_oc_config, _deep_merge,
+            )
+        except Exception as exc:
+            return {"status": "error", "detail": f"config path unavailable: {exc}"}
+        import json as _json
+
+        config, source, base_hash = _get_effective_config()
+        if not config:
+            return {"status": "error",
+                    "detail": "gateway unreachable and no readable openclaw.json"}
+        built, changes = _build_ai_config_partial(partial, config)
+        if not built:
+            return {"status": "applied", "detail": "no changes"}
+        if source == "gateway":
+            result = _run_rpc("config.patch",
+                              {"raw": _json.dumps(built), "baseHash": base_hash}, timeout=15.0)
+            if result.get("ok"):
+                return {"status": "applied", "detail": "applied via config.patch",
+                        "changes": changes}
+            return {"status": "error",
+                    "detail": f"gateway rejected change: {result.get('error')}"}
+        if not _oc_config_writable():
+            return {"status": "error",
+                    "detail": "gateway unreachable and openclaw.json not writable"}
+        try:
+            _write_oc_config(_deep_merge(config, built))
+        except Exception as exc:
+            return {"status": "error", "detail": f"write failed: {exc}"}
+        return {"status": "needs_restart",
+                "detail": "wrote openclaw.json directly — restart openclaw to apply",
+                "changes": changes}
 
     def stream_to_queue(self, event_queue, message, session_key,
                         captured_actions=None, **kwargs):

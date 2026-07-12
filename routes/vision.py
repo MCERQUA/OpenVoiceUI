@@ -217,10 +217,16 @@ def identify_face():
                         'message': 'No faces registered yet'}), 200
 
     # Decode and save to temp file (DeepFace needs a file path)
-    image_data = image
-    if ',' in image_data:
-        image_data = image_data.split(',', 1)[1]
-    image_bytes = base64.b64decode(image_data)
+    # Malformed/truncated data-URIs happen with flaky camera capture — return the
+    # same graceful "unknown" payload as every other failure path, never a 500.
+    try:
+        image_data = image
+        if ',' in image_data:
+            image_data = image_data.split(',', 1)[1]
+        image_bytes = base64.b64decode(image_data)
+    except Exception:
+        return jsonify({'name': 'unknown', 'confidence': 0,
+                        'message': 'Invalid image data'}), 200
 
     tmp_path = None
     try:

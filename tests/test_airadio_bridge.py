@@ -232,7 +232,7 @@ class TestPushSongHappyPath:
             assert args[1].endswith("/api/agent/push-song")
             assert kwargs["headers"]["X-JamBot-Agent-Key"] == "fake-shared-secret"
             assert kwargs["headers"]["X-JamBot-User"] == "test-dev"
-            assert "files" in kwargs and "file" in kwargs["files"]
+            assert "files" in kwargs and "audio" in kwargs["files"]
         finally:
             if fake_song.exists():
                 fake_song.unlink()

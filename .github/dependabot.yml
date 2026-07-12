@@ -3,7 +3,7 @@ updates:
   # Python dependencies
   - package-ecosystem: "pip"
     directory: "/"
-    target-branch: "dev"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -21,7 +21,7 @@ updates:
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
-    target-branch: "dev"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -37,7 +37,7 @@ updates:
   # Docker (if using docker-compose.yml or Dockerfile)
   - package-ecosystem: "docker"
     directory: "/"
-    target-branch: "dev"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "monday"

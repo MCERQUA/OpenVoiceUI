@@ -38,7 +38,7 @@ from routes.music import current_music_state as _music_state
 from services.gateway_manager import gateway_manager
 from services.gateways.compat import is_system_response
 from services.tts import generate_tts_b64 as _tts_generate_b64
-from tts_providers import get_provider, list_providers
+from tts_providers import get_provider, list_providers, invalidate as _tts_invalidate
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,17 @@ _VOICE_INSTRUCTIONS = (
     "The frontend handles Suno — do NOT call any Suno APIs yourself. "
     "After generation, the new song appears in [Available tracks:] by its title. "
     "Use [MUSIC_PLAY:song title] to play it — do NOT use exec/shell to find the file. "
+
+    # --- Delivering a download link (voice / SMS / email) ---
+    "SONG DOWNLOAD / DELIVERY: "
+    "When the user asks for a download or a link to a generated song, give them a DIRECT link in this exact form: "
+    "https://DOMAIN/generated_music/FILENAME?download=1  — where FILENAME is the EXACT file name from the "
+    "[Available tracks — Generated:] list (e.g. 'shop-bay-wisdom.mp3'), and DOMAIN is this site's domain. "
+    "The ?download=1 makes the browser SAVE the file instead of just playing it. "
+    "RULES: (1) NEVER invent a URL — generated songs live ONLY at /generated_music/<file>, never /music/<file>. "
+    "(2) NEVER emit a [CANVAS:...] page for a download — there is no download page; use the direct link above. "
+    "(3) For 'the last/latest track I made', use the song shown in [Latest generated song: ...] context — do not guess. "
+    "(4) The same https://DOMAIN/generated_music/FILENAME?download=1 link is what you text or email the user. "
 
     # --- SoundCloud (real playback, no auth) ---
     "SOUNDCLOUD: [SOUNDCLOUD:<full-track-url>] — embeds the track in the music player and plays it. "
@@ -328,6 +339,39 @@ _session_key_lock = threading.Lock()
 _session_recovery_key: str | None = None  # Set after double-empty to escape poisoned session
 
 # ---------------------------------------------------------------------------
+# Per-turn context: cached music-track NAME lists (voice-latency finding #6).
+# get_music_files() does a full dir iterdir() + per-file stat() + metadata load
+# every call, and the agent context build calls it twice (library+generated)
+# on EVERY turn. On big-library tenants that adds avoidable per-turn latency.
+# This 10s TTL cache is scoped ONLY to the agent's "[Available tracks ...]"
+# context string — the music UI/API endpoints keep calling get_music_files()
+# directly, so they stay fully fresh. 10s staleness in the agent's track list
+# is immaterial (Suno completions are announced separately via the
+# completed/failed queues), and matches the existing FIND-0x perf caching.
+_music_names_cache: dict = {}          # playlist -> {'ts': float, 'names': list[str]}
+_music_names_lock = threading.Lock()
+_MUSIC_NAMES_TTL_SECONDS: float = 10.0
+
+
+def _cached_music_names(playlist: str) -> list[str]:
+    """Track display-names for `playlist`, cached for _MUSIC_NAMES_TTL_SECONDS.
+    Fail-soft: any error returns []. Used only by the per-turn context build."""
+    now = time.time()
+    with _music_names_lock:
+        ent = _music_names_cache.get(playlist)
+        if ent and (now - ent['ts']) < _MUSIC_NAMES_TTL_SECONDS:
+            return ent['names']
+    try:
+        from routes.music import get_music_files
+        tracks = get_music_files(playlist)
+        names = [n for n in (t.get('title') or t.get('name', '') for t in tracks) if n]
+    except Exception:  # noqa: BLE001
+        names = []
+    with _music_names_lock:
+        _music_names_cache[playlist] = {'ts': now, 'names': names}
+    return names
+
+# ---------------------------------------------------------------------------
 # Conversation state (module-level singletons)
 # ---------------------------------------------------------------------------
 
@@ -400,6 +444,12 @@ def bump_voice_session() -> str:
     cache warm.
     """
     global _consecutive_empty_responses, _session_key_cache
+    # Exit session-recovery mode: a manual reset means the user wants a
+    # genuinely fresh start on the stable key. Previously the recovery key
+    # survived bump_voice_session() (nothing called _exit_session_recovery
+    # at all), so the Reset button left the app pinned to a recovery-<epoch>
+    # session forever.
+    _exit_session_recovery()
     try:
         with open(VOICE_SESSION_FILE, 'r') as f:
             counter = int(f.read().strip())
@@ -419,10 +469,26 @@ _recovery_entered_at: float = 0
 _recovery_last_activity_at: float = 0
 _recovery_last_exited_at: float = 0
 
+#: True once the current recovery session has produced at least one real
+#: (non-empty, non-fallback) response. A successful recovery session IS the
+#: new stable session (sticky-recovery design, see the text_done handler) and
+#: must NOT be idle-cleared back to the possibly-still-poisoned main key —
+#: that idle-clear was the recurrence engine behind the repeated
+#: main → double-empty → recovery loops (2 dead user turns per loop).
+_recovery_had_success: bool = False
+
 #: Context-replay prime — injected into the FIRST request on the recovery
 #: session so the fresh openclaw session has memory of the conversation that
 #: was poisoned. Cleared after one consume via :func:`consume_recovery_prime`.
 _recovery_context_prime: str | None = None
+
+#: When the current prime was built (epoch). A prime can now survive a
+#: __session_start__ greeting and failed deliveries, so it needs an age cap:
+#: if the user walks away and comes back hours later, replaying the
+#: poison-moment turns as "ongoing conversation" would be wrong. Primes older
+#: than this are discarded at consume time.
+_recovery_prime_built_at: float = 0
+_RECOVERY_PRIME_MAX_AGE_S: float = 1800.0  # 30 min
 
 #: Most recent steer/interject message per session key, with timestamp.
 #: When a user speaks mid-inference the interject is delivered fire-and-forget
@@ -460,7 +526,7 @@ def consume_recent_steer(session_key: str, max_age_s: float = 30.0) -> str | Non
     return msg
 
 
-def _build_recovery_prime(max_turns: int = 6) -> str | None:
+def _build_recovery_prime(max_turns: int = 6, window_minutes: int = 120) -> str | None:
     """Build a compressed history summary from the most recent DB turns so a
     fresh recovery session doesn't lose context.
 
@@ -471,7 +537,27 @@ def _build_recovery_prime(max_turns: int = 6) -> str | None:
     """
     try:
         from services.paths import DB_PATH
+        from datetime import timedelta
         import sqlite3
+        # Time-filter: only inject turns from the last ``window_minutes`` so
+        # stale context from previous sessions (days old) can't poison a fresh
+        # recovery.
+        #
+        # FORMAT FIX: log_conversation() writes created_at as
+        # datetime.now().isoformat() → '2026-06-12T03:46:25' (with a 'T').
+        # The old filter compared against datetime('now','-10 minutes') →
+        # '2026-06-12 03:38:25' (with a space). SQLite compares TEXT
+        # lexically and 'T' > ' ', so every same-day row passed regardless
+        # of age (fail-open) while just after UTC midnight NO row passed
+        # (fail-closed → prime=None → recovery amnesia even on the happy
+        # path). Compute the cutoff in Python in the SAME isoformat the
+        # writer uses so the comparison is exact.
+        #
+        # WINDOW: 120 min, deliberately wider than the old nominal 10 — the
+        # accidental same-day window is what made delivered primes good;
+        # a true 10-minute window would hand back an EMPTY prime whenever
+        # poisoning follows a normal conversational pause.
+        _cutoff = (datetime.now() - timedelta(minutes=window_minutes)).isoformat()
         with sqlite3.connect(str(DB_PATH), timeout=2.0) as _c:
             _c.row_factory = sqlite3.Row
             # NOTE: most rows land with session_id IS NULL (the main
@@ -479,15 +565,12 @@ def _build_recovery_prime(max_turns: int = 6) -> str | None:
             # usually None) — only the steer/interject routes explicitly
             # write session_id='default'. Include both so the prime
             # reflects the actual recent conversation.
-            # Time-filter: only inject turns from the last 10 minutes so stale
-            # context from previous sessions (hours/days old) can't poison a
-            # fresh recovery. Recovery is immediate so old turns are irrelevant.
             rows = _c.execute(
                 'SELECT role, message FROM conversation_log '
                 "WHERE (session_id = 'default' OR session_id IS NULL) "
-                "AND created_at >= datetime('now', '-10 minutes') "
+                'AND created_at >= ? '
                 'ORDER BY id DESC LIMIT ?',
-                (max_turns,),
+                (_cutoff, max_turns),
             ).fetchall()
         if not rows:
             return None
@@ -521,12 +604,76 @@ def _build_recovery_prime(max_turns: int = 6) -> str | None:
         return None
 
 
+def _with_recent_history(fallback_msg: str) -> str:
+    """Prepend recent conversation turns to a Z.AI-direct fallback message.
+
+    The direct fallback bypasses the openclaw session entirely, so without
+    this the fallback model answers with ZERO conversation memory — the
+    client-facing "amnesia" replies ("no indication of what 'one' refers
+    to", phatty 2026-07-02). Reuses the recovery-prime builder (last turns
+    from conversation_log). Fail-open: on any problem, return the message
+    unchanged.
+    """
+    try:
+        prime = _build_recovery_prime(max_turns=8)
+        if prime:
+            return prime + fallback_msg
+    except Exception as _e:
+        logger.warning(f'### _with_recent_history failed: {_e}')
+    return fallback_msg
+
+
 def consume_recovery_prime() -> str | None:
-    """Return the recovery context prime once and clear it."""
+    """Return the recovery context prime once and clear it.
+    Discards primes older than :data:`_RECOVERY_PRIME_MAX_AGE_S` — a prime
+    that survived a greeting / failed deliveries must not replay hours-old
+    turns as if they were the ongoing conversation."""
     global _recovery_context_prime
     p = _recovery_context_prime
     _recovery_context_prime = None
+    if p and time.time() - _recovery_prime_built_at > _RECOVERY_PRIME_MAX_AGE_S:
+        logger.info(
+            f'### Recovery prime expired (built '
+            f'{int(time.time() - _recovery_prime_built_at)}s ago) — discarding'
+        )
+        return None
     return p
+
+
+def restore_recovery_prime(prime: str | None) -> None:
+    """Re-arm a consumed recovery prime after the turn that carried it FAILED
+    (empty response / gateway error / stream timeout).
+
+    Without this, the prime is single-consume: if the first request on the
+    recovery session dies (common — the same upstream brownout that poisoned
+    the session is usually still in progress), the conversation context is
+    lost forever and the user meets an amnesiac agent. Verified live on
+    bricks 2026-06-11 19:58 ("Injecting session-recovery prime (2758 chars)"
+    immediately followed by "EMPTY-FINAL RETRY FAILED: both attempts empty").
+
+    Only restores while still in recovery mode and only if no newer prime has
+    been armed in the meantime (a fresh double-empty rebuilds a newer prime —
+    never clobber it with an older one).
+    """
+    global _recovery_context_prime
+    if prime and _session_recovery_key is not None and _recovery_context_prime is None:
+        _recovery_context_prime = prime
+        logger.info(f'### Recovery prime re-armed after failed delivery ({len(prime)} chars)')
+
+
+def mark_recovery_success() -> None:
+    """Record that the current recovery session produced a real response.
+    A successful recovery session is the new stable session (sticky-recovery
+    design) — :func:`_check_recovery_timeout` must not idle-clear it back to
+    the possibly-still-poisoned main key.
+    """
+    global _recovery_had_success
+    if _session_recovery_key is not None and not _recovery_had_success:
+        _recovery_had_success = True
+        logger.info(
+            f'### SESSION RECOVERY HEALTHY: "{_session_recovery_key}" produced a real '
+            f'response — keeping it as the stable session (no idle-clear back to main)'
+        )
 
 
 def _enter_session_recovery():
@@ -543,7 +690,8 @@ def _enter_session_recovery():
     Uses a timestamped key so that if the recovery session ITSELF poisons
     later, a new recovery-<epoch> session can be spun up cleanly. The
     last-exited cooldown prevents rapid thrashing."""
-    global _session_recovery_key, _recovery_entered_at, _recovery_last_activity_at, _recovery_context_prime
+    global _session_recovery_key, _recovery_entered_at, _recovery_last_activity_at, \
+        _recovery_context_prime, _recovery_had_success, _recovery_prime_built_at
     # Cooldown: prevent re-entering recovery within 10s of a previous SUCCESSFUL
     # exit. Pre-Fix-F this was measured against _recovery_entered_at which
     # double-dutied as "last activity" after activity bumping was added —
@@ -569,9 +717,11 @@ def _enter_session_recovery():
     # enter recovery when main is genuinely broken, so a new session per
     # poisoning event is appropriate.
     _session_recovery_key = f'recovery-{int(now)}'
+    _recovery_had_success = False
     # Pull 30 turns instead of 6 — complex multi-turn icon/canvas work easily
     # exceeds 6 turns and the agent was losing all context after recovery.
     _recovery_context_prime = _build_recovery_prime(max_turns=30)
+    _recovery_prime_built_at = now
     logger.warning(
         f'### SESSION RECOVERY: switching to key "{_session_recovery_key}" '
         f'(prime={"yes" if _recovery_context_prime else "no"}, '
@@ -586,11 +736,16 @@ def _exit_session_recovery():
     Also resets the double-empty circuit breaker and records the exit
     timestamp so :func:`_enter_session_recovery` can cooldown against it
     (prevents thrash, but ALLOWS re-entry when main gets re-poisoned)."""
-    global _session_recovery_key, _double_empty_restart_count, _recovery_last_exited_at
+    global _session_recovery_key, _double_empty_restart_count, _recovery_last_exited_at, \
+        _recovery_context_prime, _recovery_had_success
     if _session_recovery_key is not None:
         old_recovery = _session_recovery_key
         _session_recovery_key = None
         _double_empty_restart_count = 0
+        _recovery_had_success = False
+        # Drop any armed-but-undelivered prime — the stable key has its own
+        # server-side history; injecting a recovery prime there duplicates it.
+        _recovery_context_prime = None
         _recovery_last_exited_at = time.time()
         stable = get_voice_session_key()
         logger.info(f'### SESSION RECOVERY CLEARED: "{old_recovery}" → back to stable key "{stable}"')
@@ -620,20 +775,35 @@ def bump_recovery_activity() -> None:
 
 
 def _check_recovery_timeout():
-    """Auto-clear stale recovery keys. Only fires if the recovery session has
-    been idle (no gateway events) longer than :data:`_RECOVERY_IDLE_TIMEOUT_S`.
-    The normal exit path is :func:`_exit_session_recovery` on first success.
+    """Auto-clear STUCK recovery keys — i.e. recovery sessions that never
+    produced a single successful response and have been idle longer than
+    :data:`_RECOVERY_IDLE_TIMEOUT_S`.
+
+    A recovery session that HAS succeeded is the new stable session
+    (sticky-recovery design — see the text_done handler) and is deliberately
+    NEVER idle-cleared. The old behavior cleared any idle recovery, dumping
+    the next conversation back onto the possibly-still-poisoned main key:
+    every >10-minute pause cost the user two dead turns (empty + retry-empty)
+    and a context switch into yet another recovery session. Verified live on
+    bricks 2026-06-11: TIMEOUT-clear of a healthy recovery → next interaction
+    on main → DOUBLE EMPTY → new recovery.
     """
-    global _session_recovery_key
+    global _session_recovery_key, _recovery_context_prime
     if _session_recovery_key is None:
         return
+    if _recovery_had_success:
+        return  # healthy recovery = the new stable session; never idle-clear
     idle_for = time.time() - max(_recovery_last_activity_at, _recovery_entered_at)
     if idle_for > _RECOVERY_IDLE_TIMEOUT_S:
         logger.warning(
             f'### SESSION RECOVERY TIMEOUT: "{_session_recovery_key}" '
-            f'idle for >{int(_RECOVERY_IDLE_TIMEOUT_S)}s — clearing'
+            f'idle for >{int(_RECOVERY_IDLE_TIMEOUT_S)}s with no successful '
+            f'response (stuck) — clearing'
         )
         _session_recovery_key = None
+        # The prime belonged to the abandoned recovery attempt — don't let it
+        # leak into the stable session's next turn.
+        _recovery_context_prime = None
 
 
 # ---------------------------------------------------------------------------
@@ -758,6 +928,62 @@ def normalize_action_tags(text: str) -> str:
     return text
 
 
+def strip_canvas_action_tags(text: str) -> str:
+    """Strip [CANVAS_ACTION:{...JSON...}] tags via a brace walker.
+
+    The JSON payload nests {} and [] (e.g. checkbox-group ``values`` arrays),
+    which defeats both ``[^\\]]*`` and the ``_nb`` one-level-nesting pattern
+    used for browser-companion tags. Walk the payload respecting string
+    literals, escapes, and brace depth. (2026-07-02 tradeshow form-fill fix —
+    without this the raw JSON tag was spoken aloud by TTS.)
+    """
+    if not text or '[CANVAS_ACTION' not in text.upper():
+        return text
+    out = []
+    idx = 0
+    pattern = re.compile(r'\[CANVAS_ACTION:', re.IGNORECASE)
+    while True:
+        m = pattern.search(text, idx)
+        if not m:
+            out.append(text[idx:])
+            break
+        json_start = m.end()
+        if json_start >= len(text) or text[json_start] != '{':
+            out.append(text[idx:m.end()])
+            idx = m.end()
+            continue
+        depth, i, in_str, esc = 0, json_start, False, False
+        while i < len(text):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == '\\':
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            i += 1
+        if depth == 0 and i < len(text) and text[i] == ']':
+            out.append(text[idx:m.start()])
+            idx = i + 1  # skip the whole tag
+        else:
+            # Malformed/unterminated tag (e.g. mid-stream cut): drop from tag
+            # start to end of text so a half-arrived tag is never spoken.
+            out.append(text[idx:m.start()])
+            idx = len(text)
+            break
+    return ''.join(out)
+
+
 def clean_for_tts(text: str) -> str:
     """Remove markdown, reasoning tokens, and non-speech characters for TTS."""
     if not text:
@@ -765,6 +991,10 @@ def clean_for_tts(text: str) -> str:
 
     # Normalize sloppy tag whitespace FIRST so every strip regex below matches.
     text = normalize_action_tags(text)
+
+    # Strip [CANVAS_ACTION:{json}] BEFORE the regex chain — the JSON payload
+    # nests ] and } so no regex below can match it (2026-07-02).
+    text = strip_canvas_action_tags(text)
 
     # Strip GPT-OSS-120B reasoning tokens (but not if NO/YES is the full response)
     if text.strip().upper() not in ['NO', 'YES', 'NO.', 'YES.']:
@@ -1013,10 +1243,13 @@ def _conversation_inner():
             }) + '\n'
         return Response(_noop_stream(), mimetype='application/x-ndjson')
 
-    # Input length guard (P7-T3 security audit)
-    # Browser companion task loop sends page context (~5K) + prompt — allow 8K for those
-    # CSV/text file attachments can push messages over 4K — allow 15K for jambot sessions
-    _max_msg_len = 8000 if ui_context and ui_context.get('source') == 'jambot_extension' else 15000
+    # Input length guard (P7-T3 security audit) — raised 2026-06-25.
+    # A user's pasted prompt must NEVER be rejected for normal large pastes (text files, CSVs,
+    # docs, transcripts). The old 15K cap turned a big paste into a 400 "Message too long" API
+    # error with no response. Cap is now generous and sits well under the model's real input
+    # budget (GLM 204.8K-token context ≈ ~800K chars) — only an abusive multi-MB paste hits it.
+    # Browser-extension messages carry page context too, so they get a generous cap as well.
+    _max_msg_len = 200000 if ui_context and ui_context.get('source') == 'jambot_extension' else 500000
     if len(user_message) > _max_msg_len:
         return jsonify({'error': f'Message too long (max {_max_msg_len} characters)'}), 400
 
@@ -1235,14 +1468,11 @@ def _conversation_inner():
             context_parts.append(f'[Music PLAYING: {track}]')
 
         # Available music tracks (so agent can use [MUSIC_PLAY:exact name])
+        # Names come from a 10s TTL cache (_cached_music_names) so a full
+        # dir-scan isn't paid on every turn — voice-latency finding #6.
         try:
-            from routes.music import get_music_files
-            _lib_tracks = get_music_files('library')
-            _gen_tracks = get_music_files('generated')
-            _lib_names = [t.get('title') or t.get('name', '') for t in _lib_tracks]
-            _gen_names = [t.get('title') or t.get('name', '') for t in _gen_tracks]
-            _lib_names = [n for n in _lib_names if n]
-            _gen_names = [n for n in _gen_names if n]
+            _lib_names = _cached_music_names('library')
+            _gen_names = _cached_music_names('generated')
             _parts = []
             if _lib_names:
                 _parts.append(f'Library ({len(_lib_names)}): {_cap_list(_lib_names, max_chars=2000)}')
@@ -1250,6 +1480,22 @@ def _conversation_inner():
                 _parts.append(f'Generated ({len(_gen_names)}): {_cap_list(_gen_names, max_chars=2000)}')
             if _parts:
                 context_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
+        except Exception:
+            pass
+
+        # Authoritative "last track you made" — newest generated song by file
+        # mtime (created_date metadata is date-only and useless for recency).
+        # Gives the agent the exact filename + a ready-to-send download link so
+        # it never guesses or hands out a broken /music/ URL.
+        try:
+            from routes.music import get_latest_generated_track
+            _latest = get_latest_generated_track()
+            if _latest:
+                context_parts.append(
+                    f"[Latest generated song: {_latest['title']!r} "
+                    f"(file: {_latest['filename']}) — "
+                    f"download link: /generated_music/{_latest['filename']}?download=1]"
+                )
         except Exception:
             pass
 
@@ -1318,6 +1564,13 @@ def _conversation_inner():
     except Exception:
         pass  # Profile system not available — skip gracefully
 
+    # Greetings are short by design ("Hey, what's up?") — with the 40-char
+    # minimum they never hit a mid-stream sentence boundary, so greeting TTS
+    # only fired at text_done (issue #81: 5-38s first-audio latency on
+    # session start). Fire on the first complete sentence regardless of length.
+    if user_message == '__session_start__':
+        _min_sentence_chars = 1
+
     # Inject [CURRENT_USER: ...] so the agent knows WHO is actually logged in
     # right now (regardless of which tenant account they're using). When Mike
     # the developer pops into a client tenant to debug, the agent should treat
@@ -1350,6 +1603,28 @@ def _conversation_inner():
                 logger.warning(f'mesh-gate refresh failed (non-fatal): {_ge}')
     except Exception as _e:
         logger.warning(f'CURRENT_USER injection failed (non-fatal): {_e}')
+
+    # Inject [CANVAS_STYLE: ...] when the tenant has an active canvas style.
+    # Agents write page files directly (bypassing the pages API) and long
+    # sessions never re-read skills, so soft skill guidance is not enough —
+    # this per-turn tag is the enforcement that actually reaches the agent.
+    try:
+        from services.canvas_styles import get_active_style_id as _get_style_id
+        _style_id = _get_style_id()
+        if _style_id:
+            context_parts.append(
+                f'[CANVAS_STYLE: The user chose the "{_style_id}" design system for all '
+                f'canvas pages. BEFORE creating or restyling ANY canvas page you MUST '
+                f'read canvas-styles/ACTIVE-STYLE.md inside your canvas-pages directory '
+                f'(OpenClaw: /app/runtime/canvas-pages/canvas-styles/ACTIVE-STYLE.md; '
+                f'Hermes: /workspace/canvas-pages/canvas-styles/ACTIVE-STYLE.md) and start '
+                f'by cp-ing canvas-styles/active-template.html to the new page file, then '
+                f'edit the copy (keep its full <style> block — never retype the template). '
+                f'Never use the old dark default. '
+                f'Never use emoji as UI icons — use inline SVG.]'
+            )
+    except Exception as _se:
+        logger.warning(f'CANVAS_STYLE injection failed (non-fatal): {_se}')
 
     # Inject voice assistant instructions so the agent knows about action tags.
     # This must be in-app (not workspace files) so it works out of the box.
@@ -1466,13 +1741,25 @@ def _conversation_inner():
             # prepend a compressed history summary to the very FIRST request
             # so the fresh openclaw session has memory of the prior turns.
             # Skip on __session_start__: injecting old context onto a greeting
-            # request causes the agent to pick up stale work instead of greeting.
-            _recovery_prime = consume_recovery_prime()
-            if _recovery_prime and user_message == '__session_start__':
-                logger.info('### Suppressing recovery prime on __session_start__ (greeting takes priority)')
-                _recovery_prime = None
-            elif _recovery_prime:
-                logger.info(f'### Injecting session-recovery prime ({len(_recovery_prime)} chars)')
+            # request causes the agent to pick up stale work instead of
+            # greeting. CRITICAL: skip means LEAVE THE PRIME ARMED, not
+            # consume-and-discard. After a drop the user's next request is
+            # almost always __session_start__ (they re-open the call) — the
+            # old consume-then-null code burned the prime on the greeting, so
+            # every turn after the "Hi, can I help you?" ran on a context-free
+            # session. That was the primary amnesia path.
+            _recovery_prime = None
+            if user_message == '__session_start__':
+                if _recovery_context_prime is not None:
+                    logger.info(
+                        '### Holding recovery prime through __session_start__ '
+                        '(greeting goes out prime-free; prime stays armed for '
+                        'the first real user turn)'
+                    )
+            else:
+                _recovery_prime = consume_recovery_prime()
+                if _recovery_prime:
+                    logger.info(f'### Injecting session-recovery prime ({len(_recovery_prime)} chars)')
 
             def _run_gateway():
                 _msg = message_with_context
@@ -1502,22 +1789,46 @@ def _conversation_inner():
                     except Exception:
                         _audio_fmt = 'wav'
 
+                    def _detect_audio_fmt(audio_b64):
+                        """Sniff the real container from the audio header (TTS-11).
+
+                        After a sticky/transitive fallback the actual provider can
+                        switch mp3↔wav mid-response; labeling every chunk with the
+                        PRIMARY provider's format then lies and breaks decoding. Read
+                        the magic bytes so each chunk is labeled with what it actually
+                        is. Falls back to the primary provider's format on any doubt.
+                        """
+                        try:
+                            head = base64.b64decode(audio_b64[:32])
+                        except Exception:
+                            return _audio_fmt
+                        if head[:4] == b'RIFF' and head[8:12] == b'WAVE':
+                            return 'wav'
+                        if head[:3] == b'ID3' or (len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0):
+                            return 'mp3'
+                        if head[:4] == b'OggS':
+                            return 'ogg'
+                        return _audio_fmt
+
                     def _tts_error_event(err_str):
+                        # CLIENT-FACING RULE (Mike 2026-06-28): never serialize raw provider
+                        # name, billing reason, or exception text into a client-bound event.
+                        # Classify to a neutral reason CODE only (used for client-side logic /
+                        # devtools log) — the raw string is logged server-side here, never sent.
                         code_match = re.search(r'\[groq:([^\]]+)\]', err_str)
                         err_code = code_match.group(1) if code_match else 'unknown'
-                        REASONS = {
-                            'model_terms_required': ('terms', 'Accept Orpheus terms at console.groq.com'),
-                            'rate_limit_exceeded':  ('rate_limit', 'Groq rate limit hit — try again shortly'),
-                            'insufficient_quota':   ('no_credits', 'Groq account out of credits'),
-                            'invalid_api_key':      ('bad_key', 'Invalid GROQ_API_KEY'),
-                            'unknown':              ('error', err_str),
+                        REASON_CODES = {
+                            'model_terms_required': 'terms',
+                            'rate_limit_exceeded':  'rate_limit',
+                            'insufficient_quota':   'no_credits',
+                            'invalid_api_key':      'bad_key',
+                            'unknown':              'error',
                         }
-                        reason_key, reason_msg = REASONS.get(err_code, ('error', err_str))
+                        reason_key = REASON_CODES.get(err_code, 'error')
+                        logger.warning(f"### TTS error (not sent to client): reason={reason_key} raw={err_str!r}")
                         return json.dumps({
                             'type': 'tts_error',
-                            'provider': tts_provider,
                             'reason': reason_key,
-                            'error': reason_msg,
                         }) + '\n'
 
                     # ── Mid-stream TTS helpers ────────────────────────────
@@ -1604,18 +1915,27 @@ def _conversation_inner():
                                 result['error'] = str(e)
                             finally:
                                 done.set()
+                                # Wake the stream loop NOW so finished audio is
+                                # flushed immediately instead of sitting in
+                                # _tts_pending until the next gateway event or
+                                # queue-poll timeout (up to 10s during quiet
+                                # tool runs). Handled as a no-op flush trigger.
+                                try:
+                                    event_queue.put({'type': 'tts_ready'})
+                                except Exception:
+                                    pass
                         if _parallel_sentences:
                             threading.Thread(target=_run, daemon=True).start()
                         else:
                             _run()  # sequential — block until this sentence is done
                         return done, result
 
-                    def _audio_event(audio_b64, chunk_idx, tts_ms=0):
+                    def _audio_event(audio_b64, chunk_idx, tts_ms=0, fmt=None):
                         """Build an audio SSE event dict with gap config."""
                         evt = {
                             'type': 'audio',
                             'audio': audio_b64,
-                            'audio_format': _audio_fmt,
+                            'audio_format': fmt or _detect_audio_fmt(audio_b64),
                             'chunk': chunk_idx,
                             'total_chunks': None,
                             'timing': {
@@ -1654,7 +1974,12 @@ def _conversation_inner():
                             # connection alive (they time out at 60-100s of silence).
                             elapsed = int(time.time() - _stream_start)
                             if elapsed > _STREAM_HARD_TIMEOUT:
-                                yield json.dumps({'type': 'error', 'error': 'Gateway timeout'}) + '\n'
+                                # Re-arm a consumed recovery prime — this turn
+                                # never completed, so context must carry forward.
+                                restore_recovery_prime(_recovery_prime)
+                                # CLIENT-FACING RULE (Mike 2026-06-28): neutral code only.
+                                logger.error('### STREAM HARD TIMEOUT (not sent to client): Gateway timeout')
+                                yield json.dumps({'type': 'error', 'code': 'timeout'}) + '\n'
                                 break
                             yield json.dumps({'type': 'heartbeat', 'elapsed': elapsed}) + '\n'
                             continue
@@ -1667,6 +1992,19 @@ def _conversation_inner():
 
                         if evt['type'] == 'handshake':
                             metrics['handshake_ms'] = evt['ms']
+                            continue
+
+                        if evt['type'] == 'tts_ready':
+                            # A TTS thread finished — flush any audio that's ready,
+                            # in order, without waiting for gateway event cadence.
+                            while _tts_pending and _tts_pending[0][0].is_set():
+                                _done_evt, _res = _tts_pending.pop(0)
+                                if _res.get('error'):
+                                    yield _tts_error_event(_res['error'])
+                                elif _res.get('audio'):
+                                    yield _audio_event(_res['audio'], _chunks_sent)
+                                    _chunks_sent += 1
+                                    _last_audio_time = time.time()
                             continue
 
                         if evt['type'] == 'heartbeat':
@@ -1700,12 +2038,14 @@ def _conversation_inner():
                                         _last_tool_name, _tools_seen, _silence_secs
                                     )
                                     logger.info(f"### STATUS TTS ({_status_tts_count}): '{_status_text}' (silence={_silence_secs:.0f}s)")
-                                    _status_done, _status_res = _fire_tts(_status_text)
-                                    _status_done.wait(timeout=10)
-                                    if _status_res.get('audio'):
-                                        yield _audio_event(_status_res['audio'], _chunks_sent)
-                                        _chunks_sent += 1
-                                        _last_audio_time = time.time()
+                                    # Non-blocking: queue it like a normal sentence and
+                                    # let the tts_ready flush deliver it. Blocking here
+                                    # held the whole stream (deltas, real audio) hostage
+                                    # for up to 10s while filler audio generated.
+                                    _tts_pending.append(_fire_tts(_status_text))
+                                    # Reset the silence clock at fire time so the next
+                                    # heartbeat doesn't double-fire while this generates.
+                                    _last_audio_time = time.time()
                                     _status_tts_count += 1
                             continue
 
@@ -1794,9 +2134,12 @@ def _conversation_inner():
                                 if tts_text_interim and tts_text_interim.strip():
                                     _tts_pending.append(_fire_tts(tts_text_interim))
 
-                            # Flush all pending TTS audio immediately
+                            # Flush all pending TTS audio immediately. Bounded per-chunk
+                            # wait (TTS-2) so a hung provider can't stall the interim
+                            # flush; a failed chunk is skipped, not fatal (already if/elif).
+                            _interim_timeout = int(os.getenv('TTS_SENTENCE_TIMEOUT', '20'))
                             for _done_i, _res_i in _tts_pending:
-                                _done_i.wait(timeout=30)
+                                _done_i.wait(timeout=_interim_timeout)
                                 if _res_i.get('error'):
                                     yield _tts_error_event(_res_i['error'])
                                 elif _res_i.get('audio'):
@@ -1827,10 +2170,13 @@ def _conversation_inner():
                                 logger.error(f"### GATEWAY ERROR → fallback: {error_msg}")
                                 # Detect rate limit specifically so the UI can surface it
                                 if 'rate limit' in error_msg.lower():
+                                    # CLIENT-FACING RULE (Mike 2026-06-28): never serialize the
+                                    # raw provider name or rate-limit string into a client-bound
+                                    # event. Send a neutral code only; the browser surfaces
+                                    # nothing and the spoken fallback below stays graceful.
                                     yield json.dumps({
                                         'type': 'rate_limit',
-                                        'provider': 'Z.AI',
-                                        'message': error_msg,
+                                        'code': 'throttled',
                                     }) + '\n'
                                     metrics['rate_limited'] = 1
                                 evt['response'] = "One moment, still working on that."
@@ -1913,6 +2259,11 @@ def _conversation_inner():
                             # exits recovery now.
                             if full_response and full_response.strip() and _session_recovery_key is not None:
                                 bump_recovery_activity()
+                                # A real (non-degenerate) response marks this
+                                # recovery session healthy — it becomes the new
+                                # stable session and is exempt from idle-clear.
+                                if full_response.strip().upper().rstrip('.!?') not in ('NO', 'YES'):
+                                    mark_recovery_success()
 
                             # ── Uncommitted tool-promise detection ────────────
                             # If the assistant said "let me build X" / "I'll write Y"
@@ -1963,6 +2314,14 @@ def _conversation_inner():
                                 and metrics.get('llm_inference_ms', 0) > 1000
                                 and not getattr(stream_response, '_continued', False)
                                 and _promise_re.search(full_response)
+                                # Question guard (phatty 2026-07-02): a reply that
+                                # ENDS with a question is the agent asking the user
+                                # for a decision ("Want me to send this for approval
+                                # first, or just fire it?"). Forcing "actually do it
+                                # now" both bypasses the user's answer AND lands a
+                                # chat.send in the turn-finalization window where it
+                                # gets coalesced → bare final → recovery cascade.
+                                and not full_response.strip().rstrip('*_ \n').endswith('?')
                             ):
                                 stream_response._continued = True
                                 logger.warning(
@@ -2106,9 +2465,33 @@ def _conversation_inner():
                                     )
                                 retry_queue = queue.Queue()
                                 captured_actions.clear()
+                                # Rebuild the FULL outbound message for the retry:
+                                # 1. Re-attach the recovery prime + reconnect prefix —
+                                #    the old retry sent bare message_with_context, so
+                                #    when the prime-carrying first turn on a recovery
+                                #    session came back empty, the retry silently
+                                #    dropped the conversation context (amnesia hole).
+                                # 2. Append a nudge so the retry prompt is NOT
+                                #    byte-identical to the failed attempt. The
+                                #    gateway-internal EMPTY-FINAL retry already
+                                #    resent the identical prompt twice; when the
+                                #    empty is prompt-deterministic (GLM thinking-only
+                                #    completion), identical retries fail identically.
+                                _retry_msg = message_with_context
+                                if _recovery_prefix:
+                                    _retry_msg = _recovery_prefix + _retry_msg
+                                if _recovery_prime:
+                                    _retry_msg = _recovery_prime + _retry_msg
+                                _retry_msg = _retry_msg + (
+                                    '\n\n[SYSTEM: Your previous attempt at this message '
+                                    'produced no spoken text. Respond now with a normal, '
+                                    'plain spoken-text reply to the user\'s message above. '
+                                    'Do not answer with a bare YES/NO, an empty message, '
+                                    'or only action tags.]'
+                                )
                                 def _retry_gateway():
                                     gateway_manager.stream_to_queue(
-                                        retry_queue, message_with_context,
+                                        retry_queue, _retry_msg,
                                         _retry_key, captured_actions,
                                         gateway_id=gateway_id,
                                         agent_id=agent_id,
@@ -2119,12 +2502,19 @@ def _conversation_inner():
                                 t_llm_start = time.time()
                                 retry_thread.start()
                                 event_queue = retry_queue
-                                logger.info("### RETRY: re-sent message to gateway")
+                                logger.info("### RETRY: re-sent message to gateway (with anti-empty nudge)")
                                 continue  # back to event loop — text_done NOT sent yet
 
                             # ── Z.AI direct fallback after double-empty ──
                             if _is_empty and getattr(stream_response, '_retried', False):
                                 logger.warning('### DOUBLE EMPTY — session poisoned, entering recovery mode')
+
+                                # If this turn consumed a prime, re-arm it first.
+                                # _enter_session_recovery() normally rebuilds a
+                                # fresh prime (which supersedes this), but when
+                                # its 10s cooldown skips the entry, this restore
+                                # is the only thing keeping the context alive.
+                                restore_recovery_prime(_recovery_prime)
 
                                 # 1. Switch to recovery session key so NEXT request
                                 #    goes to a fresh openclaw session (not the poisoned one)
@@ -2175,7 +2565,7 @@ def _conversation_inner():
                                     import requests as _req
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
                                     # Use full context so the fallback LLM has agent personality
-                                    _fallback_msg = message_with_context if message_with_context else user_message
+                                    _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
                                     _fallback_system = _load_voice_system_prompt()
                                     if _zai_key:
                                         _zai_resp = _req.post(
@@ -2225,7 +2615,7 @@ def _conversation_inner():
                                     try:
                                         import requests as _req
                                         _zai_key = os.environ.get('ZAI_API_KEY', '')
-                                        _fallback_msg = message_with_context if message_with_context else user_message
+                                        _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
                                         _fallback_system = _load_voice_system_prompt()
                                         if _zai_key:
                                             _zai_resp = _req.post(
@@ -2376,12 +2766,12 @@ def _conversation_inner():
                                     }) + '\n'
                                     logger.info(f'Served agent-generated audio: {len(file_bytes)} bytes ({audio_format})')
                                 except Exception as fp_err:
+                                    # CLIENT-FACING RULE (Mike 2026-06-28): log the raw
+                                    # exception server-side; send only a neutral reason code.
                                     logger.error(f'Failed to serve agent audio file {file_path}: {fp_err}')
                                     yield json.dumps({
                                         'type': 'tts_error',
-                                        'provider': 'agent',
                                         'reason': 'file_read_error',
-                                        'error': f'Agent generated audio but file could not be read: {fp_err}',
                                     }) + '\n'
                                 log_metrics(metrics)
                                 break
@@ -2407,8 +2797,15 @@ def _conversation_inner():
                                 _tts_pending.append(_fire_tts(_remaining))
                                 _tts_buf = ''
 
-                            # Fallback: no sentences extracted (very short response)
-                            if not _tts_pending and full_response:
+                            # Fallback: no sentences extracted (very short response).
+                            # Guard on _chunks_sent, NOT just _tts_pending: the delta
+                            # path pops sentences from _tts_pending as their audio is
+                            # yielded, so on short fast replies the list is already
+                            # empty at text_done and this fallback re-spoke the WHOLE
+                            # reply a second time (double audio, 2026-07-12).
+                            # _chunks_sent counts audio actually delivered — if any
+                            # went out, streaming TTS already covered the text.
+                            if not _tts_pending and _chunks_sent == 0 and full_response:
                                 tts_text = clean_for_tts(full_response)
                                 if tts_text and tts_text.strip():
                                     _tts_pending.append(_fire_tts(tts_text))
@@ -2435,22 +2832,52 @@ def _conversation_inner():
                                         actions=captured_actions,
                                         identified_person=identified_person,
                                         clerk_user_id=_clerk_user_id,
+                                        gateway=gateway_id or 'openclaw',
                                     )
                                 break
 
                             t_tts_start = time.time()
                             total_chunks = _chunks_sent + len(_tts_pending)
-                            tts_ok = True
+                            # TTS-2 / TTS-8: a hung provider must NOT head-of-line-block
+                            # the ordered flush, and one chunk's error/timeout must NOT
+                            # discard the already-generated (paid) chunks behind it.
+                            # First pass: wait a bounded per-chunk timeout; deliver ready
+                            # audio, skip errors, and defer any chunk whose provider is
+                            # still hung. Second pass: give the deferred chunks a short
+                            # grace and deliver any that landed (out of order beats
+                            # silence). Never silently drop paid audio — log the rest.
+                            _tts_sentence_timeout = int(os.getenv('TTS_SENTENCE_TIMEOUT', '20'))
+                            _tts_deferred_grace = int(os.getenv('TTS_DEFERRED_GRACE', '10'))
+                            _deferred = []
                             for i, (done_evt, res) in enumerate(_tts_pending):
-                                done_evt.wait(timeout=30)
-                                if res['error']:
+                                if done_evt.wait(timeout=_tts_sentence_timeout):
+                                    if res['error']:
+                                        metrics['tts_success'] = 0
+                                        metrics['tts_error'] = res['error']
+                                        yield _tts_error_event(res['error'])
+                                        continue  # skip only the failed chunk, keep flushing
+                                    if res['audio']:
+                                        yield _audio_event(res['audio'], _chunks_sent + i, tts_ms=int((time.time() - t_tts_start) * 1000))
+                                else:
+                                    logger.warning(
+                                        f"### TTS chunk {i} not ready after "
+                                        f"{_tts_sentence_timeout}s — skipping ahead (provider hung)"
+                                    )
+                                    _deferred.append((i, done_evt, res))
+                            # Second pass — deliver late-completing chunks if they land.
+                            for i, done_evt, res in _deferred:
+                                if done_evt.wait(timeout=_tts_deferred_grace):
+                                    if res['error']:
+                                        yield _tts_error_event(res['error'])
+                                    elif res['audio']:
+                                        logger.info(f"### TTS chunk {i} completed late — delivering")
+                                        yield _audio_event(res['audio'], _chunks_sent + i, tts_ms=int((time.time() - t_tts_start) * 1000))
+                                else:
                                     metrics['tts_success'] = 0
-                                    metrics['tts_error'] = res['error']
-                                    yield _tts_error_event(res['error'])
-                                    tts_ok = False
-                                    break
-                                if res['audio']:
-                                    yield _audio_event(res['audio'], _chunks_sent + i, tts_ms=int((time.time() - t_tts_start) * 1000))
+                                    logger.error(
+                                        f"### TTS chunk {i} never completed within grace — "
+                                        f"audio not delivered (provider hung); paid generation logged, not discarded"
+                                    )
 
                             metrics['tts_generation_ms'] = int((time.time() - t_tts_start) * 1000)
                             metrics['tts_text_len'] = metrics['response_len']
@@ -2471,13 +2898,24 @@ def _conversation_inner():
                                     actions=captured_actions,
                                     identified_person=identified_person,
                                     clerk_user_id=_clerk_user_id,
+                                    gateway=gateway_id or 'openclaw',
                                 )
                             break
 
                         if evt['type'] == 'error':
+                            # Gateway-level failure — if this request consumed a
+                            # recovery prime, the message likely never reached
+                            # the session. Re-arm the prime so the NEXT turn
+                            # still carries the conversation context.
+                            restore_recovery_prime(_recovery_prime)
+                            # CLIENT-FACING RULE (Mike 2026-06-28): never serialize the raw
+                            # gateway/exception text into a client-bound event. Log it
+                            # server-side; send only a neutral code the browser maps to a
+                            # graceful "reconnecting" line.
+                            logger.error(f"### STREAM ERROR (not sent to client): {evt.get('error', 'Unknown error')!r}")
                             yield json.dumps({
                                 'type': 'error',
-                                'error': evt.get('error', 'Unknown error')
+                                'code': 'gateway',
                             }) + '\n'
                             break
 
@@ -2509,6 +2947,10 @@ def _conversation_inner():
                             ai_response = normalize_action_tags(ai_response)
                     elif evt['type'] == 'handshake':
                         metrics['handshake_ms'] = evt['ms']
+                if not ai_response:
+                    # Turn failed — re-arm any consumed recovery prime so the
+                    # next request still carries the conversation context.
+                    restore_recovery_prime(_recovery_prime)
                 metrics['llm_inference_ms'] = int((time.time() - t_llm_start) * 1000)
                 metrics['tool_count'] = sum(
                     1 for a in captured_actions
@@ -2529,7 +2971,7 @@ def _conversation_inner():
         except Exception as e:
             logger.error(f'Failed to call Clawdbot Gateway: {e}')
 
-    # ── FALLBACK: Z.AI direct (glm-4.5-flash, no tools) ──────────────────
+    # ── FALLBACK: Z.AI direct (glm-5-flash, no tools) ───────────────────
     if not ai_response:
         if metrics.get('profile') == 'gateway':
             logger.warning('No text response from Gateway, falling back to Z.AI flash...')
@@ -2540,12 +2982,13 @@ def _conversation_inner():
         # Lazy import to avoid circular dependency (server.py imports this blueprint)
         try:
             import server as _server
-            ai_response = _server.get_zai_direct_response(message_with_context, session_id)
+            ai_response = _server.get_zai_direct_response(
+                _with_recent_history(message_with_context), session_id)
         except Exception as e:
             logger.error(f'Z.AI direct call failed: {e}')
             ai_response = None
         metrics['profile'] = 'flash-direct'
-        metrics['model'] = 'glm-4.5-flash'
+        metrics['model'] = 'glm-5-flash'
         metrics['llm_inference_ms'] = int((time.time() - t_flash_start) * 1000)
 
     # ── LAST RESORT ───────────────────────────────────────────────────────
@@ -2587,6 +3030,7 @@ def _conversation_inner():
             actions=captured_actions,
             identified_person=identified_person,
             clerk_user_id=_clerk_user_id,
+            gateway=gateway_id or 'openclaw',
         )
 
     response_data = {'response': ai_response, 'user_said': user_message}
@@ -2669,7 +3113,7 @@ def conversation_steer():
         return jsonify({'ok': False, 'error': 'No message provided'}), 400
 
     # Input length guard (same as main conversation endpoint)
-    if len(message) > 4000:
+    if len(message) > 500000:  # raised 2026-06-25 — never reject a user's pasted text (steer/interject)
         return jsonify({'ok': False, 'error': 'Message too long'}), 400
 
     session_key = get_voice_session_key()
@@ -2726,7 +3170,7 @@ def conversation_interject():
 
     if not message:
         return jsonify({'ok': False, 'error': 'No message provided'}), 400
-    if len(message) > 4000:
+    if len(message) > 500000:  # raised 2026-06-25 — never reject a user's pasted text (steer/interject)
         return jsonify({'ok': False, 'error': 'Message too long'}), 400
 
     lane = classify_message(message, agent_busy=True)
@@ -2848,15 +3292,31 @@ def conversation_reset():
 
 
 # ---------------------------------------------------------------------------
-# POST /api/session/reset  — manual session reset from UI actions panel
+# POST /api/session/reset-openclaw  — deep reset that also clears the openclaw
+# session JSONL (ADMIN-BUG-2, 2026-07-11)
 # ---------------------------------------------------------------------------
-
-@conversation_bp.route('/api/session/reset', methods=['POST'])
+# HISTORY / ADMIN-BUG-2: this handler was originally registered on
+# '/api/session/reset', the SAME path as server.py's soft/hard reset handler
+# (server.py `session_reset`). Because conversation_bp is registered before the
+# server.py @app.route is defined, Werkzeug matched THIS blueprint rule first —
+# silently shadowing server.py's mode-aware (soft/hard + pre-warm) handler that
+# SessionControl.js / the admin Health panel actually drive (they POST
+# {"mode": "soft"|"hard"} and read back `mode`). Worse, the openclaw-session-file
+# path below (`/home/node/.openclaw/...`) lives inside the OPENCLAW container, so
+# from the openvoiceui container it never exists — the try/except swallowed the
+# miss and this handler degraded to "bump the key" while blocking the richer one.
+#
+# FIX (additive, no deletion): this route is moved to the explicit, distinct
+# '/api/session/reset-openclaw' path. `/api/session/reset` is now unambiguously
+# served by server.py's canonical soft/hard handler. Both remain reachable; the
+# deep openclaw-file clear is opt-in via the new path.
+@conversation_bp.route('/api/session/reset-openclaw', methods=['POST'])
 def session_reset():
     """Clear the corrupted openclaw session state and return a fresh session key.
-    Called by the Reset button in the UI actions panel.
-    Clears the openclaw session JSONL file so orphaned messages don't cascade,
-    then bumps the voice session key so the next request starts completely fresh."""
+    Deep reset (opt-in): clears the openclaw session JSONL file so orphaned
+    messages don't cascade, then bumps the voice session key so the next request
+    starts completely fresh. The default /api/session/reset (server.py) handles
+    the common soft/hard reset."""
     old_key = get_voice_session_key()
     # Find and clear the openclaw session file for the current session key
     try:
@@ -2890,7 +3350,7 @@ def session_reset():
 def tts_providers_list():
     """List all available TTS providers with metadata."""
     try:
-        providers = list_providers(include_inactive=True)
+        providers = list_providers(include_inactive=True, probe=True)
         config_path = (Path(__file__).parent.parent
                        / 'tts_providers' / 'providers_config.json')
         default_provider = 'supertonic'
@@ -2973,6 +3433,10 @@ def tts_set_default_provider():
         except Exception as e:
             return jsonify({'ok': False, 'error': f'failed to write config: {e}'}), 500
 
+        # Drop the cached config + provider singletons so the next generate
+        # picks up the new default without a restart.
+        _tts_invalidate()
+
         logger.info(
             f'TTS default provider changed: {old_default} → {provider_id}'
         )
@@ -3041,6 +3505,9 @@ def tts_set_default_voice():
             os.replace(tmp_path, config_path)
         except Exception as e:
             return jsonify({'ok': False, 'error': f'failed to write config: {e}'}), 500
+
+        # Drop the cached config so the next read reflects the new voice order.
+        _tts_invalidate()
 
         logger.info(f'TTS default voice for {provider_id} → {voice}')
         return jsonify({
@@ -3314,7 +3781,10 @@ def tts_voices_list():
     """List all available voices across all providers, including cloned voices."""
     try:
         all_voices = {}
-        for provider_info in list_providers(include_inactive=False):
+        # probe=True: this is an explicit UI voice-list request, so instantiate
+        # cached singletons to surface live cloned_voices (a get_info() field the
+        # config catalog doesn't carry).
+        for provider_info in list_providers(include_inactive=False, probe=True):
             pid = provider_info.get('provider_id', provider_info.get('name', 'unknown'))
             voices = provider_info.get('voices', [])
             cloned = provider_info.get('cloned_voices', [])

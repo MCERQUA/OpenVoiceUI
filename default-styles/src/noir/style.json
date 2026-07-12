@@ -1,0 +1,32 @@
+{
+  "id": "noir",
+  "name": "Noir",
+  "tagline": "High-fashion monochrome editorial — typography as the design",
+  "description": "Stark black on pure white with brutal confidence: Archivo display type at heavy weights, solid black borders, hard offset shadows, zero radius, and one crimson thread for status and emphasis. The Vogue-runway-report of dashboards — editorial brutalism with discipline.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#ffffff",
+    "surface": "#ffffff",
+    "surface-2": "#f4f4f4",
+    "border": "#111111",
+    "text": "#111111",
+    "text-secondary": "#454545",
+    "text-muted": "#6f6f6f",
+    "heading": "#111111",
+    "brand": "#111111",
+    "brand-contrast": "#ffffff",
+    "accent": "#dc2626",
+    "success": "#15803d",
+    "warning": "#a16207",
+    "danger": "#b91c1c",
+    "scrollbar": "#111111",
+    "radius": "0px",
+    "radius-sm": "0px",
+    "shadow": "4px 4px 0 0 #111111",
+    "font-display": "'Archivo', 'Helvetica Neue', system-ui, sans-serif",
+    "font-body": "'Libre Franklin', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Space Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Libre+Franklin:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
+  }
+}

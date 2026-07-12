@@ -116,7 +116,7 @@
 
 /* Canvas padded mode — OS-style inset for external URLs */
 #canvas-container.canvas-padded {
-    background: #111 !important;
+    background: var(--bg-deep, #0d0f1a) !important;
 }
 #canvas-container.canvas-padded #canvas-iframe {
     position: absolute !important;
@@ -124,6 +124,12 @@
     width: auto !important; height: auto !important;
     border-radius: var(--radius-lg) !important;
     box-shadow: 0 0 40px rgba(0,0,0,0.6) !important;
+}
+@media (max-width: 768px) {
+    #canvas-container.canvas-padded #canvas-iframe {
+        top: 8px !important; left: 4px !important; right: 4px !important; bottom: 4px !important;
+        border-radius: var(--radius-md) !important;
+    }
 }
 
 /* Control buttons — Edge Tabs (Concept A) */
@@ -161,11 +167,17 @@
             border-right: none;
             border-radius: var(--radius-lg) 0 0 var(--radius-lg);
         }
-        .edge-tab:hover {
-            background: rgba(0, 136, 255, 0.18);
-            border-color: var(--blue-bright);
-            box-shadow: 0 0 15px rgba(0, 136, 255, 0.2);
-            width: 52px;
+        /* Hover-capable pointers only — on touch devices a tap leaves the element
+           in a sticky :hover state that overrides state classes (e.g. .ptt-mode
+           orange) until the user taps elsewhere. @media (hover: hover) keeps
+           hover styling off phones/tablets entirely. */
+        @media (hover: hover) {
+            .edge-tab:hover {
+                background: rgba(0, 136, 255, 0.18);
+                border-color: var(--blue-bright);
+                box-shadow: 0 0 15px rgba(0, 136, 255, 0.2);
+                width: 52px;
+            }
         }
 
         /* Active states per button type */
@@ -557,7 +569,12 @@
 
         /* Apply preset to edge tabs and listen panel accent colour */
         body[data-theme-preset] .edge-tab { background: rgba(var(--theme-accent),0.08); border-color: rgba(var(--theme-accent),0.25); color: var(--theme-accent-hex); }
-        body[data-theme-preset] .edge-tab:hover { background: rgba(var(--theme-accent),0.14); border-color: rgba(var(--theme-accent),0.5); }
+        /* (hover: hover) — this rule's specificity (0,3,1) beats state classes like
+           .ptt-button.ptt-mode (0,3,0), so a sticky touch-hover here masked the PTT
+           orange state on mobile until the next tap elsewhere. */
+        @media (hover: hover) {
+            body[data-theme-preset] .edge-tab:hover { background: rgba(var(--theme-accent),0.14); border-color: rgba(var(--theme-accent),0.5); }
+        }
         body[data-theme-preset] .listen-panel { border-color: rgba(var(--theme-accent),0.35); }
 
         /* ── Profile mode badge ── */
@@ -923,7 +940,9 @@
                 min-height: 48px;
                 font-size: 16px;
             }
-            .edge-tab:hover { width: 48px; }
+            @media (hover: hover) {
+                .edge-tab:hover { width: 48px; }
+            }
             #canvas-menu-button {
                 width: 36px;
                 height: 36px;
@@ -1537,7 +1556,11 @@
         }
         .party-effects-container.active { opacity: 1; }
 
-        /* Center Glow - pulses behind face with audio */
+        /* Center Glow - pulses behind face with audio.
+           Softness is baked into the gradient stops (was filter: blur(60px) — a
+           huge GPU blur re-run every frame while JS also rebuilt the gradient).
+           JS now animates only transform/opacity/hue-rotate over this fixed
+           hue-180 gradient. */
         .center-glow {
             position: fixed;
             top: 50%;
@@ -1546,10 +1569,14 @@
             width: 600px;
             height: 600px;
             border-radius: var(--radius-full);
-            background: radial-gradient(circle, rgba(0, 136, 255, 0.15) 0%, rgba(0, 255, 255, 0.05) 40%, transparent 70%);
-            filter: blur(60px);
+            background: radial-gradient(circle,
+                hsla(180, 90%, 50%, 0.40) 0%,
+                hsla(165, 90%, 40%, 0.18) 35%,
+                hsla(150, 90%, 30%, 0.08) 55%,
+                transparent 78%);
             pointer-events: none;
             z-index: 0;
+            will-change: transform, opacity, filter;
         }
 
         /* Beat Flash - screen flash on bass hits */
@@ -1625,6 +1652,7 @@
             background: var(--cyan);
             border-radius: 50%;
             opacity: 0;
+            will-change: transform;
         }
 
         /* Disco Dots - orbit and react */
@@ -1642,7 +1670,9 @@
             border-radius: 50%;
             filter: blur(3px);
             opacity: 0;
-            transition: left 0.1s ease-out, top 0.1s ease-out, opacity 0.2s;
+            /* moved via transform now (left/top never change after init);
+               audio-reactive opacity lives on .disco-container */
+            will-change: transform;
         }
 
         /* Waveform oscilloscope - FULL SCREEN background effect */
@@ -1661,7 +1691,8 @@
         #oscilloscope-canvas {
             width: 100%;
             height: 100%;
-            filter: drop-shadow(0 0 30px var(--cyan)) drop-shadow(0 0 60px var(--blue));
+            /* halo is drawn as layered strokes in-canvas — the old double
+               drop-shadow here forced a fullscreen GPU blur pass every frame */
         }
 
 /* Settings Drawer (top-center dropdown) */

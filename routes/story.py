@@ -248,8 +248,12 @@ def generate_scene():
             errors.append('ambient')
     threads.append(threading.Thread(target=do_ambient))
 
-    # SFX sounds
+    # SFX sounds — the sfx list comes from LLM JSON; "id" is requested in the
+    # prompt but not guaranteed. Backfill missing ids so indexing never KeyErrors.
     sfx_list = scene_data.get('sfx', [])
+    for _i, _sfx in enumerate(sfx_list):
+        if not _sfx.get('id'):
+            _sfx['id'] = f'sfx_{_i}'
     for sfx in sfx_list:
         sfx_file = story_dir / f'{scene_id}_{sfx["id"]}.mp3'
         def do_sfx(s=sfx, f=sfx_file):

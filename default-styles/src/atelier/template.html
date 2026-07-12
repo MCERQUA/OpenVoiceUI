@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hartwell Roofing &amp; Exteriors — Quarterly Operations Report</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Source+Sans+3:ital,wght@0,400..700;1,400..600&display=swap');
+
+/* ============================================================
+   ATELIER — Editorial Warm Light
+   Depth via hairline rules + spacing. One accent: deep teal.
+   ============================================================ */
+
+:root {
+  --bg: #faf8f5;
+  --surface: #fffefb;
+  --surface-2: #f3efe7;
+  --border: #e4ddd0;
+  --border-strong: #cfc6b4;
+  --text: #26211a;
+  --text-secondary: #5c5546;
+  --text-muted: #8b8271;
+  --heading: #1c170f;
+  --brand: #0f766e;
+  --brand-strong: #0c5f58;
+  --brand-contrast: #fffefb;
+  --brand-wash: rgba(15, 118, 110, 0.08);
+  --brand-ring: rgba(15, 118, 110, 0.15);
+  --accent: #b45309;
+  --accent-wash: rgba(180, 83, 9, 0.08);
+  --success: #227a4b;
+  --success-wash: rgba(34, 122, 75, 0.08);
+  --warning: #b45309;
+  --warning-wash: rgba(180, 83, 9, 0.08);
+  --danger: #b3372e;
+  --danger-wash: rgba(179, 55, 46, 0.08);
+  --scrollbar: #d8d0c1;
+  --radius: 3px;
+  --radius-sm: 2px;
+  --shadow: 0 1px 0 rgba(38, 33, 26, 0.05);
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-body: 'Source Sans 3', -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scrollbar-color: var(--scrollbar) var(--bg); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 5px; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--brand); color: var(--brand-contrast); }
+
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* ---------- typography ---------- */
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  color: var(--heading);
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+h1 {
+  font-size: clamp(2.1rem, 5vw, 3.1rem);
+  font-weight: 580;
+  font-variation-settings: 'opsz' 72;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: clamp(1.4rem, 3vw, 1.75rem);
+  font-variation-settings: 'opsz' 40;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  font-size: 1.1rem;
+  font-variation-settings: 'opsz' 24;
+}
+
+p { color: var(--text-secondary); }
+
+a { color: var(--brand); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+
+/* the signature small-caps label */
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
+}
+
+.section-no { color: var(--brand); }
+
+.lede {
+  font-size: 1.05rem;
+  max-width: 62ch;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- entrance motion ---------- */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.reveal { animation: fade-up 480ms var(--ease-out) both; }
+.reveal:nth-child(2) { animation-delay: 60ms; }
+.reveal:nth-child(3) { animation-delay: 120ms; }
+.reveal:nth-child(4) { animation-delay: 180ms; }
+.reveal:nth-child(5) { animation-delay: 240ms; }
+.reveal:nth-child(6) { animation-delay: 300ms; }
+.reveal:nth-child(7) { animation-delay: 360ms; }
+.reveal:nth-child(8) { animation-delay: 420ms; }
+
+@keyframes grow-bar { from { width: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { animation: none; }
+  .bar-fill { animation: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+/* ---------- masthead ---------- */
+
+.masthead {
+  border-top: 1px solid var(--text);
+  padding-top: 6px;
+  margin-bottom: 48px;
+}
+
+.masthead-rule {
+  border-top: 1px solid var(--text);
+  padding-top: 24px;
+}
+
+.masthead-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 20px;
+}
+
+.masthead-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 32px;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.masthead .subtitle {
+  margin-top: 10px;
+  font-size: 1.05rem;
+  color: var(--text-secondary);
+  max-width: 56ch;
+}
+
+.masthead .subtitle em { font-family: var(--font-display); font-style: italic; }
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
+  white-space: nowrap;
+}
+
+.btn svg { flex: none; }
+
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  border-color: var(--brand);
+}
+.btn-primary:hover { background: var(--brand-strong); border-color: var(--brand-strong); }
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--text);
+}
+.btn-secondary:hover { background: var(--surface-2); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--brand);
+  border-color: transparent;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.btn-ghost:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+/* ---------- sections ---------- */
+
+section { margin-bottom: 56px; }
+
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 24px;
+}
+
+.section-head .label { display: block; margin-bottom: 6px; }
+
+/* ---------- KPI stat blocks ---------- */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px 24px 18px;
+  position: relative;
+  transition: border-color 180ms ease;
+}
+
+.kpi::before {
+  content: '';
+  position: absolute;
+  top: -1px; left: -1px; right: -1px;
+  height: 2px;
+  background: var(--brand);
+  border-radius: var(--radius) var(--radius) 0 0;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.kpi:hover { border-color: var(--border-strong); }
+.kpi:hover::before { opacity: 1; }
+
+.kpi .label { display: block; margin-bottom: 10px; }
+
+.kpi-value {
+  font-family: var(--font-display);
+  font-size: 2.6rem;
+  font-weight: 560;
+  font-variation-settings: 'opsz' 72;
+  letter-spacing: -0.015em;
+  line-height: 1;
+  color: var(--heading);
+  font-variant-numeric: lining-nums;
+}
+
+.kpi-value small {
+  font-size: 1.3rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.kpi-delta {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.kpi-delta .vs { font-weight: 400; color: var(--text-muted); }
+.delta-up { color: var(--success); }
+.delta-down { color: var(--danger); }
+
+/* ---------- badges ---------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badge-success { color: var(--success); background: var(--success-wash); border: 1px solid rgba(34, 122, 75, 0.35); }
+.badge-warning { color: var(--warning); background: var(--warning-wash); border: 1px solid rgba(180, 83, 9, 0.35); }
+.badge-danger  { color: var(--danger);  background: var(--danger-wash);  border: 1px solid rgba(179, 55, 46, 0.35); }
+.badge-neutral { color: var(--text-secondary); background: var(--surface-2); border: 1px solid var(--border); }
+.badge-brand   { color: var(--brand); background: var(--brand-wash); border: 1px solid rgba(15, 118, 110, 0.35); }
+
+/* ---------- table ---------- */
+
+.table-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 640px;
+}
+
+thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
+  text-align: left;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+}
+
+tbody td {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background-color 150ms ease; }
+tbody tr:hover { background: var(--surface-2); }
+
+td.job { color: var(--heading); font-weight: 600; }
+td.job .sub { display: block; font-size: 13px; font-weight: 400; color: var(--text-muted); }
+
+.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num { color: var(--heading); }
+
+/* ---------- progress bars ---------- */
+
+.progress-list { display: grid; gap: 20px; }
+
+.progress-row .progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  gap: 16px;
+}
+
+.progress-row .progress-name { font-weight: 600; color: var(--heading); font-size: 15px; }
+.progress-row .progress-figure {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.bar {
+  height: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: var(--brand);
+  border-radius: 3px;
+  animation: grow-bar 600ms var(--ease-out) both;
+}
+
+.bar-fill.is-warning { background: var(--accent); }
+
+/* ---------- two-column band: form + timeline ---------- */
+
+.band {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.panel > .label { display: block; margin-bottom: 4px; }
+.panel h3 { margin-bottom: 6px; }
+.panel .panel-note { font-size: 14px; margin-bottom: 20px; }
+
+/* forms */
+.field { margin-bottom: 16px; }
+.field label { display: block; margin-bottom: 6px; }
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+input[type="text"], input[type="email"], select {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  appearance: none;
+}
+
+select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%235c5546' stroke-width='1.5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+input::placeholder { color: var(--text-muted); }
+
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+/* timeline */
+.timeline { list-style: none; }
+
+.timeline li {
+  position: relative;
+  padding: 0 0 20px 24px;
+  border-left: 1px solid var(--border);
+}
+
+.timeline li:last-child { padding-bottom: 0; }
+
+.timeline li::before {
+  content: '';
+  position: absolute;
+  left: -4.5px;
+  top: 7px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 1px solid var(--surface);
+}
+
+.timeline li.t-warning::before { background: var(--accent); }
+.timeline li.t-success::before { background: var(--success); }
+
+.timeline .t-time { display: block; margin-bottom: 2px; }
+.timeline .t-text { font-size: 15px; color: var(--text-secondary); }
+.timeline .t-text strong { color: var(--heading); font-weight: 600; }
+
+/* ---------- card grid (crews) ---------- */
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+}
+
+.crew-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  transition: border-color 180ms ease;
+}
+
+.crew-card:hover { border-color: var(--border-strong); }
+
+.crew-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.crew-card .crew-lead { font-size: 14px; margin-bottom: 16px; }
+.crew-card .crew-lead em { font-family: var(--font-display); font-style: italic; }
+
+.crew-stats {
+  display: flex;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  gap: 24px;
+}
+
+.crew-stat .label { display: block; margin-bottom: 2px; font-size: 10px; }
+.crew-stat b {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 560;
+  color: var(--heading);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- pull quote ---------- */
+
+.pull-quote {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 32px 8px;
+  text-align: left;
+}
+
+.pull-quote blockquote {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 480;
+  font-variation-settings: 'opsz' 40;
+  font-size: clamp(1.2rem, 2.6vw, 1.55rem);
+  line-height: 1.4;
+  color: var(--heading);
+  max-width: 44ch;
+}
+
+.pull-quote cite {
+  display: block;
+  margin-top: 14px;
+  font-style: normal;
+}
+
+/* ---------- footer ---------- */
+
+footer {
+  border-top: 1px solid var(--text);
+  margin-top: 64px;
+  padding-top: 16px;
+  padding-bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+footer .fine { font-size: 13px; color: var(--text-muted); max-width: 60ch; }
+footer .fine em { font-family: var(--font-display); font-style: italic; }
+
+/* ---------- small screens ---------- */
+
+/* Mobile width rule: the host wrapper's 25px safe-area padding is the ONLY
+   horizontal inset on phones. Wrappers/sections get ZERO side padding here;
+   cards keep only 16px internal padding. Never stack padded containers. */
+@media (max-width: 640px) {
+  .page, section { padding-left: 0; padding-right: 0; }
+  .panel, .crew-card { padding: 18px 16px; }
+  .kpi { padding: 16px 16px 14px; }
+  .pull-quote { padding-left: 0; padding-right: 0; }
+  .form-row { grid-template-columns: 1fr; }
+  thead th, tbody td { padding-left: 14px; padding-right: 14px; }
+  .kpi-grid { gap: 12px; }
+  .band, .card-grid { gap: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ MASTHEAD ============ -->
+  <header class="masthead reveal">
+    <div class="masthead-meta">
+      <span class="label">Hartwell Roofing &amp; Exteriors · Est. 1987</span>
+      <span class="label">Q2 2026 · Prepared July 10</span>
+    </div>
+    <div class="masthead-rule">
+      <div class="masthead-head">
+        <div>
+          <span class="label"><span class="section-no">№ 00</span> · Quarterly Operations Report</span>
+          <h1>A quarter of steady hands<br>and full order books.</h1>
+          <p class="subtitle">Production, sales, and crew performance for April through June — <em>compiled from the field, set in ink.</em></p>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-secondary" type="button">Share report</button>
+          <button class="btn btn-primary" type="button">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><path d="M6.5 1v8m0 0L3.5 6m3 3l3-3M1.5 11.5h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Export PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ 01 · KEY FIGURES ============ -->
+  <section class="reveal" aria-labelledby="s1">
+    <div class="section-head">
+      <div>
+        <span class="label"><span class="section-no">№ 01</span> · Key Figures</span>
+        <h2 id="s1">The quarter at a glance</h2>
+      </div>
+      <a href="#" class="label" style="color:var(--brand); letter-spacing:0.1em;">Full ledger →</a>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi">
+        <span class="label">Revenue booked</span>
+        <div class="kpi-value">$412<small>k</small></div>
+        <div class="kpi-delta"><span class="delta-up">▲ 12.4%</span> <span class="vs">vs. Q1</span></div>
+      </div>
+      <div class="kpi">
+        <span class="label">Jobs completed</span>
+        <div class="kpi-value">148</div>
+        <div class="kpi-delta"><span class="delta-up">▲ 9 jobs</span> <span class="vs">vs. Q1</span></div>
+      </div>
+      <div class="kpi">
+        <span class="label">Avg. job margin</span>
+        <div class="kpi-value">31.2<small>%</small></div>
+        <div class="kpi-delta"><span class="delta-down">▼ 0.8 pts</span> <span class="vs">material costs</span></div>
+      </div>
+      <div class="kpi">
+        <span class="label">Estimate → close</span>
+        <div class="kpi-value">38<small>%</small></div>
+        <div class="kpi-delta"><span class="delta-up">▲ 4.1 pts</span> <span class="vs">best on record</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 02 · ACTIVE JOBS TABLE ============ -->
+  <section class="reveal" aria-labelledby="s2">
+    <div class="section-head">
+      <div>
+        <span class="label"><span class="section-no">№ 02</span> · Production</span>
+        <h2 id="s2">Active jobs</h2>
+      </div>
+      <button class="btn btn-ghost" type="button">View all 23 →</button>
+    </div>
+    <div class="table-card">
+      <table>
+        <thead>
+          <tr>
+            <th>Job &amp; Address</th>
+            <th>Crew</th>
+            <th>Status</th>
+            <th class="num">Contract</th>
+            <th class="num">Due</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="job">Alvarez Residence <span class="sub">1418 Sycamore Ln — full tear-off, architectural shingle</span></td>
+            <td>Crew A · Reyes</td>
+            <td><span class="badge badge-success">On schedule</span></td>
+            <td class="num">$24,800</td>
+            <td class="num">Jul 14</td>
+          </tr>
+          <tr>
+            <td class="job">Whitfield Dental <span class="sub">220 Commerce Pkwy — TPO flat roof, 11,200 sq ft</span></td>
+            <td>Crew C · Okafor</td>
+            <td><span class="badge badge-warning">Materials hold</span></td>
+            <td class="num">$61,350</td>
+            <td class="num">Jul 22</td>
+          </tr>
+          <tr>
+            <td class="job">Beaumont Estate <span class="sub">7 Ridgecrest Ct — standing-seam metal, copper valleys</span></td>
+            <td>Crew B · Lindqvist</td>
+            <td><span class="badge badge-success">On schedule</span></td>
+            <td class="num">$88,200</td>
+            <td class="num">Aug 02</td>
+          </tr>
+          <tr>
+            <td class="job">Cedar Row Townhomes <span class="sub">Units 1–8, Cedar Row — re-roof, gutters, fascia</span></td>
+            <td>Crew A · Reyes</td>
+            <td><span class="badge badge-danger">2 days behind</span></td>
+            <td class="num">$47,900</td>
+            <td class="num">Jul 11</td>
+          </tr>
+          <tr>
+            <td class="job">Marsh &amp; Sons Feed <span class="sub">Rt 9 warehouse — storm repair, insurance claim</span></td>
+            <td>Crew D · Petit</td>
+            <td><span class="badge badge-brand">Starting Jul 15</span></td>
+            <td class="num">$19,400</td>
+            <td class="num">Jul 25</td>
+          </tr>
+          <tr>
+            <td class="job">Okonkwo Residence <span class="sub">55 Birchwood Dr — cedar shake restoration</span></td>
+            <td>Crew B · Lindqvist</td>
+            <td><span class="badge badge-neutral">Awaiting permit</span></td>
+            <td class="num">$33,750</td>
+            <td class="num">Aug 09</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 03 · GOALS / PROGRESS ============ -->
+  <section class="reveal" aria-labelledby="s3">
+    <div class="section-head">
+      <div>
+        <span class="label"><span class="section-no">№ 03</span> · Targets</span>
+        <h2 id="s3">Progress against annual goals</h2>
+      </div>
+      <span class="label">Fiscal year 54% elapsed</span>
+    </div>
+    <div class="panel">
+      <div class="progress-list">
+        <div class="progress-row">
+          <div class="progress-meta">
+            <span class="progress-name">Annual revenue — $1.6M target</span>
+            <span class="progress-figure">$829k · 52%</span>
+          </div>
+          <div class="bar"><div class="bar-fill" style="width:52%"></div></div>
+        </div>
+        <div class="progress-row">
+          <div class="progress-meta">
+            <span class="progress-name">Maintenance contracts — 120 target</span>
+            <span class="progress-figure">74 · 62%</span>
+          </div>
+          <div class="bar"><div class="bar-fill" style="width:62%"></div></div>
+        </div>
+        <div class="progress-row">
+          <div class="progress-meta">
+            <span class="progress-name">Crew certifications renewed — 32 target</span>
+            <span class="progress-figure">14 · 44%</span>
+          </div>
+          <div class="bar"><div class="bar-fill is-warning" style="width:44%"></div></div>
+        </div>
+        <div class="progress-row">
+          <div class="progress-meta">
+            <span class="progress-name">Warranty callbacks kept under 2.5%</span>
+            <span class="progress-figure">1.8% · well inside</span>
+          </div>
+          <div class="bar"><div class="bar-fill" style="width:72%"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PULL QUOTE ============ -->
+  <section class="reveal" aria-label="Note from the field">
+    <div class="pull-quote">
+      <blockquote>&ldquo;Three storm seasons in a row without a single missed close-out. The order book is full through September &mdash; the constraint now is crews, not customers.&rdquo;</blockquote>
+      <cite class="label">Dana Hartwell · Operations Director</cite>
+    </div>
+  </section>
+
+  <!-- ============ 04 · INTAKE FORM + ACTIVITY ============ -->
+  <section class="reveal" aria-labelledby="s4">
+    <div class="section-head">
+      <div>
+        <span class="label"><span class="section-no">№ 04</span> · Office</span>
+        <h2 id="s4">New estimate &amp; recent activity</h2>
+      </div>
+    </div>
+    <div class="band">
+
+      <form class="panel" onsubmit="return false;">
+        <span class="label">Intake</span>
+        <h3>Log a new estimate request</h3>
+        <p class="panel-note">Routed to the estimating desk; homeowner receives a confirmation the same day.</p>
+        <div class="field">
+          <label class="label" for="f-name">Customer name</label>
+          <input type="text" id="f-name" placeholder="e.g. Ruth Calloway">
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label class="label" for="f-type">Job type</label>
+            <select id="f-type">
+              <option>Full replacement</option>
+              <option>Repair / patch</option>
+              <option>Storm &amp; insurance</option>
+              <option>Gutters &amp; exteriors</option>
+              <option>Annual maintenance</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="label" for="f-source">Lead source</label>
+            <select id="f-source">
+              <option>Referral</option>
+              <option>Website</option>
+              <option>Yard sign</option>
+              <option>Repeat customer</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">Create estimate</button>
+          <button class="btn btn-secondary" type="button">Save draft</button>
+          <button class="btn btn-ghost" type="button">Clear</button>
+        </div>
+      </form>
+
+      <div class="panel">
+        <span class="label">Ledger</span>
+        <h3>Recent activity</h3>
+        <p class="panel-note">The last five entries from the operations ledger.</p>
+        <ul class="timeline">
+          <li class="t-success">
+            <span class="label t-time">Today · 9:41 AM</span>
+            <span class="t-text"><strong>Beaumont Estate</strong> — copper valley work signed off by county inspector, first pass.</span>
+          </li>
+          <li>
+            <span class="label t-time">Today · 8:15 AM</span>
+            <span class="t-text"><strong>Crew A</strong> dispatched to Cedar Row with two extra hands to recover the schedule.</span>
+          </li>
+          <li class="t-warning">
+            <span class="label t-time">Yesterday · 4:02 PM</span>
+            <span class="t-text"><strong>Whitfield Dental</strong> — TPO membrane shipment delayed to Jul 16; client notified.</span>
+          </li>
+          <li>
+            <span class="label t-time">Yesterday · 11:30 AM</span>
+            <span class="t-text">Estimate #2214 accepted — <strong>Okonkwo Residence</strong>, cedar shake restoration, $33,750.</span>
+          </li>
+          <li class="t-success">
+            <span class="label t-time">Jul 8 · 3:20 PM</span>
+            <span class="t-text"><strong>Q2 safety review</strong> closed with zero recordable incidents — 214 days and counting.</span>
+          </li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ 05 · CREW CARDS ============ -->
+  <section class="reveal" aria-labelledby="s5">
+    <div class="section-head">
+      <div>
+        <span class="label"><span class="section-no">№ 05</span> · People</span>
+        <h2 id="s5">Crews in the field</h2>
+      </div>
+      <button class="btn btn-ghost" type="button">Crew schedule →</button>
+    </div>
+    <div class="card-grid">
+      <div class="crew-card">
+        <div class="crew-head">
+          <h3>Crew A</h3>
+          <span class="badge badge-success">Active</span>
+        </div>
+        <p class="crew-lead">Led by <em>Marisol Reyes</em> · residential tear-off specialists, 6 hands.</p>
+        <div class="crew-stats">
+          <div class="crew-stat"><span class="label">Jobs Q2</span><b>41</b></div>
+          <div class="crew-stat"><span class="label">On-time</span><b>93%</b></div>
+          <div class="crew-stat"><span class="label">Callbacks</span><b>1</b></div>
+        </div>
+      </div>
+      <div class="crew-card">
+        <div class="crew-head">
+          <h3>Crew B</h3>
+          <span class="badge badge-success">Active</span>
+        </div>
+        <p class="crew-lead">Led by <em>Anders Lindqvist</em> · metal &amp; specialty roofing, 5 hands.</p>
+        <div class="crew-stats">
+          <div class="crew-stat"><span class="label">Jobs Q2</span><b>27</b></div>
+          <div class="crew-stat"><span class="label">On-time</span><b>96%</b></div>
+          <div class="crew-stat"><span class="label">Callbacks</span><b>0</b></div>
+        </div>
+      </div>
+      <div class="crew-card">
+        <div class="crew-head">
+          <h3>Crew C</h3>
+          <span class="badge badge-warning">Materials hold</span>
+        </div>
+        <p class="crew-lead">Led by <em>Chidi Okafor</em> · commercial flat-roof systems, 7 hands.</p>
+        <div class="crew-stats">
+          <div class="crew-stat"><span class="label">Jobs Q2</span><b>18</b></div>
+          <div class="crew-stat"><span class="label">On-time</span><b>89%</b></div>
+          <div class="crew-stat"><span class="label">Callbacks</span><b>2</b></div>
+        </div>
+      </div>
+      <div class="crew-card">
+        <div class="crew-head">
+          <h3>Crew D</h3>
+          <span class="badge badge-neutral">Staging</span>
+        </div>
+        <p class="crew-lead">Led by <em>Sylvie Petit</em> · storm response &amp; repairs, 4 hands.</p>
+        <div class="crew-stats">
+          <div class="crew-stat"><span class="label">Jobs Q2</span><b>62</b></div>
+          <div class="crew-stat"><span class="label">On-time</span><b>91%</b></div>
+          <div class="crew-stat"><span class="label">Callbacks</span><b>3</b></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="reveal">
+    <p class="fine">Hartwell Roofing &amp; Exteriors · Quarterly Operations Report, Q2 2026. Figures unaudited; ledger reconciliation follows on the 15th. <em>Set in Fraunces &amp; Source Sans.</em></p>
+    <span class="label">Page 1 of 1</span>
+  </footer>
+
+</div>
+</body>
+</html>

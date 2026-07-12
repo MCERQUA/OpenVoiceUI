@@ -1,5 +1,11 @@
 FROM python:3.12-slim
 
+# Source-commit provenance — readable via `docker inspect` so the drift detector
+# reads the baked commit directly instead of guessing (closes ovui_commit_drift).
+# Passed by jambot-build-images.sh as: --build-arg SOURCE_COMMIT=$(git rev-parse --short HEAD)
+ARG SOURCE_COMMIT=unknown
+LABEL com.jambot.source_commit=$SOURCE_COMMIT
+
 WORKDIR /app
 
 # System deps for cryptography, audio processing, vision, and canvas features

@@ -71,6 +71,27 @@
       "audio_format": "mp3",
       "sample_rate": 24000
     },
+    "qwen3-local": {
+      "name": "Qwen3-TTS (local GPU)",
+      "provider_id": "qwen3-local",
+      "cost_per_minute": 0.0,
+      "quality": "very-high",
+      "latency": "fast",
+      "voices": [],
+      "features": ["voice-cloning", "multilingual", "local-gpu", "free", "mp3-output", "no-api-key"],
+      "requires_api_key": false,
+      "status": "active",
+      "description": "Qwen3-TTS-1.7B on residential RTX 3070 GPU — free, no API cost. Cloned voices only. Requires laptop + tunnel to be up.",
+      "languages": ["en", "zh", "es", "fr", "de", "it", "ja", "ko", "pt", "ru"],
+      "max_characters": 5000,
+      "notes": "Free local GPU inference via reverse SSH tunnel. Cloned voices only (.pt). Auto-disabled when laptop offline — falls back to qwen3 (fal.ai). OVUI_BRIDGE_AUTH_TOKEN required.",
+      "clone_endpoint": "/api/tts/clone",
+      "requires_microphone": false,
+      "requires_websocket": false,
+      "mode": "tts-only",
+      "audio_format": "mp3",
+      "sample_rate": 24000
+    },
     "resemble": {
       "name": "Resemble AI (Chatterbox)",
       "provider_id": "resemble",

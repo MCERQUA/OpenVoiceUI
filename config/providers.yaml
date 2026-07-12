@@ -2,6 +2,19 @@
 # ADR-001: YAML format with env interpolation
 # ADR-003: Abstract base class + registry pattern
 #
+# ── STATUS (2026-07-11, WO-1.3) ────────────────────────────────────────────
+# Only the `stt:` section is LOAD-BEARING. autodiscover() runs at startup
+# (server.py) to register the STT providers so the Service Catalog reads STT
+# ids from the same registry that /api/stt/* uses.
+#
+# The `llm:` section is DEPRECATED — see providers/llm/DEPRECATED.md. LLM
+# routing belongs to the gateway/framework layer (openclaw.json model config via
+# the config.patch RPC / GatewayBase.configure()). The llm modules here have
+# zero production call sites; autodiscover only registers the classes. The
+# provider CATALOG the admin panel renders is config/ai-providers.json, not this
+# file. Kept (not removed) so autodiscover stays stable; do not build on it.
+# The `tts:` section is likewise informational — live TTS uses tts_providers/.
+#
 # ${ENV_VAR} placeholders are resolved at runtime from environment variables.
 # 'modules' lists Python module paths imported during autodiscover() so that
 # each module's register() calls fire automatically.

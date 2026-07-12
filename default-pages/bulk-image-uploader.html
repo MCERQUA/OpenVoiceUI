@@ -458,8 +458,22 @@ function render(){
   $('empty').style.display='none';
   $('grid').innerHTML=list.map((f,i)=>{
     const isImg=f.cat==='img';const e=f.ext.toUpperCase();
+    // Inline playable thumbnails: images render <img>, videos render an inline <video> the user
+    // can play right in the feed (muted+preload=metadata so 20+ clips don't all download at once),
+    // audio renders a compact inline <audio> player. event.stopPropagation keeps play/scrub controls
+    // from bubbling up to the card's lightbox onclick — clicking the card elsewhere still opens the lightbox.
+    let thumb;
+    if(isImg){
+      thumb=`<img src="${f.url}" loading="lazy" alt="">`;
+    }else if(f.cat==='vid'){
+      thumb=`<video src="${f.url}" muted playsinline preload="metadata" controls onclick="event.stopPropagation()" style="width:100%;height:100%;object-fit:cover;background:#000"></video>`;
+    }else if(f.cat==='aud'){
+      thumb=`<div class="ct-ic" style="width:100%;padding:0 10px">${IC.aud.replace(/stroke-width="[^"]*"/,'stroke-width="1.4"').replace(/<svg/,`<svg style="stroke:${COLORS.aud}"`)}<audio src="${f.url}" controls preload="none" onclick="event.stopPropagation()" style="width:100%;max-width:130px"></audio></div>`;
+    }else{
+      thumb=`<div class="ct-ic">${IC[f.cat]?.replace(/stroke-width="[^"]*"/,'stroke-width="1.4"').replace(/<svg/,`<svg style="stroke:${COLORS[f.cat]}"`)}<span class="ct-ext bg-${f.cat} c-${f.cat}">${e}</span></div>`;
+    }
     return`<div class="card" onclick="lbOpen(${i},'${filter}','${s.replace(/'/g,"\\'")}')" role="button" tabindex="0" aria-label="${esc(f.name)}">
-      <div class="card-thumb">${isImg?`<img src="${f.url}" loading="lazy" alt="">`:`<div class="ct-ic">${IC[f.cat]?.replace(/stroke-width="[^"]*"/,'stroke-width="1.4"').replace(/<svg/,`<svg style="stroke:${COLORS[f.cat]}"`)}<span class="ct-ext bg-${f.cat} c-${f.cat}">${e}</span></div>`}<div class="card-badge c-${f.cat}">${e}</div></div>
+      <div class="card-thumb">${thumb}<div class="card-badge c-${f.cat}">${e}</div></div>
       <div class="card-info"><div class="card-name">${esc(f.name)}</div><div class="card-meta"><span>${sz(f.size)}</span><span>${ago(f.modified)}</span></div></div></div>`}).join('');
 }
 

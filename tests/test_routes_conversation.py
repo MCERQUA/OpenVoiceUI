@@ -99,6 +99,49 @@ class TestCleanForTts:
         result = self._clean("[CANVAS_MENU] Open the menu")
         assert "[CANVAS_MENU]" not in result
 
+    # --- CANVAS_ACTION brace-walker (2026-07-02 tradeshow form-fill fix) ---
+
+    def test_strips_canvas_action_simple(self):
+        result = self._clean(
+            'Filling that in now. [CANVAS_ACTION:{"action":"spf-quote-set-field",'
+            '"payload":{"name":"businessName","value":"Acme Spray Foam"}}] Done.'
+        )
+        assert "CANVAS_ACTION" not in result
+        assert "spf-quote-set-field" not in result
+        assert "Filling that in now." in result
+        assert "Done." in result
+
+    def test_strips_canvas_action_nested_array(self):
+        # values arrays embed ] — the case that defeats every [^\]]* regex
+        result = self._clean(
+            'On it. [CANVAS_ACTION:{"action":"spf-quote-set-group","payload":'
+            '{"name":"typeOfWork","values":["open-cell","closed-cell"]}}] Submitted.'
+        )
+        assert "CANVAS_ACTION" not in result
+        assert "open-cell" not in result
+        assert "On it." in result and "Submitted." in result
+
+    def test_strips_multiple_canvas_action_tags(self):
+        result = self._clean(
+            '[CANVAS_ACTION:{"action":"a","payload":{"x":1}}] middle '
+            '[CANVAS_ACTION:{"action":"b","payload":{"y":[2,3]}}] end'
+        )
+        assert "CANVAS_ACTION" not in result
+        assert "middle" in result and "end" in result
+
+    def test_strips_unterminated_canvas_action_midstream(self):
+        # A half-arrived tag (stream cut) must never be spoken
+        result = self._clean('Sure thing. [CANVAS_ACTION:{"action":"spf-quote-set')
+        assert "CANVAS_ACTION" not in result
+        assert "Sure thing." in result
+
+    def test_canvas_action_with_escaped_quotes_and_braces_in_strings(self):
+        result = self._clean(
+            'Ok. [CANVAS_ACTION:{"action":"set","payload":{"note":"brace } and \\" quote"}}] After.'
+        )
+        assert "CANVAS_ACTION" not in result
+        assert "Ok." in result and "After." in result
+
     def test_yes_no_preserved_as_single_word(self):
         from routes.conversation import clean_for_tts
         # "NO" as sole response should not be stripped

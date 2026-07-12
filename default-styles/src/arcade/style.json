@@ -1,0 +1,32 @@
+{
+  "id": "arcade",
+  "name": "Arcade",
+  "tagline": "Insert coin — 8-bit cabinet glow on CRT black",
+  "description": "A retro arcade high-score screen turned business dashboard: deep CRT black-blue, insert-coin red, pixel-yellow score highlights and 1-up green, Press Start 2P headings with VT323 score readouts over a clean Jost body. Flashy in the chrome, dead-serious in the data.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#0a0a14",
+    "surface": "#12121f",
+    "surface-2": "#1a1a2e",
+    "border": "#28284a",
+    "text": "#cdd2ea",
+    "text-secondary": "#9298bd",
+    "text-muted": "#666c94",
+    "heading": "#f4f5ff",
+    "brand": "#ef4444",
+    "brand-contrast": "#ffffff",
+    "accent": "#fbbf24",
+    "success": "#22c55e",
+    "warning": "#f59e0b",
+    "danger": "#dc2626",
+    "scrollbar": "#33335c",
+    "radius": "4px",
+    "radius-sm": "2px",
+    "shadow": "0 3px 0 rgba(0, 0, 0, 0.45), 0 10px 28px rgba(0, 0, 0, 0.5)",
+    "font-display": "'Press Start 2P', 'Jost', monospace",
+    "font-body": "'Jost', system-ui, sans-serif",
+    "font-mono": "'VT323', ui-monospace, monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Jost:wght@400;500;600;700&family=VT323&display=swap"
+  }
+}

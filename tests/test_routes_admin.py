@@ -156,3 +156,114 @@ class TestServerStats:
         resp = admin_client.get("/api/server-stats")
         data = resp.get_json()
         assert "timestamp" in data
+
+# ---------------------------------------------------------------------------
+# AI config — openclaw.json read/write path (2026-07-07 admin panel overhaul)
+# ---------------------------------------------------------------------------
+
+_SAMPLE_JSONC = '''{
+  // primary provider
+  "models": {
+    "providers": {
+      "zai": {
+        "baseUrl": "https://api.z.ai/api/anthropic", /* url with slashes */
+        "apiKey": "${ZAI_API_KEY}",
+        "api": "anthropic-messages",
+        "models": [{"id": "glm-5-turbo", "contextWindow": 204800},]
+      }
+    }
+  },
+  "agents": {"defaults": {"model": {"primary": "zai/glm-5-turbo", "fallbacks": ["zai_fb/glm-5-turbo"]}}}
+}'''
+
+
+class TestOpenclawConfigIO:
+    def test_parse_jsonc_preserves_urls(self):
+        """The old regex stripped '//…' inside https:// URLs — every real config failed."""
+        from routes.admin import _parse_jsonc
+        data = _parse_jsonc(_SAMPLE_JSONC)
+        assert data["models"]["providers"]["zai"]["baseUrl"] == "https://api.z.ai/api/anthropic"
+        assert data["agents"]["defaults"]["model"]["primary"] == "zai/glm-5-turbo"
+
+    def test_parse_plain_json(self):
+        from routes.admin import _parse_jsonc
+        assert _parse_jsonc('{"a": "https://x/y"}') == {"a": "https://x/y"}
+
+    def test_write_oc_config_keeps_inode(self, tmp_path, monkeypatch):
+        """openclaw.json is a single-file bind mount — the write must reuse the
+        same inode (in-place), never tmp+rename."""
+        import routes.admin as adm
+        cfg_file = tmp_path / "openclaw.json"
+        cfg_file.write_text('{"agents": {}}')
+        inode_before = cfg_file.stat().st_ino
+        monkeypatch.setattr(adm, "_OPENCLAW_CONFIG_PATH", cfg_file)
+        adm._write_oc_config({"agents": {"defaults": {}}})
+        assert cfg_file.stat().st_ino == inode_before
+        assert json.loads(cfg_file.read_text()) == {"agents": {"defaults": {}}}
+        backups = list(tmp_path.glob("openclaw.json.bak-*"))
+        assert len(backups) == 1 and json.loads(backups[0].read_text()) == {"agents": {}}
+
+    def test_read_falls_back_to_ro_view(self, tmp_path, monkeypatch):
+        import routes.admin as adm
+        ro = tmp_path / "openclaw-client.json"
+        ro.write_text(_SAMPLE_JSONC)
+        monkeypatch.setattr(adm, "_OPENCLAW_CONFIG_PATH", tmp_path / "missing.json")
+        monkeypatch.setattr(adm, "_OPENCLAW_CONFIG_RO_FALLBACK", ro)
+        data = adm._read_oc_config()
+        assert data["agents"]["defaults"]["model"]["fallbacks"] == ["zai_fb/glm-5-turbo"]
+
+    def test_provider_catalog_has_no_dropped_providers(self):
+        """MiniMax ('mx'), bigmodel-GLM and Groq-for-LLM are dropped — never offer them."""
+        from routes.admin import _AI_PROVIDERS
+        assert "mx" not in _AI_PROVIDERS
+        assert "glm" not in _AI_PROVIDERS
+        assert "groqcloud" not in _AI_PROVIDERS
+        assert _AI_PROVIDERS["zai"]["baseUrl"] == "https://api.z.ai/api/anthropic"
+        assert "zai_fb" in _AI_PROVIDERS
+
+    def test_put_rejects_malformed_model_ref(self, admin_client, tmp_path, monkeypatch):
+        import routes.admin as adm
+        cfg_file = tmp_path / "openclaw.json"
+        cfg_file.write_text(_SAMPLE_JSONC)
+        monkeypatch.setattr(adm, "_OPENCLAW_CONFIG_PATH", cfg_file)
+        resp = admin_client.put("/api/admin/ai-config", json={"primary": "not-a-model-ref"})
+        assert resp.status_code == 400
+
+    def test_put_updates_primary_in_place(self, admin_client, tmp_path, monkeypatch):
+        import routes.admin as adm
+        cfg_file = tmp_path / "openclaw.json"
+        cfg_file.write_text(_SAMPLE_JSONC)
+        monkeypatch.setattr(adm, "_OPENCLAW_CONFIG_PATH", cfg_file)
+        resp = admin_client.put("/api/admin/ai-config", json={"primary": "zai_fb/glm-5-turbo"})
+        assert resp.status_code == 200
+        data = json.loads(cfg_file.read_text())
+        assert data["agents"]["defaults"]["model"]["primary"] == "zai_fb/glm-5-turbo"
+        # env-placeholder apiKey untouched
+        assert data["models"]["providers"]["zai"]["apiKey"] == "${ZAI_API_KEY}"
+
+    def test_put_patches_via_gateway_when_available(self, admin_client, monkeypatch):
+        import routes.admin as adm
+        calls = []
+
+        def fake_rpc(method, params, timeout=10.0):
+            calls.append((method, params))
+            if method == "config.get":
+                return {"ok": True, "result": {"parsed": json.loads(
+                    '{"models":{"providers":{"zai":{"apiKey":"__OPENCLAW_REDACTED__"}}},'
+                    '"agents":{"defaults":{"model":{"primary":"zai/glm-5-turbo","fallbacks":[]}}}}'
+                ), "hash": "abc123"}}
+            if method == "config.patch":
+                return {"ok": True, "result": {"ok": True}}
+            return {"ok": False, "error": "unexpected"}
+
+        monkeypatch.setattr(adm, "_run_rpc", fake_rpc)
+        resp = admin_client.put("/api/admin/ai-config", json={"primary": "zai_fb/glm-5-turbo"})
+        assert resp.status_code == 200
+        methods = [m for m, _ in calls]
+        assert methods == ["config.get", "config.patch"]
+        patch_params = calls[1][1]
+        assert patch_params["baseHash"] == "abc123"
+        partial = json.loads(patch_params["raw"])
+        assert partial["agents"]["defaults"]["model"]["primary"] == "zai_fb/glm-5-turbo"
+        # partial must NOT echo back redacted keys
+        assert "__OPENCLAW_REDACTED__" not in patch_params["raw"]

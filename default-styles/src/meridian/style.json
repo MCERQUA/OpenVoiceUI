@@ -1,0 +1,32 @@
+{
+  "id": "meridian",
+  "name": "Meridian",
+  "tagline": "Crisp, confident, modern SaaS light",
+  "description": "The Linear/Stripe-dashboard aesthetic: white surfaces on cool gray, Inter + Sora type, blue brand, soft layered shadows and generous whitespace. Clean enough to ship as a Fortune-500 product.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#f8fafc",
+    "surface": "#ffffff",
+    "surface-2": "#f1f5f9",
+    "border": "#e2e8f0",
+    "text": "#334155",
+    "text-secondary": "#64748b",
+    "text-muted": "#94a3b8",
+    "heading": "#0f172a",
+    "brand": "#2563eb",
+    "brand-contrast": "#ffffff",
+    "accent": "#0284c7",
+    "success": "#059669",
+    "warning": "#d97706",
+    "danger": "#dc2626",
+    "scrollbar": "#cbd5e1",
+    "radius": "12px",
+    "radius-sm": "8px",
+    "shadow": "0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.06)",
+    "font-display": "'Sora', 'Inter', system-ui, sans-serif",
+    "font-body": "'Inter', system-ui, -apple-system, sans-serif",
+    "font-mono": "'JetBrains Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+  }
+}

@@ -46,6 +46,19 @@ class GatewayBase:
     #         zero idle cost; no background thread required.
     persistent: bool = False
 
+    # Capability descriptor (WO-2.1). Machine-readable set of features this
+    # framework supports, so the admin panel can render capability chips and
+    # decide which controls to show. Known tokens (extend as needed):
+    #   'streaming'     — token-by-token streaming responses
+    #   'steer'         — inject a message into an in-flight run
+    #   'sessions'      — per-session conversational memory / history
+    #   'tool-events'   — emits structured tool/action lifecycle events
+    #   'config-rpc'    — supports live config read/patch (get_config_schema+configure applied hot)
+    #   'reset'         — supports reset_session()
+    #   'delegation'    — used for inter-gateway delegation (not a primary brain)
+    # Set on each subclass. Default: streaming only (the one required behaviour).
+    capabilities: set = frozenset({"streaming"})
+
     # ------------------------------------------------------------------ #
     # Required — subclasses must implement these                          #
     # ------------------------------------------------------------------ #
@@ -95,8 +108,72 @@ class GatewayBase:
         Quick synchronous health check. No I/O — just inspect local state.
         Default: same as is_configured().
         Override to check live connection state, last-error timestamp, etc.
+
+        NOTE: this returns a plain bool and is kept that way for backwards
+        compatibility (gateway_manager.list_gateways() and the readiness probe
+        consume it). For a health check that ALSO reports latency, use
+        check_health() below (WO-2.1).
         """
         return self.is_configured()
+
+    # ------------------------------------------------------------------ #
+    # Capability / config / richer-health contracts (WO-2.1)             #
+    # ------------------------------------------------------------------ #
+
+    def check_health(self) -> tuple:
+        """Richer health probe: return (healthy: bool, latency_ms: float|None).
+
+        Kept separate from is_healthy() (which must stay a bare bool for its
+        existing callers). The Service Catalog / Agent Framework tab call this
+        for the health ring + latency. Default: no I/O — mirror is_healthy()
+        with no latency. Override to measure real reachability + round-trip.
+        Implementations MUST be cheap (socket/local ping), never a vendor API
+        call on the catalog path.
+        """
+        return (self.is_healthy(), None)
+
+    def get_config_schema(self) -> dict:
+        """Return a machine-readable config-field schema for this framework.
+
+        Shape (Hermes install_config style — the panel renders it generically):
+            {"fields": [
+                {"id": "HERMES_HOST", "type": "text", "label": "...",
+                 "required": True},
+                {"id": "HERMES_API_KEY", "type": "password", "label": "...",
+                 "credential": "hermes_api_key"},
+            ]}
+
+        Field types: text | password | select | toggle | number.
+        A field may carry "credential": <vault-cred-id> to route its write
+        through the vault instead of a plain config value.
+
+        Default: an empty, display-only schema (no editable fields). Override
+        to expose configurable settings.
+        """
+        return {"fields": [], "editable": False}
+
+    def configure(self, partial: dict) -> dict:
+        """Apply a partial configuration change to this framework.
+
+        Args:
+            partial: subset of fields from get_config_schema() to change.
+
+        Returns a status dict:
+            {"status": "applied",       "detail": "..."}   — live, no restart
+            {"status": "needs_restart", "detail": "..."}   — written, restart X
+            {"status": "error",         "detail": "..."}   — rejected/failed
+
+        Default: not supported (display-only frameworks).
+        """
+        return {"status": "error", "detail": "configure() not supported by this gateway"}
+
+    def restart_scope(self) -> str:
+        """What a configure() change restarts: 'none' | 'ovui' | 'container:<name>'.
+
+        Default 'none' (hot-applied or display-only). Override when a change
+        requires bouncing a sibling container.
+        """
+        return "none"
 
     def shutdown(self) -> None:
         """
