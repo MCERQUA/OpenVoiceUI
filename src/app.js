@@ -4360,6 +4360,7 @@ connectAiradio();
 
                 // Send via HTTP POST - server connects to Gateway, generates TTS, returns response
                 let _inactivityTimer = null;  // declared here so finally block can clear it
+                let _localAbortController = null;  // declared here so the finally block can compare it (FE-6)
                 try {
                     const provider = window.providerManager?.selectedProvider || 'groq';
                     const voice = window.providerManager?.currentVoice || 'autumn';
@@ -4370,7 +4371,7 @@ connectAiradio();
                     // block only clears the shared slot if it STILL belongs to this stream
                     // (FE-6). Otherwise a slow finally can null a newer send's controller,
                     // and the next interrupt starts a second concurrent stream.
-                    const _localAbortController = new AbortController();
+                    _localAbortController = new AbortController();
                     this._fetchAbortController = _localAbortController;
                     // FE-9: a new user turn starts here — reset duplicate-response
                     // suppression so an identical short reply ("Done.", "Yes.") in a
@@ -6207,6 +6208,7 @@ connectAiradio();
 
                 // NOTE: STT stays running - isProcessing flag blocks new transcripts
 
+                let _localAbortController = null;  // declared here so the finally block can compare it (FE-6)
                 try {
                     // Gather UI context so the LLM knows about canvas pages, music state, etc.
                     const uiContext = ModeManager.clawdbotMode?.getUIContext?.() || {};
@@ -6215,7 +6217,7 @@ connectAiradio();
                     // Get AI response from backend
                     // Capture this stream's own controller so the finally only clears
                     // the shared slot when it still belongs to this stream (FE-6).
-                    const _localAbortController = new AbortController();
+                    _localAbortController = new AbortController();
                     this._fetchAbortController = _localAbortController;
                     const response = await fetch(`${this.config.serverUrl}/api/conversation`, {
                         method: 'POST',
