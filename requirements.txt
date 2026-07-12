@@ -6,7 +6,7 @@ flask-limiter==4.1.1
 flask-sock==0.7.0
 
 # WebSocket & HTTP
-websockets==16.0
+websockets==16.1
 requests==2.34.2
 
 # Environment & config
