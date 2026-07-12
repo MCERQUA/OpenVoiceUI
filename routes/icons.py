@@ -506,16 +506,37 @@ def list_generated():
 
 @icons_bp.route('/api/icons/generated/<filename>')
 def serve_generated(filename):
-    """Serve a generated icon.
+    """Serve a generated icon — desktop-size THUMBNAIL by default.
 
-    NO-CACHE: see docs/jambot/no-cache-policy.md. Agents regenerate icons —
-    a 1-hour cache here used to hide updates for an hour. Live updates win;
-    optimize the source images for size instead.
+    NO-CACHE stays (see docs/jambot/no-cache-policy.md: agents regenerate
+    icons; live updates win) — but the policy's own instruction is
+    "optimize the source images for size instead", which was never done:
+    Gemini originals run 0.5-1.7MB while the desktop renders icons at
+    <=96px, so a desktop load pulled hundreds of MB uncached (the
+    slow-desktop report, 2026-07-12). We now serve a 192px derivative
+    (~15KB) regenerated whenever the source is newer; the ORIGINAL is
+    never modified (paid AI content is permanent). ?full=1 → original.
     """
     safe = re.sub(r'[^\w.\-]', '', filename)
-    path = _ensure_generated_dir() / safe
+    gen_dir = _ensure_generated_dir()
+    path = gen_dir / safe
     if not path.exists():
         return jsonify({'error': 'Not found'}), 404
+    if request.args.get('full') not in ('1', 'true'):
+        try:
+            thumb_dir = gen_dir / '.thumbs'
+            thumb_dir.mkdir(exist_ok=True)
+            thumb = thumb_dir / safe
+            if (not thumb.exists()
+                    or thumb.stat().st_mtime < path.stat().st_mtime):
+                img = Image.open(path)
+                img.thumbnail((192, 192))
+                img.save(thumb, optimize=True)
+            if thumb.exists() and thumb.stat().st_size > 0:
+                path = thumb
+        except Exception:
+            # fail-soft: SVGs / odd formats / PIL errors → serve the original
+            pass
     resp = send_file(str(path))
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
