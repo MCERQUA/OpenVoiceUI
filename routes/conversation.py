@@ -1615,7 +1615,9 @@ def _conversation_inner():
             context_parts.append(
                 f'[CANVAS_STYLE: The user chose the "{_style_id}" design system for all '
                 f'canvas pages. BEFORE creating or restyling ANY canvas page you MUST '
-                f'read /app/runtime/canvas-pages/canvas-styles/ACTIVE-STYLE.md and start '
+                f'read canvas-styles/ACTIVE-STYLE.md inside your canvas-pages directory '
+                f'(OpenClaw: /app/runtime/canvas-pages/canvas-styles/ACTIVE-STYLE.md; '
+                f'Hermes: /workspace/canvas-pages/canvas-styles/ACTIVE-STYLE.md) and start '
                 f'by cp-ing canvas-styles/active-template.html to the new page file, then '
                 f'edit the copy (keep its full <style> block — never retype the template). '
                 f'Never use the old dark default. '
@@ -2795,8 +2797,15 @@ def _conversation_inner():
                                 _tts_pending.append(_fire_tts(_remaining))
                                 _tts_buf = ''
 
-                            # Fallback: no sentences extracted (very short response)
-                            if not _tts_pending and full_response:
+                            # Fallback: no sentences extracted (very short response).
+                            # Guard on _chunks_sent, NOT just _tts_pending: the delta
+                            # path pops sentences from _tts_pending as their audio is
+                            # yielded, so on short fast replies the list is already
+                            # empty at text_done and this fallback re-spoke the WHOLE
+                            # reply a second time (double audio, 2026-07-12).
+                            # _chunks_sent counts audio actually delivered — if any
+                            # went out, streaming TTS already covered the text.
+                            if not _tts_pending and _chunks_sent == 0 and full_response:
                                 tts_text = clean_for_tts(full_response)
                                 if tts_text and tts_text.strip():
                                     _tts_pending.append(_fire_tts(tts_text))
@@ -2823,6 +2832,7 @@ def _conversation_inner():
                                         actions=captured_actions,
                                         identified_person=identified_person,
                                         clerk_user_id=_clerk_user_id,
+                                        gateway=gateway_id or 'openclaw',
                                     )
                                 break
 
@@ -2888,6 +2898,7 @@ def _conversation_inner():
                                     actions=captured_actions,
                                     identified_person=identified_person,
                                     clerk_user_id=_clerk_user_id,
+                                    gateway=gateway_id or 'openclaw',
                                 )
                             break
 
@@ -3019,6 +3030,7 @@ def _conversation_inner():
             actions=captured_actions,
             identified_person=identified_person,
             clerk_user_id=_clerk_user_id,
+            gateway=gateway_id or 'openclaw',
         )
 
     response_data = {'response': ai_response, 'user_said': user_message}
