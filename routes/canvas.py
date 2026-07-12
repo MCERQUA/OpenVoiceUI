@@ -19,7 +19,7 @@ import mimetypes
 from pathlib import Path
 
 import requests as http_requests
-from flask import Blueprint, Response, jsonify, redirect, request, send_file
+from flask import Blueprint, Response, g, jsonify, redirect, request, send_file
 
 # 3D asset MIME types — without these, send_file falls back to
 # application/octet-stream which (combined with X-Content-Type-Options:nosniff)
@@ -362,7 +362,106 @@ def generate_voice_aliases(title: str) -> list[str]:
 def sync_canvas_manifest() -> dict:
     """Full sync with pages directory."""
     with _manifest_lock:
-        return _sync_canvas_manifest_locked()
+        manifest = _sync_canvas_manifest_locked()
+    _kick_off_pending_icon_generation(manifest)
+    return manifest
+
+
+# Pages still missing a custom icon after HTML-meta extraction get a real
+# generated one automatically — the icon-generation skill tells agents to do
+# this themselves, but nothing enforced it (grep found no call site besides
+# the route), so pages silently fell back to the generic document icon
+# whenever an agent skipped the step. This is the enforcement layer.
+_ICON_GEN_RETRY_COOLDOWN = 6 * 3600  # seconds — backoff after a failed attempt
+_icon_gen_lock = threading.Lock()  # single-flight guard — see _kick_off_pending_icon_generation
+
+
+def _kick_off_pending_icon_generation(manifest: dict) -> None:
+    """Fire-and-forget: spawn a background thread to generate icons for any
+    page still missing one. Must never run inline here — this function is
+    called on every /api/canvas/manifest sync (throttled to 60s, but still a
+    request path polled by every open desktop), and Gemini calls take
+    seconds.
+
+    Single-flight: _kick_off_pending_icon_generation is called on every sync,
+    and a large backlog takes many sync cycles (2s stagger per page) to work
+    through. Without this lock, each cycle spawned its OWN thread over the
+    SAME still-pending list — multiple overlapping threads generating the
+    same pages concurrently. That burst blew through Gemini's rate limit
+    (confirmed live: 429s across 139 pages) and none of them recovered until
+    their independent 6h cooldowns expired. Only one batch may run at a time,
+    fleet-wide within this process."""
+    if not _icon_gen_lock.acquire(blocking=False):
+        return  # a batch is already in flight — this sync cycle's backlog will be picked up next time
+    now = time.time()
+    pending = []
+    for page_id, page_data in manifest.get('pages', {}).items():
+        if page_id == 'desktop' or page_data.get('icon'):
+            continue
+        failed_at = page_data.get('icon_gen_failed_at')
+        if failed_at and now - failed_at < _ICON_GEN_RETRY_COOLDOWN:
+            continue
+        pending.append(page_id)
+    if not pending:
+        _icon_gen_lock.release()
+        return
+    threading.Thread(target=_generate_pending_icons, args=(pending,), daemon=True).start()
+
+
+def _generate_pending_icons(page_ids) -> None:
+    """Background-thread worker — see _kick_off_pending_icon_generation()."""
+    try:
+        _generate_pending_icons_inner(page_ids)
+    finally:
+        _icon_gen_lock.release()
+
+
+def _generate_pending_icons_inner(page_ids) -> None:
+    from routes.icons import generate_icon_image, IconGenerationError
+    logger = logging.getLogger(__name__)
+    extra_backoff = 0  # seconds — grows on a 429, so the batch self-throttles instead of hammering a rate-limited API
+    for i, page_id in enumerate(page_ids):
+        if i > 0:
+            time.sleep(2 + extra_backoff)  # stagger Gemini calls
+        try:
+            with _manifest_lock:
+                manifest = load_canvas_manifest()
+                page_data = manifest['pages'].get(page_id)
+                if not page_data or page_data.get('icon'):
+                    continue  # something else set an icon meanwhile
+                title = page_data.get('display_name') or page_id.replace('-', ' ').title()
+                category = page_data.get('category', 'uncategorized')
+                description = page_data.get('description', '')
+
+            prompt = f'A {category} icon for: {title}.' + (f' {description}' if description else '')
+            try:
+                result = generate_icon_image(prompt, name=f'{page_id}-icon')
+                extra_backoff = 0  # reset once a call actually succeeds
+            except IconGenerationError as e:
+                logger.warning(f'Auto icon-gen failed for {page_id}: {e}')
+                is_rate_limited = '429' in str(e)
+                if is_rate_limited:
+                    # Rate-limited, not actually broken — don't stamp the long
+                    # cooldown (that would strand it for 6h over a transient
+                    # limit). Back off harder for the rest of THIS batch instead.
+                    extra_backoff = min(extra_backoff + 4, 20)
+                else:
+                    with _manifest_lock:
+                        manifest = load_canvas_manifest()
+                        if page_id in manifest['pages']:
+                            manifest['pages'][page_id]['icon_gen_failed_at'] = time.time()
+                            save_canvas_manifest(manifest)
+                continue
+
+            with _manifest_lock:
+                manifest = load_canvas_manifest()
+                if page_id in manifest['pages'] and not manifest['pages'][page_id].get('icon'):
+                    manifest['pages'][page_id]['icon'] = result['url']
+                    manifest['pages'][page_id].pop('icon_gen_failed_at', None)
+                    save_canvas_manifest(manifest)
+                    logger.info(f"Auto-generated icon for {page_id}: {result['url']}")
+        except Exception as e:
+            logger.warning(f'Auto icon-gen error for {page_id}: {e}')
 
 
 def _sync_canvas_manifest_locked() -> dict:
@@ -411,6 +510,16 @@ def _sync_canvas_manifest_locked() -> dict:
         }
         if page_icon:
             manifest['pages'][page_id]['icon'] = page_icon
+        # Agents write page files directly (not via the pages API), so newly
+        # discovered files get stamped with the active canvas style here too.
+        if not manifest['pages'][page_id].get('style'):
+            try:
+                from services.canvas_styles import get_active_style_id as _gas
+                _active_style = _gas()
+                if _active_style:
+                    manifest['pages'][page_id]['style'] = _active_style
+            except Exception:
+                pass
         if category not in manifest['categories']:
             manifest['categories'][category] = {
                 'name': category.title(),
@@ -480,6 +589,11 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
     page_id = Path(filename).stem
     category = suggest_category(title, content)
 
+    # Stamp the tenant's active canvas style — the serve-time base-CSS injection
+    # follows the style the page was authored under (legacy pages keep dark).
+    from services.canvas_styles import get_active_style_id
+    active_style = get_active_style_id()
+
     # Extract canonical icon from the page HTML meta tag
     page_icon = extract_page_icon(content) if content else None
     if not page_icon:
@@ -501,6 +615,9 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
         # Update icon from page HTML if present (page is source of truth)
         if page_icon:
             manifest['pages'][page_id]['icon'] = page_icon
+        # Rewritten pages are re-authored under the current active style
+        if active_style:
+            manifest['pages'][page_id]['style'] = active_style
     else:
         is_new_page = True
         manifest['pages'][page_id] = {
@@ -517,6 +634,8 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
             'voice_aliases': generate_voice_aliases(title),
             'access_count': 0,
         }
+        if active_style:
+            manifest['pages'][page_id]['style'] = active_style
         if page_icon:
             manifest['pages'][page_id]['icon'] = page_icon
     if category not in manifest['categories']:
@@ -771,30 +890,22 @@ def canvas_pages_proxy(path):
                 content_str = content.decode('utf-8', errors='replace')
                 content = content_str.encode('utf-8')
 
-                # Inject base dark-theme fallback + padding for UI chrome clearance.
+                # Inject base-theme fallback + padding for UI chrome clearance.
                 # Edge tabs are 44px wide on left+right — safe area is 52px each side.
                 # CSS custom props let fixed/absolute elements also honour the safe area.
-                _base_css = (
-                    b'<style id="canvas-base-styles">'
-                    b':root{'
-                    b'--canvas-safe-top:25px;'
-                    b'--canvas-safe-right:25px;'
-                    b'--canvas-safe-bottom:25px;'
-                    b'--canvas-safe-left:25px;}'
-                    b'html,body{'
-                    b'padding:25px!important;'
-                    b'box-sizing:border-box!important;'
-                    b'color:#e2e8f0;'
-                    b'background:#0a0a0a;}'
-                    b'h1,h2,h3,h4{color:#fff;}'
-                    b'a{color:#fb923c;}'
-                    b'*,html,body{scrollbar-width:thin;scrollbar-color:#3a3a42 transparent;}'
-                    b'::-webkit-scrollbar{width:5px!important;height:5px!important;}'
-                    b'::-webkit-scrollbar-track{background:transparent!important;}'
-                    b'::-webkit-scrollbar-thumb{background:#3a3a42!important;border-radius:99px!important;}'
-                    b'::-webkit-scrollbar-thumb:hover{background:#555!important;}'
-                    b'</style>'
-                )
+                # Colors come from the style the page was authored under (canvas
+                # style system); pages with no style stamp get the legacy dark base.
+                # Color rules are :where()-wrapped (zero specificity) so page-authored
+                # CSS always wins — see services/canvas_styles.py.
+                from services.canvas_styles import base_css_for
+                _page_style = None
+                try:
+                    _style_manifest = load_canvas_manifest()
+                    _page_style = _style_manifest.get('pages', {}).get(
+                        Path(path).stem, {}).get('style')
+                except Exception:
+                    pass
+                _base_css = base_css_for(_page_style)
                 # Inject error bridge — posts JS errors back to parent for debugging
                 _error_bridge = (
                     b'<script id="canvas-error-bridge">'
@@ -1183,16 +1294,23 @@ def handle_page_metadata(page_id):
         _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
         is_agent_request = bool(_agent_api_key and request.headers.get('X-Agent-Key') == _agent_api_key)
 
-        # Guard: locked pages — agent cannot change is_public on locked pages.
-        # Admin (Clerk-authenticated) can still change anything, including unlocking.
-        if 'is_public' in data and page.get('is_locked', False) and is_agent_request:
+        # Admin identity — only a Clerk-authenticated admin may lock/unlock pages
+        # or flip visibility on a locked page. Resolve from g.clerk_user_id (set
+        # by require_auth) — never trust the agent key for these mutations.
+        from services.auth import is_admin_user
+        is_admin = is_admin_user(getattr(g, 'clerk_user_id', None))
+
+        # Guard: locked pages — visibility can only be changed by an admin.
+        # The unauthenticated path is already 401'd by require_auth (SEC-2 fix in
+        # app.py); this guard is defense-in-depth and blocks the agent key too.
+        if 'is_public' in data and page.get('is_locked', False) and not is_admin:
             return jsonify({
                 'error': 'This page is locked. Visibility can only be changed from the admin dashboard.',
                 'is_locked': True,
             }), 403
 
-        # Guard: agent cannot lock/unlock pages — only admin can.
-        if 'is_locked' in data and is_agent_request:
+        # Guard: only an admin may lock/unlock pages (never the agent).
+        if 'is_locked' in data and not is_admin:
             return jsonify({
                 'error': 'Page lock status can only be changed from the admin dashboard.',
             }), 403
@@ -1214,7 +1332,7 @@ def handle_page_metadata(page_id):
                 except (ValueError, TypeError):
                     pass  # malformed date — allow through
 
-        for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon']:
+        for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon', 'style']:
             if field in data:
                 old_category = page.get('category')
                 page[field] = data[field]
@@ -1331,13 +1449,24 @@ def create_canvas_page():
         page_meta = add_page_to_manifest(filename, title, content=html_content[:500])
         _notify_brain('canvas_page_created', filename=filename, title=title)
 
-        return jsonify({
+        # Deterministic QA — agents see warnings in the tool result and fix them.
+        try:
+            from services.canvas_styles import lint_page_html
+            _warnings = lint_page_html(html_content)
+        except Exception:
+            _warnings = []
+
+        _resp = {
             'filename': filename,
             'page_id': Path(filename).stem,
             'url': f'/pages/{filename}',
             'title': title,
             'category': page_meta.get('category', 'uncategorized'),
-        })
+        }
+        if _warnings:
+            _resp['warnings'] = _warnings
+            _resp['action_required'] = 'Fix the warnings and re-save this page.'
+        return jsonify(_resp)
     except Exception as exc:
         logger.error(f'Canvas page create error: {exc}')
         return jsonify({'error': 'Canvas page creation failed'}), 500

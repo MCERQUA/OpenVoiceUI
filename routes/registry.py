@@ -47,13 +47,19 @@ def registry_checkin():
     status_icon  = "&#10004;" if is_healthy else "&#9888;"
     status_color = "#4ade80" if is_healthy else "#fbbf24"
 
-    # Pass values to JS safely via JSON encoding
+    # HTML-escape user-controlled params before interpolating into the page
+    # (SEC-4 reflected XSS: `repo` was interpolated raw into the HTML below).
+    import markupsafe
+    repo_safe = markupsafe.escape(repo)
+
+    # Pass values to JS safely via JSON encoding. Escape '<' so a `repo`
+    # containing '</script>' can't break out of the inline script tag.
     js_config = json.dumps({
         'returnUrl': return_url,
         'registry':  registry,
         'appSlug':   app_slug,
         'repo':      repo,
-    })
+    }).replace('<', '\\u003c')
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -141,7 +147,7 @@ def registry_checkin():
         </div>
         <div class="status-row">
             <span class="label">Repository</span>
-            <span class="value">{repo}</span>
+            <span class="value">{repo_safe}</span>
         </div>
 
         <div id="status-msg">Completing check-in&hellip;</div>

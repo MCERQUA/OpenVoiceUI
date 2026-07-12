@@ -1618,7 +1618,7 @@ def set_model_selection(username: str, primary: str = None, fallback: str = None
     if not _safe_exists(config_path):
         config_path = _OPENCLAW_CONFIG_PATH
     if not _safe_exists(config_path):
-        return
+        return {'ok': False, 'error': 'openclaw.json not found — cannot set model selection'}
 
     try:
         config = _parse_jsonc(config_path.read_text())
@@ -1627,10 +1627,10 @@ def set_model_selection(username: str, primary: str = None, fallback: str = None
             f"Cannot read {config_path} to set model selection ({exc}); "
             f"skipping. Phase 2 will store model selection in the vault."
         )
-        return
+        return {'ok': False, 'error': f'Cannot read openclaw.json ({exc})'}
     except Exception as exc:
         logger.error(f"Failed to parse {config_path}: {exc}")
-        return
+        return {'ok': False, 'error': f'Failed to parse openclaw.json ({exc})'}
 
     defaults = config.setdefault('agents', {}).setdefault('defaults', {})
     model_cfg = defaults.setdefault('model', {})
@@ -1650,7 +1650,12 @@ def set_model_selection(username: str, primary: str = None, fallback: str = None
         # on template-shaped tenants — tmp+rename breaks the mount.
         _write_json_inplace(config_path, config)
     except (PermissionError, OSError) as exc:
+        # Report the failure honestly instead of returning success — a silent
+        # no-op here is exactly the "model saved but nothing changed" bug
+        # (ADMIN-BUG-1). Callers surface this to the admin.
         logger.warning(
             f"Cannot write {config_path} ({exc}); model selection update "
-            f"skipped. Phase 2 will fix this properly."
+            f"failed. Use PUT /api/admin/ai-config (gateway config.patch) instead."
         )
+        return {'ok': False, 'error': f'Cannot write openclaw.json ({exc})'}
+    return {'ok': True}

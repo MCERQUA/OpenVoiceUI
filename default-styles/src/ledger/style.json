@@ -1,0 +1,32 @@
+{
+  "id": "ledger",
+  "name": "Ledger",
+  "tagline": "Private-banking precision on cream paper",
+  "description": "The financial-broadsheet aesthetic: cream paper, near-black ink, Libre Caslon headlines over IBM Plex, forest-green brand with aged-gold accents. Hairline rules, small-caps labels, and tables set like a wealth-management statement.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#faf7f0",
+    "surface": "#fffdf8",
+    "surface-2": "#f3efe3",
+    "border": "#e5dfcd",
+    "text": "#38352b",
+    "text-secondary": "#6d6858",
+    "text-muted": "#98927e",
+    "heading": "#1c1a14",
+    "brand": "#14532d",
+    "brand-contrast": "#fffdf8",
+    "accent": "#a16207",
+    "success": "#166534",
+    "warning": "#b45309",
+    "danger": "#991b1b",
+    "scrollbar": "#d8d1bc",
+    "radius": "6px",
+    "radius-sm": "4px",
+    "shadow": "0 1px 2px rgba(28, 26, 20, 0.04), 0 3px 12px rgba(28, 26, 20, 0.05)",
+    "font-display": "'Libre Caslon Text', 'Georgia', 'Times New Roman', serif",
+    "font-body": "'IBM Plex Sans', system-ui, -apple-system, sans-serif",
+    "font-mono": "'IBM Plex Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+  }
+}

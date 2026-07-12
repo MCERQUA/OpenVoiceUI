@@ -43,10 +43,12 @@ MODELS = {
 DEFAULT_MODEL = "chatterbox-turbo"
 
 # Timeouts
-STREAM_TIMEOUT = 120.0   # Max wait for full streaming response. Resemble's custom-clone
-                         # base model is slow (~53ms/char → a long ~1500-char chunk needs
-                         # ~80s); 30s used to cut long replies off mid-stream → silence.
-                         # 120s lets a full reply finish so the clone voice always speaks. (2026-06-07)
+STREAM_TIMEOUT = 30.0    # Max wait for one streaming request (TTS-2). Was 120s, which
+                         # — combined with up to 6 retries — let a hung Resemble cluster
+                         # head-of-line-block the ordered audio flush for MINUTES. tts.py
+                         # chunks Resemble at 400 chars (~21s at ~53ms/char), so a single
+                         # request finishes well under 30s; a request that doesn't is hung,
+                         # and bailing fast to retry/fallback beats blocking the whole reply.
 CONNECT_TIMEOUT = 10.0   # TCP connect timeout
 API_TIMEOUT = 15.0       # For voice listing / non-synthesis calls
 

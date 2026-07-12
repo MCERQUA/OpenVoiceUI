@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maison Vance — Atelier Operations</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Libre+Franklin:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+/* ================================================================
+   NOIR — Monochrome Editorial Brutalism
+   Pure white / true black / one crimson thread.
+   Every color flows through these tokens. Do not hardcode hex
+   values in component rules; extend the palette here instead.
+   ================================================================ */
+:root {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f4f4f4;
+  --border: #111111;
+  --text: #111111;
+  --text-secondary: #454545;
+  --text-muted: #6f6f6f;
+  --heading: #111111;
+  --brand: #111111;
+  --brand-contrast: #ffffff;
+  --accent: #dc2626;
+  --success: #15803d;
+  --warning: #a16207;
+  --danger: #b91c1c;
+  --scrollbar: #111111;
+  --radius: 0px;
+  --radius-sm: 0px;
+  --shadow: 4px 4px 0 0 #111111;
+  --shadow-lift: 6px 6px 0 0 #111111;
+  --font-display: 'Archivo', 'Helvetica Neue', system-ui, sans-serif;
+  --font-body: 'Libre Franklin', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, 'SF Mono', monospace;
+  /* Derived — hairline for table row dividers only */
+  --hairline: #e5e5e5;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--brand); color: var(--brand-contrast); }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); }
+*::-webkit-scrollbar-track { background: transparent; }
+
+h1 { color: var(--heading); }
+
+a { color: var(--text); font-weight: 600; text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--accent); }
+
+:focus-visible {
+  outline: 2px solid var(--border);
+  outline-offset: 2px;
+}
+
+/* ---------- Layout shell ---------- */
+.page { max-width: 1120px; margin: 0 auto; }
+
+.section { margin-bottom: 56px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 3px solid var(--border);
+  padding-top: 14px;
+  margin-bottom: 20px;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--heading);
+}
+
+.section-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+/* ---------- Entrance animation (opacity/transform only) ---------- */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim { opacity: 0; animation: rise-in 0.4s var(--ease-out) forwards; }
+.d1 { animation-delay: 0.05s; }
+.d2 { animation-delay: 0.11s; }
+.d3 { animation-delay: 0.17s; }
+.d4 { animation-delay: 0.23s; }
+.d5 { animation-delay: 0.29s; }
+.d6 { animation-delay: 0.35s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim { animation: none; opacity: 1; }
+  * { transition: none !important; }
+}
+
+/* ---------- Masthead / page header ---------- */
+.masthead {
+  border-top: 6px solid var(--border);
+  border-bottom: 1.5px solid var(--border);
+  padding: 28px 0 24px;
+  margin-bottom: 48px;
+}
+
+.masthead-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.masthead-kicker .tick {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+}
+
+.masthead-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.masthead h1 {
+  font-family: var(--font-display);
+  font-size: 52px;
+  font-weight: 900;
+  line-height: 0.96;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  color: var(--heading);
+}
+
+.masthead-sub {
+  margin-top: 12px;
+  font-size: 15px;
+  color: var(--text-secondary);
+  max-width: 560px;
+}
+
+.masthead-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 12px 20px;
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s linear, color 0.12s linear,
+              transform 0.12s linear, box-shadow 0.12s linear;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.btn svg { width: 15px; height: 15px; flex: none; }
+
+.btn-primary { background: var(--brand); color: var(--brand-contrast); }
+.btn-primary:hover {
+  background: var(--surface);
+  color: var(--text);
+  transform: translate(-2px, -2px);
+  box-shadow: var(--shadow);
+}
+
+.btn-secondary:hover {
+  background: var(--surface-2);
+  transform: translate(-2px, -2px);
+  box-shadow: var(--shadow);
+}
+
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  padding-left: 4px;
+  padding-right: 4px;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--border);
+}
+.btn-ghost:hover { color: var(--accent); text-decoration-color: var(--accent); }
+
+/* ---------- KPI tiles ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0;
+  border: 1.5px solid var(--border);
+}
+
+.kpi {
+  padding: 22px 20px 20px;
+  border-right: 1.5px solid var(--border);
+  background: var(--surface);
+  position: relative;
+}
+.kpi:last-child { border-right: none; }
+
+.kpi-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.kpi-label svg { width: 16px; height: 16px; color: var(--text); flex: none; }
+
+.kpi-value {
+  font-family: var(--font-display);
+  font-size: 42px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-delta {
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.kpi-delta .vs { font-weight: 400; color: var(--text-muted); font-size: 11px; }
+.up   { color: var(--success); }
+.down { color: var(--danger); }
+
+.kpi-feature { border-top: 4px solid var(--accent); margin-top: -1.5px; }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 3px 8px;
+  border: 1.5px solid currentColor;
+  background: var(--surface);
+  white-space: nowrap;
+}
+.badge::before { content: ""; width: 6px; height: 6px; background: currentColor; flex: none; }
+.badge-success { color: var(--success); }
+.badge-warning { color: var(--warning); }
+.badge-danger  { color: var(--danger); }
+.badge-neutral { color: var(--text-secondary); }
+.badge-accent  { color: var(--accent); }
+
+/* ---------- Table ---------- */
+.table-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.table-card {
+  border: 1.5px solid var(--border);
+  border-top-width: 2.5px;
+  background: var(--surface);
+  overflow-x: auto;
+}
+
+table { width: 100%; border-collapse: collapse; min-width: 720px; }
+
+thead th {
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1.5px solid var(--border);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 13.5px;
+  color: var(--text);
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr { transition: background 0.12s linear; }
+tbody tr:hover { background: var(--surface-2); }
+
+.row-index {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  width: 44px;
+}
+
+.cell-main { font-weight: 700; font-family: var(--font-display); letter-spacing: -0.01em; color: var(--heading); }
+.cell-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  letter-spacing: 0.02em;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.due-hot { color: var(--accent); font-weight: 700; }
+
+/* ---------- Forms ---------- */
+.form-card {
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  padding: 24px 20px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 1.2fr auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.field label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.input, .select {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  padding: 11px 12px;
+  transition: box-shadow 0.12s linear;
+}
+.input::placeholder { color: var(--text-muted); }
+.input:hover, .select:hover { background: var(--surface-2); }
+.input:focus, .select:focus {
+  outline: none;
+  box-shadow: 3px 3px 0 0 var(--accent);
+}
+
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23111111' stroke-width='2.5' stroke-linecap='square'%3E%3Cpath d='M6 9l6 6 6-9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+.form-note {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------- Progress ---------- */
+.progress-card {
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  padding: 24px 20px;
+}
+
+.progress-item { margin-bottom: 22px; }
+.progress-item:last-child { margin-bottom: 0; }
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.progress-name {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--heading);
+}
+
+.progress-frac {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  height: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.progress-fill { height: 100%; background: var(--brand); }
+.progress-fill.critical { background: var(--accent); }
+
+/* ---------- Timeline ---------- */
+.timeline-card {
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  padding: 24px 20px;
+}
+
+.timeline { list-style: none; border-left: 2px solid var(--border); margin-left: 5px; }
+
+.timeline li {
+  position: relative;
+  padding: 0 0 22px 22px;
+}
+.timeline li:last-child { padding-bottom: 0; }
+
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 5px;
+  width: 10px;
+  height: 10px;
+  background: var(--brand);
+}
+.timeline li.hot::before { background: var(--accent); }
+
+.timeline-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 3px;
+}
+
+.timeline-text { font-size: 13.5px; color: var(--text-secondary); }
+.timeline-text strong { color: var(--heading); font-weight: 700; }
+
+/* ---------- Split (progress + timeline) ---------- */
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+/* ---------- Card grid (collections) ---------- */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0;
+  border: 1.5px solid var(--border);
+}
+
+.collection-card {
+  border-right: 1.5px solid var(--border);
+  border-bottom: 1.5px solid var(--border);
+  padding: 24px 20px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: transform 0.12s linear, box-shadow 0.12s linear;
+}
+.collection-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--shadow-lift);
+  position: relative;
+  z-index: 1;
+}
+
+.collection-no {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.collection-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  color: var(--heading);
+}
+
+.collection-desc { font-size: 13px; color: var(--text-secondary); flex: 1; }
+
+.collection-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid var(--hairline);
+  padding-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Inverted feature card — the ONE black block on the page */
+.collection-card.inverted { background: var(--brand); }
+.collection-card.inverted .collection-title { color: var(--brand-contrast); }
+.collection-card.inverted .collection-desc { color: var(--surface-2); }
+.collection-card.inverted .collection-no,
+.collection-card.inverted .collection-meta { color: var(--surface-2); }
+.collection-card.inverted .collection-no .tick { color: var(--accent); }
+.collection-card.inverted .collection-meta { border-top-color: var(--text-secondary); }
+
+/* ---------- Footer ---------- */
+.footer {
+  border-top: 3px solid var(--border);
+  padding: 20px 0 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.footer-brand {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--heading);
+}
+
+.footer-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* ================================================================
+   RESPONSIVE — the host injects a 25px safe area on html/body.
+   That 25px is the ONLY horizontal inset at <=640px: wrappers and
+   sections carry ZERO side padding; cards keep internal 16-20px.
+   ================================================================ */
+@media (max-width: 900px) {
+  .split { grid-template-columns: 1fr; }
+  .form-row { grid-template-columns: 1fr 1fr; }
+  .masthead h1 { font-size: 40px; }
+}
+
+@media (max-width: 640px) {
+  .page, .section, .masthead { padding-left: 0; padding-right: 0; }
+  .masthead h1 { font-size: 32px; }
+  .masthead { padding-top: 20px; padding-bottom: 18px; margin-bottom: 36px; }
+  .section { margin-bottom: 40px; }
+  .form-row { grid-template-columns: 1fr; }
+  .kpi { border-right: none; border-bottom: 1.5px solid var(--border); }
+  .kpi:last-child { border-bottom: none; }
+  .kpi-value { font-size: 36px; }
+  .collection-card { border-right: none; }
+  .kpi, .collection-card, .form-card, .progress-card, .timeline-card { padding-left: 18px; padding-right: 18px; }
+  .section-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ MASTHEAD ============ -->
+  <header class="masthead anim">
+    <div class="masthead-kicker">
+      <span class="tick"></span>
+      <span>Atelier Operations &mdash; Issue No. 47 &mdash; Week of Mar 09</span>
+    </div>
+    <div class="masthead-row">
+      <div>
+        <h1>Maison<br>Vance</h1>
+        <p class="masthead-sub">Bespoke tailoring house &mdash; commissions, fittings, and workroom
+        throughput for the Spring made-to-measure season.</p>
+      </div>
+      <div class="masthead-actions">
+        <button class="btn btn-secondary" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+          Export
+        </button>
+        <button class="btn btn-primary" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M12 5v14M5 12h14"/></svg>
+          New Commission
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ KPI ROW ============ -->
+  <section class="section anim d1" aria-label="Key metrics">
+    <div class="kpi-grid">
+      <div class="kpi kpi-feature">
+        <div class="kpi-label">
+          <span>Open Commissions</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M6 3h12l2 5H4l2-5zM4 8v13h16V8M9 12h6"/></svg>
+        </div>
+        <div class="kpi-value">38</div>
+        <div class="kpi-delta"><span class="up">+6</span><span class="vs">vs last month</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">
+          <span>Season Revenue</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 19h16M4 15l4-6 4 3 5-8 3 5"/></svg>
+        </div>
+        <div class="kpi-value">$214K</div>
+        <div class="kpi-delta"><span class="up">+18.2%</span><span class="vs">vs SS last year</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">
+          <span>Fittings This Week</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 5h16v16H4zM4 9h16M9 3v4M15 3v4"/></svg>
+        </div>
+        <div class="kpi-value">12</div>
+        <div class="kpi-delta"><span class="down">&minus;2</span><span class="vs">vs prior week</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">
+          <span>Workroom Load</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/></svg>
+        </div>
+        <div class="kpi-value">87%</div>
+        <div class="kpi-delta"><span class="up">On plan</span><span class="vs">capacity 44 hrs</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMMISSIONS TABLE ============ -->
+  <section class="section anim d2" aria-label="Active commissions">
+    <div class="section-head">
+      <h2 class="section-title">Active Commissions</h2>
+      <span class="section-hint">Sorted by delivery date</span>
+    </div>
+    <div class="table-grid">
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>Client / Garment</th>
+              <th>Cutter</th>
+              <th>Status</th>
+              <th class="num">Value</th>
+              <th class="num">Delivery</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="row-index">01</td>
+              <td>
+                <div class="cell-main">Adrien Kessler</div>
+                <div class="cell-sub">MV-2214 &middot; Two-piece, midnight barathea</div>
+              </td>
+              <td>R. Okafor</td>
+              <td><span class="badge badge-danger">Overdue</span></td>
+              <td class="num">$6,800</td>
+              <td class="num due-hot">Mar 11</td>
+            </tr>
+            <tr>
+              <td class="row-index">02</td>
+              <td>
+                <div class="cell-main">Helena Marsh</div>
+                <div class="cell-sub">MV-2231 &middot; Double-breasted coat, charcoal herringbone</div>
+              </td>
+              <td>J. Fontaine</td>
+              <td><span class="badge badge-warning">Second fitting</span></td>
+              <td class="num">$9,200</td>
+              <td class="num">Mar 18</td>
+            </tr>
+            <tr>
+              <td class="row-index">03</td>
+              <td>
+                <div class="cell-main">Theodore Braun</div>
+                <div class="cell-sub">MV-2238 &middot; Dinner suit, grosgrain lapel</div>
+              </td>
+              <td>R. Okafor</td>
+              <td><span class="badge badge-success">In workroom</span></td>
+              <td class="num">$7,450</td>
+              <td class="num">Mar 24</td>
+            </tr>
+            <tr>
+              <td class="row-index">04</td>
+              <td>
+                <div class="cell-main">Ines Duarte</div>
+                <div class="cell-sub">MV-2240 &middot; Three-piece, dove-gray flannel</div>
+              </td>
+              <td>M. Aldana</td>
+              <td><span class="badge badge-success">In workroom</span></td>
+              <td class="num">$8,100</td>
+              <td class="num">Mar 27</td>
+            </tr>
+            <tr>
+              <td class="row-index">05</td>
+              <td>
+                <div class="cell-main">Casper Lindqvist</div>
+                <div class="cell-sub">MV-2244 &middot; Field jacket, waxed cotton</div>
+              </td>
+              <td>J. Fontaine</td>
+              <td><span class="badge badge-neutral">Cloth ordered</span></td>
+              <td class="num">$3,950</td>
+              <td class="num">Apr 03</td>
+            </tr>
+            <tr>
+              <td class="row-index">06</td>
+              <td>
+                <div class="cell-main">Priya Raghavan</div>
+                <div class="cell-sub">MV-2247 &middot; Evening column, silk crepe</div>
+              </td>
+              <td>M. Aldana</td>
+              <td><span class="badge badge-accent">Rush</span></td>
+              <td class="num">$11,600</td>
+              <td class="num">Apr 05</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INTAKE FORM ============ -->
+  <section class="section anim d3" aria-label="Quick intake">
+    <div class="section-head">
+      <h2 class="section-title">Quick Intake</h2>
+      <span class="section-hint">New client measurement slip</span>
+    </div>
+    <div class="form-card">
+      <form class="form-row" onsubmit="return false">
+        <div class="field">
+          <label for="client-name">Client Name</label>
+          <input class="input" id="client-name" type="text" placeholder="Full name as it appears on the order">
+        </div>
+        <div class="field">
+          <label for="garment-type">Garment</label>
+          <select class="select" id="garment-type">
+            <option>Two-piece suit</option>
+            <option>Three-piece suit</option>
+            <option>Overcoat</option>
+            <option>Dinner suit</option>
+            <option>Separates</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="cutter">Assign Cutter</label>
+          <select class="select" id="cutter">
+            <option>R. Okafor</option>
+            <option>J. Fontaine</option>
+            <option>M. Aldana</option>
+          </select>
+        </div>
+        <div class="field">
+          <button class="btn btn-primary" type="submit">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M5 13l5 5L20 6"/></svg>
+            Book
+          </button>
+        </div>
+      </form>
+      <p class="form-note">First fitting is scheduled automatically fourteen days after cloth arrival.
+        Review the house <a href="#terms">commission terms</a> before confirming a rush order.</p>
+    </div>
+  </section>
+
+  <!-- ============ PROGRESS + TIMELINE ============ -->
+  <section class="section anim d4" aria-label="Workroom and activity">
+    <div class="split">
+      <div>
+        <div class="section-head">
+          <h2 class="section-title">Workroom</h2>
+          <span class="section-hint">Stage completion</span>
+        </div>
+        <div class="progress-card">
+          <div class="progress-item">
+            <div class="progress-head">
+              <span class="progress-name">Cutting Bench</span>
+              <span class="progress-frac">14 / 16 lays</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" style="width: 88%"></div></div>
+          </div>
+          <div class="progress-item">
+            <div class="progress-head">
+              <span class="progress-name">Basting &amp; Canvas</span>
+              <span class="progress-frac">9 / 14 garments</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" style="width: 64%"></div></div>
+          </div>
+          <div class="progress-item">
+            <div class="progress-head">
+              <span class="progress-name">Finishing &mdash; Rush Queue</span>
+              <span class="progress-frac">3 / 8 garments</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill critical" style="width: 38%"></div></div>
+          </div>
+          <div class="progress-item">
+            <div class="progress-head">
+              <span class="progress-name">Pressing &amp; Dispatch</span>
+              <span class="progress-frac">11 / 12 garments</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill" style="width: 92%"></div></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="section-head">
+          <h2 class="section-title">House Log</h2>
+          <span class="section-hint">Last 48 hours</span>
+        </div>
+        <div class="timeline-card">
+          <ul class="timeline">
+            <li class="hot">
+              <span class="timeline-time">Today &middot; 09:40</span>
+              <span class="timeline-text"><strong>Priya Raghavan</strong> confirmed the rush delivery date &mdash; finishing queue reprioritized.</span>
+            </li>
+            <li>
+              <span class="timeline-time">Today &middot; 08:15</span>
+              <span class="timeline-text"><strong>J. Fontaine</strong> completed the second fitting for <strong>Helena Marsh</strong>; sleeve pitch adjusted.</span>
+            </li>
+            <li>
+              <span class="timeline-time">Yesterday &middot; 16:50</span>
+              <span class="timeline-text">Cloth for <strong>MV-2244</strong> arrived from the mill &mdash; 3.4m waxed cotton, lot 88-C.</span>
+            </li>
+            <li>
+              <span class="timeline-time">Yesterday &middot; 11:05</span>
+              <span class="timeline-text"><strong>Theodore Braun</strong> paid the 50% deposit on invoice <strong>INV-1187</strong>.</span>
+            </li>
+            <li>
+              <span class="timeline-time">Yesterday &middot; 09:30</span>
+              <span class="timeline-text">Season lookbook proof returned to the printer with <strong>two corrections</strong>.</span>
+            </li>
+          </ul>
+          <div style="margin-top: 18px;">
+            <button class="btn btn-ghost" type="button">View full log</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COLLECTIONS CARD GRID ============ -->
+  <section class="section anim d5" aria-label="Season programs">
+    <div class="section-head">
+      <h2 class="section-title">Season Programs</h2>
+      <span class="section-hint">SS commissions by line</span>
+    </div>
+    <div class="card-grid">
+      <article class="collection-card inverted">
+        <div class="collection-no"><span>No. 01 <span class="tick">&mdash;</span> Flagship</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M5 12h14m0 0l-6-6m6 6l-6 6"/></svg>
+        </div>
+        <h3 class="collection-title">The Midnight Line</h3>
+        <p class="collection-desc">Formal evening tailoring &mdash; barathea, grosgrain, silk facings. The house signature and the season's revenue anchor.</p>
+        <div class="collection-meta"><span>16 commissions</span><span>$96,400</span></div>
+      </article>
+      <article class="collection-card">
+        <div class="collection-no"><span>No. 02</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M5 12h14m0 0l-6-6m6 6l-6 6"/></svg>
+        </div>
+        <h3 class="collection-title">City Flannel</h3>
+        <p class="collection-desc">Working wardrobe suiting in dove, slate, and charcoal flannels. Repeat-client volume, steady margins.</p>
+        <div class="collection-meta"><span>13 commissions</span><span>$71,900</span></div>
+      </article>
+      <article class="collection-card">
+        <div class="collection-no"><span>No. 03</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M5 12h14m0 0l-6-6m6 6l-6 6"/></svg>
+        </div>
+        <h3 class="collection-title">Field &amp; Cloth</h3>
+        <p class="collection-desc">Casual outerwear program &mdash; waxed cottons, loden, moleskin. New this season; watching conversion closely.</p>
+        <div class="collection-meta"><span>9 commissions</span><span>$45,700</span></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer anim d6">
+    <span class="footer-brand">Maison Vance &mdash; Est. 1987</span>
+    <span class="footer-note">Data refreshed 09:52 &middot; All figures in USD &middot; Internal use only</span>
+  </footer>
+
+</div>
+</body>
+</html>

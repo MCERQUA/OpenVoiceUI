@@ -1572,7 +1572,15 @@ def _submit_process_job(endpoint: str, request_body: dict, kind: str,
 def suno_callback():
     """Webhook from sunoapi.org — downloads song and queues frontend notification."""
     try:
-        # Verify HMAC signature when a webhook secret is configured
+        # Verify HMAC signature when a webhook secret is configured.
+        # NOTE: SUNO_WEBHOOK_SECRET is NOT provisioned in the fleet .env template
+        # yet (verified 2026-07-11), so we cannot fail-closed without breaking
+        # every tenant's song delivery. Until the secret is provisioned
+        # fleet-wide, an unsigned callback is accepted but constrained: the
+        # download is SSRF-checked, restricted to https, and hard-capped at
+        # SUNO_MAX_DOWNLOAD_BYTES (50 MB). TODO: add SUNO_WEBHOOK_SECRET to
+        # templates/.env then flip this to a 503 fail-closed.
+        _require_https = not SUNO_WEBHOOK_SECRET
         if SUNO_WEBHOOK_SECRET:
             sig_header = request.headers.get('X-Suno-Signature', '')
             payload = request.get_data()
@@ -1580,6 +1588,12 @@ def suno_callback():
             if not hmac.compare_digest(sig_header, expected):
                 logger.warning('Suno callback rejected: invalid signature')
                 return jsonify({'status': 'forbidden'}), 403
+        else:
+            logger.warning(
+                'Suno callback accepted UNSIGNED — SUNO_WEBHOOK_SECRET not configured. '
+                'Download restricted to https + %d byte cap. Provision the secret '
+                'fleet-wide to fail closed.', SUNO_MAX_DOWNLOAD_BYTES
+            )
 
         data = request.json or {}
         logger.info(f'Suno callback: {json.dumps(data, indent=2)[:500]}')
@@ -1639,6 +1653,10 @@ def suno_callback():
 
                     if audio_url and not save_path.exists():
                         if not _is_safe_download_url(audio_url):
+                            continue
+                        # Unsigned callbacks: only https audio URLs are allowed.
+                        if _require_https and not audio_url.lower().startswith('https://'):
+                            logger.warning('Unsigned Suno callback: rejecting non-https audioUrl')
                             continue
                         try:
                             audio_resp = http_requests.get(audio_url, timeout=60, stream=True)

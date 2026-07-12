@@ -1,0 +1,32 @@
+{
+  "id": "velocity",
+  "name": "Velocity",
+  "tagline": "Pit-wall telemetry at 300 km/h",
+  "description": "Motorsport command center: deep carbon-black surfaces, F1 racing red, silver detailing and checkered-flag dividers. Saira italic headings lean into the corner, Chivo Mono lap-timer figures keep the data honest. Flashy in the headers, ruthless legibility in the tables.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#0b0c0e",
+    "surface": "#131418",
+    "surface-2": "#1b1d22",
+    "border": "#2a2d34",
+    "text": "#c9ccd3",
+    "text-secondary": "#8f939c",
+    "text-muted": "#63676f",
+    "heading": "#f4f5f7",
+    "brand": "#e10600",
+    "brand-contrast": "#ffffff",
+    "accent": "#c7ccd6",
+    "success": "#2fd071",
+    "warning": "#ffb020",
+    "danger": "#ff453a",
+    "scrollbar": "#3a3d45",
+    "radius": "4px",
+    "radius-sm": "2px",
+    "shadow": "0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.45)",
+    "font-display": "'Saira', 'Titillium Web', system-ui, sans-serif",
+    "font-body": "'Titillium Web', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Chivo Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Saira:ital,wght@0,600;0,700;1,600;1,700;1,800&family=Titillium+Web:wght@400;600;700&family=Chivo+Mono:wght@400;500;700&display=swap"
+  }
+}

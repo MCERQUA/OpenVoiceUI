@@ -1,0 +1,57 @@
+{
+  "_comment": "LLM provider catalog for the admin panel + Service Catalog (WO-1.2). Moved out of the hardcoded routes/admin.py:_AI_PROVIDERS dict so a provider can be added/edited without a code change. services/ai_providers.py loads this file and falls back to the inline default (services.ai_providers._DEFAULT_AI_PROVIDERS) if it is missing or unparseable. Adding a provider here makes it appear in /api/services/catalog and the AI-Models admin tab with no panel edit. LLM ROUTING itself lives in the gateway/framework layer (openclaw.json agents.defaults.model), NOT here — this catalog only describes providers + their credential env keys + selectable models.",
+  "providers": {
+    "zai": {
+      "name": "Z.AI (Account A)",
+      "envKey": "ZAI_API_KEY",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "api": "anthropic-messages",
+      "models": [
+        {"id": "glm-5-turbo", "name": "GLM-5 Turbo (Z.AI)", "contextWindow": 204000},
+        {"id": "glm-4.7", "name": "GLM-4.7 (Z.AI)", "contextWindow": 204000}
+      ]
+    },
+    "zai_fb": {
+      "name": "Z.AI (Account B / fallback)",
+      "envKey": "ZAI_FALLBACK_API_KEY",
+      "baseUrl": "https://api.z.ai/api/anthropic",
+      "api": "anthropic-messages",
+      "models": [
+        {"id": "glm-5-turbo", "name": "GLM-5 Turbo (Z.AI B)", "contextWindow": 204000},
+        {"id": "glm-4.7", "name": "GLM-4.7 (Z.AI B)", "contextWindow": 204000}
+      ]
+    },
+    "anthropic": {
+      "name": "Anthropic",
+      "envKey": "ANTHROPIC_API_KEY",
+      "baseUrl": "https://api.anthropic.com",
+      "api": "anthropic-messages",
+      "models": [
+        {"id": "claude-sonnet-5", "name": "Claude Sonnet 5", "contextWindow": 200000},
+        {"id": "claude-opus-4-8", "name": "Claude Opus 4.8", "contextWindow": 200000},
+        {"id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5", "contextWindow": 200000}
+      ]
+    },
+    "openai": {
+      "name": "OpenAI",
+      "envKey": "OPENAI_API_KEY",
+      "baseUrl": "https://api.openai.com/v1",
+      "api": "openai-responses",
+      "models": [
+        {"id": "gpt-4.1", "name": "GPT-4.1", "contextWindow": 1047576},
+        {"id": "gpt-4o", "name": "GPT-4o", "contextWindow": 128000},
+        {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "contextWindow": 128000}
+      ]
+    },
+    "google": {
+      "name": "Google Gemini",
+      "envKey": "GEMINI_API_KEY",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "api": "google-generative-ai",
+      "models": [
+        {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "contextWindow": 1048576},
+        {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "contextWindow": 1048576}
+      ]
+    }
+  }
+}

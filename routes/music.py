@@ -864,7 +864,20 @@ def delete_track(playlist, filename):
     if not track_path.exists():
         return jsonify({"error": "Track not found"}), 404
 
-    track_path.unlink()
+    # Soft-delete: rename to a .deleted sibling instead of hard-removing (NEVER-DELETE
+    # house rule — matches routes/suno.py delete_song + routes/workspace.py). The
+    # .deleted suffix is not in the music-extension whitelist the list endpoints scan,
+    # so archived tracks are excluded automatically. Collision-safe: if a .deleted
+    # target already exists, append a timestamp so no prior archive is clobbered.
+    renamed = track_path.with_suffix(track_path.suffix + ".deleted")
+    if renamed.exists():
+        renamed = track_path.with_suffix(track_path.suffix + f".{int(time.time())}.deleted")
+    try:
+        track_path.rename(renamed)
+        print(f"🎵 Archived track: {safe_filename} -> {renamed.name}")
+    except Exception as e:
+        print(f"Error archiving track {safe_filename}: {e}")
+        return jsonify({"error": str(e)}), 500
 
     # Remove from metadata if present
     metadata = load_meta()

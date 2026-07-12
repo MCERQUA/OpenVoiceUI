@@ -111,6 +111,9 @@ def create_app(config_override: dict = None):
         '/api/server-stats',
         '/api/plugins/',    # install/uninstall/restart/config (assets exempted below)
         '/api/plugins',     # bare list endpoint
+        '/api/services/',   # Service Catalog + per-service health (WO-1.2) — reads
+                            # gateway/LLM/TTS/STT descriptors + vault cred status;
+                            # admin-only, never public.
     )
 
     if not _auth_enabled:
@@ -148,29 +151,41 @@ def create_app(config_override: dict = None):
             '/canvas-data/',  # processed-song media (audio stems) + fixtures for the Suno Studio editor — non-sensitive, served like /uploads/ (added 2026-06-25)
             '/static/',    # PWA icons, app icons
             '/pages/',     # canvas pages — served without auth (CANVAS_REQUIRE_AUTH opt-in)
-            '/api/canvas/',  # canvas API — creation, manifest, context (no per-user auth needed)
             '/api/upload',    # file upload — canvas pages lose Clerk JWT on long sessions; files are non-sensitive
             '/api/uploads',   # uploads list — files are already public at /uploads/, listing is fine
-            '/api/profiles',  # read-only profile config — loaded before Clerk init
             '/api/plugins/assets',  # Plugin face scripts/CSS — fetched by index.html before login.
                                     # All other /api/plugins routes (install/uninstall/restart/config)
                                     # are state-changing admin operations and require admin auth below.
             '/api/vault/oauth/callback/',  # OAuth callbacks — redirected from external providers
             '/plugins/',      # Plugin static assets — face scripts, CSS, previews
-            '/api/chat',      # LLM proxy (Groq) — used by canvas pages for inline AI
-            '/api/tts/',      # TTS provider list — loaded before Clerk init
-            '/api/stt/',      # STT endpoints (Deepgram token, Groq, local) — mic audio only, no secrets exposed
             '/api/theme',     # theme config — loaded before Clerk init
-            '/api/music',     # music track list — loaded before Clerk init
-            '/api/faces',     # face list — loaded before Clerk init
-            '/api/custom-faces', # custom face manifest + CRUD — loaded by face picker
             '/faces/custom/', # custom face HTML — loaded in iframe by face-box
-            '/api/icons/',    # icon library + generated icons — static images, no secrets
-            '/api/suno',      # Suno song generation — status polling + song list (no secrets)
             '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
             '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
             '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
         )
+        # Public for READS ONLY (GET/HEAD/OPTIONS). These prefixes serve config
+        # lists the UI loads before Clerk init, but their state-changing methods
+        # (POST/PUT/PATCH/DELETE) must NOT bypass auth — a prefix opened for a
+        # benign read previously exposed every write sibling under it
+        # (SEC-1/2/3/6/9). Write methods fall through to the normal auth path:
+        # the internal agent key already carves out its allowed non-admin paths
+        # (canvas/tts/suno/music writes the openclaw agent depends on), and
+        # everything else requires a Clerk session.
+        _PUBLIC_READ_PREFIXES = (
+            '/api/canvas/',   # GET manifest/context/pages — writes gated (SEC-2/3/8)
+            '/api/tts/',      # GET provider list — clone/default-writes gated (SEC-9)
+            '/api/chat',      # LLM proxy — POST gated so anon can't burn the LLM budget (SEC-6)
+            '/api/music',     # GET track list — upload/delete gated
+            '/api/faces',     # GET face list — enrollment writes gated
+            '/api/custom-faces',  # GET manifest — HTML-face writes gated (SEC-3 stored XSS)
+            '/api/icons/',    # GET icon library — generate/upload gated (SEC-9)
+            '/api/suno',      # GET status/song-list — generation POSTs gated (SEC-9)
+            '/api/profiles',  # GET profile config — activate/save writes gated (SEC-10)
+        )
+        # NOTE: /api/stt/ is intentionally NOT public — the Deepgram token
+        # endpoint returns a live secret (SEC-1). All /api/stt/* now requires a
+        # Clerk session or the agent key.
         _PUBLIC_EXACT = {
             '/',           # main page — hosts the Clerk login gate itself
             '/pi',         # Pi-optimized page — same login gate, different entry point
@@ -227,6 +242,13 @@ def create_app(config_override: dict = None):
             # /src/ is public (login-screen assets) EXCEPT the admin shell itself —
             # /src/admin.html must go through the same admin gate as /admin.
             if path != '/src/admin.html' and any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+                return
+            # Read-only public prefixes: GET/HEAD/OPTIONS bypass auth (config lists
+            # loaded before Clerk init); write methods fall through to the auth
+            # path below (agent key or Clerk session required).
+            if request.method in ('GET', 'HEAD', 'OPTIONS') and any(
+                path.startswith(p) for p in _PUBLIC_READ_PREFIXES
+            ):
                 return
             # Canvas pages and images have their own auth logic (public flag)
             # handled inside canvas_bp — let them through here

@@ -1,0 +1,32 @@
+{
+  "id": "carbon",
+  "name": "Carbon",
+  "tagline": "Precision-instrument dark, built like machine hardware",
+  "description": "Industrial engineering console: matte graphite panels, 1px technical borders, signal-orange controls and HUD-lime telemetry. Chakra Petch display type with mono figures everywhere — a CNC HMI polished to product grade.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#101216",
+    "surface": "#16181d",
+    "surface-2": "#1c1f26",
+    "border": "#2a2e37",
+    "text": "#c6ccd6",
+    "text-secondary": "#8b93a2",
+    "text-muted": "#616978",
+    "heading": "#eef1f6",
+    "brand": "#ea580c",
+    "brand-contrast": "#ffffff",
+    "accent": "#84cc16",
+    "success": "#22c55e",
+    "warning": "#eab308",
+    "danger": "#ef4444",
+    "scrollbar": "#333844",
+    "radius": "6px",
+    "radius-sm": "3px",
+    "shadow": "0 1px 0 rgba(0, 0, 0, 0.45), 0 4px 14px rgba(0, 0, 0, 0.35)",
+    "font-display": "'Chakra Petch', 'Barlow', system-ui, sans-serif",
+    "font-body": "'Barlow', system-ui, -apple-system, sans-serif",
+    "font-mono": "'JetBrains Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+  }
+}

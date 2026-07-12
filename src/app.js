@@ -1438,6 +1438,44 @@ connectAiradio();
                 this._postExternalState('bandcamp', trackOrAlbumUrl, title, artist);
             },
 
+            // Spotify is a display/state mode: we receive only a track name + artist
+            // from the [SPOTIFY:] tag, not a Spotify URI, so a real playable embed
+            // can't be built headlessly. Mirror the reference MusicPlayer.playSpotify:
+            // switch the panel to spotify-mode, show the track, and notify the backend
+            // so status/context reflect it. Degrades gracefully — never throws.
+            async playSpotify(trackName, artist) {
+                console.log('[MusicModule] playSpotify:', trackName, artist);
+                try {
+                    try { this.audio?.pause?.(); } catch {}
+                    this.currentPlaylist = 'spotify';
+                    this.isPlaying = true;
+                    this.currentTrack = trackName;
+                    this.currentMetadata = { title: trackName, artist, source: 'spotify', playlist: 'spotify' };
+
+                    const displayName = artist ? `${trackName} — ${artist}` : trackName;
+                    if (this.trackName) this.trackName.textContent = displayName;
+
+                    this._clearExternalEmbed();
+                    if (this.button) this.button.classList.add('active');
+                    if (this.panel) {
+                        this.panel.classList.add('playing', 'spotify-mode');
+                    }
+                    this._syncPlayButtons(true);
+                    if (this.panelState === 'closed') this.openPanel();
+
+                    // Notify backend so status/context reflect Spotify
+                    try {
+                        const u = new URL(`${CONFIG.serverUrl}/api/music`);
+                        u.searchParams.set('action', 'spotify');
+                        u.searchParams.set('track', trackName);
+                        if (artist) u.searchParams.set('artist', artist);
+                        await fetch(u);
+                    } catch (e) { console.warn('[MusicModule] Spotify state sync failed:', e); }
+                } catch (e) {
+                    console.warn('[MusicModule] playSpotify failed (non-fatal):', e);
+                }
+            },
+
             _renderEmbed(provider, iframeHtml) {
                 // Render the embed as a SEPARATE floating element attached to <body>, not inside
                 // the music panel. Music panel is bottom-anchored, so content appended inside it
@@ -1956,6 +1994,48 @@ connectAiradio();
                 this._notifyAgent(title);
             },
 
+            // Play an announcement audio blob through the SAME STT-mute / _ttsPlaying
+            // discipline the main TTS path uses (FE-4). Without this the raw new Audio()
+            // playback is transcribed by the open mic → a paid echo turn ("play it").
+            _playMutedAnnouncement(url) {
+                const cm = (typeof ModeManager !== 'undefined') ? ModeManager?.clawdbotMode : null;
+                const stt = cm?.stt;
+                const audio = new Audio(url);
+                let _restored = false;
+                const _restore = () => {
+                    if (_restored) return;
+                    _restored = true;
+                    try { URL.revokeObjectURL(url); } catch {}
+                    if (!cm) return;
+                    try {
+                        // Match the main path's echo cooldown so buffered STT results
+                        // arriving after the announcement aren't re-submitted as speech.
+                        cm._ttsEchoCooldownUntil = Date.now() + 2500;
+                        setTimeout(() => {
+                            cm._ttsPlaying = false;
+                            if (cm._voiceActive && stt) {
+                                if (stt._micMuted || stt._pttHolding) return;
+                                if (stt.resume) stt.resume();
+                                else if (!stt.isListening && stt.start) stt.start();
+                                cm.callbacks?.onListening?.();
+                            }
+                        }, 300);
+                    } catch (e) { console.warn('[Suno] announce restore failed:', e); }
+                };
+                try {
+                    if (cm) {
+                        if (stt) {
+                            if (stt.mute) stt.mute();
+                            else { if (stt.isListening && stt.stop) stt.stop(); if (stt.resetProcessing) stt.resetProcessing(); }
+                        }
+                        cm._ttsPlaying = true;
+                    }
+                } catch (e) { console.warn('[Suno] announce mute failed:', e); }
+                audio.onended = _restore;
+                audio.onerror = _restore;
+                audio.play().catch(() => _restore());
+            },
+
             async _speakCompletion(title) {
                 try {
                     const resp = await fetch(`${CONFIG.serverUrl}/api/tts/generate`, {
@@ -1966,9 +2046,7 @@ connectAiradio();
                     if (!resp.ok) return;
                     const blob = await resp.blob();
                     const url = URL.createObjectURL(blob);
-                    const audio = new Audio(url);
-                    audio.onended = () => URL.revokeObjectURL(url);
-                    audio.play().catch(() => {});
+                    this._playMutedAnnouncement(url);
                 } catch (e) {
                     console.warn('[Suno] TTS completion error:', e);
                 }
@@ -1993,9 +2071,7 @@ connectAiradio();
                     if (!resp.ok) throw new Error(`tts ${resp.status}`);
                     const blob = await resp.blob();
                     const url = URL.createObjectURL(blob);
-                    const audio = new Audio(url);
-                    audio.onended = () => URL.revokeObjectURL(url);
-                    audio.play().catch(() => {});
+                    this._playMutedAnnouncement(url);
                 } catch (e) {
                     console.warn('[Suno] announce TTS failed:', e);
                 }
@@ -3277,6 +3353,9 @@ connectAiradio();
                             <div class="user-dropdown-item" onclick="AuthModule.openSettings('themes')">
                                 <span class="udi-icon">🎨</span> Themes & Colors
                             </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openCanvas('canvas-styles.html')">
+                                <span class="udi-icon">🖌️</span> Canvas Styles
+                            </div>
                             <div class="user-dropdown-item" onclick="AuthModule.openSettings('face')">
                                 <span class="udi-icon">👁️</span> Face Display
                             </div>
@@ -3337,6 +3416,9 @@ connectAiradio();
                             <div class="udm-section-label">Appearance</div>
                             <div class="user-dropdown-item" onclick="AuthModule.openSettings('themes')">
                                 <span class="udi-icon">🎨</span> Themes & Colors
+                            </div>
+                            <div class="user-dropdown-item" onclick="AuthModule.openCanvas('canvas-styles.html')">
+                                <span class="udi-icon">🖌️</span> Canvas Styles
                             </div>
                             <div class="user-dropdown-item" onclick="AuthModule.openSettings('face')">
                                 <span class="udi-icon">👁️</span> Face Display
@@ -3814,6 +3896,7 @@ connectAiradio();
             connect() {
                 if (this.isConnecting || this.isConnected) return;
                 this.isConnecting = true;
+                this._manualDisconnect = false;
 
                 // Determine WebSocket URL based on hostname
                 // Connect to voice agent (main agent, voice-optimized)
@@ -3829,6 +3912,7 @@ connectAiradio();
                         console.log('Clawdbot connected');
                         this.isConnected = true;
                         this.isConnecting = false;
+                        this._reconnectDelay = 3000;  // reset backoff on success
                         this.updateConnectionStatus('connected');
                         this.addSystemMessage('Connected to Clawdbot');
                         this.enableInput(true);
@@ -3859,6 +3943,18 @@ connectAiradio();
                         this.addSystemMessage('Disconnected from Clawdbot');
                         this.enableInput(false);
                         this.callbacks.onDisconnect();
+                        // Auto-reconnect (capped backoff) — this socket doubles
+                        // as the proactive-push channel, so it must come back
+                        // after server restarts / network blips without a page
+                        // reload. Manual disconnect() suppresses it.
+                        if (!this._manualDisconnect) {
+                            const delay = Math.min(this._reconnectDelay || 3000, 60000);
+                            this._reconnectDelay = delay * 2;
+                            console.log(`Clawdbot: reconnecting in ${delay / 1000}s`);
+                            setTimeout(() => {
+                                if (!this.isConnected && !this._manualDisconnect) this.connect();
+                            }, delay);
+                        }
                     };
                 } catch (error) {
                     this.isConnecting = false;
@@ -3868,6 +3964,7 @@ connectAiradio();
             }
 
             disconnect() {
+                this._manualDisconnect = true;
                 if (this.ws) {
                     this.ws.close();
                     this.ws = null;
@@ -4077,6 +4174,17 @@ connectAiradio();
                         console.log('Clawdbot WS: ignoring duplicate assistant_message');
                         break;
 
+                    case 'proactive_message':
+                        // Agent-initiated push — a background sub-agent finished
+                        // AFTER the original turn ended. Server pre-generated TTS.
+                        this._handleProactiveMessage(data);
+                        break;
+
+                    case 'keepalive':
+                        // Server idle ping keeping the push channel open through
+                        // proxy timeouts. Nothing to do.
+                        break;
+
                     case 'text_delta':
                         // Streaming text update (optional)
                         if (data.delta) {
@@ -4095,6 +4203,46 @@ connectAiradio();
 
                     default:
                         console.log('Clawdbot: Unknown message type:', data.type);
+                }
+            }
+
+            async _handleProactiveMessage(data) {
+                const rawText = data.text || '';
+                if (!rawText.trim()) return;
+                console.log('📣 Proactive message from agent:', rawText.substring(0, 120));
+                ActionConsole.addEntry('system', '✅ Background task complete — agent update');
+
+                // Dispatch [CANVAS:page] / [CANVAS_MENU] tags (mirrors the HTTP
+                // stream handler — proactive pushes must open pages the same way)
+                const canvasMatch = rawText.match(/\[CANVAS:([^\]]+)\]/i);
+                if (canvasMatch) {
+                    const pageName = canvasMatch[1].trim();
+                    ActionConsole.addEntry('system', `Canvas: opening ${pageName}`);
+                    AgentActivityChip.handleTag('canvas', pageName);
+                    try {
+                        await fetch(`${this.config.serverUrl}/api/canvas/manifest/sync`, { method: 'POST' });
+                        await window.CanvasMenu?.loadManifest();
+                    } catch (e) { console.warn('[Canvas] manifest sync failed:', e); }
+                    CanvasControl.showPage?.(pageName);
+                } else if (/\[CANVAS_MENU\]/i.test(rawText)) {
+                    AgentActivityChip.handleTag('canvas_menu');
+                    CanvasControl.showMenu?.() || document.getElementById('canvas-menu-button')?.click();
+                }
+
+                // Dispatch canvas-action tags, then strip ALL tags for display
+                window.__canvasAction?.dispatchFrom(rawText);
+                let clean = (window.__canvasAction?.strip(rawText) ?? rawText);
+                clean = clean.replace(/\[[A-Z_]+(?::[^\]]*)?\]/g, '').trim();
+                if (clean) {
+                    this.displayMessage('assistant', clean);
+                    this.callbacks.onMessage('assistant', clean);
+                    window.TranscriptPanel?.addMessage('assistant', clean);
+                }
+
+                // Play the server-generated TTS through the normal audio queue
+                // (respects text mode, mic muting, ducking via onSpeaking).
+                if (data.audio) {
+                    this.playAudio(data.audio, data.audio_format || 'wav');
                 }
             }
 
@@ -4218,7 +4366,17 @@ connectAiradio();
                     const uiContext = this.getUIContext();
 
                     const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
-                    this._fetchAbortController = new AbortController();
+                    // Capture this stream's own controller in the closure so the finally
+                    // block only clears the shared slot if it STILL belongs to this stream
+                    // (FE-6). Otherwise a slow finally can null a newer send's controller,
+                    // and the next interrupt starts a second concurrent stream.
+                    const _localAbortController = new AbortController();
+                    this._fetchAbortController = _localAbortController;
+                    // FE-9: a new user turn starts here — reset duplicate-response
+                    // suppression so an identical short reply ("Done.", "Yes.") in a
+                    // LATER turn is not silently swallowed. Suppression stays effective
+                    // within this same turn (text_done sets _lastResponse below).
+                    this._lastResponse = null;
                     this._textDoneReceived = false;  // new stream — reset the race-window guard
                     this._streamingResponseActive = true;  // stream open — TTS chunks may arrive with long gaps; see constructor note
                     const response = await fetch(`${this.config.serverUrl}/api/conversation?stream=1`, {
@@ -4267,7 +4425,7 @@ connectAiradio();
                     const _resetInactivity = () => {
                         if (_inactivityTimer) clearTimeout(_inactivityTimer);
                         _inactivityTimer = setTimeout(() => {
-                            console.warn('[Stream] No data for 60s — aborting');
+                            console.warn(`[Stream] No data for ${INACTIVITY_TIMEOUT_MS / 1000}s — aborting`);
                             this._abortReason = 'inactivity';
                             this._fetchAbortController?.abort();
                         }, INACTIVITY_TIMEOUT_MS);
@@ -4337,6 +4495,14 @@ connectAiradio();
 
                     // Helper: check for canvas/music commands in accumulated text
                     const checkCanvasInStream = async (text) => {
+                        // Per-tag isolation (FE-3): run each side-effecting tag handler
+                        // through _tag() so a throw in one (e.g. a missing player method)
+                        // is logged and contained — later tag handlers in the SAME pass
+                        // still run instead of being skipped.
+                        const _tag = (label, fn) => {
+                            try { return fn(); }
+                            catch (e) { console.error(`[tag:${label}] handler failed:`, e); }
+                        };
                         text = normalizeActionTags(text);
                         // Check for [CANVAS_MENU]
                         if (/\[CANVAS_MENU\]/i.test(text) && !canvasCommandsProcessed.has('CANVAS_MENU')) {
@@ -4344,7 +4510,7 @@ connectAiradio();
                             console.log('[Canvas] CANVAS_MENU trigger detected');
                             ActionConsole.addEntry('system', 'Canvas: opening menu');
                             AgentActivityChip.handleTag('canvas_menu');
-                            CanvasControl.showMenu?.() || document.getElementById('canvas-menu-button')?.click();
+                            _tag('canvas_menu', () => CanvasControl.showMenu?.() || document.getElementById('canvas-menu-button')?.click());
                         }
                         // Check for [CANVAS:pagename]
                         const canvasMatch = text.match(/\[CANVAS:([^\]]+)\]/i);
@@ -4359,7 +4525,7 @@ connectAiradio();
                                 await fetch(`${CONFIG.serverUrl}/api/canvas/manifest/sync`, { method: 'POST' });
                                 await window.CanvasMenu?.loadManifest();
                             } catch (e) { console.warn('[Canvas] manifest sync failed:', e); }
-                            CanvasControl.showPage?.(pageName);
+                            _tag('canvas_page', () => CanvasControl.showPage?.(pageName));
                         }
                         // Check for [MUSIC_PLAY] or [MUSIC_PLAY:track]
                         const musicPlay = text.match(/\[MUSIC_PLAY(?::([^\]]+))?\]/i);
@@ -4369,26 +4535,28 @@ connectAiradio();
                             ActionConsole.addEntry('system', trackName ? `Music: playing "${trackName}"` : 'Music: playing');
                             AgentActivityChip.handleTag('music_play', trackName);
                             // Always open the panel regardless of whether tracks exist
-                            if (window.musicPlayer?.panelState === 'closed') window.musicPlayer.openPanel();
-                            if (trackName) {
-                                window.musicPlayer?.play(trackName);
-                            } else {
-                                window.musicPlayer?.play();
-                            }
+                            _tag('music_play', () => {
+                                if (window.musicPlayer?.panelState === 'closed') window.musicPlayer.openPanel();
+                                if (trackName) {
+                                    window.musicPlayer?.play(trackName);
+                                } else {
+                                    window.musicPlayer?.play();
+                                }
+                            });
                         }
                         // Check for [MUSIC_STOP]
                         if (/\[MUSIC_STOP\]/i.test(text) && !canvasCommandsProcessed.has('MUSIC_STOP')) {
                             canvasCommandsProcessed.add('MUSIC_STOP');
                             ActionConsole.addEntry('system', 'Music: stopped');
                             AgentActivityChip.handleTag('music_stop');
-                            window.musicPlayer?.stop();
+                            _tag('music_stop', () => window.musicPlayer?.stop());
                         }
                         // Check for [MUSIC_NEXT]
                         if (/\[MUSIC_NEXT\]/i.test(text) && !canvasCommandsProcessed.has('MUSIC_NEXT')) {
                             canvasCommandsProcessed.add('MUSIC_NEXT');
                             ActionConsole.addEntry('system', 'Music: next track');
                             AgentActivityChip.handleTag('music_next');
-                            window.musicPlayer?.next();
+                            _tag('music_next', () => window.musicPlayer?.next());
                         }
                         [...text.matchAll(/\[SUNO_GENERATE:([^\]]+)\]/gi)].forEach(m => {
                             const sunoPrompt = m[1].trim();
@@ -4397,7 +4565,7 @@ connectAiradio();
                             canvasCommandsProcessed.add(key);
                             ActionConsole?.addEntry('system', `🎵 Suno: generating "${sunoPrompt.substring(0, 60)}${sunoPrompt.length > 60 ? '...' : ''}"`);
                             AgentActivityChip?.handleTag('suno', sunoPrompt);
-                            window.sunoModule?.generate(sunoPrompt);
+                            _tag('suno', () => window.sunoModule?.generate(sunoPrompt));
                         });
                         // [JINGLE_GENERATE:brand|style|gender|instrumental|repeat] — short logo jingle (10-15s)
                         // Parts: brand (required), style (preset key or freetext), gender (m|f),
@@ -4419,7 +4587,7 @@ connectAiradio();
                             }
                             ActionConsole?.addEntry('system', `🎵 Jingle: "${brand}" (${style || 'random style'}${instrumental ? ', instrumental' : ', ' + (gender === 'f' ? 'female' : 'male')}${repeat !== 2 ? `, ${repeat}×` : ''})`);
                             AgentActivityChip?.handleTag('suno', `${brand} jingle`);
-                            window.sunoModule?.generateJingle(brand, style, gender, instrumental, repeat);
+                            _tag('jingle', () => window.sunoModule?.generateJingle(brand, style, gender, instrumental, repeat));
                         });
                         // Check for [SPOTIFY:track name|artist] — switches player to Spotify mode
                         const spotifyMatch = text.match(/\[SPOTIFY:([^|\]]+)(?:\|([^\]]+))?\]/i);
@@ -4429,7 +4597,7 @@ connectAiradio();
                             const spotifyArtist = spotifyMatch[2]?.trim() || '';
                             ActionConsole.addEntry('system', `Spotify: "${spotifyTrack}"${spotifyArtist ? ` by ${spotifyArtist}` : ''}`);
                             AgentActivityChip.handleTag('spotify', spotifyTrack);
-                            window.musicPlayer?.playSpotify(spotifyTrack, spotifyArtist);
+                            _tag('spotify', () => window.musicPlayer?.playSpotify(spotifyTrack, spotifyArtist));
                         }
                         // [AIRADIO_*] — dispatch each unique tag once; bridge maps verb→endpoint
                         const _airadioRe = /\[AIRADIO_([A-Z_]+)(?::([^\]]*))?\]/gi;
@@ -4442,7 +4610,7 @@ connectAiradio();
                             canvasCommandsProcessed.add(key);
                             ActionConsole.addEntry('system', `AI-Radio: ${verb}${data ? ` (${data})` : ''}`);
                             AgentActivityChip.handleTag('airadio', `${verb}${data ? `: ${data}` : ''}`);
-                            window.airadioDispatch?.(verb, data);
+                            _tag('airadio', () => window.airadioDispatch?.(verb, data));
                         }
                         // [SOUNDCLOUD:url] — play track in music player embed
                         const soundcloudMatch = text.match(/\[SOUNDCLOUD:([^\]]+)\]/i);
@@ -4451,7 +4619,7 @@ connectAiradio();
                             const scUrl = soundcloudMatch[1].trim();
                             ActionConsole.addEntry('system', `SoundCloud: ${scUrl}`);
                             AgentActivityChip.handleTag('soundcloud', scUrl);
-                            window.musicPlayer?.playSoundCloud(scUrl);
+                            _tag('soundcloud', () => window.musicPlayer?.playSoundCloud(scUrl));
                         }
                         // [SOUNDCLOUD_PAGE:url] — open full-screen canvas page with the embed
                         const soundcloudPageMatch = text.match(/\[SOUNDCLOUD_PAGE:([^\]]+)\]/i);
@@ -4460,7 +4628,7 @@ connectAiradio();
                             const scUrl = soundcloudPageMatch[1].trim();
                             ActionConsole.addEntry('system', `SoundCloud page: ${scUrl}`);
                             AgentActivityChip.handleTag('soundcloud_page', scUrl);
-                            window.openEmbedCanvasPage?.('soundcloud', scUrl);
+                            _tag('soundcloud_page', () => window.openEmbedCanvasPage?.('soundcloud', scUrl));
                         }
                         // [BANDCAMP:url] — play in music player embed
                         const bandcampMatch = text.match(/\[BANDCAMP:([^\]]+)\]/i);
@@ -4469,7 +4637,7 @@ connectAiradio();
                             const bcUrl = bandcampMatch[1].trim();
                             ActionConsole.addEntry('system', `Bandcamp: ${bcUrl}`);
                             AgentActivityChip.handleTag('bandcamp', bcUrl);
-                            window.musicPlayer?.playBandcamp(bcUrl);
+                            _tag('bandcamp', () => window.musicPlayer?.playBandcamp(bcUrl));
                         }
                         // [BANDCAMP_PAGE:url] — full-screen canvas page
                         const bandcampPageMatch = text.match(/\[BANDCAMP_PAGE:([^\]]+)\]/i);
@@ -4478,7 +4646,7 @@ connectAiradio();
                             const bcUrl = bandcampPageMatch[1].trim();
                             ActionConsole.addEntry('system', `Bandcamp page: ${bcUrl}`);
                             AgentActivityChip.handleTag('bandcamp_page', bcUrl);
-                            window.openEmbedCanvasPage?.('bandcamp', bcUrl);
+                            _tag('bandcamp_page', () => window.openEmbedCanvasPage?.('bandcamp', bcUrl));
                         }
                         // Check for [REGISTER_FACE:name] — agent registers current camera frame
                         const registerFaceMatch = text.match(/\[REGISTER_FACE:([^\]]+)\]/i);
@@ -4514,7 +4682,7 @@ connectAiradio();
                             console.log('[Sound] DJ sound trigger:', soundName);
                             ActionConsole.addEntry('system', `Sound: ${soundName}`);
                             AgentActivityChip.handleTag('sound', soundName);
-                            DJSoundboard.play(soundName);
+                            _tag('sound', () => DJSoundboard.play(soundName));
                         }
                         // Check for [CANVAS_URL:https://example.com] — load external URL in iframe
                         const canvasUrlMatch = text.match(/\[CANVAS_URL:([^\]]+)\]/i);
@@ -4546,15 +4714,19 @@ connectAiradio();
                                 const dedupeKey = 'CANVAS_ACTION:' + action + ':' + JSON.stringify(t.payload?.payload ?? '');
                                 if (canvasCommandsProcessed.has(dedupeKey)) continue;
                                 canvasCommandsProcessed.add(dedupeKey);
-                                dispatchCanvasAction(action, t.payload?.payload || {});
+                                _tag('canvas_action', () => dispatchCanvasAction(action, t.payload?.payload || {}));
                             }
                         }
-                        // Check for [MOOD:xxx] — agent-driven facial expression change
+                        // Check for [MOOD:xxx] — agent-driven facial expression change.
+                        // Dedupe so the mood fires ONCE per response, not on every delta pass
+                        // (FE-11) — the tag is present in the accumulated text on every subsequent
+                        // delta, which otherwise re-set the mood repeatedly.
                         const moodTagMatch = text.match(/\[MOOD:(neutral|happy|sad|angry|thinking|surprised|listening)\]/i);
-                        if (moodTagMatch) {
+                        if (moodTagMatch && !canvasCommandsProcessed.has('MOOD')) {
+                            canvasCommandsProcessed.add('MOOD');
                             const newMood = moodTagMatch[1].toLowerCase();
                             console.log('[Mood] Agent set mood:', newMood);
-                            FaceModule.setMood(newMood);
+                            _tag('mood', () => FaceModule.setMood(newMood));
                             ActionConsole.addEntry('system', `Mood: ${newMood}`);
                         }
                         // Check for [SLEEP] — agent-initiated return to wake-word mode
@@ -4576,7 +4748,7 @@ connectAiradio();
                                 console.log('[Canvas] Complete HTML detected in stream, saving early...');
                                 ActionConsole.addEntry('system', 'Canvas: building page from HTML');
                                 AgentActivityChip.handleTag('html_canvas');
-                                this._saveAndShowHtml(htmlEarlyMatch[1].trim());
+                                _tag('html_canvas', () => this._saveAndShowHtml(htmlEarlyMatch[1].trim()));
                             }
                         }
                     };
@@ -4594,9 +4766,22 @@ connectAiradio();
                             buffer = buffer.slice(newlineIdx + 1);
                             if (!line) continue;
 
+                            // Parse in its own narrow try/catch — a genuine parse
+                            // failure skips only this line, it never masks a handler
+                            // exception below (FE-2).
+                            let data;
                             try {
-                                const data = JSON.parse(line);
+                                data = JSON.parse(line);
+                            } catch (parseErr) {
+                                console.warn('Failed to parse stream line:', parseErr, line.slice(0, 200));
+                                continue;
+                            }
 
+                            // Dispatch OUTSIDE the parse try/catch, wrapped in its own
+                            // handler try/catch so an exception in one event handler
+                            // (e.g. a text_done DOM/tag throw) is logged with its real
+                            // event type and does NOT kill the read loop.
+                            try {
                                 // Filtered: server rejected garbage STT — silently resume
                                 if (data.type === 'filtered') {
                                     console.log('[stream] Garbage STT filtered by server:', data.reason);
@@ -4634,8 +4819,12 @@ connectAiradio();
                                         TranscriptPanel.updateStreaming(stripCanvasTags(streamingText));
                                     }
 
-                                    // Check for canvas commands as they stream in
-                                    checkCanvasInStream(streamingText);
+                                    // Check for canvas commands as they stream in.
+                                    // checkCanvasInStream is async — catch its rejection so a
+                                    // failing tag handler never becomes an unhandled promise
+                                    // rejection (FE-3). Fire-and-forget by design (streaming).
+                                    checkCanvasInStream(streamingText).catch(e =>
+                                        console.error('[stream] checkCanvasInStream failed:', e));
                                 }
 
                                 // Heartbeat: server is alive, agent is working
@@ -4880,8 +5069,10 @@ connectAiradio();
                                     }
                                 }
 
-                            } catch (parseErr) {
-                                console.warn('Failed to parse stream line:', parseErr);
+                            } catch (dispatchErr) {
+                                // Real handler error — log with the event type so it is
+                                // debuggable, and keep reading the stream (don't rethrow).
+                                console.error(`[stream] handler error for event '${data?.type}':`, dispatchErr);
                             }
                         }
                     }
@@ -4908,7 +5099,7 @@ connectAiradio();
                             ActionConsole.addEntry('system', 'Task redirected by user');
                         } else if (_reason === 'inactivity') {
                             TranscriptPanel.finalizeStreaming('⏳ Agent went quiet — stream timed out.');
-                            ActionConsole.addEntry('system', 'Stream timed out (agent silent 60s) — not a user action');
+                            ActionConsole.addEntry('system', 'Stream timed out (agent silent 300s) — not a user action');
                         } else if (_wasAgentic && !_reason) {
                             // Unknown-source abort during agentic work — don't blame
                             // the user; just close the stream quietly.
@@ -4972,7 +5163,11 @@ connectAiradio();
                 } finally {
                     if (_inactivityTimer) clearTimeout(_inactivityTimer);
                     this._sending = false;
-                    this._fetchAbortController = null;
+                    // Only clear the shared controller slot if it is STILL this stream's
+                    // own controller — a newer send may have already replaced it (FE-6).
+                    if (this._fetchAbortController === _localAbortController) {
+                        this._fetchAbortController = null;
+                    }
                     // Stream is done. Future drain timer fires should use the short
                     // 800ms wait again. If an extended-wait drain timer is currently
                     // pending and the queue is empty, collapse it to the short window
@@ -6018,7 +6213,10 @@ connectAiradio();
                     const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
 
                     // Get AI response from backend
-                    this._fetchAbortController = new AbortController();
+                    // Capture this stream's own controller so the finally only clears
+                    // the shared slot when it still belongs to this stream (FE-6).
+                    const _localAbortController = new AbortController();
+                    this._fetchAbortController = _localAbortController;
                     const response = await fetch(`${this.config.serverUrl}/api/conversation`, {
                         method: 'POST',
                         signal: this._fetchAbortController.signal,
@@ -6100,7 +6298,9 @@ connectAiradio();
                         setTimeout(() => FaceModule.setMood('neutral'), 2000);
                     }
                 } finally {
-                    this._fetchAbortController = null;
+                    if (this._fetchAbortController === _localAbortController) {
+                        this._fetchAbortController = null;
+                    }
                     // Reset processing flag to allow new transcripts
                     TranscriptPanel.removeThinking();
                     document.getElementById('thought-bubbles')?.classList.remove('active');
@@ -7328,8 +7528,14 @@ connectAiradio();
                 });
             }
 
-            // If mode is hume, initialize HumeAdapter as voice agent
-            const activeMode = localStorage.getItem('voice_mode') || 'supertonic';
+            // If mode is hume, initialize HumeAdapter as voice agent.
+            // Server profile is AUTHORITATIVE (VPS = source of truth) — never let a stale
+            // per-tab localStorage voice_mode strand the UI in Hume mode, which hides the
+            // TTS Voice picker (Hume EVI controls voice itself, so #voice-select-group is
+            // hidden). BHB 2026-07-11: localStorage voice_mode='hume' left over from a past
+            // Hume session hid the Voice field despite the server profile being supertonic/
+            // resemble. Mirror line ~7178's server-first resolution.
+            const activeMode = window._serverProfile?.ui?.voice_mode || localStorage.getItem('voice_mode') || 'supertonic';
             if (activeMode === 'hume') {
                 // Force switchMode by temporarily setting a different mode
                 ModeManager.currentMode = '_init';
@@ -7417,7 +7623,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                             await window.CanvasMenu?.loadManifest?.();
                         } catch {}
                         const pageId = saveRes.page_id || saveRes.filename.replace(/\.html$/, '');
-                        window.CanvasControl?.showPage?.(pageId);
+                        window.CanvasControl?.showPageById?.(pageId);
                     }
                 } catch (e) {
                     console.error('[openEmbedCanvasPage] save failed:', e);
@@ -7441,6 +7647,9 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
 
                 // Inject dark scrollbar theme into canvas iframe pages
                 if (this.iframe) {
+                    // Stamp every canvas navigation/reload — the speak gate below uses
+                    // this to suppress pages that "announce themselves" on load.
+                    this.iframe.addEventListener('load', () => { window._canvasNavAt = Date.now(); });
                     this.iframe.addEventListener('load', () => {
                         try {
                             const doc = this.iframe.contentDocument;
@@ -7471,14 +7680,33 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     console.log('[Canvas] postMessage action:', action, event.data);
                     switch (action) {
                         case 'speak':
-                            // Send text as if user spoke it — triggers AI response
+                            // Send text as if user spoke it — triggers AI response.
+                            // Every speak is a paid agent turn + TTS, so auto-announcements
+                            // are gated (Mike 2026-07-11):
+                            //  - userInitiated:true (explicit button tap in the page) always passes
+                            //  - untagged speaks within 15s of a canvas load/reload are pages
+                            //    announcing themselves on open — dropped
+                            //  - untagged speaks are also rate-limited to one per 60s
                             if (text && ModeManager.clawdbotMode) {
+                                if (event.data.userInitiated !== true) {
+                                    const sinceNav = Date.now() - (window._canvasNavAt || 0);
+                                    if (sinceNav < 15000) {
+                                        console.log('[Canvas] speak suppressed: page-open auto-announce', text.slice(0, 80));
+                                        break;
+                                    }
+                                    if (Date.now() - (window._lastAutoSpeakAt || 0) < 60000) {
+                                        console.log('[Canvas] speak suppressed: auto-speak rate limit', text.slice(0, 80));
+                                        break;
+                                    }
+                                    window._lastAutoSpeakAt = Date.now();
+                                }
                                 ModeManager.clawdbotMode.sendMessage(text);
                             }
                             break;
                         case 'navigate':
-                            // Navigate to another canvas page
-                            if (page) CanvasControl.showPage(page);
+                            // Navigate to another canvas page. The desktop
+                            // sends exact page ids here — never fuzzy match.
+                            if (page) CanvasControl.showPageById(page);
                             break;
                         case 'open-url':
                             // Load external URL in the iframe
@@ -7557,14 +7785,20 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 // Poll every 10 seconds for file changes on the displayed canvas page
                 if (this._pollInterval) return;
                 this._pollInterval = setInterval(() => this._checkForUpdates(), 10000);
-                // Pause polling when tab is hidden to reduce server load
-                document.addEventListener('visibilitychange', () => {
-                    if (document.hidden) {
-                        if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
-                    } else if (this.isVisible) {
-                        this._startPoll();
-                    }
-                });
+                // Pause polling when tab is hidden to reduce server load.
+                // Register the visibilitychange listener ONCE (FE-7) — _startPoll is
+                // re-called from inside this very handler on re-show, so an unguarded
+                // addEventListener leaked one extra listener per hide/show cycle.
+                if (!this._visibilityBound) {
+                    this._visibilityBound = true;
+                    document.addEventListener('visibilitychange', () => {
+                        if (document.hidden) {
+                            if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+                        } else if (this.isVisible) {
+                            this._startPoll();
+                        }
+                    });
+                }
             },
 
             async _checkForUpdates() {
@@ -7655,14 +7889,39 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 this.openPage('desktop.html');
             },
 
-            showPage(pageName) {
-                // Fuzzy-find page by name using CanvasMenu's lookup
+            showPageById(pageId) {
+                // Exact match ONLY — no fuzzy scoring. Used by the desktop's
+                // postMessage navigation and any other caller that already
+                // knows the precise page id/filename stem (never voice input).
+                if (!pageId) return;
+                const menu = window.CanvasMenu;
+                const filename = pageId.endsWith('.html') ? pageId : pageId + '.html';
+                const stem = filename.replace(/\.html$/, '');
+                if (menu?.manifest?.pages?.[stem]) {
+                    console.log('[Canvas] showPageById exact:', stem);
+                    menu.showPage(menu.manifest.pages[stem].filename);
+                    return;
+                }
+                // Manifest doesn't have it (not synced yet, or a raw filename
+                // stem) — direct-load by filename. Still exact, no fuzzy fallback.
+                console.log('[Canvas] showPageById direct:', filename);
+                if (this.iframe) {
+                    this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
+                    localStorage.setItem('canvas_last_page', filename);
+                    this._lastMtime = null;
+                    this.show();
+                }
+            },
+
+            showPageByName(pageName) {
+                // Fuzzy-find page by name — for voice commands and agent
+                // [CANVAS:pagename] tags where the exact id isn't known.
                 if (!pageName) return;
                 const menu = window.CanvasMenu;
                 if (!menu?.manifest) {
                     // Manifest not loaded yet — try direct filename
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
-                    console.log('[Canvas] showPage direct:', filename);
+                    console.log('[Canvas] showPageByName direct:', filename);
                     if (this.iframe) {
                         this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
                         localStorage.setItem('canvas_last_page', filename);
@@ -7673,12 +7932,12 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 }
                 const match = menu.findPageByName(pageName);
                 if (match) {
-                    console.log('[Canvas] showPage matched:', match.page.display_name);
+                    console.log('[Canvas] showPageByName matched:', match.page.display_name);
                     menu.showPage(match.page.filename);
                 } else {
                     // Fallback: try as-is with .html
                     const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
-                    console.log('[Canvas] showPage fallback:', filename);
+                    console.log('[Canvas] showPageByName fallback:', filename);
                     if (this.iframe) {
                         this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
                         localStorage.setItem('canvas_last_page', filename);
@@ -7686,6 +7945,12 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                         this.show();
                     }
                 }
+            },
+
+            showPage(pageName) {
+                // Back-compat alias — fuzzy match (voice/agent-tag callers).
+                // Programmatic exact-id callers should use showPageById().
+                this.showPageByName(pageName);
             },
 
             async updateDisplay(type, path, title) {
@@ -8421,6 +8686,11 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     }
                 }
 
+                // Reject weak matches — a bare single-word substring hit
+                // (score ~53) used to be enough to win and open the wrong
+                // page. Require at least a solid partial-name/alias match.
+                const MIN_MATCH_SCORE = 70;
+                if (bestMatch && bestMatch.score < MIN_MATCH_SCORE) return null;
                 return bestMatch;
             },
 
@@ -9847,6 +10117,14 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 // Stop recording and force transcription — pttRelease handles all state
                 // onstop handler will send to Groq and call onResult asynchronously
                 stt.pttRelease();
+            },
+
+            // Set PTT mode to a specific target state (idempotent). Delegates to
+            // _toggleMode so all the STT-mute / wake-word side-effects run exactly
+            // once — never toggling twice. No-op if already in the requested state.
+            _setPTT(enabled) {
+                if (this.pttMode === !!enabled) return;
+                this._toggleMode();
             }
         };
         window.PTTButton.init();
@@ -10037,115 +10315,135 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 window.providerManager._activeProfileId = profile.id;
             }
 
+            // Each numbered step is wrapped in its own try/catch so one failing step
+            // (e.g. a missing PTT method or a face-plugin throw) can't abort the rest
+            // of profile setup — the actual damage mechanism behind FE-1.
+
             // 1. STT silence timeout — applied immediately if STT is live, else deferred to poll
-            const stt = window._sttInstance;
-            if (stt) {
-                const ms = profile?.stt?.silence_timeout_ms;
-                if (ms != null) {
-                    stt.silenceDelayMs = ms;
-                    console.log(`[Profile] stt.silenceDelayMs = ${ms}ms`);
+            try {
+                const stt = window._sttInstance;
+                if (stt) {
+                    const ms = profile?.stt?.silence_timeout_ms;
+                    if (ms != null) {
+                        stt.silenceDelayMs = ms;
+                        console.log(`[Profile] stt.silenceDelayMs = ${ms}ms`);
+                    }
+                    const vt = profile?.stt?.vad_threshold;
+                    if (vt != null) {
+                        stt.vadThreshold = vt;
+                        console.log(`[Profile] stt.vadThreshold = ${vt}`);
+                    }
+                    const maxRec = profile?.stt?.max_recording_s;
+                    if (maxRec != null) {
+                        stt.maxRecordingMs = maxRec * 1000;
+                        console.log(`[Profile] stt.maxRecordingMs = ${maxRec * 1000}ms`);
+                    }
+                    const accMs = profile?.stt?.accumulation_delay_ms;
+                    if (accMs != null) {
+                        stt.accumulationDelayMs = accMs;
+                        console.log(`[Profile] stt.accumulationDelayMs = ${accMs}ms`);
+                    }
+                    // PTT default — auto-enable if profile says so
+                    if (profile?.stt?.ptt_default === true && window.PTTButton && !window.PTTButton.pttMode) {
+                        window.PTTButton._setPTT(true);
+                    }
                 }
-                const vt = profile?.stt?.vad_threshold;
-                if (vt != null) {
-                    stt.vadThreshold = vt;
-                    console.log(`[Profile] stt.vadThreshold = ${vt}`);
-                }
-                const maxRec = profile?.stt?.max_recording_s;
-                if (maxRec != null) {
-                    stt.maxRecordingMs = maxRec * 1000;
-                    console.log(`[Profile] stt.maxRecordingMs = ${maxRec * 1000}ms`);
-                }
-                const accMs = profile?.stt?.accumulation_delay_ms;
-                if (accMs != null) {
-                    stt.accumulationDelayMs = accMs;
-                    console.log(`[Profile] stt.accumulationDelayMs = ${accMs}ms`);
-                }
-                // PTT default — auto-enable if profile says so
-                if (profile?.stt?.ptt_default === true && window.PTTButton && !window.PTTButton.pttMode) {
-                    window.PTTButton._setPTT(true);
-                }
-            }
+            } catch (e) { console.error('[Profile] step 1 (STT) failed:', e); }
 
             // 2. Mode picker — show/hide options based on profile.modes
-            const modes = profile?.modes || {};
-            ['normal', 'listen', 'a2a'].forEach(key => {
-                const btn = document.getElementById('mode-opt-' + key);
-                if (btn) btn.style.display = (modes[key] === false) ? 'none' : '';
-            });
-            // PTT button
-            const pttBtn = document.getElementById('ptt-button');
-            if (pttBtn) pttBtn.style.display = (modes.ptt === false) ? 'none' : '';
+            try {
+                const modes = profile?.modes || {};
+                ['normal', 'listen', 'a2a'].forEach(key => {
+                    const btn = document.getElementById('mode-opt-' + key);
+                    if (btn) btn.style.display = (modes[key] === false) ? 'none' : '';
+                });
+                // PTT button
+                const pttBtn = document.getElementById('ptt-button');
+                if (pttBtn) pttBtn.style.display = (modes.ptt === false) ? 'none' : '';
+            } catch (e) { console.error('[Profile] step 2 (mode picker) failed:', e); }
 
             // 3. UI theme preset (maps to CSS data attribute → color overrides)
-            const preset = profile?.ui?.theme_preset || '';
-            document.body.dataset.themePreset = preset;
+            try {
+                const preset = profile?.ui?.theme_preset || '';
+                document.body.dataset.themePreset = preset;
+            } catch (e) { console.error('[Profile] step 3 (theme preset) failed:', e); }
 
             // 4. Mode badge
-            const showBadge = profile?.ui?.show_mode_badge;
-            const badgeText = profile?.ui?.mode_badge_text;
-            let badge = document.getElementById('profile-mode-badge');
-            if (!badge && showBadge) {
-                badge = document.createElement('div');
-                badge.id = 'profile-mode-badge';
-                badge.className = 'profile-mode-badge';
-                document.body.appendChild(badge);
-            }
-            if (badge) {
-                badge.style.display = showBadge ? '' : 'none';
-                if (badgeText) badge.textContent = badgeText;
-            }
+            try {
+                const showBadge = profile?.ui?.show_mode_badge;
+                const badgeText = profile?.ui?.mode_badge_text;
+                let badge = document.getElementById('profile-mode-badge');
+                if (!badge && showBadge) {
+                    badge = document.createElement('div');
+                    badge.id = 'profile-mode-badge';
+                    badge.className = 'profile-mode-badge';
+                    document.body.appendChild(badge);
+                }
+                if (badge) {
+                    badge.style.display = showBadge ? '' : 'none';
+                    if (badgeText) badge.textContent = badgeText;
+                }
+            } catch (e) { console.error('[Profile] step 4 (mode badge) failed:', e); }
 
             // 5. Conversation flags stored for use in API calls and TTS player
-            window._interruptionEnabled = profile?.conversation?.interruption_enabled === true;
-            window._maxResponseChars   = profile?.conversation?.max_response_chars || null;
+            try {
+                window._interruptionEnabled = profile?.conversation?.interruption_enabled === true;
+                window._maxResponseChars   = profile?.conversation?.max_response_chars || null;
+            } catch (e) { console.error('[Profile] step 5 (conversation flags) failed:', e); }
 
             // 6. Camera auth / identify-on-wake flags (read at wake-time from _activeProfileData)
             // These are read directly from window._activeProfileData in the wake callback —
             // no extra storage needed here.
 
             // 7. Wake words — update detector when profile overrides them
-            if (window.wakeDetector) {
-                const profileWords = profile?.stt?.wake_words;
-                if (Array.isArray(profileWords) && profileWords.length > 0) {
-                    window.wakeDetector.wakeWords = profileWords;
-                } else if (profileWords === null || profileWords === undefined) {
-                    // null = use platform default
-                    window.wakeDetector.wakeWords = ['wake up'];
+            try {
+                if (window.wakeDetector) {
+                    const profileWords = profile?.stt?.wake_words;
+                    if (Array.isArray(profileWords) && profileWords.length > 0) {
+                        window.wakeDetector.wakeWords = profileWords;
+                    } else if (profileWords === null || profileWords === undefined) {
+                        // null = use platform default
+                        window.wakeDetector.wakeWords = ['wake up'];
+                    }
+                    // [] = empty array means disable wake word (leave as-is, detector won't match anything)
+                    console.log(`[Profile] wakeWords = ${JSON.stringify(window.wakeDetector.wakeWords)}`);
                 }
-                // [] = empty array means disable wake word (leave as-is, detector won't match anything)
-                console.log(`[Profile] wakeWords = ${JSON.stringify(window.wakeDetector.wakeWords)}`);
-            }
+            } catch (e) { console.error('[Profile] step 7 (wake words) failed:', e); }
 
             // 8. TTS provider/voice — switch ProviderManager to match profile voice settings
-            if (profile?.voice && window.providerManager) {
-                const newProvider = profile.voice.tts_provider;
-                const newVoice = profile.voice.voice_id;
-                if (newProvider) {
-                    window.providerManager.selectedProvider = newProvider;
-                    if (newVoice) window.providerManager.currentVoice = newVoice;
-                    // Update provider dropdown
-                    const provSelect = document.getElementById('voice-provider-select');
-                    if (provSelect) provSelect.value = newProvider;
-                    // Rebuild voice dropdown (includes cloned voices)
-                    window.providerManager.updateProviderStatus();
-                    window.providerManager.updateVoiceUI();
-                    // Update active voice conversation
-                    if (window.voiceAgent?.setTTSProvider) {
-                        window.voiceAgent.setTTSProvider(newProvider, newVoice || 'autumn');
+            try {
+                if (profile?.voice && window.providerManager) {
+                    const newProvider = profile.voice.tts_provider;
+                    const newVoice = profile.voice.voice_id;
+                    if (newProvider) {
+                        window.providerManager.selectedProvider = newProvider;
+                        if (newVoice) window.providerManager.currentVoice = newVoice;
+                        // Update provider dropdown
+                        const provSelect = document.getElementById('voice-provider-select');
+                        if (provSelect) provSelect.value = newProvider;
+                        // Rebuild voice dropdown (includes cloned voices)
+                        window.providerManager.updateProviderStatus();
+                        window.providerManager.updateVoiceUI();
+                        // Update active voice conversation
+                        if (window.voiceAgent?.setTTSProvider) {
+                            window.voiceAgent.setTTSProvider(newProvider, newVoice || 'autumn');
+                        }
+                        console.log(`[Profile] TTS: ${newProvider} / ${newVoice}`);
                     }
-                    console.log(`[Profile] TTS: ${newProvider} / ${newVoice}`);
                 }
-            }
+            } catch (e) { console.error('[Profile] step 8 (TTS provider/voice) failed:', e); }
 
             // 9. Face plugin — switch mode + config from profile (generic, not face-type-specific)
-            const faceMode = profile?.ui?.face_mode;
-            const faceConfig = profile?.ui?.face_config || null;
-            if (faceMode && window.FaceRenderer) {
-                if (window.FaceRenderer.currentMode !== faceMode || faceConfig) {
-                    // skipPersist: applyProfile is READING the profile, not user-initiated
-                    window.FaceRenderer.setMode(faceMode, faceConfig, { skipPersist: true });
+            try {
+                const faceMode = profile?.ui?.face_mode;
+                const faceConfig = profile?.ui?.face_config || null;
+                if (faceMode && window.FaceRenderer) {
+                    if (window.FaceRenderer.currentMode !== faceMode || faceConfig) {
+                        // skipPersist: applyProfile is READING the profile, not user-initiated
+                        window.FaceRenderer.setMode(faceMode, faceConfig, { skipPersist: true });
+                    }
                 }
-            }
+            } catch (e) { console.error('[Profile] step 9 (face plugin) failed:', e); }
 
             console.log(`[Profile] applied: ${profile?.id} | silence=${profile?.stt?.silence_timeout_ms ?? 'default'}ms | accumulation=${profile?.stt?.accumulation_delay_ms ?? 'default'}ms | interruption=${window._interruptionEnabled} | wakeWords=${JSON.stringify(profile?.stt?.wake_words)} | modes=${JSON.stringify(profile?.modes)} | tts=${profile?.voice?.tts_provider}/${profile?.voice?.voice_id}`);
         };

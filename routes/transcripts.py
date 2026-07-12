@@ -328,6 +328,7 @@ def save_conversation_turn(
     actions: list = None,
     identified_person: dict = None,
     clerk_user_id: str = None,
+    gateway: str = None,
 ) -> 'str | None':
     """Save one conversation turn as a JSON transcript file.
 
@@ -377,6 +378,7 @@ def save_conversation_turn(
             'timestamp': ts_iso,
             'date': date_str,
             'time': now.strftime('%H:%M:%S'),
+            'gateway': gateway or 'openclaw',
             'tts_provider': tts_provider,
             'voice': voice,
             'duration_ms': duration_ms,

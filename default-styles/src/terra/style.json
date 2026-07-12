@@ -1,0 +1,32 @@
+{
+  "id": "terra",
+  "name": "Terra",
+  "tagline": "Warm organic earthen light",
+  "description": "Aesop-counter calm for business dashboards: sand and linen surfaces, deep soil-brown type, terracotta brand with an olive accent. Softly rounded, diffusely shadowed, quietly luxurious — grounded, never rustic.",
+  "base": "light",
+  "version": 1,
+  "tokens": {
+    "bg": "#f6f1e8",
+    "surface": "#fdfbf5",
+    "surface-2": "#f0e9da",
+    "border": "#e5dbc7",
+    "text": "#4a3f33",
+    "text-secondary": "#7a6c5a",
+    "text-muted": "#a3927c",
+    "heading": "#2e2620",
+    "brand": "#c2410c",
+    "brand-contrast": "#ffffff",
+    "accent": "#5f7a3d",
+    "success": "#3f7d4e",
+    "warning": "#a16207",
+    "danger": "#b3261e",
+    "scrollbar": "#d5c7b0",
+    "radius": "16px",
+    "radius-sm": "10px",
+    "shadow": "0 2px 4px rgba(76, 60, 40, 0.05), 0 12px 32px rgba(76, 60, 40, 0.08)",
+    "font-display": "'Epilogue', system-ui, sans-serif",
+    "font-body": "'Nunito Sans', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Spline Sans Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Epilogue:wght@500;600;700&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&family=Spline+Sans+Mono:wght@400;500&display=swap"
+  }
+}

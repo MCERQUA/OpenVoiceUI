@@ -85,11 +85,18 @@ def update_credential(cred_id):
 
     # Handle model selection update
     if cred_id == '_model_selection':
-        set_model_selection(
+        result = set_model_selection(
             username,
             primary=data.get('primary'),
             fallback=data.get('fallback'),
         )
+        # set_model_selection now returns {'ok': bool, 'error': str} — honor a
+        # real write failure instead of always reporting success (ADMIN-BUG-1).
+        if isinstance(result, dict) and not result.get('ok'):
+            return jsonify({
+                'ok': False,
+                'message': result.get('error', 'Model selection update failed'),
+            }), 500
         return jsonify({'ok': True, 'message': 'Model selection updated'})
 
     value = data.get('value')

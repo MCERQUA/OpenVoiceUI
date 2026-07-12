@@ -1,0 +1,32 @@
+{
+  "id": "voltage",
+  "name": "Voltage",
+  "tagline": "Full-send energy — acid volt on blacked-out steel",
+  "description": "Extreme-sports broadcast graphics: towering Bebas Neue uppercase, electric volt-green fills and glows on a green-tinted near-black base, hazard-stripe dividers and skewed badges. Loud where it counts — headers, badges, hover — while tables and body copy stay crisp and readable.",
+  "base": "dark",
+  "version": 1,
+  "tokens": {
+    "bg": "#0d0f0a",
+    "surface": "#141810",
+    "surface-2": "#1b2115",
+    "border": "#2b331e",
+    "text": "#d5dcc6",
+    "text-secondary": "#9aa587",
+    "text-muted": "#6d7a5c",
+    "heading": "#f4f7ec",
+    "brand": "#a3e635",
+    "brand-contrast": "#0d0f0a",
+    "accent": "#84cc16",
+    "success": "#34d399",
+    "warning": "#fbbf24",
+    "danger": "#f87171",
+    "scrollbar": "#3a4428",
+    "radius": "6px",
+    "radius-sm": "3px",
+    "shadow": "0 1px 0 rgba(163, 230, 53, 0.07) inset, 0 10px 28px rgba(0, 0, 0, 0.55)",
+    "font-display": "'Bebas Neue', 'Chivo', system-ui, sans-serif",
+    "font-body": "'Chivo', system-ui, -apple-system, sans-serif",
+    "font-mono": "'Martian Mono', ui-monospace, 'SF Mono', monospace",
+    "font-import": "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Chivo:wght@400;500;700;900&family=Martian+Mono:wght@400;700&display=swap"
+  }
+}
