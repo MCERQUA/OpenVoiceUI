@@ -389,6 +389,23 @@ _double_empty_window_start: float = 0
 _DOUBLE_EMPTY_MAX_RESTARTS: int = 2       # max restart flags per window
 _DOUBLE_EMPTY_WINDOW_SECONDS: float = 300  # 5-minute sliding window
 
+#: ── Context-bloat guard (2026-07-13, bhb session overflow) ────────────────
+#: The STATIC instruction blocks (voice action-tag instructions, canvas page
+#: list, track list, DJ sounds, profile instructions, canvas style) used to be
+#: re-sent verbatim on EVERY turn (~17KB/turn). The gateway session keeps full
+#: history, so after a day of voice chat the duplicated blocks alone overflowed
+#: GLM-5's context window (bhb 2026-07-13: 199-message session, repeated
+#: 'Context overflow' + a wedged ReplyRunAlreadyActive run → UI stuck in
+#: 'Connection lost — retrying'). Now the full static block is sent only when
+#: its CONTENT CHANGES (hash), on __session_start__, or as a periodic refresh
+#: so openclaw auto-compaction can never silently strip it from history;
+#: otherwise a one-line pointer is sent. Dynamic parts (face recognition,
+#: canvas open/closed, music state, Suno events, CURRENT_USER) stay per-turn.
+_ctx_static_cache: dict = {}        # "<session_id>:<voice_key>" -> {hash, ts, skips}
+_CTX_STATIC_RESEND_TURNS = 10       # resend full block at least every N turns
+_CTX_STATIC_RESEND_SECS = 900       # ...or after 15 minutes, whichever first
+_CTX_STATIC_CACHE_MAX = 300         # prune guard for the in-process cache
+
 # ---------------------------------------------------------------------------
 # Voice session management
 # (moved here from server.py so the blueprint owns the session counter)
@@ -450,6 +467,11 @@ def bump_voice_session() -> str:
     # at all), so the Reset button left the app pinned to a recovery-<epoch>
     # session forever.
     _exit_session_recovery()
+    # Context-bloat guard: a reset means the gateway session history is (or is
+    # about to be) gone — the next turn MUST carry the full static instruction
+    # block again, never the dedup pointer. The stable session key would
+    # otherwise keep the cache entry alive across the reset.
+    _ctx_static_cache.clear()
     try:
         with open(VOICE_SESSION_FILE, 'r') as f:
             counter = int(f.read().strip())
@@ -1272,7 +1294,9 @@ def _conversation_inner():
     # Build context prefix from UI state
     t_context_start = time.time()
     context_prefix = ''
-    context_parts = []
+    context_parts = []   # dynamic — changes turn to turn, always sent
+    static_parts = []    # static — identical between turns; deduped by the
+                         # context-bloat guard below (sent on change/periodic)
 
     # Inject face recognition identity
     if identified_person and identified_person.get('name') and identified_person.get('name') != 'unknown':
@@ -1479,7 +1503,7 @@ def _conversation_inner():
             if _gen_names:
                 _parts.append(f'Generated ({len(_gen_names)}): {_cap_list(_gen_names, max_chars=2000)}')
             if _parts:
-                context_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
+                static_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
         except Exception:
             pass
 
@@ -1531,10 +1555,10 @@ def _conversation_inner():
             _page_list = _cap_list(_page_ids, max_chars=5000)
         except Exception:
             _page_list = 'unknown'
-        context_parts.append(f'[Canvas pages: {_page_list}]')
+        static_parts.append(f'[Canvas pages: {_page_list}]')
 
         # Available DJ sounds (for [SOUND:name] in DJ mode)
-        context_parts.append(
+        static_parts.append(
             '[DJ sounds: air_horn, scratch_long, rewind, record_stop, '
             'crowd_cheer, crowd_hype, yeah, lets_go, gunshot, bruh, sad_trombone]'
         )
@@ -1546,13 +1570,22 @@ def _conversation_inner():
     _prof = None  # default — referenced again in __session_start__ greeting branch below
     _profile_greeting = ''  # default — set in the __session_start__ branch; read by the
                             # empty-greeting fallback in stream_response (closure capture)
+    # Persona greeting rotation defaults — MUST be initialized at function level:
+    # the text_done capture hook in stream_response evaluates _grot_active on
+    # EVERY turn (closure), and the assignments below only run in the
+    # __session_start__ branch. Without these defaults every non-greeting turn
+    # raised NameError mid-stream → 'Connection lost — retrying' (bhb 2026-07-13).
+    _grot_active = False
+    _grot_state_path = ''
+    _persona_greeting_prompt = ''
+    _persona_fallbacks = []
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
         _mgr = get_profile_manager()
         _prof = _mgr.get_profile(_active_profile_id)
         if _prof and _prof.system_prompt and _prof.system_prompt.strip():
-            context_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
+            static_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
         if _prof and hasattr(_prof, 'voice') and _prof.voice:
             _vc = _prof.voice
             if _vc.min_sentence_chars:
@@ -1612,7 +1645,7 @@ def _conversation_inner():
         from services.canvas_styles import get_active_style_id as _get_style_id
         _style_id = _get_style_id()
         if _style_id:
-            context_parts.append(
+            static_parts.append(
                 f'[CANVAS_STYLE: The user chose the "{_style_id}" design system for all '
                 f'canvas pages. BEFORE creating or restyling ANY canvas page you MUST '
                 f'read canvas-styles/ACTIVE-STYLE.md inside your canvas-pages directory '
@@ -1628,7 +1661,46 @@ def _conversation_inner():
 
     # Inject voice assistant instructions so the agent knows about action tags.
     # This must be in-app (not workspace files) so it works out of the box.
-    context_parts.append(_load_voice_system_prompt())
+    static_parts.append(_load_voice_system_prompt())
+
+    # ── Context-bloat guard: dedup the static block (see module docstring at
+    # _ctx_static_cache). Full block goes out when its content changes, on
+    # __session_start__, or as a periodic refresh; otherwise a 1-line pointer.
+    if static_parts:
+        _static_blob = ' '.join(static_parts)
+        try:
+            import hashlib as _hl
+            _ctx_key = f'{session_id}:{get_voice_session_key()}'
+            _static_hash = _hl.sha1(_static_blob.encode('utf-8', 'replace')).hexdigest()
+            _now_ctx = time.time()
+            _rec = _ctx_static_cache.get(_ctx_key)
+            _resend_full = (
+                user_message == '__session_start__'
+                or _rec is None
+                or _rec.get('hash') != _static_hash
+                or _rec.get('skips', 0) + 1 >= _CTX_STATIC_RESEND_TURNS
+                or _now_ctx - _rec.get('ts', 0) > _CTX_STATIC_RESEND_SECS
+            )
+            if _resend_full:
+                context_parts.append(_static_blob)
+                _ctx_static_cache[_ctx_key] = {'hash': _static_hash, 'ts': _now_ctx, 'skips': 0}
+                if len(_ctx_static_cache) > _CTX_STATIC_CACHE_MAX:
+                    for _old_k in sorted(_ctx_static_cache,
+                                         key=lambda k: _ctx_static_cache[k].get('ts', 0))[:50]:
+                        _ctx_static_cache.pop(_old_k, None)
+            else:
+                _rec['skips'] = _rec.get('skips', 0) + 1
+                context_parts.append(
+                    '[Standing instructions (voice action tags, canvas page list, track list, '
+                    'profile instructions, canvas style) were already provided earlier this '
+                    'session, are UNCHANGED, and still apply.]'
+                )
+                logger.info(f'### CONTEXT DEDUP: skipped {len(_static_blob)} static chars '
+                            f'(skip {_rec["skips"]}/{_CTX_STATIC_RESEND_TURNS})')
+        except Exception as _ctx_e:
+            # Fail open — never let the guard cost a turn its instructions.
+            logger.warning(f'### CONTEXT DEDUP failed (sending full block): {_ctx_e}')
+            context_parts.append(_static_blob)
 
     if context_parts:
         context_prefix = ' '.join(context_parts) + ' '
