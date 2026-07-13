@@ -389,6 +389,23 @@ _double_empty_window_start: float = 0
 _DOUBLE_EMPTY_MAX_RESTARTS: int = 2       # max restart flags per window
 _DOUBLE_EMPTY_WINDOW_SECONDS: float = 300  # 5-minute sliding window
 
+#: ── Context-bloat guard (2026-07-13, bhb session overflow) ────────────────
+#: The STATIC instruction blocks (voice action-tag instructions, canvas page
+#: list, track list, DJ sounds, profile instructions, canvas style) used to be
+#: re-sent verbatim on EVERY turn (~17KB/turn). The gateway session keeps full
+#: history, so after a day of voice chat the duplicated blocks alone overflowed
+#: GLM-5's context window (bhb 2026-07-13: 199-message session, repeated
+#: 'Context overflow' + a wedged ReplyRunAlreadyActive run → UI stuck in
+#: 'Connection lost — retrying'). Now the full static block is sent only when
+#: its CONTENT CHANGES (hash), on __session_start__, or as a periodic refresh
+#: so openclaw auto-compaction can never silently strip it from history;
+#: otherwise a one-line pointer is sent. Dynamic parts (face recognition,
+#: canvas open/closed, music state, Suno events, CURRENT_USER) stay per-turn.
+_ctx_static_cache: dict = {}        # "<session_id>:<voice_key>" -> {hash, ts, skips}
+_CTX_STATIC_RESEND_TURNS = 10       # resend full block at least every N turns
+_CTX_STATIC_RESEND_SECS = 900       # ...or after 15 minutes, whichever first
+_CTX_STATIC_CACHE_MAX = 300         # prune guard for the in-process cache
+
 # ---------------------------------------------------------------------------
 # Voice session management
 # (moved here from server.py so the blueprint owns the session counter)
@@ -450,6 +467,11 @@ def bump_voice_session() -> str:
     # at all), so the Reset button left the app pinned to a recovery-<epoch>
     # session forever.
     _exit_session_recovery()
+    # Context-bloat guard: a reset means the gateway session history is (or is
+    # about to be) gone — the next turn MUST carry the full static instruction
+    # block again, never the dedup pointer. The stable session key would
+    # otherwise keep the cache entry alive across the reset.
+    _ctx_static_cache.clear()
     try:
         with open(VOICE_SESSION_FILE, 'r') as f:
             counter = int(f.read().strip())
@@ -1272,7 +1294,9 @@ def _conversation_inner():
     # Build context prefix from UI state
     t_context_start = time.time()
     context_prefix = ''
-    context_parts = []
+    context_parts = []   # dynamic — changes turn to turn, always sent
+    static_parts = []    # static — identical between turns; deduped by the
+                         # context-bloat guard below (sent on change/periodic)
 
     # Inject face recognition identity
     if identified_person and identified_person.get('name') and identified_person.get('name') != 'unknown':
@@ -1479,7 +1503,7 @@ def _conversation_inner():
             if _gen_names:
                 _parts.append(f'Generated ({len(_gen_names)}): {_cap_list(_gen_names, max_chars=2000)}')
             if _parts:
-                context_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
+                static_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
         except Exception:
             pass
 
@@ -1531,10 +1555,10 @@ def _conversation_inner():
             _page_list = _cap_list(_page_ids, max_chars=5000)
         except Exception:
             _page_list = 'unknown'
-        context_parts.append(f'[Canvas pages: {_page_list}]')
+        static_parts.append(f'[Canvas pages: {_page_list}]')
 
         # Available DJ sounds (for [SOUND:name] in DJ mode)
-        context_parts.append(
+        static_parts.append(
             '[DJ sounds: air_horn, scratch_long, rewind, record_stop, '
             'crowd_cheer, crowd_hype, yeah, lets_go, gunshot, bruh, sad_trombone]'
         )
@@ -1546,13 +1570,22 @@ def _conversation_inner():
     _prof = None  # default — referenced again in __session_start__ greeting branch below
     _profile_greeting = ''  # default — set in the __session_start__ branch; read by the
                             # empty-greeting fallback in stream_response (closure capture)
+    # Persona greeting rotation defaults — MUST be initialized at function level:
+    # the text_done capture hook in stream_response evaluates _grot_active on
+    # EVERY turn (closure), and the assignments below only run in the
+    # __session_start__ branch. Without these defaults every non-greeting turn
+    # raised NameError mid-stream → 'Connection lost — retrying' (bhb 2026-07-13).
+    _grot_active = False
+    _grot_state_path = ''
+    _persona_greeting_prompt = ''
+    _persona_fallbacks = []
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
         _mgr = get_profile_manager()
         _prof = _mgr.get_profile(_active_profile_id)
         if _prof and _prof.system_prompt and _prof.system_prompt.strip():
-            context_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
+            static_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
         if _prof and hasattr(_prof, 'voice') and _prof.voice:
             _vc = _prof.voice
             if _vc.min_sentence_chars:
@@ -1612,7 +1645,7 @@ def _conversation_inner():
         from services.canvas_styles import get_active_style_id as _get_style_id
         _style_id = _get_style_id()
         if _style_id:
-            context_parts.append(
+            static_parts.append(
                 f'[CANVAS_STYLE: The user chose the "{_style_id}" design system for all '
                 f'canvas pages. BEFORE creating or restyling ANY canvas page you MUST '
                 f'read canvas-styles/ACTIVE-STYLE.md inside your canvas-pages directory '
@@ -1628,7 +1661,46 @@ def _conversation_inner():
 
     # Inject voice assistant instructions so the agent knows about action tags.
     # This must be in-app (not workspace files) so it works out of the box.
-    context_parts.append(_load_voice_system_prompt())
+    static_parts.append(_load_voice_system_prompt())
+
+    # ── Context-bloat guard: dedup the static block (see module docstring at
+    # _ctx_static_cache). Full block goes out when its content changes, on
+    # __session_start__, or as a periodic refresh; otherwise a 1-line pointer.
+    if static_parts:
+        _static_blob = ' '.join(static_parts)
+        try:
+            import hashlib as _hl
+            _ctx_key = f'{session_id}:{get_voice_session_key()}'
+            _static_hash = _hl.sha1(_static_blob.encode('utf-8', 'replace')).hexdigest()
+            _now_ctx = time.time()
+            _rec = _ctx_static_cache.get(_ctx_key)
+            _resend_full = (
+                user_message == '__session_start__'
+                or _rec is None
+                or _rec.get('hash') != _static_hash
+                or _rec.get('skips', 0) + 1 >= _CTX_STATIC_RESEND_TURNS
+                or _now_ctx - _rec.get('ts', 0) > _CTX_STATIC_RESEND_SECS
+            )
+            if _resend_full:
+                context_parts.append(_static_blob)
+                _ctx_static_cache[_ctx_key] = {'hash': _static_hash, 'ts': _now_ctx, 'skips': 0}
+                if len(_ctx_static_cache) > _CTX_STATIC_CACHE_MAX:
+                    for _old_k in sorted(_ctx_static_cache,
+                                         key=lambda k: _ctx_static_cache[k].get('ts', 0))[:50]:
+                        _ctx_static_cache.pop(_old_k, None)
+            else:
+                _rec['skips'] = _rec.get('skips', 0) + 1
+                context_parts.append(
+                    '[Standing instructions (voice action tags, canvas page list, track list, '
+                    'profile instructions, canvas style) were already provided earlier this '
+                    'session, are UNCHANGED, and still apply.]'
+                )
+                logger.info(f'### CONTEXT DEDUP: skipped {len(_static_blob)} static chars '
+                            f'(skip {_rec["skips"]}/{_CTX_STATIC_RESEND_TURNS})')
+        except Exception as _ctx_e:
+            # Fail open — never let the guard cost a turn its instructions.
+            logger.warning(f'### CONTEXT DEDUP failed (sending full block): {_ctx_e}')
+            context_parts.append(_static_blob)
 
     if context_parts:
         context_prefix = ' '.join(context_parts) + ' '
@@ -1658,6 +1730,74 @@ def _conversation_inner():
                 _profile_greeting = (getattr(_prof.conversation, 'greeting', '') or '').strip()
         except Exception:
             _profile_greeting = ''
+        # ENTERTAINMENT-PERSONA greeting (opt-in per profile, e.g. Kyle/BHB).
+        # A profile that defines conversation.greeting_angles wants a FRESH, in-character
+        # greeting every single wake-up — never one canned line, and never the same TOPIC
+        # twice in a row. We ROTATE through the profile's angles (a persisted index that
+        # advances each session) and ask the agent to riff a brand-new bit in that angle,
+        # in its OWN real character (greeting_persona anchors the voice), while avoiding the
+        # last few openers. The greeting is produced by the gateway agent that loads the
+        # real persona — so the humour comes from the character, not a thin caricature here.
+        # Gated entirely on greeting_angles → any tenant without it is completely unaffected.
+        # (BHB/Kyle 2026-07-13 — replaces the wrong 'King of Entrepreneurship' caricature.)
+        _grot_active = False
+        _grot_state_path = ''
+        _persona_greeting_prompt = ''
+        _persona_fallbacks = []
+        try:
+            import json as _json_gp, os as _os_gp
+            _pf_gp = f"/app/runtime/profiles/{_active_profile_id}.json"
+            _pconf = {}
+            if _os_gp.path.exists(_pf_gp):
+                _pconf = (_json_gp.load(open(_pf_gp)).get('conversation') or {})
+            _persona = (_pconf.get('greeting_persona') or '').strip()
+            _angles = [a for a in (_pconf.get('greeting_angles') or [])
+                       if isinstance(a, str) and a.strip()]
+            _persona_fallbacks = [g for g in (_pconf.get('fallback_greetings') or [])
+                                  if isinstance(g, str) and g.strip()]
+            if _angles:
+                _grot_state_path = f"/app/runtime/profiles/.greeting-state-{_active_profile_id}.json"
+                _st = {}
+                try:
+                    if _os_gp.path.exists(_grot_state_path):
+                        _st = _json_gp.load(open(_grot_state_path)) or {}
+                except Exception:
+                    _st = {}
+                _idx = int(_st.get('i', 0)) % len(_angles)
+                _angle = _angles[_idx].strip()
+                _recent = [r for r in (_st.get('recent') or [])
+                           if isinstance(r, str) and r.strip()][-4:]
+                # advance + persist the index NOW so rotation moves forward even if the
+                # later text-capture never runs (empty turn, error, etc.)
+                try:
+                    _st['i'] = (_idx + 1) % len(_angles)
+                    _st['recent'] = _recent
+                    _tmp_gp = _grot_state_path + '.tmp'
+                    with open(_tmp_gp, 'w') as _fh_gp:
+                        _json_gp.dump(_st, _fh_gp)
+                    _os_gp.replace(_tmp_gp, _grot_state_path)
+                except Exception:
+                    pass
+                _avoid = ''
+                if _recent:
+                    _joined = ' | '.join(r[:120] for r in _recent)
+                    _avoid = f" Do NOT reuse or closely echo any of these recent openers: {_joined}."
+                _face_clause = ''
+                if _face_name:
+                    _face_clause = (f" The person is {_face_name} — you can work their name in "
+                                    f"naturally, or not.")
+                _persona_greeting_prompt = (
+                    f"{_persona}\n\n"
+                    f"A new voice session just started — someone woke you up. Give a genuinely funny, "
+                    f"in-character wake-up greeting — about 3 to 5 sentences. Let it RAMBLE: start on "
+                    f"one thing and spiral into a tangent the way you do, then actually greet them at "
+                    f"the end. Spoken only, no markdown, no stage directions. {_angle}{_avoid} Make it "
+                    f"a completely FRESH bit in your real voice — not a repeat, not a generic AI joke."
+                    f"{_face_clause} Output ONLY the greeting."
+                )
+                _grot_active = True
+        except Exception:
+            _grot_active = False
         if _profile_greeting:
             if _face_name:
                 _gateway_message = (
@@ -1672,6 +1812,8 @@ def _conversation_inner():
                     f'entire response — do not add or remove anything, do not rephrase, do not '
                     f'append qualifiers: "{_profile_greeting}"'
                 )
+        elif _grot_active and _persona_greeting_prompt:
+            _gateway_message = _persona_greeting_prompt
         elif _face_name:
             _gateway_message = (
                 f'A new voice session has just started. The person in front of the camera '
@@ -2692,28 +2834,20 @@ def _conversation_inner():
                                 if (not _gs) or _gs_norm in ('NO', 'YES') or _gs_tag_only:
                                     # Empty/degenerate wake-up turn — substitute a greeting.
                                     # ENTERTAINMENT-PERSONA path (opt-in per profile, e.g. Kyle/BHB):
-                                    # a persona whose whole value is a funny wake-up story must never
-                                    # settle for one repeated canned line. If the profile provides
-                                    # greeting_retry_prompt, take ONE more shot at a FRESH funny greeting
-                                    # via a TIGHT prompt (lighter than the heavy __session_start__ GLM
-                                    # just emptied on); if that also empties, rotate a VARIED in-character
-                                    # last-resort from fallback_greetings. Gated entirely on those profile
-                                    # keys, so any tenant that doesn't set them is completely unaffected —
+                                    # the gateway emptied, so take ONE more shot using the SAME rotated
+                                    # persona prompt we built for the gateway turn above
+                                    # (_persona_greeting_prompt — faithful voice + fresh angle + avoid-recent).
+                                    # That keeps even this standalone shot on-character and varied. If it
+                                    # also empties, rotate a VARIED real-voice line from fallback_greetings.
+                                    # Gated on the persona config, so tenants without it are unaffected —
                                     # they keep the plain profile-greeting-or-silence behaviour below.
                                     # (BHB/Kyle 2026-07-13; feedback_no_hardcoded_responses honoured — all
                                     # copy lives in the tenant's own profile, nothing hardcoded here.)
                                     _fb_greeting = ''
                                     try:
-                                        import json as _json_g, random as _rnd_g
-                                        _pf = f"/app/runtime/profiles/{_active_profile_id}.json"
-                                        _pc = {}
-                                        if os.path.exists(_pf):
-                                            _pc = (_json_g.load(open(_pf)).get('conversation') or {})
-                                        _retry_prompt = (_pc.get('greeting_retry_prompt') or '').strip()
-                                        _fallbacks = [g for g in (_pc.get('fallback_greetings') or [])
-                                                      if isinstance(g, str) and g.strip()]
+                                        import random as _rnd_g
                                         _zk = os.environ.get('ZAI_API_KEY', '')
-                                        if _retry_prompt and _zk:
+                                        if _persona_greeting_prompt and _zk:
                                             import requests as _req_g
                                             try:
                                                 _rr = _req_g.post(
@@ -2721,10 +2855,10 @@ def _conversation_inner():
                                                     headers={'x-api-key': _zk,
                                                              'anthropic-version': '2023-06-01',
                                                              'content-type': 'application/json'},
-                                                    json={'model': 'glm-5-turbo', 'max_tokens': 300,
+                                                    json={'model': 'glm-5-turbo', 'max_tokens': 600,
                                                           'system': 'Output ONLY the spoken greeting text — '
                                                                     'no tags, no preamble, fully in character.',
-                                                          'messages': [{'role': 'user', 'content': _retry_prompt}]},
+                                                          'messages': [{'role': 'user', 'content': _persona_greeting_prompt}]},
                                                     timeout=15)
                                                 if _rr.status_code == 200:
                                                     _fb_greeting = (_rr.json().get('content', [{}])[0]
@@ -2733,8 +2867,8 @@ def _conversation_inner():
                                                         metrics['profile'] = 'persona-greeting-retry'
                                             except Exception:
                                                 pass
-                                        if not _fb_greeting and _fallbacks:
-                                            _fb_greeting = _rnd_g.choice(_fallbacks).strip()
+                                        if not _fb_greeting and _persona_fallbacks:
+                                            _fb_greeting = _rnd_g.choice(_persona_fallbacks).strip()
                                     except Exception:
                                         _fb_greeting = ''
                                     # Tenants without the entertainment-persona config: profile greeting
@@ -2773,6 +2907,29 @@ def _conversation_inner():
                                 # Wipe TTS buffer so the bare token isn't spoken
                                 _tts_buf = ''
                                 _tts_pending.clear()
+
+                            # Persona greeting rotation (Kyle/BHB): remember what he ACTUALLY
+                            # opened with, so the next wake-up's prompt can avoid echoing it.
+                            # Best-effort — the rotation index already advanced at prompt-build
+                            # time, so a miss here never repeats an angle. Persona path only.
+                            if _grot_active and user_message == '__session_start__' and (full_response or '').strip():
+                                try:
+                                    import json as _json_cap
+                                    _stc = {}
+                                    if _grot_state_path and os.path.exists(_grot_state_path):
+                                        _stc = _json_cap.load(open(_grot_state_path)) or {}
+                                    _rec = [r for r in (_stc.get('recent') or [])
+                                            if isinstance(r, str) and r.strip()]
+                                    _g_cap = full_response.strip()
+                                    if not _rec or _rec[-1] != _g_cap:
+                                        _rec.append(_g_cap)
+                                    _stc['recent'] = _rec[-6:]
+                                    _tmp_cap = _grot_state_path + '.tmp'
+                                    with open(_tmp_cap, 'w') as _fh_cap:
+                                        _json_cap.dump(_stc, _fh_cap)
+                                    os.replace(_tmp_cap, _grot_state_path)
+                                except Exception:
+                                    pass
 
                             yield json.dumps({
                                 'type': 'text_done',
