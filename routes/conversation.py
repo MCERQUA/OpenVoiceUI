@@ -2648,19 +2648,25 @@ def _conversation_inner():
                                     except Exception as _fbe:
                                         logger.error(f'### Slow-empty Z.AI fallback failed: {_fbe}')
 
-                                # Z.AI direct didn't return text either — graceful apology
+                                # Z.AI direct didn't return text either — graceful apology.
+                                # For __session_start__ do NOT hardcode a greeting here: the
+                                # __session_start__ block below substitutes the profile-defined
+                                # greeting (or intentional silence, feedback_no_hardcoded_responses).
+                                # Setting one here left full_response non-empty, so that block's
+                                # `if not _gs...` skipped — the canned "give me a moment" filler
+                                # then won over the tenant's persona greeting (BHB/Kyle, 2026-07-13).
                                 if not full_response or not full_response.strip():
-                                    if user_message == '__session_start__':
-                                        full_response = "Hey, give me just a moment — I'm getting started."
-                                    else:
+                                    if user_message != '__session_start__':
                                         full_response = (
                                             "That took a bit longer than expected on my end. "
                                             "I'm still here — try again and I'll get right to it."
                                         )
-                                    metrics['fallback_used'] = 1
+                                        metrics['fallback_used'] = 1
                                     logger.warning(
                                         f"### SLOW EMPTY ({metrics['llm_inference_ms']}ms) — "
-                                        f"Z.AI direct also failed, using apology"
+                                        f"Z.AI direct also failed"
+                                        + ("" if user_message == '__session_start__'
+                                           else ", using apology")
                                     )
 
                             # ── __session_start__ must ALWAYS produce a spoken greeting ──
