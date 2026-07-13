@@ -1658,6 +1658,23 @@ def _conversation_inner():
                 _profile_greeting = (getattr(_prof.conversation, 'greeting', '') or '').strip()
         except Exception:
             _profile_greeting = ''
+        # ENTERTAINMENT-PERSONA path (opt-in per profile, e.g. Kyle/BHB): a profile
+        # that defines conversation.greeting_retry_prompt but NO verbatim greeting
+        # wants a FRESH, improvised greeting every single wake-up (never one fixed
+        # canned line). We feed that persona prompt as the session_start instruction
+        # so the LLM generates a new funny greeting each time. (fallback_greetings +
+        # the empty-turn retry block below are only the safety net if the LLM empties.)
+        # Read from the raw profile JSON since it's a custom field. (BHB/Kyle 2026-07-13)
+        _greeting_retry_prompt = ''
+        try:
+            import json as _json_gp
+            _pf_gp = f"/app/runtime/profiles/{_active_profile_id}.json"
+            if os.path.exists(_pf_gp):
+                _greeting_retry_prompt = (
+                    (_json_gp.load(open(_pf_gp)).get('conversation') or {})
+                    .get('greeting_retry_prompt') or '').strip()
+        except Exception:
+            _greeting_retry_prompt = ''
         if _profile_greeting:
             if _face_name:
                 _gateway_message = (
@@ -1672,6 +1689,10 @@ def _conversation_inner():
                     f'entire response — do not add or remove anything, do not rephrase, do not '
                     f'append qualifiers: "{_profile_greeting}"'
                 )
+        elif _greeting_retry_prompt:
+            _face_clause = (f' The person in front of the camera has been identified as '
+                            f'{_face_name} — you may work their name in naturally.') if _face_name else ''
+            _gateway_message = _greeting_retry_prompt + _face_clause
         elif _face_name:
             _gateway_message = (
                 f'A new voice session has just started. The person in front of the camera '
