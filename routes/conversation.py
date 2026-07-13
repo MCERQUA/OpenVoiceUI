@@ -2690,11 +2690,57 @@ def _conversation_inner():
                                 _gs_norm = _gs.upper().rstrip('.!?')
                                 _gs_tag_only = bool(_gs) and re.match(r'^\s*(\[[^\]]+\]\s*)+$', _gs)
                                 if (not _gs) or _gs_norm in ('NO', 'YES') or _gs_tag_only:
-                                    # ONLY use a profile-defined greeting (tenant config, not hardcoded).
-                                    # If no profile greeting, leave empty — the silence is the diagnostic
-                                    # signal that the LLM failed on __session_start__.
-                                    # (feedback_no_hardcoded_responses — 2026-05-23 removal of canned list)
-                                    _fb_greeting = (_profile_greeting or '').strip()
+                                    # Empty/degenerate wake-up turn — substitute a greeting.
+                                    # ENTERTAINMENT-PERSONA path (opt-in per profile, e.g. Kyle/BHB):
+                                    # a persona whose whole value is a funny wake-up story must never
+                                    # settle for one repeated canned line. If the profile provides
+                                    # greeting_retry_prompt, take ONE more shot at a FRESH funny greeting
+                                    # via a TIGHT prompt (lighter than the heavy __session_start__ GLM
+                                    # just emptied on); if that also empties, rotate a VARIED in-character
+                                    # last-resort from fallback_greetings. Gated entirely on those profile
+                                    # keys, so any tenant that doesn't set them is completely unaffected —
+                                    # they keep the plain profile-greeting-or-silence behaviour below.
+                                    # (BHB/Kyle 2026-07-13; feedback_no_hardcoded_responses honoured — all
+                                    # copy lives in the tenant's own profile, nothing hardcoded here.)
+                                    _fb_greeting = ''
+                                    try:
+                                        import json as _json_g, random as _rnd_g
+                                        _pf = f"/app/runtime/profiles/{_active_profile_id}.json"
+                                        _pc = {}
+                                        if os.path.exists(_pf):
+                                            _pc = (_json_g.load(open(_pf)).get('conversation') or {})
+                                        _retry_prompt = (_pc.get('greeting_retry_prompt') or '').strip()
+                                        _fallbacks = [g for g in (_pc.get('fallback_greetings') or [])
+                                                      if isinstance(g, str) and g.strip()]
+                                        _zk = os.environ.get('ZAI_API_KEY', '')
+                                        if _retry_prompt and _zk:
+                                            import requests as _req_g
+                                            try:
+                                                _rr = _req_g.post(
+                                                    'https://api.z.ai/api/anthropic/v1/messages',
+                                                    headers={'x-api-key': _zk,
+                                                             'anthropic-version': '2023-06-01',
+                                                             'content-type': 'application/json'},
+                                                    json={'model': 'glm-5-turbo', 'max_tokens': 300,
+                                                          'system': 'Output ONLY the spoken greeting text — '
+                                                                    'no tags, no preamble, fully in character.',
+                                                          'messages': [{'role': 'user', 'content': _retry_prompt}]},
+                                                    timeout=15)
+                                                if _rr.status_code == 200:
+                                                    _fb_greeting = (_rr.json().get('content', [{}])[0]
+                                                                    .get('text', '') or '').strip()
+                                                    if _fb_greeting:
+                                                        metrics['profile'] = 'persona-greeting-retry'
+                                            except Exception:
+                                                pass
+                                        if not _fb_greeting and _fallbacks:
+                                            _fb_greeting = _rnd_g.choice(_fallbacks).strip()
+                                    except Exception:
+                                        _fb_greeting = ''
+                                    # Tenants without the entertainment-persona config: profile greeting
+                                    # or intentional silence (feedback_no_hardcoded_responses).
+                                    if not _fb_greeting:
+                                        _fb_greeting = (_profile_greeting or '').strip()
                                     logger.warning(
                                         f"### SESSION_START produced no usable greeting "
                                         f"(was {full_response!r}, {metrics.get('llm_inference_ms')}ms) "
