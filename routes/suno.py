@@ -410,6 +410,12 @@ def _action_generate(_q, body: dict):
     lyrics = _q('lyrics') or body.get('lyrics', '')
     instrumental = (_q('instrumental') or str(body.get('instrumental', 'false'))).lower() == 'true'
     vocal_gender = _q('vocal_gender') or body.get('vocal_gender', 'm')
+    # Persona / custom-voice passthrough (2026-07-14). personaId can be a STYLE
+    # persona (from generate-persona) or a cloned VOICE id (from the Suno Voice
+    # API). personaModel: 'style_persona' (default) or 'voice_persona' (a cloned
+    # voice — REQUIRES custom mode, i.e. lyrics). Accept snake_case or camelCase.
+    persona_id = (_q('persona_id') or body.get('persona_id') or body.get('personaId') or '').strip()
+    persona_model = (_q('persona_model') or body.get('persona_model') or body.get('personaModel') or '').strip()
 
     if not prompt and not lyrics and not style:
         return jsonify({'action': 'error', 'response': 'Need a prompt, lyrics, or style — tell me what kind of song to make.'})
@@ -448,6 +454,16 @@ def _action_generate(_q, body: dict):
             'model': 'V5_5',
             'vocalGender': vocal_gender,
         }
+
+    # Attach persona / cloned-voice if provided. voice_persona only works in
+    # custom mode — if a cloned voice was requested in description mode, promote
+    # to custom mode (song_prompt then acts as the lyrics) so the voiceId is honored.
+    if persona_id:
+        request_body['personaId'] = persona_id
+        request_body['personaModel'] = persona_model or 'style_persona'
+        if request_body['personaModel'] == 'voice_persona' and not request_body.get('customMode'):
+            request_body['customMode'] = True
+        logger.info(f'Suno generate: persona {request_body["personaModel"]} id={persona_id[:12]}…')
 
     if SUNO_CALLBACK_URL:
         request_body['callBackUrl'] = SUNO_CALLBACK_URL
@@ -1143,7 +1159,7 @@ def _action_extend(_q, body: dict):
     prompt = (_q('prompt') or body.get('prompt', '')).strip()
     style = (_q('style') or body.get('style', '')).strip() or src['style'] or 'Same style as original'
     title = (_q('title') or body.get('title', '')).strip() or src['title'] or 'Extended Track'
-    model = (_q('model') or body.get('model', '')).strip() or 'V5'
+    model = (_q('model') or body.get('model', '')).strip() or 'V5_5'
 
     continue_at_raw = _q('continue_at') or body.get('continue_at', '')
     request_body = {
@@ -1183,7 +1199,7 @@ def _action_cover(_q, body: dict):
     prompt = (_q('prompt') or body.get('prompt', '')).strip()
     style = (_q('style') or body.get('style', '')).strip()
     title = (_q('title') or body.get('title', '')).strip() or (f"{src['title']} (Cover)" if src['title'] else 'Cover')
-    model = (_q('model') or body.get('model', '')).strip() or 'V5'
+    model = (_q('model') or body.get('model', '')).strip() or 'V5_5'
     instrumental_raw = _q('instrumental') or body.get('instrumental', False)
     instrumental = instrumental_raw if isinstance(instrumental_raw, bool) else str(instrumental_raw).lower() in ('true', '1', 'yes')
 
@@ -1222,7 +1238,7 @@ def _action_add_vocals(_q, body: dict):
         return jsonify({'action': 'error', 'response': 'Describe the vocals/lyrics to add (prompt is required).'})
     style = (_q('style') or body.get('style', '')).strip() or src['style'] or 'Pop'
     title = (_q('title') or body.get('title', '')).strip() or (f"{src['title']} (Vocals)" if src['title'] else 'Vocal Version')
-    model = (_q('model') or body.get('model', '')).strip() or 'V5'
+    model = (_q('model') or body.get('model', '')).strip() or 'V5_5'
     vocal_gender = (_q('vocal_gender') or body.get('vocal_gender', '')).strip().lower()
 
     request_body = {
@@ -1253,7 +1269,7 @@ def _action_add_instrumental(_q, body: dict):
 
     tags = (_q('tags') or body.get('tags', '')).strip() or (_q('style') or body.get('style', '')).strip() or src['style'] or 'instrumental backing'
     title = (_q('title') or body.get('title', '')).strip() or (f"{src['title']} (Instrumental)" if src['title'] else 'Instrumental Version')
-    model = (_q('model') or body.get('model', '')).strip() or 'V5'
+    model = (_q('model') or body.get('model', '')).strip() or 'V5_5'
 
     request_body = {
         'uploadUrl': src['upload_url'],
