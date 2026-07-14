@@ -416,6 +416,27 @@ def _action_generate(_q, body: dict):
     # voice — REQUIRES custom mode, i.e. lyrics). Accept snake_case or camelCase.
     persona_id = (_q('persona_id') or body.get('persona_id') or body.get('personaId') or '').strip()
     persona_model = (_q('persona_model') or body.get('persona_model') or body.get('personaModel') or '').strip()
+    # Voice-track flag: the frontend [SUNO_GENERATE:...|voice] tag (or voice=1)
+    # asks to sing in THIS tenant's cloned voice. The voiceId lives server-side
+    # in the active profile (voice_persona_id) so the browser never handles it —
+    # we attach it here. This lets a voice track ride the normal frontend popup /
+    # player / "your track is ready" flow instead of a bare direct API call.
+    use_voice = str(_q('voice') or body.get('voice', '')).lower() in ('1', 'true', 'yes')
+    if use_voice and not persona_id:
+        try:
+            import json as _jv
+            from routes.profiles import _active_profile_id as _apid
+            _pf = f'/app/runtime/profiles/{_apid}.json'
+            if os.path.exists(_pf):
+                _pc = _jv.load(open(_pf))
+                _vpid = (_pc.get('voice_persona_id')
+                         or (_pc.get('conversation') or {}).get('voice_persona_id') or '').strip()
+                if _vpid:
+                    persona_id = _vpid
+                    persona_model = 'voice_persona'
+                    logger.info(f'Suno generate: voice flag → profile {_apid} voiceId {_vpid[:12]}…')
+        except Exception as _ve:
+            logger.warning(f'Suno voice-flag profile lookup failed: {_ve}')
 
     if not prompt and not lyrics and not style:
         return jsonify({'action': 'error', 'response': 'Need a prompt, lyrics, or style — tell me what kind of song to make.'})
@@ -423,6 +444,13 @@ def _action_generate(_q, body: dict):
     # Determine mode: custom (explicit lyrics) vs description (Suno writes lyrics)
     if lyrics:
         song_prompt = lyrics
+        has_lyrics = True
+    elif (use_voice or persona_model == 'voice_persona') and prompt:
+        # Voice track: the prompt IS the lyrics to sing in the cloned voice — go
+        # straight to custom mode (do NOT munge it into a description). Lets the
+        # frontend tag pass plain-line lyrics (structural [Verse] tags can't ride
+        # the [SUNO_GENERATE:...] tag — bracket collision — so plain lines only).
+        song_prompt = prompt
         has_lyrics = True
     elif '[Verse' in prompt or '[Chorus' in prompt or '[Hook' in prompt or '[Bridge' in prompt:
         song_prompt = prompt

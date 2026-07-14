@@ -1897,16 +1897,20 @@ connectAiradio();
                 console.log('[Suno] Generating:', prompt);
                 this._showStatus('🎵 Suno: submitting song request...');
 
-                // Parse optional fields from prompt: "prompt | style:hip hop | title:My Song"
+                // Parse optional fields from prompt: "prompt | style:hip hop | title:My Song | voice"
+                // The bare "voice" flag = sing in this tenant's cloned voice (the server
+                // attaches the active profile's voiceId). Rides the normal popup/player flow.
                 let actualPrompt = prompt;
                 let style = '';
                 let title = '';
+                let useVoice = false;
                 const parts = prompt.split('|').map(s => s.trim());
                 if (parts.length > 1) {
                     actualPrompt = parts[0];
                     for (const part of parts.slice(1)) {
                         if (part.toLowerCase().startsWith('style:')) style = part.slice(6).trim();
                         else if (part.toLowerCase().startsWith('title:')) title = part.slice(6).trim();
+                        else if (part.toLowerCase() === 'voice' || part.toLowerCase() === 'myvoice') useVoice = true;
                     }
                 }
 
@@ -1914,6 +1918,7 @@ connectAiradio();
                     const params = new URLSearchParams({ action: 'generate', prompt: actualPrompt });
                     if (style) params.set('style', style);
                     if (title) params.set('title', title);
+                    if (useVoice) params.set('voice', '1');
 
                     const resp = await fetch(`${CONFIG.serverUrl}/api/suno?${params}`);
                     const data = await resp.json();
