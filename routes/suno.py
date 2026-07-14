@@ -49,6 +49,9 @@ GENERATED_SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
 
 SUNO_API_KEY = os.environ.get('SUNO_API_KEY', '')
 SUNO_API_BASE = 'https://api.sunoapi.org'
+# File Upload API lives on a DIFFERENT host (same bearer auth). It hosts a remote
+# file and returns a public URL used as uploadUrl/voiceUrl/verifyUrl elsewhere.
+SUNO_FILE_UPLOAD_BASE = 'https://sunoapiorg.redpandaai.co'
 SUNO_WEBHOOK_SECRET = os.environ.get('SUNO_WEBHOOK_SECRET', '')
 SUNO_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB cap on audio downloads
 
@@ -363,8 +366,30 @@ def handle_suno():
         elif action == 'song_details':
             return _action_song_details(_q, body)
 
+        # --- Custom voice cloning + persona + file hosting (2026-07-14) -------
+        elif action == 'generate_persona':
+            return _action_generate_persona(_q, body)
+
+        elif action == 'voice_validate':
+            return _action_voice_validate(_q, body)
+
+        elif action == 'voice_validate_info':
+            return _action_voice_validate_info(_q, body)
+
+        elif action == 'voice_generate':
+            return _action_voice_generate(_q, body)
+
+        elif action == 'voice_info':
+            return _action_voice_info(_q, body)
+
+        elif action == 'voice_check':
+            return _action_voice_check(_q, body)
+
+        elif action == 'file_upload':
+            return _action_file_upload(_q, body)
+
         else:
-            return jsonify({'action': 'error', 'response': f"Unknown action '{action}'. Use: generate, jingle, sfx, list_jingles, jingle_styles, status, list, credits, extend, cover, add_vocals, add_instrumental, replace_section, generate_lyrics, timestamped_lyrics, wav_convert, stem_separate, style_boost, music_video, song_details"})
+            return jsonify({'action': 'error', 'response': f"Unknown action '{action}'. Use: generate, jingle, sfx, list_jingles, jingle_styles, status, list, credits, extend, cover, add_vocals, add_instrumental, replace_section, generate_lyrics, timestamped_lyrics, wav_convert, stem_separate, style_boost, music_video, song_details, generate_persona, voice_validate, voice_validate_info, voice_generate, voice_info, voice_check, file_upload"})
 
     except Exception as exc:
         logger.exception('Suno endpoint error')
@@ -1457,16 +1482,23 @@ def _action_stem_separate(_q, body: dict):
         return jsonify({'action': 'error', 'response': 'Stem separation needs both Suno task id and audio id for the track.'})
 
     sep_type = (_q('type') or body.get('type', '')).strip() or 'separate_vocal'
-    if sep_type not in ('separate_vocal', 'split_stem'):
+    if sep_type not in ('separate_vocal', 'split_stem', 'split_stem_advanced'):
         sep_type = 'separate_vocal'
 
-    request_body = {'taskId': task_id, 'audioId': audio_id, 'type': sep_type}
+    # stemName is required by the API schema for ALL types (only meaningful for
+    # split_stem_advanced, which isolates ONE named instrument). Default it so the
+    # existing separate_vocal / split_stem behavior keeps working unchanged.
+    stem_name = (_q('stem_name') or body.get('stem_name', '')).strip() or 'Lead Vocal'
+
+    request_body = {'taskId': task_id, 'audioId': audio_id, 'type': sep_type, 'stemName': stem_name}
     if SUNO_CALLBACK_URL:
         request_body['callBackUrl'] = SUNO_CALLBACK_URL
     return _submit_process_job(
         '/api/v1/vocal-removal/generate', request_body, 'stem_separate',
         op='stem_separate', est_seconds=40,
-        response_msg=('Splitting into stems — results delivered when ready.'
+        response_msg=(f"Isolating '{stem_name}' stem — results delivered when ready."
+                      if sep_type == 'split_stem_advanced' else
+                      'Splitting into stems — results delivered when ready.'
                       if sep_type == 'split_stem' else
                       'Separating vocals from music — results delivered when ready.'),
     )
@@ -1602,6 +1634,311 @@ def _submit_process_job(endpoint: str, request_body: dict, kind: str,
             'kind': kind,
             'response': response_msg or f'{kind.replace("_", " ").title()} started.',
             'estimated_seconds': est_seconds,
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+# ---------------------------------------------------------------------------
+# Custom voice cloning + persona + file hosting (2026-07-14)
+#
+# Suno Voice API (same SUNO_API_BASE + bearer auth) mints a reusable `voiceId`
+# from a short source recording, then a user-sung verification of a phrase:
+#   file_upload → voice_validate → voice_validate_info → (record phrase) →
+#   file_upload → voice_generate → voice_info → voice_check.
+# The resulting voiceId is used in _action_generate as personaId +
+# personaModel='voice_persona'. `generate_persona` is the separate STYLE-persona
+# path (personaModel='style_persona'). All of these are direct calls that return
+# the parsed Suno JSON (they carry taskId/phrase/voiceId/isAvailable payloads the
+# caller needs), matching the _action_style_boost / _action_song_details shape.
+# ---------------------------------------------------------------------------
+
+
+def _action_generate_persona(_q, body: dict):
+    """Create a STYLE persona from a generated track's vocal segment.
+    POST /api/v1/generate/generate-persona — SYNC (no callBackUrl); the response
+    carries the new personaId. Returns the parsed Suno JSON."""
+    src = _resolve_song(_q, body)
+    task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
+    audio_id = src['audio_id'] or (_q('audio_id') or body.get('audio_id', '')).strip()
+    if not (task_id and audio_id):
+        return jsonify({'action': 'error', 'response': 'Persona creation needs both Suno task id and audio id for the source track.'})
+
+    name = (_q('name') or body.get('name', '')).strip()
+    description = (_q('description') or body.get('description', '')).strip()
+    if not name or not description:
+        return jsonify({'action': 'error', 'response': 'Persona needs both a name and a description.'})
+
+    style = (_q('style') or body.get('style', '')).strip()
+
+    vocal_start_raw = _q('vocalStart') or body.get('vocalStart') or _q('vocal_start') or body.get('vocal_start')
+    vocal_end_raw = _q('vocalEnd') or body.get('vocalEnd') or _q('vocal_end') or body.get('vocal_end')
+    try:
+        vocal_start = float(vocal_start_raw) if vocal_start_raw not in (None, '') else 0.0
+    except (TypeError, ValueError):
+        vocal_start = 0.0
+    try:
+        vocal_end = float(vocal_end_raw) if vocal_end_raw not in (None, '') else 30.0
+    except (TypeError, ValueError):
+        vocal_end = 30.0
+
+    request_body = {
+        'taskId': task_id,
+        'audioId': audio_id,
+        'name': name,
+        'description': description,
+        'vocalStart': vocal_start,
+        'vocalEnd': vocal_end,
+    }
+    if style:
+        request_body['style'] = style
+
+    logger.info(f'Suno generate_persona: name={name!r} audio_id={audio_id} '
+                f'seg={vocal_start}-{vocal_end}')
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}/api/v1/generate/generate-persona',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno generate_persona response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        _provider_receipt('generate_persona')
+        return jsonify({
+            'action': 'ok',
+            'data': data.get('data', {}),
+            'response': 'Persona created.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_voice_validate(_q, body: dict):
+    """Voice cloning step 1: validate a source recording + get the phrase to sing.
+    POST /api/v1/voice/validate — async (returns taskId + a validation phrase).
+    Returns the parsed Suno JSON."""
+    voice_url = (_q('voiceUrl') or body.get('voiceUrl') or _q('voice_url') or body.get('voice_url', '')).strip()
+    if not voice_url:
+        return jsonify({'action': 'error', 'response': 'Need a hosted voiceUrl to validate (use action=file_upload first).'})
+
+    start_raw = _q('vocalStartS') or body.get('vocalStartS') or _q('vocal_start_s') or body.get('vocal_start_s', '')
+    end_raw = _q('vocalEndS') or body.get('vocalEndS') or _q('vocal_end_s') or body.get('vocal_end_s', '')
+    try:
+        start_s = int(start_raw)
+        end_s = int(end_raw)
+    except (TypeError, ValueError):
+        return jsonify({'action': 'error', 'response': 'vocalStartS and vocalEndS must be integers (seconds).'})
+    if not (end_s > start_s):
+        return jsonify({'action': 'error', 'response': 'vocalEndS must be greater than vocalStartS.'})
+
+    request_body = {'voiceUrl': voice_url, 'vocalStartS': start_s, 'vocalEndS': end_s}
+    language = (_q('language') or body.get('language', '')).strip()
+    if language:
+        request_body['language'] = language
+    if SUNO_CALLBACK_URL:
+        request_body['callBackUrl'] = SUNO_CALLBACK_URL
+
+    logger.info(f'Suno voice_validate: seg={start_s}-{end_s} url={voice_url[:80]}')
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}/api/v1/voice/validate',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno voice_validate response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        _provider_receipt('voice_validate')
+        return jsonify({
+            'action': 'voice_validate',
+            'data': data.get('data', {}),
+            'response': 'Voice validation started — poll action=voice_validate_info for the phrase.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_voice_validate_info(_q, body: dict):
+    """Voice cloning step 2: fetch the validation phrase + status.
+    GET /api/v1/voice/validate-info?taskId=... — returns the parsed Suno JSON."""
+    task_id = (_q('task_id') or body.get('task_id', '')).strip()
+    if not task_id:
+        return jsonify({'action': 'error', 'response': 'Need a Suno task id from action=voice_validate.'})
+    try:
+        resp = http_requests.get(
+            f'{SUNO_API_BASE}/api/v1/voice/validate-info',
+            headers={'Authorization': f'Bearer {SUNO_API_KEY}'},
+            params={'taskId': task_id},
+            timeout=15,
+        )
+        logger.info(f'Suno voice_validate_info response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        return jsonify({
+            'action': 'voice_validate_info',
+            'data': data.get('data', {}),
+            'response': 'Fetched voice validation info.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_voice_generate(_q, body: dict):
+    """Voice cloning step 5: mint the cloned voiceId from a verified recording.
+    POST /api/v1/voice/generate — async (returns taskId → voiceId). Returns the
+    parsed Suno JSON."""
+    task_id = (_q('task_id') or body.get('task_id', '')).strip()
+    verify_url = (_q('verifyUrl') or body.get('verifyUrl') or _q('verify_url') or body.get('verify_url', '')).strip()
+    if not task_id:
+        return jsonify({'action': 'error', 'response': 'Need the Suno task id from action=voice_validate.'})
+    if not verify_url:
+        return jsonify({'action': 'error', 'response': 'Need a hosted verifyUrl (the recording of the phrase).'})
+
+    request_body = {'taskId': task_id, 'verifyUrl': verify_url}
+    voice_name = (_q('voiceName') or body.get('voiceName') or _q('voice_name') or body.get('voice_name', '')).strip()
+    if voice_name:
+        request_body['voiceName'] = voice_name
+    description = (_q('description') or body.get('description', '')).strip()
+    if description:
+        request_body['description'] = description
+    style = (_q('style') or body.get('style', '')).strip()
+    if style:
+        request_body['style'] = style
+    skill = (_q('singerSkillLevel') or body.get('singerSkillLevel')
+             or _q('singer_skill_level') or body.get('singer_skill_level', '')).strip() or 'beginner'
+    request_body['singerSkillLevel'] = skill
+    if SUNO_CALLBACK_URL:
+        request_body['callBackUrl'] = SUNO_CALLBACK_URL
+
+    logger.info(f'Suno voice_generate: task_id={task_id} skill={skill} name={voice_name!r}')
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}/api/v1/voice/generate',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno voice_generate response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        _provider_receipt('voice_generate')
+        return jsonify({
+            'action': 'voice_generate',
+            'data': data.get('data', {}),
+            'response': 'Voice generation started — poll action=voice_info for the voiceId.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_voice_info(_q, body: dict):
+    """Voice cloning step 6: fetch the minted voiceId + status.
+    GET /api/v1/voice/record-info?taskId=... — returns the parsed Suno JSON."""
+    task_id = (_q('task_id') or body.get('task_id', '')).strip()
+    if not task_id:
+        return jsonify({'action': 'error', 'response': 'Need a Suno task id from action=voice_generate.'})
+    try:
+        resp = http_requests.get(
+            f'{SUNO_API_BASE}/api/v1/voice/record-info',
+            headers={'Authorization': f'Bearer {SUNO_API_KEY}'},
+            params={'taskId': task_id},
+            timeout=15,
+        )
+        logger.info(f'Suno voice_info response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        return jsonify({
+            'action': 'voice_info',
+            'data': data.get('data', {}),
+            'response': 'Fetched voice record info.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_voice_check(_q, body: dict):
+    """Check whether a cloned voice is available for use.
+    POST /api/v1/voice/check-voice — this endpoint is inconsistent: the body uses
+    snake_case `task_id` (NOT taskId). Returns the parsed Suno JSON (data.isAvailable)."""
+    task_id = (_q('task_id') or body.get('task_id', '')).strip()
+    if not task_id:
+        return jsonify({'action': 'error', 'response': 'Need a Suno task id (or voice task id) to check.'})
+    # NOTE: snake_case `task_id` is intentional — this endpoint does not accept taskId.
+    request_body = {'task_id': task_id}
+    try:
+        resp = http_requests.post(
+            f'{SUNO_API_BASE}/api/v1/voice/check-voice',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=15,
+        )
+        logger.info(f'Suno voice_check response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        return jsonify({
+            'action': 'voice_check',
+            'data': data.get('data', {}),
+            'response': 'Checked voice availability.',
+        })
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+def _action_file_upload(_q, body: dict):
+    """Host a remote file on the Suno File Upload API (DIFFERENT host) so other
+    endpoints can fetch it. POST {SUNO_FILE_UPLOAD_BASE}/api/file-url-upload —
+    returns the hosted URL (used as uploadUrl/voiceUrl/verifyUrl). Same bearer auth."""
+    file_url = (_q('fileUrl') or body.get('fileUrl') or _q('file_url') or body.get('file_url', '')).strip()
+    if not file_url:
+        return jsonify({'action': 'error', 'response': 'Need a fileUrl to host.'})
+    upload_path = (_q('uploadPath') or body.get('uploadPath')
+                   or _q('upload_path') or body.get('upload_path', '')).strip() or 'uploads'
+    file_name = (_q('fileName') or body.get('fileName') or _q('file_name') or body.get('file_name', '')).strip()
+
+    request_body = {'fileUrl': file_url, 'uploadPath': upload_path}
+    if file_name:
+        request_body['fileName'] = file_name
+
+    logger.info(f'Suno file_upload: path={upload_path} url={file_url[:80]}')
+    try:
+        resp = http_requests.post(
+            f'{SUNO_FILE_UPLOAD_BASE}/api/file-url-upload',
+            headers=_suno_headers(),
+            json=request_body,
+            timeout=30,
+        )
+        logger.info(f'Suno file_upload response: {resp.status_code} {resp.text[:300]}')
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json()
+        if data.get('code') != 200:
+            return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        _provider_receipt('file_upload')
+        return jsonify({
+            'action': 'file_upload',
+            'data': data.get('data', {}),
+            'response': 'File hosted.',
         })
     except http_requests.RequestException as exc:
         return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
