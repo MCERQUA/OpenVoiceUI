@@ -1482,7 +1482,13 @@ def _action_stem_separate(_q, body: dict):
     task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
     audio_id = src['audio_id'] or (_q('audio_id') or body.get('audio_id', '')).strip()
     if not (task_id and audio_id):
-        return jsonify({'action': 'error', 'response': 'Stem separation needs both Suno task id and audio id for the track.'})
+        # Legacy tracks (pre task-id capture in generated_metadata.json) can't be
+        # separated — the vocal-removal API only works on a Suno taskId+audioId
+        # pair, and there is no reverse lookup by audio id. Distinct code so UIs
+        # can degrade gracefully instead of retrying.
+        return jsonify({'action': 'error', 'code': 'stem_ids_missing',
+                        'response': "This track was generated before Suno task tracking, so the API can't "
+                                    "separate its vocals. Newly generated songs support voice lock automatically."})
 
     sep_type = (_q('type') or body.get('type', '')).strip() or 'separate_vocal'
     if sep_type not in ('separate_vocal', 'split_stem', 'split_stem_advanced'):
