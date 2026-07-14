@@ -1789,11 +1789,11 @@ def _conversation_inner():
                 _persona_greeting_prompt = (
                     f"{_persona}\n\n"
                     f"A new voice session just started — someone woke you up. Give a genuinely funny, "
-                    f"in-character wake-up greeting — about 3 to 5 sentences. Let it RAMBLE: start on "
-                    f"one thing and spiral into a tangent the way you do, then actually greet them at "
-                    f"the end. Spoken only, no markdown, no stage directions. {_angle}{_avoid} Make it "
-                    f"a completely FRESH bit in your real voice — not a repeat, not a generic AI joke."
-                    f"{_face_clause} Output ONLY the greeting."
+                    f"in-character wake-up greeting — 2 to 3 sentences, about 40 words MAX (it's spoken "
+                    f"aloud, so keep it punchy — no long monologue). Ramble a little into ONE quick "
+                    f"tangent, then greet them. Spoken only, no markdown, no stage directions. "
+                    f"{_angle}{_avoid} Make it a completely FRESH bit in your real voice — not a repeat, "
+                    f"not a generic AI joke.{_face_clause} Output ONLY the greeting."
                 )
                 _grot_active = True
         except Exception:
@@ -2855,7 +2855,7 @@ def _conversation_inner():
                                                     headers={'x-api-key': _zk,
                                                              'anthropic-version': '2023-06-01',
                                                              'content-type': 'application/json'},
-                                                    json={'model': 'glm-5-turbo', 'max_tokens': 600,
+                                                    json={'model': 'glm-5-turbo', 'max_tokens': 400,
                                                           'system': 'Output ONLY the spoken greeting text — '
                                                                     'no tags, no preamble, fully in character.',
                                                           'messages': [{'role': 'user', 'content': _persona_greeting_prompt}]},
