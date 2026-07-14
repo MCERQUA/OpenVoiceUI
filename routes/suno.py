@@ -357,6 +357,9 @@ def handle_suno():
         elif action == 'stem_separate':
             return _action_stem_separate(_q, body)
 
+        elif action == 'stem_result':
+            return _action_stem_result(_q, body)
+
         elif action == 'style_boost':
             return _action_style_boost(_q, body)
 
@@ -389,7 +392,7 @@ def handle_suno():
             return _action_file_upload(_q, body)
 
         else:
-            return jsonify({'action': 'error', 'response': f"Unknown action '{action}'. Use: generate, jingle, sfx, list_jingles, jingle_styles, status, list, credits, extend, cover, add_vocals, add_instrumental, replace_section, generate_lyrics, timestamped_lyrics, wav_convert, stem_separate, style_boost, music_video, song_details, generate_persona, voice_validate, voice_validate_info, voice_generate, voice_info, voice_check, file_upload"})
+            return jsonify({'action': 'error', 'response': f"Unknown action '{action}'. Use: generate, jingle, sfx, list_jingles, jingle_styles, status, list, credits, extend, cover, add_vocals, add_instrumental, replace_section, generate_lyrics, timestamped_lyrics, wav_convert, stem_separate, stem_result, style_boost, music_video, song_details, generate_persona, voice_validate, voice_validate_info, voice_generate, voice_info, voice_check, file_upload"})
 
     except Exception as exc:
         logger.exception('Suno endpoint error')
@@ -1502,6 +1505,100 @@ def _action_stem_separate(_q, body: dict):
                       if sep_type == 'split_stem' else
                       'Separating vocals from music — results delivered when ready.'),
     )
+
+
+def _action_stem_result(_q, body: dict):
+    """Fetch vocal-separation results and persist the stems locally.
+    GET /api/v1/vocal-removal/record-info?taskId=...
+
+    Downloads the vocal (and instrumental) tracks into canvas-pages/_data/stems/
+    (served via /canvas-data/stems/<file> — the suno-audio-editor stem bridge dir)
+    so lip-sync tools like Character Stage can drive mouths off the isolated
+    vocal while the full mix plays. Idempotent per taskId: re-calls return the
+    already-downloaded files without re-fetching. Poll this after stem_separate.
+    Params: task_id (required), filename (optional — names the saved stems)."""
+    task_id = (_q('task_id') or body.get('task_id', '')).strip()
+    if not task_id:
+        return jsonify({'action': 'error', 'response': 'stem_result needs the task_id returned by stem_separate.'})
+    src_name = (_q('filename') or body.get('filename', '')).strip()
+    name_stem = Path(src_name).stem if src_name else task_id[:12]
+    name_stem = ''.join(ch for ch in name_stem if ch.isalnum() or ch in '-_')[:60] or task_id[:12]
+
+    from services.paths import CANVAS_PAGES_DIR
+    stems_dir = CANVAS_PAGES_DIR / '_data' / 'stems'
+    stems_dir.mkdir(parents=True, exist_ok=True)
+
+    # Already downloaded? Serve from disk without hitting the API again.
+    existing = {}
+    for kind_key in ('vocal', 'instrumental'):
+        p = stems_dir / f'{name_stem}-{kind_key}.mp3'
+        if p.exists() and p.stat().st_size > 0:
+            existing[kind_key] = f'/canvas-data/stems/{p.name}'
+    if existing.get('vocal'):
+        return jsonify({'action': 'complete', 'task_id': task_id,
+                        'vocal_url': existing.get('vocal'),
+                        'instrumental_url': existing.get('instrumental'),
+                        'response': 'Stems ready (cached).'})
+
+    try:
+        resp = http_requests.get(
+            f'{SUNO_API_BASE}/api/v1/vocal-removal/record-info',
+            headers=_suno_headers(), params={'taskId': task_id}, timeout=30)
+        if resp.status_code != 200:
+            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
+        data = resp.json().get('data') or {}
+    except http_requests.RequestException as exc:
+        return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+    # URLs nest under data.response with key-name variants across doc versions
+    # (vocal_url / vocalUrl / instrumental_url / ...) — walk the payload for them.
+    def _find_urls(obj, found):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                lk = k.lower().replace('_', '')
+                if isinstance(v, str) and v.startswith('http'):
+                    if lk == 'vocalurl':
+                        found['vocal'] = v
+                    elif lk == 'instrumentalurl':
+                        found['instrumental'] = v
+                else:
+                    _find_urls(v, found)
+        elif isinstance(obj, list):
+            for item in obj:
+                _find_urls(item, found)
+    urls = {}
+    _find_urls(data, urls)
+
+    if not urls.get('vocal'):
+        status = str(data.get('successFlag', '') or data.get('status', '')).upper()
+        if status in ('CREATE_TASK_FAILED', 'GENERATE_AUDIO_FAILED', 'CALLBACK_EXCEPTION',
+                      'SENSITIVE_WORD_ERROR', 'FAIL', 'FAILED'):
+            return jsonify({'action': 'error', 'response': f'Stem separation failed: {status}'})
+        return jsonify({'action': 'generating', 'task_id': task_id,
+                        'response': 'Stems not ready yet — poll again in a few seconds.'})
+
+    saved = {}
+    for kind_key, url in urls.items():
+        if not _is_safe_download_url(url):
+            continue
+        p = stems_dir / f'{name_stem}-{kind_key}.mp3'
+        if not p.exists():
+            try:
+                r = http_requests.get(url, timeout=120)
+                if r.status_code == 200 and 0 < len(r.content) <= SUNO_MAX_DOWNLOAD_BYTES:
+                    p.write_bytes(r.content)
+                    logger.info(f'stem_result downloaded {kind_key} stem → {p.name} ({len(r.content)} bytes)')
+            except Exception as exc:
+                logger.warning(f'stem_result download failed ({kind_key}): {exc}')
+                continue
+        if p.exists() and p.stat().st_size > 0:
+            saved[kind_key] = f'/canvas-data/stems/{p.name}'
+
+    if not saved.get('vocal'):
+        return jsonify({'action': 'error', 'response': 'Stems reported ready but the vocal download failed — try again.'})
+    return jsonify({'action': 'complete', 'task_id': task_id,
+                    'vocal_url': saved.get('vocal'), 'instrumental_url': saved.get('instrumental'),
+                    'response': 'Stems ready.'})
 
 
 def _action_style_boost(_q, body: dict):
