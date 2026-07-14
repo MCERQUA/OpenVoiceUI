@@ -218,8 +218,30 @@ def _add_song_to_metadata(filename: str, title: str, prompt: str, style: str,
     }
     if extra:
         entry.update(extra)
+    # NEVER lose Suno ids: if a previous entry for this filename already carries a
+    # non-empty task_id / suno_id and the incoming write would blank it, keep the
+    # old value. (2026-07-14: a metadata rewrite path blanked task_id on same-day
+    # tracks, killing vocal-stem separation for them.)
+    prev = metadata.get(filename) or {}
+    for id_key in ('task_id', 'suno_id'):
+        if not entry.get(id_key) and prev.get(id_key):
+            entry[id_key] = prev[id_key]
+    if not entry.get('task_id'):
+        logger.warning(f'_add_song_to_metadata: {filename} written WITHOUT task_id '
+                       f'(song_id={song_id!r}, kind={kind}) — vocal separation will be unavailable')
     metadata[filename] = entry
     _save_generated_metadata(metadata)
+    # Durable id ledger — append-only, survives any metadata rewrite. stem_separate
+    # falls back to this when metadata is missing the ids.
+    try:
+        if entry.get('suno_id'):
+            with open(GENERATED_MUSIC_DIR / 'suno-task-log.jsonl', 'a') as _tl:
+                _tl.write(json.dumps({'ts': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+                                      'filename': filename, 'title': title,
+                                      'task_id': entry.get('task_id', ''),
+                                      'suno_id': entry.get('suno_id', ''), 'kind': kind}) + '\n')
+    except Exception:
+        pass
 
 
 def _is_uuid(s: str) -> bool:
@@ -1481,6 +1503,25 @@ def _action_stem_separate(_q, body: dict):
     src = _resolve_song(_q, body)
     task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
     audio_id = src['audio_id'] or (_q('audio_id') or body.get('audio_id', '')).strip()
+    if not (task_id and audio_id):
+        # Self-heal: the append-only suno-task-log.jsonl records ids at generation
+        # time — recover from it when the metadata entry lost them.
+        try:
+            log_path = GENERATED_MUSIC_DIR / 'suno-task-log.jsonl'
+            if log_path.exists():
+                for line in log_path.read_text().splitlines():
+                    try:
+                        row = json.loads(line)
+                    except Exception:
+                        continue
+                    if src['filename'] and row.get('filename') == src['filename'] and row.get('task_id'):
+                        task_id = task_id or row['task_id']
+                        audio_id = audio_id or row.get('suno_id', '')
+                    elif audio_id and row.get('suno_id') == audio_id and row.get('task_id'):
+                        task_id = task_id or row['task_id']
+        except Exception:
+            pass
+
     if not (task_id and audio_id):
         # Legacy tracks (pre task-id capture in generated_metadata.json) can't be
         # separated — the vocal-removal API only works on a Suno taskId+audioId
