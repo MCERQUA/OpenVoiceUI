@@ -1134,9 +1134,11 @@ def clean_for_tts(text: str) -> str:
 
     # Clean up whitespace
     text = re.sub(r'\n+', '. ', text)
-    text = re.sub(r'\.{2,}', '.', text)
+    # Preserve "..." — TTS models render ellipses as a natural trailing pause
+    # (character voices like Kyle depend on them). Only collapse runs of 4+.
+    text = re.sub(r'\.{4,}', '...', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    text = re.sub(r'\.\s*\.', '.', text)
+    text = re.sub(r'(?<!\.)\.\s*\.(?!\.)', '.', text)
     # Strip leading punctuation/spaces (e.g. from [MUSIC_STOP]\n\n → ". text")
     text = re.sub(r'^[.,;:\s]+', '', text)
 
@@ -1786,12 +1788,21 @@ def _conversation_inner():
                 if _face_name:
                     _face_clause = (f" The person is {_face_name} — you can work their name in "
                                     f"naturally, or not.")
+                # Per-profile bit style: a profile can define conversation.greeting_bit_style
+                # to control the SHAPE of the opener (length, pacing, sound tags). Without it,
+                # the default stays the short punchy 40-word greeting. (Kyle/BHB wants the
+                # full episode-style cold-open ramble — 2026-07-14.)
+                _bit_style = (_pconf.get('greeting_bit_style') or '').strip()
+                if not _bit_style:
+                    _bit_style = (
+                        "Give a genuinely funny, in-character wake-up greeting — 2 to 3 "
+                        "sentences, about 40 words MAX (it's spoken aloud, so keep it punchy — "
+                        "no long monologue). Ramble a little into ONE quick tangent, then greet "
+                        "them. Spoken only, no markdown, no stage directions."
+                    )
                 _persona_greeting_prompt = (
                     f"{_persona}\n\n"
-                    f"A new voice session just started — someone woke you up. Give a genuinely funny, "
-                    f"in-character wake-up greeting — 2 to 3 sentences, about 40 words MAX (it's spoken "
-                    f"aloud, so keep it punchy — no long monologue). Ramble a little into ONE quick "
-                    f"tangent, then greet them. Spoken only, no markdown, no stage directions. "
+                    f"A new voice session just started — someone woke you up. {_bit_style} "
                     f"{_angle}{_avoid} Make it a completely FRESH bit in your real voice — not a repeat, "
                     f"not a generic AI joke.{_face_clause} Output ONLY the greeting."
                 )

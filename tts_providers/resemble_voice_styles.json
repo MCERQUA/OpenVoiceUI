@@ -1,9 +1,10 @@
 {
   "704cb696": {
-    "exaggeration": 0.5,
-    "temperature": 1.0,
-    "wrap": ["slow", "lower-pitch"],
-    "_note": "Kyle Valhalla post-tts-v4-rebuild (2026-07-14). Drawl comes from wrap tags + persona-level text shaping (ellipses/uh/[chuckle]); the old prompt attr is inert on tts-v4. A/B: test-dev /pages/kyle-voice-tuning.html"
+    "exaggeration": 0.75,
+    "temperature": 1.1,
+    "prompt": "deep stoner voice, lost, dazed and confused, laughs a lot",
+    "wrap": [],
+    "_note": "Mike's dashboard-validated recipe 2026-07-14 (pace 1.09 in dashboard ~= normal, so no slow wrap). Dial-in via /pages/kyle-voice-lab.html on test-dev; 'apply the winner' reads kyle-voice-takes.json"
   },
   "cabc1397": {
     "exaggeration": 0.7,
