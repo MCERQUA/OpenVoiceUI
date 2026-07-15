@@ -211,7 +211,7 @@ def oauth_callback(provider):
     This endpoint is hit by the OAuth provider after user consent.
     Returns HTML that closes the popup and notifies the parent window.
     """
-    from services.vault import exchange_oauth_code
+    from services.vault import exchange_oauth_code, verify_oauth_nonce
 
     code = request.args.get('code', '')
     state_raw = request.args.get('state', '{}')
@@ -233,6 +233,12 @@ def oauth_callback(provider):
 
     if not username:
         return _oauth_callback_html(False, 'Missing username in state')
+
+    # F-6 (2026-07-15): verify the single-use CSRF state nonce BEFORE exchanging the code.
+    # Without this an attacker could forge this callback and connect their own account
+    # into the victim's vault (OAuth login/connection CSRF).
+    if not verify_oauth_nonce(username, cred_id, state.get('nonce', '')):
+        return _oauth_callback_html(False, 'Invalid or expired OAuth state (CSRF check failed) — please retry the connection.')
 
     result = exchange_oauth_code(cred_id, code, username)
 

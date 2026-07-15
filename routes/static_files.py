@@ -470,6 +470,23 @@ def serve_upload(filename):
     if not upload_path.exists():
         return jsonify({"error": "File not found"}), 404
     resp = send_file(upload_path)
+    # F-5 (2026-07-15): neutralize STORED XSS. Uploads are user/agent-supplied; an
+    # .html or .svg served with a rendering content-type executes in OUR origin and can
+    # steal the Clerk session. Serve only known-safe media types inline with their real
+    # mime; serve EVERYTHING else (html, svg, xml, js, ...) as a non-rendering
+    # text/plain attachment. Agent code-file uploads still store + download fine — they
+    # just never execute in-browser. nosniff + a locked-down CSP are belt-and-suspenders.
+    _ext = upload_path.suffix.lower()
+    _SAFE_INLINE = {
+        '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.avif',
+        '.mp4', '.webm', '.ogg', '.mov', '.mp3', '.wav', '.m4a', '.pdf',
+    }
+    if _ext not in _SAFE_INLINE:
+        resp.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        resp.headers['Content-Disposition'] = (
+            'attachment; filename="%s"' % Path(filename).name.replace('"', ''))
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox; frame-ancestors 'none'"
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'

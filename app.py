@@ -125,18 +125,39 @@ def create_app(config_override: dict = None):
         # Local / self-hosted installs (no CANVAS_REQUIRE_AUTH) keep the documented
         # open-access behaviour.
         if os.getenv('CANVAS_REQUIRE_AUTH', '').strip().lower() == 'true':
-            logger.error('CANVAS_REQUIRE_AUTH=true but no Clerk key — admin surface fail-closed')
+            logger.error('CANVAS_REQUIRE_AUTH=true but no Clerk key — FAILING CLOSED (all non-public routes)')
+
+            # F-7 (2026-07-15): fail CLOSED for the WHOLE app, not just admin. When a
+            # hosted tenant requires auth (CANVAS_REQUIRE_AUTH=true) but Clerk is
+            # unconfigured (missing/blank key — e.g. a broken .platform-keys.env mount),
+            # `require_auth` below is never registered, so PREVIOUSLY only /admin was
+            # blocked and every other protected route (voice/canvas/session RPC/vault)
+            # was served unauthenticated. Nobody can log in in this state anyway, so we
+            # deny every non-public path (deny-by-default) and serve only the minimal
+            # shell needed to render the login/error page + health probes. This is an
+            # emergency degraded posture; the real fix is restoring the Clerk key.
+            _UNCONF_PUBLIC_EXACT = {
+                '/', '/pi', '/health', '/health/live', '/health/ready',
+                '/favicon.ico', '/sw.js', '/manifest.json',
+                '/api/config', '/api/version', '/api/auth/check',
+            }
+            _UNCONF_PUBLIC_PREFIXES = ('/src/', '/static/', '/images/', '/plugins/')
 
             @app.before_request
-            def block_admin_unconfigured():
+            def fail_closed_unconfigured():
                 path = request.path
-                if (path == '/admin' or path.startswith('/admin/')
-                        or path == '/src/admin.html'
-                        or any(path.startswith(p) for p in _ADMIN_ONLY_PREFIXES)):
+                if path in _UNCONF_PUBLIC_EXACT:
+                    return
+                # /src/admin.html is the admin shell — never public even here
+                if path != '/src/admin.html' and any(path.startswith(p) for p in _UNCONF_PUBLIC_PREFIXES):
+                    return
+                # everything else is denied: JSON 401 for APIs, redirect to the login shell for pages
+                if path.startswith('/api/') or request.headers.get('X-Requested-With'):
                     return jsonify({
-                        'error': 'Admin surface disabled: auth required but Clerk is not configured',
-                        'code': 'admin_auth_unconfigured',
+                        'error': 'Auth required but Clerk is not configured — service unavailable',
+                        'code': 'auth_unconfigured',
                     }), 503
+                return redirect('/')
     else:
         # Routes that never require authentication:
         _PUBLIC_PREFIXES = (

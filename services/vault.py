@@ -1276,6 +1276,72 @@ def set_oauth_app(provider: str, client_id: str, client_secret: str, redirect_ur
     _write_json(_PLATFORM_OAUTH_PATH, apps)
 
 
+# ── F-6 (2026-07-15): OAuth CSRF state nonce ─────────────────────────────────────
+# The OAuth `state` param previously carried only {cred_id, username} — no unguessable,
+# session-bound token — so an attacker could forge the callback (login/connection CSRF,
+# e.g. connecting the attacker's account into the victim's vault). We now mint a random
+# nonce per authorize request, persist it server-side (per-user, 10-min TTL, single-use),
+# and require the callback's state.nonce to match before exchanging the code.
+_OAUTH_NONCE_TTL_SEC = 600
+
+
+def _oauth_nonce_path(username: str) -> Path:
+    return _vault_dir(username) / 'oauth-nonces.json'
+
+
+def _mint_oauth_nonce(username: str, cred_id: str) -> str:
+    import secrets
+    nonce = secrets.token_urlsafe(24)
+    p = _oauth_nonce_path(username)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        store = {}
+        if p.exists():
+            try:
+                store = json.loads(p.read_text())
+            except Exception:
+                store = {}
+        now = time.time()
+        # prune expired while we're here
+        store = {k: v for k, v in store.items()
+                 if isinstance(v, dict) and (now - v.get('ts', 0)) < _OAUTH_NONCE_TTL_SEC}
+        store[nonce] = {'cred_id': cred_id, 'ts': now}
+        tmp = p.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(store))
+        tmp.replace(p)
+    except Exception as e:
+        logger.warning(f'oauth nonce store failed for {username}: {e}')
+    return nonce
+
+
+def verify_oauth_nonce(username: str, cred_id: str, nonce: str) -> bool:
+    """Single-use, TTL-bound verification of an OAuth state nonce. Consumes on success."""
+    if not nonce:
+        return False
+    p = _oauth_nonce_path(username)
+    try:
+        if not p.exists():
+            return False
+        store = json.loads(p.read_text())
+    except Exception:
+        return False
+    entry = store.get(nonce)
+    ok = (isinstance(entry, dict)
+          and entry.get('cred_id') == cred_id
+          and (time.time() - entry.get('ts', 0)) < _OAUTH_NONCE_TTL_SEC)
+    # consume (single-use) regardless of ok, and prune expired
+    now = time.time()
+    store = {k: v for k, v in store.items()
+             if k != nonce and isinstance(v, dict) and (now - v.get('ts', 0)) < _OAUTH_NONCE_TTL_SEC}
+    try:
+        tmp = p.with_suffix('.json.tmp')
+        tmp.write_text(json.dumps(store))
+        tmp.replace(p)
+    except Exception:
+        pass
+    return ok
+
+
 def build_oauth_url(cred_id: str, username: str, domain: str) -> Optional[str]:
     """
     Build the OAuth authorization URL for a credential.
@@ -1304,7 +1370,12 @@ def build_oauth_url(cred_id: str, username: str, domain: str) -> Optional[str]:
         'redirect_uri': app_creds['redirect_uri'],
         'response_type': 'code',
         'scope': ' '.join(oauth_cfg.get('scopes', [])),
-        'state': json.dumps({'cred_id': cred_id, 'username': username}),
+        # F-6: state carries a single-use, server-persisted CSRF nonce verified on callback
+        'state': json.dumps({
+            'cred_id': cred_id,
+            'username': username,
+            'nonce': _mint_oauth_nonce(username, cred_id),
+        }),
     }
     # Extra params (e.g. access_type=offline for Google)
     params.update(oauth_cfg.get('extra_params', {}))
