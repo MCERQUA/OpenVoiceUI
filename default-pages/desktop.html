@@ -1221,7 +1221,14 @@ function getIconName(item) {
 function buildDesktopIcons() {
   const desktop = document.getElementById('desktop');
   bindDesktopIconListeners();
-  desktop.querySelectorAll('.desktop-icon').forEach(el => el.remove());
+  // Reconcile against existing icon nodes keyed by data-id instead of
+  // destroy-all-recreate — at 200+ pages a full rebuild every 30s manifest
+  // poll was a ~500ms stutter. Nodes are reused (safe: listeners are
+  // delegated to #desktop, never per-icon); only new ids get created and
+  // only vanished ids get removed.
+  const existingIcons = new Map();
+  desktop.querySelectorAll('.desktop-icon').forEach(el => existingIcons.set(el.dataset.id, el));
+  const presentIds = new Set();
   const isRightToLeft = currentTheme === 'mac';
   const container = document.getElementById('os-container');
   // ORIGINAL geometry, restored verbatim 2026-07-12 (Mike, 4th ask: NO resizing,
@@ -1247,11 +1254,7 @@ function buildDesktopIcons() {
     const x = saved ? saved.x : (isRightToLeft ? startX - col * cellW : startX + col * cellW);
     const y = saved ? saved.y : startY + row * cellH;
 
-    const el = document.createElement('div');
-    el.className = 'desktop-icon';
-    el.dataset.id = item.id;
-    el.style.left = x + 'px';
-    el.style.top = y + 'px';
+    presentIds.add(item.id);
 
     const recycleIcon = item.id === 'recycle-bin'
       ? (recycleBin.length > 0 ? 'recycle-full' : 'recycle')
@@ -1260,15 +1263,37 @@ function buildDesktopIcons() {
     const iconHtml = item.iconUrl
       ? `<img src="${item.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
       : getIcon(recycleIcon);
-    el.innerHTML = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
-    desktop.appendChild(el);
+    const inner = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
+
+    let el = existingIcons.get(item.id);
+    if (el) {
+      // Reuse the node in place. Compare innerHTML against the string we last
+      // set (cached expando) — reading el.innerHTML back can differ from the
+      // authored string after browser serialization, which would force a
+      // rewrite every poll.
+      if (el.style.left !== x + 'px') el.style.left = x + 'px';
+      if (el.style.top !== y + 'px') el.style.top = y + 'px';
+      if (el._ovuInner !== inner) { el.innerHTML = inner; el._ovuInner = inner; }
+    } else {
+      el = document.createElement('div');
+      el.className = 'desktop-icon';
+      el.dataset.id = item.id;
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.innerHTML = inner;
+      el._ovuInner = inner;
+      desktop.appendChild(el);
+    }
   });
+  // Remove only icons whose id is no longer present (recycled/deleted pages)
+  existingIcons.forEach((el, id) => { if (!presentIds.has(id)) el.remove(); });
   _lastDesktopH = getDesktopHeight(); // keep the resize-handler height baseline in sync after any rebuild
 }
 
 // Delegated icon listeners — attached once to #desktop, never re-attached on
-// rebuild. buildDesktopIcons() destroys/recreates icon DOM every manifest
-// poll; per-icon listeners would otherwise be re-registered every cycle.
+// rebuild. buildDesktopIcons() reuses icon nodes across manifest polls (and
+// may still create/remove individual nodes); delegation keeps that safe with
+// no per-icon listener bookkeeping.
 let _desktopIconListenersBound = false;
 function bindDesktopIconListeners() {
   if (_desktopIconListenersBound) return;

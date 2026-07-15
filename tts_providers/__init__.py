@@ -6,7 +6,7 @@ This package provides a unified interface for multiple Text-to-Speech backends.
 All providers inherit from TTSProvider base class and implement the same API.
 
 Available Providers:
-    - HumeProvider: Hume EVI WebSocket TTS (INACTIVE - placeholder only)
+    - HumeProvider: Hume Octave acting-direction TTS (custom designed voices)
     - SupertonicProvider: Local ONNX-based TTS (active, recommended)
 
 Usage:
