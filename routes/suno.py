@@ -1497,9 +1497,204 @@ def _action_wav_convert(_q, body: dict):
     )
 
 
+# ---------------------------------------------------------------------------
+# Stem separation persistence layer
+#
+# Every vocal-removal call is BILLED by sunoapi.org with no server-side cache,
+# so a lost result = money burned (it happened twice on 2026-07-14: an Errno 13
+# on the stems dir, then a Clerk token expiring mid-poll → the browser's poll
+# loop 401'd while the paid stems evaporated). Three defenses:
+#   1. stem_separate is idempotent: stems already on disk → instant complete;
+#      a fresh pending marker → the existing paid task is reused, never resubmitted.
+#   2. A background thread polls Suno server-side and lands the stems on disk
+#      even if the browser dies, times out, or loses auth.
+#   3. The webhook callback also persists vocal_removal_info payloads.
+# ---------------------------------------------------------------------------
+
+_STEM_PENDING_TTL = 30 * 60        # reuse a pending task for 30 min before allowing a re-buy
+_STEM_POLL_SECONDS = 10
+_STEM_POLL_DEADLINE = 15 * 60
+_stem_pollers = set()              # task_ids with a live background poller
+_stem_pollers_lock = threading.Lock()
+
+
+def _stems_dir() -> Path:
+    from services.paths import CANVAS_PAGES_DIR
+    return CANVAS_PAGES_DIR / '_data' / 'stems'
+
+
+def _stem_name_for(src_name: str, task_id: str) -> str:
+    name_stem = Path(src_name).stem if src_name else task_id[:12]
+    return ''.join(ch for ch in name_stem if ch.isalnum() or ch in '-_')[:60] or task_id[:12]
+
+
+def _stem_disk_urls(name_stem: str) -> dict:
+    """URLs for stems already persisted to disk ({} if the vocal is missing)."""
+    found = {}
+    for kind_key in ('vocal', 'instrumental'):
+        p = _stems_dir() / f'{name_stem}-{kind_key}.mp3'
+        if p.exists() and p.stat().st_size > 0:
+            found[kind_key] = f'/canvas-data/stems/{p.name}'
+    return found if found.get('vocal') else {}
+
+
+def _stem_pending_path(name_stem: str) -> Path:
+    return _stems_dir() / f'{name_stem}.pending.json'
+
+
+def _stem_read_pending(name_stem: str) -> dict:
+    """Fresh pending marker for this track, or {} (stale/missing/unreadable)."""
+    p = _stem_pending_path(name_stem)
+    try:
+        info = json.loads(p.read_text())
+        if info.get('task_id') and (time.time() - float(info.get('ts', 0))) < _STEM_PENDING_TTL:
+            return info
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def _stem_write_pending(name_stem: str, task_id: str, sep_type: str):
+    try:
+        _stem_pending_path(name_stem).write_text(json.dumps(
+            {'task_id': task_id, 'ts': time.time(), 'type': sep_type}))
+    except OSError as exc:
+        logger.warning(f'stem pending marker write failed ({name_stem}): {exc}')
+
+
+def _stem_clear_pending(name_stem: str):
+    try:
+        _stem_pending_path(name_stem).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _stem_name_from_marker(task_id: str) -> str:
+    """Reverse-lookup a track name from pending markers (webhook has only the task id)."""
+    try:
+        for p in _stems_dir().glob('*.pending.json'):
+            try:
+                if json.loads(p.read_text()).get('task_id') == task_id:
+                    return p.name[:-len('.pending.json')]
+            except (OSError, ValueError):
+                continue
+    except OSError:
+        pass
+    return ''
+
+
+def _find_stem_urls(obj, found: dict):
+    """Walk a Suno payload for vocal/instrumental URLs (key-name variants:
+    vocal_url / vocalUrl / instrumental_url / ...)."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            lk = k.lower().replace('_', '')
+            if isinstance(v, str) and v.startswith('http'):
+                if lk == 'vocalurl':
+                    found['vocal'] = v
+                elif lk == 'instrumentalurl':
+                    found['instrumental'] = v
+            else:
+                _find_stem_urls(v, found)
+    elif isinstance(obj, list):
+        for item in obj:
+            _find_stem_urls(item, found)
+
+
+def _persist_stem_urls(urls: dict, name_stem: str) -> dict:
+    """Download remote stem URLs into the stems dir. Returns local URLs saved."""
+    stems_dir = _stems_dir()
+    stems_dir.mkdir(parents=True, exist_ok=True)
+    saved = {}
+    for kind_key, url in urls.items():
+        if not _is_safe_download_url(url) or not url.lower().startswith('https://'):
+            continue
+        p = stems_dir / f'{name_stem}-{kind_key}.mp3'
+        if not p.exists():
+            try:
+                r = http_requests.get(url, timeout=120)
+                if r.status_code == 200 and 0 < len(r.content) <= SUNO_MAX_DOWNLOAD_BYTES:
+                    p.write_bytes(r.content)
+                    logger.info(f'stems: downloaded {kind_key} → {p.name} ({len(r.content)} bytes)')
+            except Exception as exc:
+                logger.warning(f'stems: download failed ({kind_key}): {exc}')
+                continue
+        if p.exists() and p.stat().st_size > 0:
+            saved[kind_key] = f'/canvas-data/stems/{p.name}'
+    if saved.get('vocal'):
+        _stem_clear_pending(name_stem)
+    return saved
+
+
+def _fetch_stems_once(task_id: str, name_stem: str) -> dict:
+    """One record-info poll + persist attempt. No Flask objects — safe in threads.
+    Returns {'status': 'complete'|'pending'|'failed', 'urls': {...}, 'error': str}."""
+    disk = _stem_disk_urls(name_stem)
+    if disk:
+        _stem_clear_pending(name_stem)
+        return {'status': 'complete', 'urls': disk, 'cached': True}
+
+    resp = http_requests.get(
+        f'{SUNO_API_BASE}/api/v1/vocal-removal/record-info',
+        headers=_suno_headers(), params={'taskId': task_id}, timeout=30)
+    if resp.status_code != 200:
+        return {'status': 'pending', 'error': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'}
+    data = resp.json().get('data') or {}
+
+    urls = {}
+    _find_stem_urls(data, urls)
+    if not urls.get('vocal'):
+        status = str(data.get('successFlag', '') or data.get('status', '')).upper()
+        if status in ('CREATE_TASK_FAILED', 'GENERATE_AUDIO_FAILED', 'CALLBACK_EXCEPTION',
+                      'SENSITIVE_WORD_ERROR', 'FAIL', 'FAILED'):
+            _stem_clear_pending(name_stem)
+            return {'status': 'failed', 'error': f'Stem separation failed: {status}'}
+        return {'status': 'pending'}
+
+    saved = _persist_stem_urls(urls, name_stem)
+    if not saved.get('vocal'):
+        return {'status': 'pending', 'error': 'stems ready upstream but the vocal download failed'}
+    return {'status': 'complete', 'urls': saved}
+
+
+def _spawn_stem_poller(task_id: str, name_stem: str):
+    """Server-side completion: poll Suno until the paid stems land on disk, so a
+    browser timeout / expired session can never lose a billed separation."""
+    with _stem_pollers_lock:
+        if task_id in _stem_pollers:
+            return
+        _stem_pollers.add(task_id)
+
+    def _run():
+        try:
+            deadline = time.time() + _STEM_POLL_DEADLINE
+            while time.time() < deadline:
+                time.sleep(_STEM_POLL_SECONDS)
+                try:
+                    res = _fetch_stems_once(task_id, name_stem)
+                except Exception as exc:
+                    logger.warning(f'stem poller {task_id[:12]}: {exc}')
+                    continue
+                if res['status'] == 'complete':
+                    logger.info(f'stem poller {task_id[:12]}: stems persisted ({name_stem})')
+                    return
+                if res['status'] == 'failed':
+                    logger.warning(f'stem poller {task_id[:12]}: {res.get("error")}')
+                    return
+            logger.warning(f'stem poller {task_id[:12]}: gave up after {_STEM_POLL_DEADLINE}s '
+                           f'(webhook callback may still deliver)')
+        finally:
+            with _stem_pollers_lock:
+                _stem_pollers.discard(task_id)
+
+    threading.Thread(target=_run, name=f'stem-poller-{task_id[:8]}', daemon=True).start()
+
+
 def _action_stem_separate(_q, body: dict):
     """Separate vocals from music (or full stem split).
-    POST /api/v1/vocal-removal/generate."""
+    POST /api/v1/vocal-removal/generate.
+    Idempotent: cached stems return instantly; a fresh pending task is reused
+    instead of resubmitting (every submit is billed)."""
     src = _resolve_song(_q, body)
     task_id = src['task_id'] or (_q('task_id') or body.get('task_id', '')).strip()
     audio_id = src['audio_id'] or (_q('audio_id') or body.get('audio_id', '')).strip()
@@ -1535,6 +1730,29 @@ def _action_stem_separate(_q, body: dict):
     if sep_type not in ('separate_vocal', 'split_stem', 'split_stem_advanced'):
         sep_type = 'separate_vocal'
 
+    name_stem = _stem_name_for(src['filename'], task_id)
+    try:
+        _stems_dir().mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return jsonify({'action': 'error',
+                        'response': f'Stems folder is not writable on the server ({exc}). '
+                                    'Fix permissions on canvas-pages/_data/stems before separating (each attempt is billed).'})
+
+    # Already separated → free, instant.
+    disk = _stem_disk_urls(name_stem)
+    if disk:
+        return jsonify({'action': 'complete', 'task_id': 'cached',
+                        'vocal_url': disk.get('vocal'), 'instrumental_url': disk.get('instrumental'),
+                        'response': 'Stems already separated (cached).'})
+
+    # A paid separation is already in flight → reuse it, don't buy another.
+    pending = _stem_read_pending(name_stem)
+    if pending:
+        _spawn_stem_poller(pending['task_id'], name_stem)
+        return jsonify({'action': 'generating', 'task_id': pending['task_id'],
+                        'kind': 'stem_separate', 'reused': True,
+                        'response': 'Separation already in progress — resuming the existing task (not re-billed).'})
+
     # stemName is required by the API schema for ALL types (only meaningful for
     # split_stem_advanced, which isolates ONE named instrument). Default it so the
     # existing separate_vocal / split_stem behavior keeps working unchanged.
@@ -1543,6 +1761,11 @@ def _action_stem_separate(_q, body: dict):
     request_body = {'taskId': task_id, 'audioId': audio_id, 'type': sep_type, 'stemName': stem_name}
     if SUNO_CALLBACK_URL:
         request_body['callBackUrl'] = SUNO_CALLBACK_URL
+
+    def _on_task_id(new_task_id):
+        _stem_write_pending(name_stem, new_task_id, sep_type)
+        _spawn_stem_poller(new_task_id, name_stem)
+
     return _submit_process_job(
         '/api/v1/vocal-removal/generate', request_body, 'stem_separate',
         op='stem_separate', est_seconds=40,
@@ -1551,6 +1774,7 @@ def _action_stem_separate(_q, body: dict):
                       'Splitting into stems — results delivered when ready.'
                       if sep_type == 'split_stem' else
                       'Separating vocals from music — results delivered when ready.'),
+        on_task_id=_on_task_id,
     )
 
 
@@ -1563,89 +1787,42 @@ def _action_stem_result(_q, body: dict):
     so lip-sync tools like Character Stage can drive mouths off the isolated
     vocal while the full mix plays. Idempotent per taskId: re-calls return the
     already-downloaded files without re-fetching. Poll this after stem_separate.
-    Params: task_id (required), filename (optional — names the saved stems)."""
+    task_id='cached' (from an idempotent stem_separate hit) is served straight
+    from disk. Params: task_id (required), filename (optional — names the stems)."""
     task_id = (_q('task_id') or body.get('task_id', '')).strip()
     if not task_id:
         return jsonify({'action': 'error', 'response': 'stem_result needs the task_id returned by stem_separate.'})
     src_name = (_q('filename') or body.get('filename', '')).strip()
-    name_stem = Path(src_name).stem if src_name else task_id[:12]
-    name_stem = ''.join(ch for ch in name_stem if ch.isalnum() or ch in '-_')[:60] or task_id[:12]
-
-    from services.paths import CANVAS_PAGES_DIR
-    stems_dir = CANVAS_PAGES_DIR / '_data' / 'stems'
-    stems_dir.mkdir(parents=True, exist_ok=True)
-
-    # Already downloaded? Serve from disk without hitting the API again.
-    existing = {}
-    for kind_key in ('vocal', 'instrumental'):
-        p = stems_dir / f'{name_stem}-{kind_key}.mp3'
-        if p.exists() and p.stat().st_size > 0:
-            existing[kind_key] = f'/canvas-data/stems/{p.name}'
-    if existing.get('vocal'):
-        return jsonify({'action': 'complete', 'task_id': task_id,
-                        'vocal_url': existing.get('vocal'),
-                        'instrumental_url': existing.get('instrumental'),
-                        'response': 'Stems ready (cached).'})
+    name_stem = _stem_name_for(src_name, task_id)
 
     try:
-        resp = http_requests.get(
-            f'{SUNO_API_BASE}/api/v1/vocal-removal/record-info',
-            headers=_suno_headers(), params={'taskId': task_id}, timeout=30)
-        if resp.status_code != 200:
-            return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
-        data = resp.json().get('data') or {}
+        _stems_dir().mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return jsonify({'action': 'error',
+                        'response': f'Stems folder is not writable on the server ({exc}).'})
+
+    if task_id == 'cached':
+        disk = _stem_disk_urls(name_stem)
+        if disk:
+            return jsonify({'action': 'complete', 'task_id': task_id,
+                            'vocal_url': disk.get('vocal'), 'instrumental_url': disk.get('instrumental'),
+                            'response': 'Stems ready (cached).'})
+        return jsonify({'action': 'error', 'response': 'No cached stems found for this track.'})
+
+    try:
+        res = _fetch_stems_once(task_id, name_stem)
     except http_requests.RequestException as exc:
         return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
 
-    # URLs nest under data.response with key-name variants across doc versions
-    # (vocal_url / vocalUrl / instrumental_url / ...) — walk the payload for them.
-    def _find_urls(obj, found):
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                lk = k.lower().replace('_', '')
-                if isinstance(v, str) and v.startswith('http'):
-                    if lk == 'vocalurl':
-                        found['vocal'] = v
-                    elif lk == 'instrumentalurl':
-                        found['instrumental'] = v
-                else:
-                    _find_urls(v, found)
-        elif isinstance(obj, list):
-            for item in obj:
-                _find_urls(item, found)
-    urls = {}
-    _find_urls(data, urls)
-
-    if not urls.get('vocal'):
-        status = str(data.get('successFlag', '') or data.get('status', '')).upper()
-        if status in ('CREATE_TASK_FAILED', 'GENERATE_AUDIO_FAILED', 'CALLBACK_EXCEPTION',
-                      'SENSITIVE_WORD_ERROR', 'FAIL', 'FAILED'):
-            return jsonify({'action': 'error', 'response': f'Stem separation failed: {status}'})
-        return jsonify({'action': 'generating', 'task_id': task_id,
-                        'response': 'Stems not ready yet — poll again in a few seconds.'})
-
-    saved = {}
-    for kind_key, url in urls.items():
-        if not _is_safe_download_url(url):
-            continue
-        p = stems_dir / f'{name_stem}-{kind_key}.mp3'
-        if not p.exists():
-            try:
-                r = http_requests.get(url, timeout=120)
-                if r.status_code == 200 and 0 < len(r.content) <= SUNO_MAX_DOWNLOAD_BYTES:
-                    p.write_bytes(r.content)
-                    logger.info(f'stem_result downloaded {kind_key} stem → {p.name} ({len(r.content)} bytes)')
-            except Exception as exc:
-                logger.warning(f'stem_result download failed ({kind_key}): {exc}')
-                continue
-        if p.exists() and p.stat().st_size > 0:
-            saved[kind_key] = f'/canvas-data/stems/{p.name}'
-
-    if not saved.get('vocal'):
-        return jsonify({'action': 'error', 'response': 'Stems reported ready but the vocal download failed — try again.'})
-    return jsonify({'action': 'complete', 'task_id': task_id,
-                    'vocal_url': saved.get('vocal'), 'instrumental_url': saved.get('instrumental'),
-                    'response': 'Stems ready.'})
+    if res['status'] == 'complete':
+        urls = res['urls']
+        return jsonify({'action': 'complete', 'task_id': task_id,
+                        'vocal_url': urls.get('vocal'), 'instrumental_url': urls.get('instrumental'),
+                        'response': 'Stems ready (cached).' if res.get('cached') else 'Stems ready.'})
+    if res['status'] == 'failed':
+        return jsonify({'action': 'error', 'response': res.get('error', 'Stem separation failed.')})
+    return jsonify({'action': 'generating', 'task_id': task_id,
+                    'response': res.get('error') or 'Stems not ready yet — poll again in a few seconds.'})
 
 
 def _action_style_boost(_q, body: dict):
@@ -1741,10 +1918,11 @@ def _action_song_details(_q, body: dict):
 
 def _submit_process_job(endpoint: str, request_body: dict, kind: str,
                         op: str = None, est_seconds: int = 30,
-                        response_msg: str = None):
+                        response_msg: str = None, on_task_id=None):
     """POST a process request (WAV/stem/video) that returns a taskId but whose
     output is NOT a normal song download. Registers a lightweight job so the UI
     can show it in the queue; results are delivered via callback / song_details.
+    on_task_id(task_id) fires after a successful submit (stem pending markers).
     """
     logger.info(f'Suno {kind}: POST {endpoint} body={json.dumps(request_body)[:300]}')
     try:
@@ -1761,6 +1939,11 @@ def _submit_process_job(endpoint: str, request_body: dict, kind: str,
         if data.get('code') != 200 or not data.get('data', {}).get('taskId'):
             return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
         task_id = data['data']['taskId']
+        if on_task_id:
+            try:
+                on_task_id(task_id)
+            except Exception as exc:
+                logger.warning(f'{kind} on_task_id hook failed: {exc}')
         job_id = str(uuid.uuid4())
         suno_jobs[job_id] = {
             'status': 'generating',
@@ -2122,6 +2305,22 @@ def suno_callback():
 
         data = request.json or {}
         logger.info(f'Suno callback: {json.dumps(data, indent=2)[:500]}')
+
+        # Vocal-removal completion (different shape: data.vocal_removal_info,
+        # snake_case task_id). Persist the paid stems server-side — the browser
+        # may have timed out or lost its session while waiting.
+        vri = (data.get('data') or {}).get('vocal_removal_info')
+        if data.get('code') == 200 and vri:
+            cb_task = (data.get('data') or {}).get('task_id') or (data.get('data') or {}).get('taskId', '')
+            name_stem = _stem_name_from_marker(cb_task) or _stem_name_for('', cb_task or 'stems')
+            urls = {}
+            _find_stem_urls(vri, urls)
+            try:
+                saved = _persist_stem_urls(urls, name_stem)
+                logger.info(f'Suno callback: persisted vocal-removal stems for {name_stem}: {list(saved)}')
+            except Exception as exc:
+                logger.warning(f'Suno callback: stem persist failed ({name_stem}): {exc}')
+            return jsonify({'status': 'ok'})
 
         if data.get('code') == 200:
             callback_type = data.get('data', {}).get('callbackType', '')
