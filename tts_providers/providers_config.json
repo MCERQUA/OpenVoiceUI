@@ -1,5 +1,30 @@
 {
   "providers": {
+    "pocket": {
+      "name": "Pocket TTS",
+      "provider_id": "pocket",
+      "cost_per_minute": 0.0,
+      "quality": "high",
+      "latency": "very-fast",
+      "voices": [],
+      "features": [
+        "voice-cloning",
+        "local-processing",
+        "no-api-key-required",
+        "reusable-voice-state",
+        "free"
+      ],
+      "requires_api_key": false,
+      "status": "inactive",
+      "description": "Pocket TTS (Kyutai) — $0 local voice cloning on the macdaddy video/voice node. Clones a per-client brand voice from a ~10-20s reference clip into a reusable .safetensors state, then generates VO clips (~2-3s each). Client-facing via this Voice Cloning Studio canvas; jobs route to mac-claude@mesh over the Syncthing Dropzone bridge.",
+      "documentation_url": "https://github.com/kyutai-labs/pocket-tts",
+      "languages": ["en"],
+      "max_characters": 600,
+      "notes": "Self-hosted on the macdaddy node (handle_voice_clone). status=inactive until the OVU->mesh Dropzone bridge (POST /api/voice-clone/submit + result ingest) is wired; the studio card stays hidden while inactive, then auto-reveals like qwen3-local. Guardrail: dedicated deterministic handler, source-allowlisted host@mesh, NOT the permissionless claude path.",
+      "requires_microphone": false,
+      "requires_websocket": false,
+      "mode": "tts-only"
+    },
     "hume": {
       "name": "Hume Octave",
       "provider_id": "hume",
