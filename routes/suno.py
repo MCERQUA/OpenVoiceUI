@@ -443,6 +443,10 @@ def _action_list():
                 'created_date': meta.get('created_date', ''),
                 'url': f'/generated_music/{f.name}',
                 'size_bytes': f.stat().st_size,
+                # Sing-along support: plain lyrics for estimated timing, and
+                # whether Suno per-word timestamps are fetchable (needs both ids).
+                'lyrics': meta.get('lyrics', ''),
+                'has_word_sync': bool(meta.get('task_id') and meta.get('suno_id')),
             })
     return jsonify({
         'action': 'list',
