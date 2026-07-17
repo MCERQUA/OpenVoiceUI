@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 1.0.0 -->
+<!-- openvoiceui-version: 1.0.2 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -147,6 +147,12 @@
     background:linear-gradient(transparent, rgba(5,7,12,.82));
     display:flex; flex-direction:column; gap:8px;
   }
+  #tp-title {
+    text-align:center; font-size:13px; font-weight:700; letter-spacing:.3px;
+    color:rgba(240,246,255,.85); text-shadow:0 1px 3px rgba(0,0,0,.8);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:0 8px 6px;
+  }
+  #tp-title:empty { display:none; }
   #seek-row { display:flex; align-items:center; gap:10px; font-size:11px; color:rgba(226,232,240,.6); font-variant-numeric:tabular-nums; }
   #seek { flex:1; -webkit-appearance:none; appearance:none; height:5px; border-radius:3px;
     background:rgba(148,163,184,.25); outline:none; cursor:pointer; }
@@ -175,7 +181,7 @@
     background:rgba(10,14,22,.6); color:#e2e8f0; font-size:16px; font-weight:800; cursor:pointer;
   }
   .nudge span { font-size:11px; color:rgba(226,232,240,.55); min-width:44px; text-align:center; font-variant-numeric:tabular-nums; }
-  @media (max-width:560px){ #main-vol-wrap { display:none; } }  /* phone: volume lives in the track sheet */
+  @media (max-width:560px){ input.vol { width:70px; } }  /* phone: compact but visible */
 
   /* ── FX side panel ─────────────────────────────────────── */
   .panel {
@@ -380,6 +386,7 @@
 </div>
 
 <div id="transport">
+  <div id="tp-title"></div>
   <div id="seek-row">
     <span id="t-cur">0:00</span>
     <input type="range" id="seek" min="0" max="1000" value="0">
@@ -430,10 +437,6 @@
       <svg id="ts-ic-pause" viewBox="0 0 24 24" fill="currentColor" class="hidden"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
     </button>
     <div id="ts-now"><div class="t">Nothing playing</div><div class="s">Pick a track below</div></div>
-    <div class="vol-wrap">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-      <input type="range" class="vol" id="ts-vol" min="0" max="100" value="100">
-    </div>
   </div>
   <div id="ts-tabs"></div>
   <div id="ts-body"></div>
@@ -710,6 +713,8 @@ async function resolveLyrics(track){
       const r=await fetch('/api/suno',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({action:'timestamped_lyrics', filename:track.filename})});
       const d=await r.json(); toastHide();
+      if(d.action==='error' && /credit/i.test(d.response||''))
+        toast('Suno credits are empty — word sync unavailable until top-up. Using best local timing.');
       const aligned=d?.data?.alignedWords||d?.data?.aligned_words;
       if(d.action==='timestamped_lyrics' && Array.isArray(aligned) && aligned.length){
         const lines=linesFromAligned(aligned, track.lyrics||'');
@@ -743,6 +748,7 @@ async function selectTrack(track){
   state.lineIdx=-1; state.wordIdx=-1;
   $('t-title').textContent=track.title||track.filename;
   $('ts-now').querySelector('.t').textContent=track.title||track.filename;
+  $('tp-title').textContent=track.title||track.filename;
   $('idle').classList.add('hidden'); $('lyrics').classList.remove('hidden');
   renderTrackList();
   audio.src=track.url; audio.load();
@@ -893,25 +899,36 @@ function resize(){
 }
 window.addEventListener('resize', resize); resize();
 
-let audioCtx=null, analyser=null, freq=null, wave=null, srcNode=null;
+let audioCtx=null, analyser=null, beatAnalyser=null, freq=null, freqBeat=null, wave=null, srcNode=null;
 function ensureAudioGraph(){
   if(audioCtx) { audioCtx.resume().catch(()=>{}); return; }
   audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  analyser=audioCtx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0.82;
+  // visuals: smoothed so bars/glow move fluidly
+  analyser=audioCtx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0.8;
+  // beat detection: RAW (no smoothing) so kick transients arrive intact
+  beatAnalyser=audioCtx.createAnalyser(); beatAnalyser.fftSize=2048; beatAnalyser.smoothingTimeConstant=0;
   srcNode=audioCtx.createMediaElementSource(audio);
-  srcNode.connect(analyser); analyser.connect(audioCtx.destination);
+  srcNode.connect(analyser); srcNode.connect(beatAnalyser); analyser.connect(audioCtx.destination);
   freq=new Uint8Array(analyser.frequencyBinCount);
+  freqBeat=new Uint8Array(beatAnalyser.frequencyBinCount);
   wave=new Uint8Array(analyser.fftSize);
 }
 
 function bandAvg(a,b){ let s=0; for(let i=a;i<b;i++) s+=freq[i]; return s/((b-a)*255); }
 
-// beat detection
-let bassHist=[], lastBeat=0;
-function detectBeat(bass, now){
-  bassHist.push(bass); if(bassHist.length>40) bassHist.shift();
-  const avg=bassHist.reduce((a,b)=>a+b,0)/bassHist.length;
-  if(bass>Math.max(0.12, avg*1.32) && now-lastBeat>260){ lastBeat=now; return true; }
+// beat detection — arm/fire state machine on the RAW (unsmoothed) kick band.
+// v2's frame-delta "rising edge" never exceeded its threshold on smoothed FFT
+// data, so beats never fired and every beat-keyed effect (ripples/flash/punch)
+// went dead. Now: fire when raw kick jumps above the rolling average, re-arm
+// only after it falls back near it — one trigger per hit, no delta games.
+let kickHist=[], lastBeat=0, beatArmed=true, beatEnv=0;
+function detectBeat(kick, now){
+  kickHist.push(kick); if(kickHist.length>50) kickHist.shift();   // ~0.8s window
+  const avg=kickHist.reduce((a,b)=>a+b,0)/kickHist.length;
+  if(!beatArmed && kick<avg*1.05) beatArmed=true;
+  if(beatArmed && kick>Math.max(0.05, avg*1.25) && now-lastBeat>200){
+    beatArmed=false; lastBeat=now; return true;
+  }
   return false;
 }
 
@@ -928,20 +945,23 @@ function fxFrame(now){
   ctx.clearRect(0,0,W,H);
   if(!analyser) return;
   analyser.getByteFrequencyData(freq);
+  beatAnalyser.getByteFrequencyData(freqBeat);
   analyser.getByteTimeDomainData(wave);
   const fx=state.settings.fx;
   const [cr,cg,cb]=hexToRgb(state.settings.glow);
   const bass=bandAvg(4,12), mid=bandAvg(24,92), treb=bandAvg(186,700);
-  const beat=detectBeat(bass, now);
+  let kick=0; for(let i=1;i<9;i++) kick+=freqBeat[i]; kick/=(8*255);   // RAW 21-190Hz
+  const beat=detectBeat(kick, now);
+  if(beat) beatEnv=1; else beatEnv*=0.90;      // punch envelope: hit → decay
 
   if(beat && fx.flash){ const bf=$('beat-flash'); bf.classList.add('hit'); requestAnimationFrame(()=>requestAnimationFrame(()=>bf.classList.remove('hit'))); }
-  if(beat && fx.ripples) ripples.push({r:20, a:0.5});
+  if(beat && fx.ripples) ripples.push({r:16, a:0.75});
 
   // center glow
   if(fx.glow){
-    const rad=Math.min(W,H)*(0.24+bass*0.5);
+    const rad=Math.min(W,H)*(0.20+bass*0.85+beatEnv*0.22);
     const g=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,rad);
-    g.addColorStop(0,`rgba(${cr},${cg},${cb},${0.10+bass*0.25})`);
+    g.addColorStop(0,`rgba(${cr},${cg},${cb},${Math.min(0.55,0.08+bass*0.55+beatEnv*0.30)})`);
     g.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
   }
@@ -950,28 +970,30 @@ function fxFrame(now){
     ripples=ripples.filter(r=>r.a>0.01);
     for(const r of ripples){
       ctx.beginPath(); ctx.arc(W/2,H/2,r.r,0,6.28);
-      ctx.strokeStyle=`rgba(${cr},${cg},${cb},${r.a})`; ctx.lineWidth=2.5; ctx.stroke();
-      r.r+=7+bass*10; r.a*=0.94;
+      ctx.strokeStyle=`rgba(${cr},${cg},${cb},${r.a})`; ctx.lineWidth=2+beatEnv*3; ctx.stroke();
+      r.r+=8+kick*22; r.a*=0.94;
     }
   } else ripples=[];
   // disco dots
   if(fx.dots){
     for(const d of dots){
-      const pulse=0.35+treb*1.6*Math.abs(Math.sin(now/700*d.sp+d.ph));
+      const tw=Math.abs(Math.sin(now/700*d.sp+d.ph));
+      const pulse=0.15+treb*4.5*tw+beatEnv*0.5;
       const hue=(now/40+d.ph*60)%360;
-      ctx.beginPath(); ctx.arc(d.x*W, d.y*H, 2.2+treb*6, 0, 6.28);
-      ctx.fillStyle=`hsla(${hue},85%,62%,${Math.min(0.7,pulse)})`; ctx.fill();
+      ctx.beginPath(); ctx.arc(d.x*W, d.y*H, 1.5+treb*20*tw+beatEnv*4, 0, 6.28);
+      ctx.fillStyle=`hsla(${hue},85%,62%,${Math.min(0.9,pulse)})`; ctx.fill();
     }
   }
   // orbit particles
   if(fx.particles){
     const R=Math.min(W,H);
     for(const p of parts){
-      p.ang+=p.sp*(0.008+mid*0.05);
-      const x=W/2+Math.cos(p.ang)*p.r*R*(1+bass*0.35);
-      const y=H/2+Math.sin(p.ang)*p.r*R*(1+bass*0.35);
-      ctx.beginPath(); ctx.arc(x,y,p.sz+mid*3,0,6.28);
-      ctx.fillStyle=`rgba(${cr},${cg},${cb},${0.25+mid*0.5})`; ctx.fill();
+      p.ang+=p.sp*(0.005+mid*0.16+beatEnv*0.05);
+      const orbit=p.r*R*(1+bass*0.55+beatEnv*0.12);
+      const x=W/2+Math.cos(p.ang)*orbit;
+      const y=H/2+Math.sin(p.ang)*orbit;
+      ctx.beginPath(); ctx.arc(x,y,p.sz+mid*9+beatEnv*3,0,6.28);
+      ctx.fillStyle=`rgba(${cr},${cg},${cb},${Math.min(0.9,0.18+mid*1.2+beatEnv*0.3)})`; ctx.fill();
     }
   }
   // oscilloscope
@@ -980,7 +1002,7 @@ function fxFrame(now){
     const step=Math.max(1,(wave.length/W)|0);
     for(let x=0;x<W;x++){
       const v=wave[Math.min(wave.length-1,x*step)]/128-1;
-      const y=H*0.5+v*H*0.12;
+      const y=H*0.5+v*H*(0.06+mid*0.45+bass*0.10);
       x?ctx.lineTo(x,y):ctx.moveTo(x,y);
     }
     ctx.strokeStyle=`rgba(${cr},${cg},${cb},0.35)`; ctx.lineWidth=1.5; ctx.stroke();
@@ -1012,12 +1034,11 @@ function updatePlayIcon(){
 function setVolume(v, save=true){
   v=Math.max(0, Math.min(100, v|0));
   audio.volume=v/100;
-  $('main-vol').value=v; $('ts-vol').value=v;
+  $('main-vol').value=v;
   state.settings.volume=v;
   if(save) saveSettings();
 }
 $('main-vol').addEventListener('input', e=>setVolume(+e.target.value));
-$('ts-vol').addEventListener('input', e=>setVolume(+e.target.value));
 let seeking=false;
 function updateSeek(){
   if(seeking || !audio.duration) return;
