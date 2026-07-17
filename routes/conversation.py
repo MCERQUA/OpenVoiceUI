@@ -1567,6 +1567,12 @@ def _conversation_inner():
     # Inject active profile's custom system_prompt (admin editor → runtime)
     # Also read min_sentence_chars for TTS sentence extraction.
     _min_sentence_chars = 40  # default — prevents choppy short TTS fragments
+    # First-audio latency cap (2026-07-16): the reply's FIRST spoken chunk is
+    # extracted at min(_min_sentence_chars, this) so audio starts fast even on
+    # profiles with large character-pacing minimums (kyle's 200-char min made
+    # the first Resemble chunk 200-310 chars = 6-10s of synthesis while the
+    # text was already on screen). Later chunks keep the profile minimum.
+    _first_chunk_min_chars = 60
     _parallel_sentences = True  # default — fire all TTS in parallel threads
     _inter_sentence_gap_ms = 0  # default — no gap between audio chunks
     _prof = None  # default — referenced again in __session_start__ greeting branch below
@@ -2216,7 +2222,12 @@ def _conversation_inner():
                             )
                             # Fire TTS for complete sentences as they arrive
                             if not _is_system_text and not _has_open_tag(_tts_buf):
-                                sentence, _tts_buf = _extract_sentence(_tts_buf, min_len=_min_sentence_chars)
+                                _eff_min = (
+                                    min(_min_sentence_chars, _first_chunk_min_chars)
+                                    if (_chunks_sent == 0 and not _tts_pending)
+                                    else _min_sentence_chars
+                                )
+                                sentence, _tts_buf = _extract_sentence(_tts_buf, min_len=_eff_min)
                                 if sentence:
                                     logger.info(f"### TTS sentence (streaming): {sentence[:80]}")
                                     _tts_pending.append(_fire_tts(sentence))
