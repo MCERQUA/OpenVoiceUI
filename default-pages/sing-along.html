@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 1.0.1 -->
+<!-- openvoiceui-version: 1.0.2 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -899,34 +899,36 @@ function resize(){
 }
 window.addEventListener('resize', resize); resize();
 
-let audioCtx=null, analyser=null, freq=null, wave=null, srcNode=null;
+let audioCtx=null, analyser=null, beatAnalyser=null, freq=null, freqBeat=null, wave=null, srcNode=null;
 function ensureAudioGraph(){
   if(audioCtx) { audioCtx.resume().catch(()=>{}); return; }
   audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  analyser=audioCtx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0.65;
+  // visuals: smoothed so bars/glow move fluidly
+  analyser=audioCtx.createAnalyser(); analyser.fftSize=2048; analyser.smoothingTimeConstant=0.8;
+  // beat detection: RAW (no smoothing) so kick transients arrive intact
+  beatAnalyser=audioCtx.createAnalyser(); beatAnalyser.fftSize=2048; beatAnalyser.smoothingTimeConstant=0;
   srcNode=audioCtx.createMediaElementSource(audio);
-  srcNode.connect(analyser); analyser.connect(audioCtx.destination);
+  srcNode.connect(analyser); srcNode.connect(beatAnalyser); analyser.connect(audioCtx.destination);
   freq=new Uint8Array(analyser.frequencyBinCount);
+  freqBeat=new Uint8Array(beatAnalyser.frequencyBinCount);
   wave=new Uint8Array(analyser.fftSize);
 }
 
 function bandAvg(a,b){ let s=0; for(let i=a;i<b;i++) s+=freq[i]; return s/((b-a)*255); }
 
-// beat detection — sub-bass/kick band with rising-edge + adaptive threshold.
-// (v1 fired rarely/randomly: 0.82 smoothing smeared transients, band started
-// at 86Hz missing 40-85Hz kick fundamentals, and no edge check meant it
-// triggered on bass SWELLS instead of HITS.)
-let kickHist=[], lastBeat=0, prevKick=0, beatEnv=0;
+// beat detection — arm/fire state machine on the RAW (unsmoothed) kick band.
+// v2's frame-delta "rising edge" never exceeded its threshold on smoothed FFT
+// data, so beats never fired and every beat-keyed effect (ripples/flash/punch)
+// went dead. Now: fire when raw kick jumps above the rolling average, re-arm
+// only after it falls back near it — one trigger per hit, no delta games.
+let kickHist=[], lastBeat=0, beatArmed=true, beatEnv=0;
 function detectBeat(kick, now){
-  kickHist.push(kick); if(kickHist.length>43) kickHist.shift();   // ~0.7s window
-  const n=kickHist.length;
-  const avg=kickHist.reduce((a,b)=>a+b,0)/n;
-  const varc=kickHist.reduce((a,b)=>a+(b-avg)*(b-avg),0)/n;
-  // dynamic sensitivity: steady loud bass raises the bar, sparse hits lower it
-  const thresh=avg*(1.18+Math.min(0.5, varc*18));
-  const rising=kick-prevKick>0.015;
-  prevKick=kick;
-  if(kick>Math.max(0.06,thresh) && rising && now-lastBeat>230){ lastBeat=now; return true; }
+  kickHist.push(kick); if(kickHist.length>50) kickHist.shift();   // ~0.8s window
+  const avg=kickHist.reduce((a,b)=>a+b,0)/kickHist.length;
+  if(!beatArmed && kick<avg*1.05) beatArmed=true;
+  if(beatArmed && kick>Math.max(0.05, avg*1.25) && now-lastBeat>200){
+    beatArmed=false; lastBeat=now; return true;
+  }
   return false;
 }
 
@@ -943,11 +945,12 @@ function fxFrame(now){
   ctx.clearRect(0,0,W,H);
   if(!analyser) return;
   analyser.getByteFrequencyData(freq);
+  beatAnalyser.getByteFrequencyData(freqBeat);
   analyser.getByteTimeDomainData(wave);
   const fx=state.settings.fx;
   const [cr,cg,cb]=hexToRgb(state.settings.glow);
   const bass=bandAvg(4,12), mid=bandAvg(24,92), treb=bandAvg(186,700);
-  const kick=bandAvg(1,8);                     // 21-172Hz — where the kick lives
+  let kick=0; for(let i=1;i<9;i++) kick+=freqBeat[i]; kick/=(8*255);   // RAW 21-190Hz
   const beat=detectBeat(kick, now);
   if(beat) beatEnv=1; else beatEnv*=0.90;      // punch envelope: hit → decay
 
