@@ -953,7 +953,21 @@ def _action_status(job_id: str):
                         _is_sfx = job.get('kind') == 'sfx'
                         _dir = GENERATED_SOUNDS_DIR if _is_sfx else GENERATED_MUSIC_DIR
                         _url_base = '/generated_music/sfx' if _is_sfx else '/generated_music'
-                        filename = _unique_filename(_dir, slug)
+                        # Cross-worker dedupe: the webhook callback and this poller
+                        # both download "the first clip" from separate gunicorn
+                        # workers (suno_jobs is per-worker memory), and
+                        # _unique_filename never reuses a name — so the second
+                        # writer saved the SAME clip again as <title>-2.mp3.
+                        # The shared metadata file is the cross-worker truth:
+                        # if this suno_id is already saved, reuse that file.
+                        filename = ''
+                        if song_id and not _is_sfx:
+                            filename = next(
+                                (fn for fn, md in _load_generated_metadata().items()
+                                 if isinstance(md, dict) and md.get('suno_id') == song_id
+                                 and (_dir / fn).exists()), '')
+                        if not filename:
+                            filename = _unique_filename(_dir, slug)
                         save_path = _dir / filename
 
                         if not save_path.exists():
@@ -2376,7 +2390,17 @@ def suno_callback():
                         song_title = 'Generated Track'
                     duration = song.get('duration', 0)
                     slug = _slugify_title(song_title)
-                    filename = _unique_filename(GENERATED_MUSIC_DIR, slug)
+                    # Cross-worker dedupe (mirror of _action_status): if the
+                    # status poller already saved this suno_id, reuse its file
+                    # instead of minting a -2 duplicate of the same clip.
+                    filename = ''
+                    if song_id:
+                        filename = next(
+                            (fn for fn, md in _load_generated_metadata().items()
+                             if isinstance(md, dict) and md.get('suno_id') == song_id
+                             and (GENERATED_MUSIC_DIR / fn).exists()), '')
+                    if not filename:
+                        filename = _unique_filename(GENERATED_MUSIC_DIR, slug)
                     save_path = GENERATED_MUSIC_DIR / filename
 
                     if audio_url and not save_path.exists():
