@@ -239,6 +239,10 @@ app.register_blueprint(identity_bp)
 from routes.services import services_bp
 app.register_blueprint(services_bp)
 
+# Google Maps — /api/maps/config (JS API key for canvas pages) + /api/maps/directions
+from routes.maps import maps_bp
+app.register_blueprint(maps_bp)
+
 # WO-1.3 — wire the STT provider registry. autodiscover() loads
 # config/providers.yaml and imports the STT provider modules so their
 # registry.register() calls fire; the Service Catalog then reads STT ids from
