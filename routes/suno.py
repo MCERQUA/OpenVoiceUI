@@ -110,6 +110,27 @@ def _provider_receipt(op: str, units: str = '1') -> None:
     except Exception:
         pass
 
+
+def _task_log(event: str, **fields) -> None:
+    """Durable append-only Suno task ledger — generated_music/suno-task-log.jsonl.
+
+    Every submission gets a 'submitted' row (task_id + op + prompt/title) and
+    every completion a 'clip' row PER CLIP Suno returns — including the second
+    clip we don't download — so task_id ↔ suno_id ↔ filename is always
+    recoverable from disk. Born 2026-07-17 after ~150 pre-07-14 tracks lost
+    their task ids forever (container logs rotate, metadata never stored them,
+    sunoapi.org has no listing API). Rows may duplicate across the callback and
+    poller workers — dedupe on read, never on write. Fire-and-forget.
+    """
+    try:
+        row = {'ts': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+               'event': event}
+        row.update({k: v for k, v in fields.items() if v not in (None, '')})
+        with open(GENERATED_MUSIC_DIR / 'suno-task-log.jsonl', 'a') as f:
+            f.write(json.dumps(row) + '\n')
+    except Exception:  # never let telemetry touch the generation path
+        pass
+
 # ---------------------------------------------------------------------------
 # Jingle style presets — proven 2026-05-05. The recipe is:
 #   customMode: false
@@ -575,6 +596,8 @@ def _action_generate(_q, body: dict):
                     'created_at': time.time(),
                 }
                 _provider_receipt('song')   # live Watch pulse — task accepted, credits committed
+                _task_log('submitted', op='song', task_id=task_id, title=title,
+                          style=style, prompt=(prompt or '')[:300])
                 return jsonify({
                     'action': 'generating',
                     'job_id': job_id,
@@ -677,6 +700,8 @@ def _action_sfx(_q, body: dict):
                     'created_at': time.time(),
                 }
                 _provider_receipt('sfx')   # live Watch pulse — task accepted, credits committed
+                _task_log('submitted', op='sfx', task_id=task_id,
+                          title=title or prompt[:60], prompt=(prompt or '')[:300])
                 return jsonify({
                     'action': 'generating',
                     'job_id': job_id,
@@ -826,6 +851,8 @@ def _action_jingle(_q, body: dict):
             'repeat': repeat,
         }
         _provider_receipt('jingle')   # live Watch pulse — task accepted, credits committed
+        _task_log('submitted', op='jingle', task_id=task_id, title=f'{brand} Jingle',
+                  style=style_descriptor, prompt=(jingle_prompt or '')[:300])
         return jsonify({
             'action': 'generating',
             'job_id': job_id,
@@ -930,6 +957,12 @@ def _action_status(job_id: str):
 
                 if gen_status == 'SUCCESS':
                     songs = status_data.get('response', {}).get('sunoData', [])
+                    # Durable ledger: record EVERY clip id (incl. the second one
+                    # we don't download) so task_id ↔ suno_id never gets lost.
+                    for _clip in songs:
+                        _task_log('clip', task_id=task_id, suno_id=_clip.get('id', ''),
+                                  title=_clip.get('title', ''),
+                                  duration=_clip.get('duration', 0), leg='poller')
                     # Suno returns 2 clips per generation — only take the first one
                     songs = songs[:1] if songs else []
                     for song in songs:
@@ -953,7 +986,21 @@ def _action_status(job_id: str):
                         _is_sfx = job.get('kind') == 'sfx'
                         _dir = GENERATED_SOUNDS_DIR if _is_sfx else GENERATED_MUSIC_DIR
                         _url_base = '/generated_music/sfx' if _is_sfx else '/generated_music'
-                        filename = _unique_filename(_dir, slug)
+                        # Cross-worker dedupe: the webhook callback and this poller
+                        # both download "the first clip" from separate gunicorn
+                        # workers (suno_jobs is per-worker memory), and
+                        # _unique_filename never reuses a name — so the second
+                        # writer saved the SAME clip again as <title>-2.mp3.
+                        # The shared metadata file is the cross-worker truth:
+                        # if this suno_id is already saved, reuse that file.
+                        filename = ''
+                        if song_id and not _is_sfx:
+                            filename = next(
+                                (fn for fn, md in _load_generated_metadata().items()
+                                 if isinstance(md, dict) and md.get('suno_id') == song_id
+                                 and (_dir / fn).exists()), '')
+                        if not filename:
+                            filename = _unique_filename(_dir, slug)
                         save_path = _dir / filename
 
                         if not save_path.exists():
@@ -1220,6 +1267,9 @@ def _submit_suno_job(endpoint: str, request_body: dict, kind: str,
             job.update(job_extra)
         suno_jobs[job_id] = job
         _provider_receipt(op or kind)
+        _task_log('submitted', op=op or kind, task_id=task_id,
+                  title=job.get('title', ''), style=job.get('style', ''),
+                  prompt=(job.get('prompt', '') or '')[:300])
         return jsonify({
             'action': 'generating',
             'job_id': job_id,
@@ -1958,6 +2008,9 @@ def _submit_process_job(endpoint: str, request_body: dict, kind: str,
             'process_only': True,  # status poller won't try to download as music
         }
         _provider_receipt(op or kind)
+        _task_log('submitted', op=op or kind, task_id=task_id,
+                  src_task_id=request_body.get('taskId', ''),
+                  src_audio_id=request_body.get('audioId', ''))
         return jsonify({
             'action': 'generating',
             'job_id': job_id,
@@ -2361,6 +2414,12 @@ def suno_callback():
                 callback_type not in ('text', 'first', 'second') and data.get('data', {}).get('data')
             ):
                 songs = data.get('data', {}).get('data', [])
+                # Durable ledger: record EVERY clip id (incl. the second one
+                # we don't download) so task_id ↔ suno_id never gets lost.
+                for _clip in songs:
+                    _task_log('clip', task_id=task_id, suno_id=_clip.get('id', ''),
+                              title=_clip.get('title', ''),
+                              duration=_clip.get('duration', 0), leg='callback')
                 # Suno returns 2 clips per generation — only take the first one
                 # (user asked for 1 song, not 2 variations)
                 songs = songs[:1] if songs else []
@@ -2376,7 +2435,17 @@ def suno_callback():
                         song_title = 'Generated Track'
                     duration = song.get('duration', 0)
                     slug = _slugify_title(song_title)
-                    filename = _unique_filename(GENERATED_MUSIC_DIR, slug)
+                    # Cross-worker dedupe (mirror of _action_status): if the
+                    # status poller already saved this suno_id, reuse its file
+                    # instead of minting a -2 duplicate of the same clip.
+                    filename = ''
+                    if song_id:
+                        filename = next(
+                            (fn for fn, md in _load_generated_metadata().items()
+                             if isinstance(md, dict) and md.get('suno_id') == song_id
+                             and (GENERATED_MUSIC_DIR / fn).exists()), '')
+                    if not filename:
+                        filename = _unique_filename(GENERATED_MUSIC_DIR, slug)
                     save_path = GENERATED_MUSIC_DIR / filename
 
                     if audio_url and not save_path.exists():
