@@ -105,7 +105,8 @@ def _call_vision(image_b64: str, prompt: str, model: str | None = None) -> str:
     """
     Send an image + prompt to the configured vision model and return the text response.
 
-    Uses Groq's Llama 4 Scout vision model — fast, free, and accurate.
+    Uses Groq's Qwen3.6-27B vision model. Groq decommissioned llama-4-scout
+    (~2026-07 — returned model_not_found, breaking all vision calls fleet-wide).
     Z.AI/GLM vision through api.z.ai is broken (returns hallucinated descriptions).
 
     image_b64 may be a raw base64 string or a data-URI (data:image/jpeg;base64,...).
@@ -118,7 +119,7 @@ def _call_vision(image_b64: str, prompt: str, model: str | None = None) -> str:
     if not api_key:
         raise ValueError('GROQ_API_KEY is not set — cannot call vision model')
 
-    vision_model = 'meta-llama/llama-4-scout-17b-16e-instruct'
+    vision_model = os.environ.get('GROQ_VISION_MODEL', 'qwen/qwen3.6-27b')
 
     payload = {
         'model': vision_model,
@@ -130,7 +131,10 @@ def _call_vision(image_b64: str, prompt: str, model: str | None = None) -> str:
                 {'type': 'text', 'text': prompt},
             ],
         }],
-        'max_tokens': 600,
+        'max_tokens': 1500,
+        # qwen3 is a reasoning model — without this its <think> tokens eat the
+        # budget and can leak into the returned description
+        'reasoning_format': 'hidden',
     }
 
     resp = requests.post(
@@ -143,7 +147,11 @@ def _call_vision(image_b64: str, prompt: str, model: str | None = None) -> str:
         timeout=30,
     )
     resp.raise_for_status()
-    return resp.json()['choices'][0]['message']['content'].strip()
+    text = (resp.json()['choices'][0]['message']['content'] or '').strip()
+    # Defense in depth: strip any <think> block if reasoning_format was ignored
+    if '</think>' in text:
+        text = text.rsplit('</think>', 1)[1].strip()
+    return text
 
 
 # ---------------------------------------------------------------------------
