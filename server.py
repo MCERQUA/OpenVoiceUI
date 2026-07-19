@@ -236,6 +236,9 @@ app.register_blueprint(vault_bp)
 from routes.identity import identity_bp
 app.register_blueprint(identity_bp)
 
+from routes.browse import browse_bp  # co-browsing bridge (#154)
+app.register_blueprint(browse_bp)
+
 from routes.services import services_bp
 app.register_blueprint(services_bp)
 
@@ -2193,6 +2196,84 @@ def xai_realtime_websocket(ws):
         logger.error(f"xAI Realtime: fatal error: {e}")
     finally:
         logger.info(f"xAI Realtime: session ended for user_id={user_id}")
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — Co-browsing screencast proxy (/ws/browse-stream)  [#154 Phase 2]
+# ---------------------------------------------------------------------------
+# Bridges the browser's viewer canvas to the shared jambot-browse service's
+# CDP screencast WS. Browser side is flask-sock; upstream is the aiohttp WS on
+# the browse service. Frames flow down (base64 JPEG), user/viewer events flow
+# up (Phase 3 consumes them; Phase 2 relays them through untouched). The
+# service key + this tenant are injected server-side — never exposed to the
+# browser. Tenant is fixed by this OVU instance's env, so a browser can only
+# ever watch ITS OWN tenant's session.
+@sock.route("/ws/browse-stream")
+def browse_stream_websocket(ws):
+    from services.auth import verify_clerk_token, get_token_from_request
+    # Clerk gate unless auth disabled (single-user self-host), matching the app.
+    # The real browser auto-sends the __session cookie (same origin). The internal
+    # agent key is also accepted (via ?agent_key= or X-Agent-Key) for parity with
+    # the /api/browse/* HTTP proxy, which lets internal tooling attach a viewer.
+    if os.getenv("CLERK_PUBLISHABLE_KEY") or os.getenv("CLERK_SECRET_KEY"):
+        _agent_key = os.getenv("AGENT_API_KEY", "").strip()
+        _presented = request.args.get("agent_key", "") or request.headers.get("X-Agent-Key", "")
+        _agent_ok = bool(_agent_key) and _presented == _agent_key
+        token = get_token_from_request()
+        if not _agent_ok and not (token and verify_clerk_token(token)):
+            try:
+                ws.send(json.dumps({"type": "error", "message": "Unauthorized"}))
+            finally:
+                ws.close()
+            return
+
+    svc_url = os.getenv("BROWSE_SERVICE_URL", "http://jambot-browse:8712").rstrip("/")
+    svc_key = os.getenv("BROWSE_SERVICE_KEY", "").strip()
+    tenant = (os.getenv("JAMBOT_TENANT") or os.getenv("TENANT_NAME") or "default").strip()
+    ws_url = svc_url.replace("http://", "ws://").replace("https://", "wss://")
+    stream_url = f"{ws_url}/session/stream?tenant={tenant}"
+    if svc_key:
+        stream_url += f"&key={svc_key}"
+
+    async def _run():
+        try:
+            async with websockets.connect(stream_url, max_size=8 * 1024 * 1024) as up:
+                logger.info("browse-stream connected upstream tenant=%s", tenant)
+
+                async def _down():
+                    """Upstream frames → browser."""
+                    async for frame in up:
+                        ws.send(frame)
+
+                async def _up():
+                    """Browser viewer events → upstream (Phase 3 acts on them)."""
+                    loop = asyncio.get_running_loop()
+                    while True:
+                        msg = await loop.run_in_executor(None, ws.receive)
+                        if msg is None:
+                            break
+                        await up.send(msg)
+
+                done, pending = await asyncio.wait(
+                    [asyncio.create_task(_down()), asyncio.create_task(_up())],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+        except Exception as e:
+            logger.info("browse-stream closed tenant=%s: %s", tenant, e)
+            try:
+                ws.send(json.dumps({"type": "error", "message": "browse stream ended"}))
+            except Exception:
+                pass
+
+    try:
+        asyncio.run(_run())
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

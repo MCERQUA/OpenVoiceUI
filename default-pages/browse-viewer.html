@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Co-Browsing</title>
+<!--
+  Co-browsing live viewer (issue #154, Phase 2).
+  Renders the agent's server-side browser as a live JPEG stream from
+  /ws/browse-stream, with a URL bar + nav controls. Voice stays active in the
+  parent app. Inline CSS/JS only (canvas sandbox rules) — no CDN.
+  Phase 3 will enable the user click/type capture stubbed at the bottom.
+-->
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#232a33; --text:#e6edf3;
+    --muted:#8b949e; --accent:#3b82f6; --ok:#2ea043; --warn:#f59e0b; --err:#f85149;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--text);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column; height:100vh; overflow:hidden;
+  }
+  /* Toolbar */
+  .bar{
+    display:flex; align-items:center; gap:8px; padding:8px 10px;
+    background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto;
+  }
+  .nav-btn{
+    width:34px; height:34px; border:1px solid var(--line); background:#1c232c;
+    color:var(--text); border-radius:8px; cursor:pointer; font-size:15px;
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+  }
+  .nav-btn:hover{border-color:var(--accent)}
+  .nav-btn:active{transform:translateY(1px)}
+  .url{
+    flex:1 1 auto; min-width:0; height:34px; padding:0 12px;
+    background:#0b1017; border:1px solid var(--line); border-radius:8px;
+    color:var(--text); font-size:13px; outline:none;
+  }
+  .url:focus{border-color:var(--accent)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+  .dot.live{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.load{background:var(--warn)}
+  .dot.dead{background:var(--err)}
+  /* Stage */
+  .stage{
+    position:relative; flex:1 1 auto; background:#000; overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+  }
+  canvas{max-width:100%; max-height:100%; display:block; image-rendering:auto}
+  .cursor{
+    position:absolute; width:22px; height:22px; margin:-11px 0 0 -11px;
+    border:2px solid var(--accent); border-radius:50%;
+    background:rgba(59,130,246,.25); pointer-events:none;
+    transition:left .12s ease,top .12s ease; opacity:0; z-index:5;
+  }
+  .status{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    color:var(--muted); text-align:center; padding:20px; z-index:2;
+  }
+  .status .title{font-size:16px;color:var(--text);margin-bottom:6px}
+  .spin{
+    width:34px;height:34px;margin:0 auto 14px;border:3px solid var(--line);
+    border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;
+  }
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .foot{
+    flex:0 0 auto; padding:5px 10px; background:var(--panel);
+    border-top:1px solid var(--line); color:var(--muted); font-size:12px;
+    display:flex; align-items:center; gap:8px; min-height:28px;
+  }
+  .pill{padding:2px 8px;border:1px solid var(--line);border-radius:20px}
+</style>
+</head>
+<body>
+  <div class="bar">
+    <button class="nav-btn" id="back" title="Back">&#8592;</button>
+    <button class="nav-btn" id="fwd" title="Forward">&#8594;</button>
+    <button class="nav-btn" id="reload" title="Reload">&#8635;</button>
+    <span class="dot" id="dot"></span>
+    <input class="url" id="url" placeholder="https://…" spellcheck="false" autocomplete="off">
+    <button class="nav-btn" id="go" title="Go">&#10148;</button>
+    <button class="nav-btn" id="stop" title="Stop session">&#10005;</button>
+  </div>
+
+  <div class="stage">
+    <canvas id="screen" width="1280" height="800"></canvas>
+    <div class="cursor" id="cursor"></div>
+    <div class="status" id="status">
+      <div class="spin"></div>
+      <div class="title">Connecting to the browser…</div>
+      <div>The agent's live view will appear here.</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="pill" id="state">idle</span>
+    <span id="pagetitle"></span>
+    <span style="margin-left:auto" id="fps"></span>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+  var API = "";                       // same-origin
+  var canvas = document.getElementById("screen");
+  var ctx = canvas.getContext("2d");
+  var img = new Image();
+  var $ = function(id){ return document.getElementById(id); };
+  var frames = 0, lastFpsT = Date.now();
+  var scale = 1, offX = 0, offY = 0;  // canvas→page coordinate mapping
+
+  function setState(cls, label){
+    $("dot").className = "dot" + (cls ? " " + cls : "");
+    if (label) $("state").textContent = label;
+  }
+  function hideStatus(){ $("status").style.display = "none"; }
+  function showStatus(title, sub){
+    var s = $("status"); s.style.display = "";
+    s.querySelector(".title").textContent = title;
+    if (sub !== undefined) s.querySelectorAll("div")[2].textContent = sub;
+  }
+
+  // ── draw incoming JPEG frames ─────────────────────────────────────────────
+  img.onload = function(){
+    if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight){
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    }
+    ctx.drawImage(img, 0, 0);
+    hideStatus(); setState("live", "live");
+    frames++;
+    var now = Date.now();
+    if (now - lastFpsT >= 1000){
+      $("fps").textContent = frames + " fps";
+      frames = 0; lastFpsT = now;
+    }
+  };
+
+  // ── screencast WebSocket ──────────────────────────────────────────────────
+  var ws = null, reconnectT = null;
+  function connect(){
+    var proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(proto + "//" + location.host + "/ws/browse-stream");
+    ws.onopen = function(){ setState("load", "streaming"); };
+    ws.onmessage = function(ev){
+      var m; try { m = JSON.parse(ev.data); } catch(e){ return; }
+      if (m.type === "frame" && m.data){
+        img.src = "data:image/jpeg;base64," + m.data;
+        if (m.meta){ // CDP metadata → coordinate mapping for cursor + clicks
+          mapMeta(m.meta);
+        }
+      } else if (m.type === "error"){
+        setState("dead", "disconnected"); showStatus("Session ended", m.message || "");
+      }
+    };
+    ws.onclose = function(){
+      setState("dead", "offline");
+      if (!reconnectT) reconnectT = setTimeout(function(){ reconnectT=null; connect(); }, 2000);
+    };
+    ws.onerror = function(){ try { ws.close(); } catch(e){} };
+  }
+
+  function mapMeta(meta){
+    // CDP screencast metadata gives device viewport offset/scale; used to place
+    // the agent cursor and (Phase 3) translate user clicks to page coords.
+    if (typeof meta.pageScaleFactor === "number" && meta.pageScaleFactor > 0)
+      scale = meta.pageScaleFactor;
+    if (typeof meta.offsetTop === "number") offY = meta.offsetTop;
+  }
+
+  // ── HTTP control helpers ──────────────────────────────────────────────────
+  function post(path, body){
+    return fetch(API + path, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body||{})
+    }).then(function(r){ return r.json().catch(function(){ return {}; }); });
+  }
+  function act(a, extra){
+    var b = Object.assign({action:a}, extra||{});
+    setState("load", a);
+    return post("/api/browse/action", b).then(function(res){
+      if (res && res.url) $("url").value = res.url;
+      if (res && res.title) $("pagetitle").textContent = res.title;
+      setState("live", "live");
+      return res;
+    });
+  }
+
+  // ── controls ──────────────────────────────────────────────────────────────
+  $("back").onclick   = function(){ act("back"); };
+  $("fwd").onclick    = function(){ act("forward"); };
+  $("reload").onclick = function(){ act("reload"); };
+  $("go").onclick     = function(){ navigate(); };
+  $("url").addEventListener("keydown", function(e){ if (e.key === "Enter") navigate(); });
+  $("stop").onclick   = function(){
+    post("/api/browse/stop", {}).then(function(){
+      showStatus("Session stopped", "Ask the agent to browse again to restart.");
+      setState("dead", "stopped");
+      // let the parent app close the canvas if it wants
+      try { window.parent.postMessage({type:"canvas-action", action:"close"}, "*"); } catch(e){}
+    });
+  };
+  function navigate(){
+    var u = $("url").value.trim();
+    if (!u) return;
+    if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+    act("goto", {url:u});
+  }
+
+  // ── user click passthrough — STUB (Phase 3) ──────────────────────────────
+  // Phase 3 maps canvas coords → true page coords and sends
+  // {type:"user_click",x,y} up the WS. Wired but inert in Phase 2.
+  var USER_INPUT_ENABLED = false;
+  canvas.addEventListener("click", function(e){
+    if (!USER_INPUT_ENABLED || !ws || ws.readyState !== 1) return;
+    var rect = canvas.getBoundingClientRect();
+    var x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    var y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    ws.send(JSON.stringify({type:"user_click", x:Math.round(x), y:Math.round(y)}));
+  });
+
+  // ── init ──────────────────────────────────────────────────────────────────
+  post("/api/browse/status", {}); // warm; ignore result
+  fetch(API + "/api/browse/status").then(function(r){ return r.json(); })
+    .then(function(s){ if (s && s.url){ $("url").value = s.url; $("pagetitle").textContent = s.title||""; } })
+    .catch(function(){});
+  connect();
+})();
+</script>
+</body>
+</html>
