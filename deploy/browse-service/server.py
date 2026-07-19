@@ -313,6 +313,35 @@ class BrowseService:
         sess.touch()
         return await sess.page.screenshot(full_page=full, type="png")
 
+    # ── user input passthrough (#154 Phase 3) ─────────────────────────────────
+    async def apply_user_event(self, sess: Session, evt: dict):
+        """Apply a viewer-originated input event to the page.
+
+        The human watching the live stream can click/type/scroll into it; those
+        events arrive on the viewer WS and land here. Runs under the SAME
+        per-session lock as agent actions so a user click and an agent action
+        never interleave mid-operation. Coordinates are already page-space
+        (the viewer maps canvas→page using the CDP screencast metadata).
+        Rate-limited by the caller. Fail-soft: a bad event never kills the WS.
+        """
+        etype = evt.get("type", "")
+        page = sess.page
+        async with sess.lock:
+            if etype == "user_click":
+                x, y = float(evt.get("x", 0)), float(evt.get("y", 0))
+                await page.mouse.click(x, y)
+            elif etype == "user_move":
+                await page.mouse.move(float(evt.get("x", 0)), float(evt.get("y", 0)))
+            elif etype == "user_type":
+                await page.keyboard.type(str(evt.get("text", ""))[:2000], delay=10)
+            elif etype == "user_key":
+                await page.keyboard.press(str(evt.get("key", "Enter"))[:24])
+            elif etype == "user_scroll":
+                await page.mouse.wheel(0, int(evt.get("dy", 0)))
+            else:
+                return
+            sess.touch()
+
     # ── screencast relay ──────────────────────────────────────────────────────
     async def _dispatch_frame(self, sess: Session, params: dict):
         data = params.get("data")
@@ -469,17 +498,32 @@ async def h_stream(request):
     sess.viewers.add(ws)
     await svc.start_screencast(sess)
     logger.info("viewer connected tenant=%s viewers=%d", tenant, len(sess.viewers))
+    # Rate-limit user input so a mash of events can't peg the browser or starve
+    # the agent's own actions (they share the per-session lock). ~25 events/s.
+    _last_evt = 0.0
+    _MIN_EVT_GAP = 0.04
     try:
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
-                # Phase 2 (user-input passthrough) parses viewer events here.
-                # Phase 1 accepts + ignores them so the socket stays symmetric.
+                # Viewer events: ping (keepalive) + user input passthrough (#154 P3).
                 try:
                     evt = json.loads(msg.data)
-                    if evt.get("type") == "ping":
-                        await ws.send_str(json.dumps({"type": "pong"}))
                 except Exception:
-                    pass
+                    continue
+                etype = evt.get("type", "")
+                if etype == "ping":
+                    await ws.send_str(json.dumps({"type": "pong"}))
+                elif etype.startswith("user_"):
+                    now = time.time()
+                    # Always allow type/key (never drop keystrokes); throttle
+                    # only high-frequency pointer events.
+                    if etype in ("user_move", "user_scroll") and now - _last_evt < _MIN_EVT_GAP:
+                        continue
+                    _last_evt = now
+                    try:
+                        await svc.apply_user_event(sess, evt)
+                    except Exception as e:
+                        logger.debug("user event %s failed: %s", etype, e)
             elif msg.type == WSMsgType.ERROR:
                 break
     finally:

@@ -98,6 +98,7 @@
 
   <div class="foot">
     <span class="pill" id="state">idle</span>
+    <span class="pill" id="control" title="Click the view to take control">agent</span>
     <span id="pagetitle"></span>
     <span style="margin-left:auto" id="fps"></span>
   </div>
@@ -210,16 +211,52 @@
     act("goto", {url:u});
   }
 
-  // ── user click passthrough — STUB (Phase 3) ──────────────────────────────
-  // Phase 3 maps canvas coords → true page coords and sends
-  // {type:"user_click",x,y} up the WS. Wired but inert in Phase 2.
-  var USER_INPUT_ENABLED = false;
-  canvas.addEventListener("click", function(e){
-    if (!USER_INPUT_ENABLED || !ws || ws.readyState !== 1) return;
+  // ── user input passthrough (#154 Phase 3) ────────────────────────────────
+  // The human can click/type/scroll into the live view; events map from canvas
+  // display coords → true page coords and go up the WS to drive the server
+  // browser. Turn indicator flips to "you" while the user is interacting.
+  var USER_INPUT_ENABLED = true;
+  var controlEl = $("control");
+  var controlT = null;
+  function markUser(){
+    controlEl.textContent = "you"; controlEl.style.borderColor = "var(--accent)";
+    controlEl.style.color = "var(--accent)";
+    if (controlT) clearTimeout(controlT);
+    controlT = setTimeout(function(){
+      controlEl.textContent = "agent"; controlEl.style.borderColor = "";
+      controlEl.style.color = "";
+    }, 2500);
+  }
+  // Canvas pixel → page coordinate. The frame IS the page bitmap at CDP scale,
+  // so canvas-internal pixels already equal page CSS px / pageScaleFactor.
+  function toPage(e){
     var rect = canvas.getBoundingClientRect();
-    var x = (e.clientX - rect.left) * (canvas.width / rect.width);
-    var y = (e.clientY - rect.top) * (canvas.height / rect.height);
-    ws.send(JSON.stringify({type:"user_click", x:Math.round(x), y:Math.round(y)}));
+    var cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    var cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+    return { x: Math.round(cx / (scale || 1)), y: Math.round(cy / (scale || 1)) };
+  }
+  function sendEvt(o){
+    if (!USER_INPUT_ENABLED || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify(o)); markUser();
+  }
+  canvas.setAttribute("tabindex", "0");  // focusable so it can capture keys
+  canvas.addEventListener("click", function(e){
+    var p = toPage(e); sendEvt({type:"user_click", x:p.x, y:p.y}); canvas.focus();
+  });
+  var wheelT = 0;
+  canvas.addEventListener("wheel", function(e){
+    e.preventDefault();
+    var now = Date.now(); if (now - wheelT < 40) return; wheelT = now;
+    sendEvt({type:"user_scroll", dy: Math.round(e.deltaY)});
+  }, {passive:false});
+  canvas.addEventListener("keydown", function(e){
+    // Named keys go as key presses; printable chars go as typed text.
+    var named = {Enter:1,Backspace:1,Tab:1,Delete:1,ArrowUp:1,ArrowDown:1,
+                 ArrowLeft:1,ArrowRight:1,Escape:1,Home:1,End:1,PageUp:1,PageDown:1};
+    if (named[e.key]){ e.preventDefault(); sendEvt({type:"user_key", key:e.key}); }
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey){
+      e.preventDefault(); sendEvt({type:"user_type", text:e.key});
+    }
   });
 
   // ── init ──────────────────────────────────────────────────────────────────

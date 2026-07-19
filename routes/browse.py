@@ -21,13 +21,11 @@ never exposed to the browser.
 """
 import logging
 import os
-import threading
-import time
 
 import requests
 from flask import Blueprint, Response, jsonify, request
 
-from services.paths import DEFAULT_PAGES_DIR
+from services.paths import DEFAULT_PAGES_DIR, UPLOADS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -50,59 +48,62 @@ def _svc_headers() -> dict:
     return h
 
 
-# ── Per-tenant latest browse state (for [BROWSE_STATE] injection) ────────────
-# Written on every action/start; read by routes/conversation.py when a session
-# is active. Small + in-process; a browse session is inherently single-node.
-_state_lock = threading.Lock()
-_latest_state: dict = {}   # {url, title, links, buttons, ts}
-_session_active = False
-
-
-def get_browse_state() -> dict | None:
-    """Return the latest browse state if a session is active, else None.
-
-    Read by the conversation route to inject [BROWSE_STATE: …]. Goes stale-safe:
-    a session with no update in 10 min is treated as gone.
-    """
-    with _state_lock:
-        if not _session_active or not _latest_state:
-            return None
-        if time.time() - _latest_state.get("ts", 0) > 600:
-            return None
-        return dict(_latest_state)
+# ── Browse-active marker + state (worker-safe) ───────────────────────────────
+# OVU runs multiple gunicorn workers, so in-process state is NOT shared across
+# them (a browser can hit worker A on /api/browse/start and worker B on the next
+# conversation turn). So: a filesystem marker (shared by all workers on the same
+# volume) records "a session is active", and the browse SERVICE is the single
+# shared source of truth for the live page — get_browse_state() queries it
+# directly each turn. That also means USER-driven navigation (which goes to the
+# service over the viewer WS, bypassing this proxy) is always reflected: we read
+# the service, not a local cache.
+_MARKER = UPLOADS_DIR / ".browse-active"
 
 
 def _set_active(active: bool):
-    global _session_active
-    with _state_lock:
-        _session_active = active
-        if not active:
-            _latest_state.clear()
+    try:
+        if active:
+            UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+            _MARKER.write_text(_tenant(), encoding="utf-8")
+        elif _MARKER.exists():
+            _MARKER.unlink()
+    except Exception as e:
+        logger.debug("browse marker update failed: %s", e)
 
 
-def _refresh_state():
-    """Pull a DOM digest from the service and cache it for [BROWSE_STATE]."""
+def get_browse_state() -> dict | None:
+    """Return the live page digest if a browse session is active, else None.
+
+    Worker-safe: gated on the filesystem marker (cheap stat, shared across
+    workers), then reads the browse SERVICE directly so the value always
+    reflects reality — including USER-driven navigation. Read by the
+    conversation route to inject [BROWSE_STATE: …]. One DOM call per agent turn,
+    only while a session is active. Self-heals: if the service reports no
+    session, the marker is cleared.
+    """
+    if not _MARKER.exists():
+        return None
     try:
         r = requests.get(
             f"{BROWSE_SERVICE_URL}/session/dom",
             params={"tenant": _tenant()}, headers=_svc_headers(), timeout=_TIMEOUT,
         )
+        if r.status_code == 404:
+            _set_active(False)  # service says no session — clear stale marker
+            return None
         if r.status_code != 200:
-            return
+            return None
         dom = r.json()
-        links = [l.get("text", "") for l in dom.get("links", [])][:12]
-        buttons = [b.get("text", "") for b in dom.get("buttons", [])][:12]
-        with _state_lock:
-            _latest_state.update({
-                "url": dom.get("url", ""),
-                "title": dom.get("title", ""),
-                "text": (dom.get("text", "") or "")[:1200],
-                "links": links,
-                "buttons": buttons,
-                "ts": time.time(),
-            })
+        return {
+            "url": dom.get("url", ""),
+            "title": dom.get("title", ""),
+            "text": (dom.get("text", "") or "")[:1200],
+            "links": [l.get("text", "") for l in dom.get("links", [])][:12],
+            "buttons": [b.get("text", "") for b in dom.get("buttons", [])][:12],
+        }
     except Exception as e:
-        logger.debug("browse state refresh failed: %s", e)
+        logger.debug("browse state read failed: %s", e)
+        return None
 
 
 # ── HTTP proxy endpoints ─────────────────────────────────────────────────────
@@ -121,7 +122,6 @@ def browse_start():
                           json=payload, headers=_svc_headers(), timeout=_TIMEOUT)
         if r.status_code == 200:
             _set_active(True)
-            _refresh_state()
         else:
             logger.warning("browse start upstream %s: %s", r.status_code, r.text[:200])
         return Response(r.content, status=r.status_code, content_type="application/json")
@@ -138,8 +138,6 @@ def browse_action():
     try:
         r = requests.post(f"{BROWSE_SERVICE_URL}/session/action",
                           json=payload, headers=_svc_headers(), timeout=_TIMEOUT)
-        if r.status_code == 200:
-            _refresh_state()
         return Response(r.content, status=r.status_code, content_type="application/json")
     except requests.RequestException as e:
         logger.error("browse action failed: %s", e)

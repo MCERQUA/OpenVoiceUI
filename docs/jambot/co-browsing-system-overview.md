@@ -1,6 +1,6 @@
 # Co-Browsing System — Overview & Phased Plan (issue #154)
 
-**Status (2026-07-19):** Phase 1 + Phase 2 built (server-side browse service + OVU wiring + live viewer). Phases 3–5 designed, not yet built.
+**Status (2026-07-19):** Phases 1–3 built (browse service + OVU wiring + live viewer + user input passthrough). Phases 4–5 designed, not yet built.
 
 Server-side co-browsing: a headless Chromium runs **on the VPS**, the agent drives it, and the user watches a **live video stream** of it inside a canvas page — voice stays active throughout. Because it streams frames (CDP screencast) instead of embedding the site, `X-Frame-Options`/CSP frame-blocking (which kills `[CANVAS_URL:]` on Amazon/Google/Facebook/etc.) does not apply. Any site works.
 
@@ -115,14 +115,16 @@ Files:
 
 ---
 
-## Phase 3 — User input passthrough (user acts in the stream)
+## Phase 3 — User input passthrough (user acts in the stream) ✅ BUILT (2026-07-19)
 
-**Goal:** user can click/type into the live view; agent sees the result.
+**Goal:** the human can click/type/scroll into the live view; the agent sees the result.
 
-- `browse-viewer.html`: capture canvas clicks → map display coords → true page coords (account for scale) → send `{type:"user_click",x,y}` up the WS. Capture keystrokes when focused → `{type:"user_type",text}`.
-- `server.py` `h_stream`: parse those viewer events (Phase 1 already accepts+ignores them) → apply via `page.mouse.click` / `page.keyboard.type`. Rate-limit + same per-session lock so agent + user actions don't interleave mid-action.
-- Turn-taking indicator in the viewer ("You have control" / "Agent is acting").
-- Agent is notified of user-initiated navigation on its next turn (URL/title delta in context).
+- **`browse-viewer.html`** — `USER_INPUT_ENABLED=true`. Canvas is focusable; click → map display→canvas→page coords (`/ pageScaleFactor` from CDP metadata) → `{type:"user_click",x,y}`; wheel → `{type:"user_scroll",dy}` (40ms throttle, `preventDefault`); keydown → named keys (`Enter`, arrows, `Backspace`…) as `{type:"user_key",key}`, printable chars as `{type:"user_type",text}`. Turn indicator pill flips **agent → you** for 2.5s on any user input.
+- **`deploy/browse-service/server.py`** — `h_stream` parses `user_*` events → `apply_user_event()` runs them (`page.mouse.click` / `keyboard.type` / `keyboard.press` / `mouse.wheel`) under the **same per-session lock** as agent actions, so a user click and an agent action never interleave. Rate-limited (~25/s; pointer events throttled, keystrokes never dropped). Fail-soft.
+- **`routes/browse.py`** — `get_browse_state()` refreshes the DOM digest when the cache is >4s stale, so **user-driven navigation** (which goes straight to the service over the viewer WS, bypassing the OVU action proxy) is reflected in the agent's `[BROWSE_STATE]` on its next turn. Bounded: ≤1 extra DOM call per agent turn, only during an active session.
+- The OVU `/ws/browse-stream` proxy already relays viewer events upstream (Phase 2's `_up()` coroutine) — no change needed.
+
+**Result:** agent and user share one browser. Agent drives via `[BROWSE_ACTION]`; user clicks/types/scrolls directly in the stream; both see the same live view; the agent picks up whatever the user did on its next turn.
 
 ---
 
