@@ -88,6 +88,19 @@ PROXY_USERNAME = os.getenv("BROWSE_PROXY_USERNAME", "").strip()
 PROXY_PASSWORD = os.getenv("BROWSE_PROXY_PASSWORD", "")
 PROXY_STICKY = os.getenv("BROWSE_PROXY_STICKY", "1").strip() not in ("0", "", "false")
 
+# Where captured downloads land (#154 Phase 5). CONTAINER-LOCAL on purpose: the
+# browse container runs arbitrary websites' JS in Chromium (--no-sandbox), so it
+# is NOT given write access to /mnt/clients. Files stage here per-tenant; OVU
+# (the per-tenant trust boundary, which already mounts the tenant's uploads)
+# pulls them into the real uploads dir via /api/browse/download.
+import pathlib as _pathlib
+DOWNLOADS_ROOT = _pathlib.Path(os.getenv("BROWSE_DOWNLOADS_DIR", "/tmp/browse-downloads"))
+
+
+def _downloads_dir(tenant: str) -> _pathlib.Path:
+    # basename() the tenant to keep it a single path segment (no traversal).
+    return DOWNLOADS_ROOT / os.path.basename(tenant or "unknown")
+
 
 def _build_proxy(sticky_session: str) -> dict | None:
     """Build the Playwright proxy object from env, or None if unconfigured.
@@ -154,18 +167,41 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 
 # ── Session model ───────────────────────────────────────────────────────────
+class Tab:
+    """One page/tab within a session's browser context (#154 Phase 5)."""
+    __slots__ = ("page", "cdp", "id")
+
+    def __init__(self, page, cdp, tab_id):
+        self.page = page
+        self.cdp = cdp
+        self.id = tab_id
+
+
 class Session:
     def __init__(self, tenant: str, context, page, cdp, proxied=False):
         self.tenant = tenant
         self.context = context
-        self.page = page
-        self.cdp = cdp
+        # Multi-tab (#154 Phase 5): a session owns N tabs; `active` indexes the
+        # one being screencast + acted on. sess.page/sess.cdp transparently
+        # resolve to the active tab so all the single-tab code paths work as-is.
+        self.tabs = [Tab(page, cdp, 0)]
+        self.active = 0
+        self._next_tab_id = 1
         self.proxied = proxied     # egressing through a residential proxy (#154 P4)
         self.egress_ip = None      # cached egress IP from the last /session/ip probe
+        self.last_download = None  # filename of the most recent captured download (P5)
         self.last_activity = time.time()
         self.viewers: set[web.WebSocketResponse] = set()
         self.screencasting = False
         self.lock = asyncio.Lock()  # serialize actions per session
+
+    @property
+    def page(self):
+        return self.tabs[self.active].page
+
+    @property
+    def cdp(self):
+        return self.tabs[self.active].cdp
 
     def touch(self):
         self.last_activity = time.time()
@@ -220,6 +256,7 @@ class BrowseService:
             ctx_kwargs = dict(
                 viewport={"width": width, "height": height},
                 user_agent=USER_AGENT,
+                accept_downloads=True,   # capture downloads → tenant uploads (#154 P5)
             )
             # Proxy precedence: an explicit per-request proxy (from OVU) wins;
             # otherwise fall back to the service-level env proxy (#154 Phase 4).
@@ -235,14 +272,114 @@ class BrowseService:
             cdp = await context.new_cdp_session(page)
             sess = Session(tenant, context, page, cdp, proxied=bool(eff_proxy))
             self.sessions[tenant] = sess
-
-            # Relay CDP screencast frames to viewers.
-            def _on_frame(params):
-                asyncio.create_task(self._dispatch_frame(sess, params))
-            cdp.on("Page.screencastFrame", _on_frame)
-
+            self._wire_frame_handler(sess, cdp)
+            self._wire_downloads(sess, page)
             await self._navigate(sess, url)
             return sess
+
+    def _wire_frame_handler(self, sess, cdp):
+        """Relay a tab's CDP screencast frames to the session's viewers. Only the
+        active tab is ever screencasting, so registering on every tab is safe."""
+        def _on_frame(params):
+            asyncio.create_task(self._dispatch_frame(sess, params))
+        cdp.on("Page.screencastFrame", _on_frame)
+
+    def _wire_downloads(self, sess, page):
+        """Capture files the page downloads into the tenant's uploads (#154 P5),
+        same destination as the browser-extension [DOWNLOAD_IMAGE]. Fail-soft."""
+        def _on_download(download):
+            asyncio.create_task(self._save_download(sess, download))
+        page.on("download", _on_download)
+
+    async def _save_download(self, sess, download):
+        try:
+            ddir = _downloads_dir(sess.tenant)
+            ddir.mkdir(parents=True, exist_ok=True)
+            name = os.path.basename(download.suggested_filename or "download.bin")
+            # namespace by tenant + time so shared uploads don't collide
+            dest = ddir / f"browse-{int(time.time())}-{name}"
+            await download.save_as(str(dest))
+            try:
+                os.chmod(dest, 0o664)
+            except OSError:
+                pass
+            sess.last_download = dest.name
+            logger.info("download captured tenant=%s → %s", sess.tenant, dest.name)
+        except Exception as e:
+            logger.warning("download capture failed tenant=%s: %s", sess.tenant, e)
+
+    # ── tabs (#154 Phase 5) ───────────────────────────────────────────────────
+    async def new_tab(self, sess, url=None, switch=True):
+        async with sess.lock:
+            page = await sess.context.new_page()
+            cdp = await sess.context.new_cdp_session(page)
+            tab = Tab(page, cdp, sess._next_tab_id)
+            sess._next_tab_id += 1
+            sess.tabs.append(tab)
+            self._wire_frame_handler(sess, cdp)
+            self._wire_downloads(sess, page)
+            if url:
+                ok, norm = _validate_url(url)
+                if ok:
+                    await page.goto(norm, wait_until="domcontentloaded")
+            if switch:
+                await self._activate(sess, len(sess.tabs) - 1)
+            sess.touch()
+            return {"index": sess.active, "tabs": len(sess.tabs)}
+
+    async def switch_tab(self, sess, index):
+        async with sess.lock:
+            if not (0 <= index < len(sess.tabs)) or index == sess.active:
+                return await self.tabs_info(sess)
+            await self._activate(sess, index)
+            sess.touch()
+            return await self.tabs_info(sess)
+
+    async def close_tab(self, sess, index):
+        async with sess.lock:
+            if not (0 <= index < len(sess.tabs)) or len(sess.tabs) <= 1:
+                return await self.tabs_info(sess)  # never close the last tab
+            closing_active = index == sess.active
+            tab = sess.tabs.pop(index)
+            try:
+                await tab.page.close()
+            except Exception:
+                pass
+            # Fix up the active index after the removal.
+            if closing_active:
+                sess.active = min(index, len(sess.tabs) - 1)
+                sess.screencasting = False  # old cast died with the page
+                await self._activate(sess, sess.active, force=True)
+            elif index < sess.active:
+                sess.active -= 1
+            sess.touch()
+            return await self.tabs_info(sess)
+
+    async def _activate(self, sess, index, force=False):
+        """Make `index` the active tab and move the screencast to it."""
+        if not force and index == sess.active:
+            return
+        if sess.screencasting:
+            await self.stop_screencast(sess)  # stops the OLD active tab's cast
+        sess.active = index
+        try:
+            await sess.page.bring_to_front()
+        except Exception:
+            pass
+        if sess.viewers:
+            await self.start_screencast(sess)  # starts the NEW active tab's cast
+
+    async def tabs_info(self, sess):
+        out = []
+        for i, t in enumerate(sess.tabs):
+            try:
+                title = await t.page.title()
+                url = t.page.url
+            except Exception:
+                title, url = "", ""
+            out.append({"index": i, "title": title[:60], "url": url,
+                        "active": i == sess.active})
+        return {"active": sess.active, "count": len(sess.tabs), "tabs": out}
 
     async def stop_session(self, tenant):
         sess = self.sessions.pop(tenant, None)
@@ -269,8 +406,17 @@ class BrowseService:
 
     async def do_action(self, sess: Session, body: dict):
         action = (body.get("action") or "").lower()
-        page = sess.page
+        # Tab actions (#154 P5) manage their own per-session lock — dispatch them
+        # BEFORE taking the page lock below (asyncio.Lock isn't reentrant).
+        if action == "new_tab":
+            return await self.new_tab(sess, body.get("url"),
+                                      switch=body.get("switch", True))
+        if action == "switch_tab":
+            return await self.switch_tab(sess, int(body.get("index", 0)))
+        if action == "close_tab":
+            return await self.close_tab(sess, int(body.get("index", 0)))
         async with sess.lock:
+            page = sess.page
             if action == "goto":
                 await self._navigate(sess, body.get("url", ""))
             elif action == "click":
@@ -541,7 +687,13 @@ async def h_screenshot(request):
 async def h_dom(request):
     _require_auth(request)
     sess = _get_session(request.query.get("tenant", "").strip())
-    return web.json_response(await svc.extract_dom(sess))
+    dom = await svc.extract_dom(sess)
+    # Session-level context so a single /session/dom call gives the agent
+    # everything for [BROWSE_STATE] (#154 P5): tabs + last captured download.
+    dom["tab_count"] = len(sess.tabs)
+    dom["active_tab"] = sess.active
+    dom["last_download"] = sess.last_download
+    return web.json_response(dom)
 
 
 async def h_status(request):
@@ -555,7 +707,35 @@ async def h_status(request):
         "screencasting": sess.screencasting,
         "proxied": sess.proxied,
         "egress_ip": sess.egress_ip,
+        "tab_count": len(sess.tabs),
+        "active_tab": sess.active,
+        "last_download": sess.last_download,
     })
+
+
+async def h_tabs(request):
+    """List the session's tabs (for the viewer tab strip, #154 P5)."""
+    _require_auth(request)
+    sess = _get_session(request.query.get("tenant", "").strip())
+    return web.json_response(await svc.tabs_info(sess))
+
+
+async def h_download(request):
+    """Stream a captured download so OVU can save it into the tenant's uploads
+    (#154 P5). Serves the session's most recent download by default; a `name`
+    query selects a specific file. Path-guarded to the tenant's staging dir."""
+    _require_auth(request)
+    tenant = request.query.get("tenant", "").strip()
+    sess = _get_session(tenant)
+    ddir = _downloads_dir(tenant).resolve()
+    name = request.query.get("name") or sess.last_download
+    if not name:
+        raise web.HTTPNotFound(reason="no download captured")
+    target = (ddir / os.path.basename(name)).resolve()
+    if ddir not in target.parents or not target.is_file():
+        raise web.HTTPNotFound(reason="download not found")
+    return web.FileResponse(target, headers={
+        "Content-Disposition": f'attachment; filename="{target.name}"'})
 
 
 async def h_ip(request):
@@ -640,6 +820,8 @@ def make_app():
         web.get("/session/screenshot", h_screenshot),
         web.get("/session/dom", h_dom),
         web.get("/session/status", h_status),
+        web.get("/session/tabs", h_tabs),
+        web.get("/session/download", h_download),
         web.get("/session/ip", h_ip),
         web.post("/session/stop", h_stop),
         web.get("/session/stream", h_stream),

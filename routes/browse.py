@@ -100,6 +100,9 @@ def get_browse_state() -> dict | None:
             "text": (dom.get("text", "") or "")[:1200],
             "links": [l.get("text", "") for l in dom.get("links", [])][:12],
             "buttons": [b.get("text", "") for b in dom.get("buttons", [])][:12],
+            "tab_count": dom.get("tab_count", 1),
+            "active_tab": dom.get("active_tab", 0),
+            "last_download": dom.get("last_download"),
         }
     except Exception as e:
         logger.debug("browse state read failed: %s", e)
@@ -187,6 +190,53 @@ def browse_ip():
                          params={"tenant": _tenant()}, headers=_svc_headers(), timeout=_TIMEOUT)
         return Response(r.content, status=r.status_code, content_type="application/json")
     except requests.RequestException as e:
+        return jsonify({"error": "browse service unavailable"}), 503
+
+
+@browse_bp.route("/api/browse/tabs", methods=["GET"])
+def browse_tabs():
+    """List the session's tabs for the viewer tab strip (#154 P5)."""
+    try:
+        r = requests.get(f"{BROWSE_SERVICE_URL}/session/tabs",
+                         params={"tenant": _tenant()}, headers=_svc_headers(), timeout=_TIMEOUT)
+        return Response(r.content, status=r.status_code, content_type="application/json")
+    except requests.RequestException as e:
+        return jsonify({"error": "browse service unavailable"}), 503
+
+
+@browse_bp.route("/api/browse/download", methods=["POST"])
+def browse_download():
+    """Pull a captured download from the browse service into THIS tenant's
+    uploads (#154 P5). OVU is the per-tenant trust boundary — the browse
+    container never touches /mnt/clients. Returns the saved /uploads/ URL."""
+    from services.paths import UPLOADS_DIR
+    name = (request.get_json(silent=True) or {}).get("name")
+    try:
+        params = {"tenant": _tenant()}
+        if name:
+            params["name"] = name
+        r = requests.get(f"{BROWSE_SERVICE_URL}/session/download",
+                         params=params, headers=_svc_headers(), timeout=_TIMEOUT, stream=True)
+        if r.status_code != 200:
+            return Response(r.content, status=r.status_code, content_type="application/json")
+        # Filename from Content-Disposition, sanitized to a single segment.
+        cd = r.headers.get("Content-Disposition", "")
+        fname = "download.bin"
+        if "filename=" in cd:
+            fname = cd.split("filename=", 1)[1].strip().strip('"') or fname
+        fname = os.path.basename(fname)
+        UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+        dest = UPLOADS_DIR / fname
+        with open(dest, "wb") as fh:
+            for chunk in r.iter_content(65536):
+                fh.write(chunk)
+        try:
+            os.chmod(dest, 0o664)
+        except OSError:
+            pass
+        return jsonify({"saved": fname, "url": f"/uploads/{fname}"})
+    except requests.RequestException as e:
+        logger.error("browse download failed: %s", e)
         return jsonify({"error": "browse service unavailable"}), 503
 
 

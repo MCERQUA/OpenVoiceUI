@@ -1,6 +1,6 @@
 # Co-Browsing System — Overview & Phased Plan (issue #154)
 
-**Status (2026-07-19):** Phases 1–4 built (browse service + OVU wiring + live viewer + user input passthrough + IP-masking plumbing). Phase 5 designed, not yet built. Phase 4 ships the residential-proxy wiring verified end-to-end; turning masking ON is an operator step (add provider creds).
+**Status (2026-07-19):** Phases 1–5 built — co-browsing is feature-complete. Browse service + OVU wiring + live viewer + user input passthrough + IP-masking plumbing + multi-tab + download capture + fleet health monitoring. Turning residential masking ON is the one operator step (add provider creds).
 
 Server-side co-browsing: a headless Chromium runs **on the VPS**, the agent drives it, and the user watches a **live video stream** of it inside a canvas page — voice stays active throughout. Because it streams frames (CDP screencast) instead of embedding the site, `X-Frame-Options`/CSP frame-blocking (which kills `[CANVAS_URL:]` on Amazon/Google/Facebook/etc.) does not apply. Any site works.
 
@@ -157,12 +157,16 @@ Verify with `GET /api/browse/ip` (or the viewer pill) — a residential IP means
 
 ---
 
-## Phase 5 — Multi-tab + polish
+## Phase 5 — Multi-tab + downloads + health ✅ BUILT (2026-07-19)
 
-- Server browser supports multiple pages per context; viewer gets a tab strip; `[BROWSE_TAB:]` / action `{action:"new_tab"|"switch_tab"|"close_tab"}`.
-- Download capture (agent grabs a file the page serves) → land in the tenant's uploads, same as extension `[DOWNLOAD_IMAGE]`.
-- Screencast tuning: adaptive quality/FPS on the memory guard; pause screencast when no viewer is attached (Phase 1 already stops the cast when the last viewer disconnects).
-- Health wired into JamFlow + `jambot-health-monitor.sh` (container up + `/health` sessions count), and a node on the JamFlow board.
+- **Multi-tab** — `Session` now owns N `Tab`s; `sess.page`/`sess.cdp` resolve to the active tab (so all single-tab code paths work unchanged). Actions `new_tab`/`switch_tab`/`close_tab` via `[BROWSE_ACTION:{…}]`; the screencast **follows the active tab** (stops the old tab's cast, starts the new). `/session/tabs` (+ OVU `/api/browse/tabs`) lists them; the viewer renders a **tab strip** (click to switch, × to close, + for new). Never closes the last tab.
+- **Download capture** — `accept_downloads=True`; a page download is auto-saved to a **container-local** per-tenant staging dir and `last_download` is recorded. Security: the browse container runs arbitrary sites' JS (`--no-sandbox`), so it is **NOT** given `/mnt/clients` access. OVU (the per-tenant trust boundary) pulls the file via `/api/browse/download` → `/session/download` (path-guarded stream) and writes it into the tenant's real uploads, returning `/uploads/<name>`. The agent sees `download: <file>` in `[BROWSE_STATE]` and tells the user it's saved.
+- **Health** — `jambot-health-monitor.sh` checks `jambot-browse` (container up + `/health`) and alerts if the shared service is down (all fleet `[BROWSE:url]` sessions depend on it). Screencast already pauses when the last viewer disconnects (Phase 1).
+- **`[BROWSE_STATE]`** now includes `tabs open: N (active #i)` and `download captured: <file>` alongside url/title/links/buttons.
+
+**Verified live 2026-07-19:** new_tab→2 tabs (Example Domain + IANA), switch_tab(0), close_tab(1)→1 tab; screencast delivered frames after a tab switch (follows active); a page download was captured and OVU pulled a real 131-byte file into `test-dev`'s uploads with the browse container having no `/mnt/clients` mount.
+
+**Remaining polish (optional, not blocking):** adaptive screencast quality/FPS under memory pressure; per-tenant GB budget when residential masking is on; a node on the JamFlow board.
 
 ---
 

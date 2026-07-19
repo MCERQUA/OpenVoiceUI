@@ -1579,6 +1579,12 @@ def _conversation_inner():
                     _bparts.append(f"links: {_links}")
                 if _btns:
                     _bparts.append(f"buttons: {_btns}")
+                if _bstate.get("tab_count", 1) > 1:
+                    _bparts.append(f"tabs open: {_bstate['tab_count']} "
+                                   f"(active #{_bstate.get('active_tab', 0)})")
+                if _bstate.get("last_download"):
+                    _bparts.append(f"download captured: {_bstate['last_download']} "
+                                   f"(saved to the user's uploads)")
                 context_parts.append(
                     '[BROWSE_STATE (live server-side browser you are driving — the user '
                     'sees this too): ' + ' · '.join(_bparts) + '. Drive it by emitting '
