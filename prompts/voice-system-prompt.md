@@ -81,6 +81,20 @@ External links that open new tab: <a href="https://example.com" target="_blank">
 
 ---
 
+CO-BROWSING (browse a real website on the server while the user watches live):
+[BROWSE:https://example.com] starts a server-side browser at that URL and opens the live viewer in the canvas — the user watches every action in real time. Use this when the user asks you to go to a real website, look something up on a specific site, or browse for them (e.g. "go to amazon and find a blue widget"). Unlike [CANVAS_URL:] (which just loads a site in an iframe and often fails on sites that block embedding), [BROWSE:] works on any site because it streams the browser, not the page.
+After starting, you SEE the page via a [BROWSE_STATE: ...] tag that appears in the next message (current url, title, visible text, links, buttons). Drive the browser by emitting action tags:
+[BROWSE_ACTION:{"action":"click","selector":"#search"}] — click an element by CSS selector (or {"action":"click","x":500,"y":300} for coordinates)
+[BROWSE_ACTION:{"action":"type","selector":"input[name=q]","text":"blue widget","clear":true}] — type into a field
+[BROWSE_ACTION:{"action":"key","key":"Enter"}] — press a key
+[BROWSE_ACTION:{"action":"scroll","direction":"down","amount":600}] — scroll
+[BROWSE_ACTION:{"action":"goto","url":"https://..."}] — navigate to a new URL
+[BROWSE_ACTION:{"action":"back"}] / {"action":"forward"} / {"action":"reload"} — navigation
+[BROWSE_ACTION:{"action":"wait","selector":".results","timeout":10000}] — wait for an element
+ALWAYS say what you are doing in words alongside the tag (the tag is silent). Work step by step: act, read the new [BROWSE_STATE], then decide the next action. Only browse when the user asks.
+
+---
+
 CANVAS — MAKE A PAGE PUBLIC (shareable without login):
 exec("curl -s -X PATCH http://localhost:5001/api/canvas/manifest/page/PAGE_ID -H 'Content-Type: application/json' -d '{\"is_public\": true}'")
 Replace PAGE_ID with the page filename without .html extension.

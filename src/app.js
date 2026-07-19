@@ -72,6 +72,11 @@ connectAiradio();
             };
             const strip = (text) => {
                 if (!text) return text;
+                // Also drop co-browsing tags here so every streaming display path
+                // that calls strip() (not just the main regex chain) hides them (#154).
+                text = text
+                    .replace(/\[BROWSE_ACTION:\{[\s\S]*?\}\]/gi, '')
+                    .replace(/\[BROWSE:[^\]]*\]/gi, '');
                 const tags = extract(text);
                 if (tags.length === 0) return text;
                 let out = '', cursor = 0;
@@ -125,6 +130,38 @@ connectAiradio();
             };
             return { extract, strip, dispatch, dispatchFrom, flush };
         })();
+
+        // Generic brace-walking extractor for [TAG:{...json...}] tags whose JSON
+        // payload nests {}/[] (so a regex can't be trusted). Used by BROWSE_ACTION
+        // (#154); mirrors the __canvasAction brace walk. Returns [payloadObj,...].
+        function extractBracketJsonTags(text, tagName) {
+            const out = [];
+            if (!text) return out;
+            const re = new RegExp('\\[' + tagName + ':', 'gi');
+            let m;
+            while ((m = re.exec(text)) !== null) {
+                const jsonStart = m.index + m[0].length;
+                if (text[jsonStart] !== '{') continue;
+                let depth = 0, i = jsonStart, inStr = false, esc = false;
+                for (; i < text.length; i++) {
+                    const c = text[i];
+                    if (inStr) {
+                        if (esc) { esc = false; continue; }
+                        if (c === '\\') { esc = true; continue; }
+                        if (c === '"') inStr = false;
+                        continue;
+                    }
+                    if (c === '"') { inStr = true; continue; }
+                    if (c === '{') depth++;
+                    else if (c === '}') { depth--; if (depth === 0) { i++; break; } }
+                }
+                if (depth !== 0 || text[i] !== ']') continue;
+                try { out.push(JSON.parse(text.slice(jsonStart, i))); }
+                catch (e) { console.warn('[' + tagName + '] JSON parse failed', e); }
+            }
+            return out;
+        }
+        window.extractBracketJsonTags = extractBracketJsonTags;
 
         // ===== CONFIGURATION =====
         const CONFIG = {
@@ -4470,6 +4507,8 @@ connectAiradio();
                             .replace(/\[CANVAS_MENU\]/gi, '')
                             .replace(/\[CANVAS:[^\]]*\]/gi, '')
                             .replace(/\[CANVAS_URL:[^\]]*\]/gi, '')
+                            .replace(/\[BROWSE_ACTION:\{[\s\S]*?\}\]/gi, '')
+                            .replace(/\[BROWSE:[^\]]*\]/gi, '')
                             .replace(/\[MUSIC_PLAY(?::[^\]]*)?\]/gi, '')
                             .replace(/\[MUSIC_STOP\]/gi, '')
                             .replace(/\[MUSIC_NEXT\]/gi, '')
@@ -4705,6 +4744,52 @@ connectAiradio();
                             } else {
                                 console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
                                 ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
+                            }
+                        }
+                        // Check for [BROWSE:url] — start a server-side co-browsing
+                        // session (agent browses on the VPS, user watches live) and
+                        // open the viewer in the canvas. (#154 Phase 2)
+                        const browseMatch = text.match(/\[BROWSE:([^\]]+)\]/i);
+                        if (browseMatch && !canvasCommandsProcessed.has('BROWSE')) {
+                            canvasCommandsProcessed.add('BROWSE');
+                            let browseUrl = browseMatch[1].trim();
+                            const resolvedBrowse = resolveCanvasUrl(browseUrl);
+                            if (resolvedBrowse) {
+                                console.log('[Browse] start:', resolvedBrowse);
+                                ActionConsole.addEntry('system', `Browse: opening ${resolvedBrowse}`);
+                                AgentActivityChip.handleTag('canvas_url', resolvedBrowse);
+                                _tag('browse', async () => {
+                                    try {
+                                        await fetch(`${CONFIG.serverUrl}/api/browse/start`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ url: resolvedBrowse })
+                                        });
+                                    } catch (e) { console.warn('[Browse] start failed:', e); }
+                                    const iframe = document.getElementById('canvas-iframe');
+                                    if (iframe) { iframe.src = '/browse-viewer?t=' + Date.now(); CanvasControl.show(); }
+                                });
+                            } else {
+                                ActionConsole.addEntry('system', 'Browse: blocked private/internal URL');
+                            }
+                        }
+                        // Check for [BROWSE_ACTION:{...JSON...}] — agent drives the
+                        // server-side browser (click/type/scroll/goto/back/forward/
+                        // reload/wait); the user sees it in the live viewer. (#154)
+                        const browseActionTags = extractBracketJsonTags(text, 'BROWSE_ACTION');
+                        if (browseActionTags.length > 0) {
+                            for (const t of browseActionTags) {
+                                const action = t && t.action;
+                                if (!action) continue;
+                                const dedupeKey = 'BROWSE_ACTION:' + action + ':' + JSON.stringify(t);
+                                if (canvasCommandsProcessed.has(dedupeKey)) continue;
+                                canvasCommandsProcessed.add(dedupeKey);
+                                ActionConsole.addEntry('system', `Browse: ${action}`);
+                                _tag('browse_action', () => fetch(`${CONFIG.serverUrl}/api/browse/action`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(t)
+                                }).catch(e => console.warn('[Browse] action failed:', e)));
                             }
                         }
                         // Check for [CANVAS_ACTION:{...JSON...}] — voice/agent-driven canvas
@@ -6095,6 +6180,8 @@ connectAiradio();
                             .replace(/\[CANVAS_MENU\]/gi, '')
                             .replace(/\[CANVAS:[^\]]*\]/gi, '')
                             .replace(/\[CANVAS_URL:[^\]]*\]/gi, '')
+                            .replace(/\[BROWSE_ACTION:\{[\s\S]*?\}\]/gi, '')
+                            .replace(/\[BROWSE:[^\]]*\]/gi, '')
                             .replace(/\[MUSIC_PLAY(?::[^\]]*)?\]/gi, '')
                             .replace(/\[MUSIC_STOP\]/gi, '')
                             .replace(/\[MUSIC_NEXT\]/gi, '')
@@ -6269,6 +6356,8 @@ connectAiradio();
                             .replace(/\[CANVAS_MENU\]/gi, '')
                             .replace(/\[CANVAS:[^\]]*\]/gi, '')
                             .replace(/\[CANVAS_URL:[^\]]*\]/gi, '')
+                            .replace(/\[BROWSE_ACTION:\{[\s\S]*?\}\]/gi, '')
+                            .replace(/\[BROWSE:[^\]]*\]/gi, '')
                             .replace(/\[MUSIC_PLAY(?::[^\]]*)?\]/gi, '')
                             .replace(/\[MUSIC_STOP\]/gi, '')
                             .replace(/\[MUSIC_NEXT\]/gi, '')

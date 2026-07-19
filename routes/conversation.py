@@ -121,6 +121,14 @@ _VOICE_INSTRUCTIONS = (
     "is not in the current message, or you no longer remember these instructions, READ "
     "uploads/UI_STATE.md — never guess a page-id or track name. "
 
+    # --- Co-browsing (#154) ---
+    "CO-BROWSING: [BROWSE:https://site.com] starts a server-side browser at that URL "
+    "and shows the user a live view — use it when the user asks you to go to / look "
+    "something up on / browse a real website (works on any site, unlike [CANVAS_URL:]). "
+    "You then see the page via a [BROWSE_STATE: ...] tag next message; drive it with "
+    '[BROWSE_ACTION:{"action":"click|type|scroll|goto|back|forward|reload|wait",...}] '
+    "tags (say what you're doing in words too). Only browse when asked. "
+
     # --- Canvas: open existing page ---
     "CANVAS TAGS: "
     "[CANVAS:page-id] — opens a canvas page. Use exact page-id from the [Canvas pages:] list above. "
@@ -1550,6 +1558,35 @@ def _conversation_inner():
                 )
         except Exception:
             pass
+
+        # Co-browsing text-sight (#154 Phase 2): when a server-side browse session
+        # is active for this tenant, give the agent the current page's url/title +
+        # a DOM digest (visible text, links, buttons) so it can navigate without a
+        # full screenshot round-trip. Dynamic (changes every action) → per-turn.
+        try:
+            from routes.browse import get_browse_state
+            _bstate = get_browse_state()
+            if _bstate:
+                _links = ' | '.join(l for l in _bstate.get('links', []) if l)[:600]
+                _btns = ' | '.join(b for b in _bstate.get('buttons', []) if b)[:400]
+                _bparts = [
+                    f"url={_bstate.get('url','')!r}",
+                    f"title={_bstate.get('title','')!r}",
+                ]
+                if _bstate.get('text'):
+                    _bparts.append(f"visible text: {_bstate['text'][:800]}")
+                if _links:
+                    _bparts.append(f"links: {_links}")
+                if _btns:
+                    _bparts.append(f"buttons: {_btns}")
+                context_parts.append(
+                    '[BROWSE_STATE (live server-side browser you are driving — the user '
+                    'sees this too): ' + ' · '.join(_bparts) + '. Drive it by emitting '
+                    '[BROWSE_ACTION:{"action":"click|type|scroll|goto|back|forward|reload|wait",...}] '
+                    'tags; say what you are doing in words too.]'
+                )
+        except Exception as _be:
+            logger.debug(f'BROWSE_STATE injection skipped: {_be}')
 
         # Recently completed Suno generations — agent gets notified on next turn
         try:

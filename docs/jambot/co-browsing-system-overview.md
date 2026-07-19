@@ -1,6 +1,6 @@
 # Co-Browsing System — Overview & Phased Plan (issue #154)
 
-**Status (2026-07-19):** Phase 1 built (server-side browse service). Phases 2–5 designed, not yet built.
+**Status (2026-07-19):** Phase 1 + Phase 2 built (server-side browse service + OVU wiring + live viewer). Phases 3–5 designed, not yet built.
 
 Server-side co-browsing: a headless Chromium runs **on the VPS**, the agent drives it, and the user watches a **live video stream** of it inside a canvas page — voice stays active throughout. Because it streams frames (CDP screencast) instead of embedding the site, `X-Frame-Options`/CSP frame-blocking (which kills `[CANVAS_URL:]` on Amazon/Google/Facebook/etc.) does not apply. Any site works.
 
@@ -94,24 +94,24 @@ bash scripts/jambot-browse-service.sh smoke     # start example.com, dom, screen
 
 ---
 
-## Phase 2 — OVU wiring + viewer page (agent browses, user watches)
+## Phase 2 — OVU wiring + viewer page (agent browses, user watches) ✅ BUILT (2026-07-19)
 
-**Goal:** end-to-end demo — user says "go to X", agent browses on the VPS, user watches live.
+**Goal:** end-to-end — user says "go to X", agent browses on the VPS, user watches live.
 
-1. **`routes/browse.py`** (new OVU blueprint) — thin proxy to `jambot-browse`:
-   - `POST /api/browse/start|action|stop`, `GET /api/browse/screenshot|dom|status`, `WS /api/browse/stream`.
-   - Injects the tenant name (from `JAMBOT_TENANT`/`TENANT_NAME`) so the browser client never chooses its own tenant. Enforces Clerk auth via the existing `before_request` gate (agent key allowed for non-admin, like `/api/conversation`).
-   - Reads `BROWSE_SERVICE_URL=http://jambot-browse:8712` + `BROWSE_SERVICE_KEY` from env.
-2. **`default-pages/browse-viewer.html`** — canvas page (inline CSS, no CDN, dual-layout, auth bridge per canvas rules):
-   - `<canvas>` renders base64 JPEG frames from `/api/browse/stream`.
-   - URL bar (current page + title), back/forward/reload/stop controls.
-   - "Agent is browsing…" / "Loading…" / connection-health indicators.
-   - Agent-cursor overlay: draw a marker at the last agent click coords (from action echoes).
-3. **`[BROWSE:url]` tag** in `app.js` — parsed alongside `[CANVAS_URL:]`; resolves via existing IP-block helper, `POST /api/browse/start`, then opens `browse-viewer` in the canvas.
-4. **Agent context** — voice-system-prompt section documenting `[BROWSE:url]`: after starting, the agent works the page via a tool loop calling `/api/browse/screenshot` (vision) + `/api/browse/action`. Mirror the browser-companion tag discipline (words with every tag).
-5. **Compose + provisioning** — add `BROWSE_SERVICE_URL`/`BROWSE_SERVICE_KEY` to the OVU service env in `templates/docker-compose.yml`; ensure OVU is on `jambot-shared` (it already is for TTS). No per-tenant container.
+Files:
+- **`routes/browse.py`** (new blueprint) — thin proxy to `jambot-browse`:
+  - `POST /api/browse/start|action|stop`, `GET /api/browse/screenshot|dom|status`, `GET /browse-viewer`.
+  - Injects THIS tenant (from `JAMBOT_TENANT`/`TENANT_NAME`) so a browser client can only ever watch its own tenant's session. Rides the existing `before_request` gate (Clerk or agent key). Adds the service key server-side (never sent to the browser).
+  - Keeps a per-process **latest browse state** (`get_browse_state()`) refreshed on every start/action — the source for `[BROWSE_STATE]`.
+- **`server.py` `/ws/browse-stream`** (flask-sock) — bridges the browser viewer to the browse service's CDP screencast WS (`websockets.connect` upstream). Frames down, viewer events up (Phase 3 consumes them). Clerk-gated; tenant + key injected server-side.
+- **`default-pages/browse-viewer.html`** — canvas viewer (inline CSS/JS, no CDN): `<canvas>` renders base64 JPEG frames, URL bar + back/forward/reload/go/stop, live/loading/offline dot, fps, agent-cursor overlay, and a **stubbed** user-click capture (`USER_INPUT_ENABLED=false`) that Phase 3 flips on. Served at `/browse-viewer`.
+- **`src/app.js`** — `[BROWSE:url]` (resolve → `POST /api/browse/start` → open `/browse-viewer` in the canvas iframe) and `[BROWSE_ACTION:{…}]` (brace-walk extract → `POST /api/browse/action`). Both stripped from displayed text (regex chain + shared `strip()`).
+- **`routes/conversation.py`** — injects `[BROWSE_STATE: …]` (url, title, visible-text digest, links, buttons) into the agent's per-turn context **only while a session is active** — text-sight so the agent navigates without a screenshot round-trip. Tag docs added to `voice-system-prompt.md` + the fallback constant.
+- **`templates/docker-compose.yml`** — `BROWSE_SERVICE_URL` + `BROWSE_SERVICE_KEY` on the OVU service (OVU is already on `jambot-shared` for TTS). No per-tenant container.
 
-**Deliverable:** "Open Amazon and find a blue widget" → live stream in canvas, agent clicks/types, user watches. One tenant (test-dev) first.
+**Agent loop:** user asks → agent emits `[BROWSE:url]` (+ words) → viewer opens, user watches → next turn the agent reads `[BROWSE_STATE]` → emits `[BROWSE_ACTION:{…}]` to click/type/scroll → repeat. Full screenshot→vision (image to the LLM) is the Phase 3 upgrade; Phase 2 sight is the DOM digest.
+
+**Deliverable met:** "go to X and find Y" → live stream in the canvas, agent drives, user watches. Verify on test-dev first (needs `jambot-browse` running + OVU env wired).
 
 ---
 
