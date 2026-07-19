@@ -114,6 +114,13 @@ _VOICE_INSTRUCTIONS = (
     "BAD: [MUSIC_PLAY]  GOOD: Playing something for you now. [MUSIC_PLAY] "
     "Tags are invisible to the user — they only hear your words. "
 
+    # --- UI state file (#94) ---
+    "UI STATE FILE: a full always-current copy of these instructions plus live UI state "
+    "(canvas page list, track lists, current user, open page, music state) is auto-written "
+    "to uploads/UI_STATE.md in your workspace before every turn. If a page-id or track title "
+    "is not in the current message, or you no longer remember these instructions, READ "
+    "uploads/UI_STATE.md — never guess a page-id or track name. "
+
     # --- Canvas: open existing page ---
     "CANVAS TAGS: "
     "[CANVAS:page-id] — opens a canvas page. Use exact page-id from the [Canvas pages:] list above. "
@@ -389,21 +396,30 @@ _double_empty_window_start: float = 0
 _DOUBLE_EMPTY_MAX_RESTARTS: int = 2       # max restart flags per window
 _DOUBLE_EMPTY_WINDOW_SECONDS: float = 300  # 5-minute sliding window
 
-#: ── Context-bloat guard (2026-07-13, bhb session overflow) ────────────────
+#: ── Context-bloat guard (2026-07-13, bhb session overflow; #94 2026-07-19) ─
 #: The STATIC instruction blocks (voice action-tag instructions, canvas page
-#: list, track list, DJ sounds, profile instructions, canvas style) used to be
-#: re-sent verbatim on EVERY turn (~17KB/turn). The gateway session keeps full
+#: list, track list, DJ sounds, profile instructions, canvas style,
+#: CURRENT_USER/office briefing, latest generated song) used to be re-sent
+#: verbatim on EVERY turn (~17KB/turn). The gateway session keeps full
 #: history, so after a day of voice chat the duplicated blocks alone overflowed
 #: GLM-5's context window (bhb 2026-07-13: 199-message session, repeated
 #: 'Context overflow' + a wedged ReplyRunAlreadyActive run → UI stuck in
-#: 'Connection lost — retrying'). Now the full static block is sent only when
-#: its CONTENT CHANGES (hash), on __session_start__, or as a periodic refresh
-#: so openclaw auto-compaction can never silently strip it from history;
-#: otherwise a one-line pointer is sent. Dynamic parts (face recognition,
-#: canvas open/closed, music state, Suno events, CURRENT_USER) stay per-turn.
+#: 'Connection lost — retrying'). The full static block is sent only when
+#: its CONTENT CHANGES (hash), on __session_start__, or as a periodic refresh;
+#: otherwise a one-line pointer is sent.
+#:
+#: Issue #94 (2026-07-19): the same static block is now ALSO mirrored to
+#: uploads/UI_STATE.md in the agent workspace on every turn (atomic,
+#: hash-skipped — see services/ui_state.py). That durable on-disk copy is why
+#: the periodic resend cadence below is 3x longer than the original 10-turn/
+#: 15-min guard: if openclaw auto-compaction strips the block from history,
+#: the per-turn pointer names the file and the agent can recover the full
+#: instructions with one read instead of waiting for the next resend.
+#: Truly per-turn parts (face recognition, camera vision, canvas open/closed,
+#: music now-playing, Suno event announcements) stay inline every turn.
 _ctx_static_cache: dict = {}        # "<session_id>:<voice_key>" -> {hash, ts, skips}
-_CTX_STATIC_RESEND_TURNS = 10       # resend full block at least every N turns
-_CTX_STATIC_RESEND_SECS = 900       # ...or after 15 minutes, whichever first
+_CTX_STATIC_RESEND_TURNS = 30       # resend full block at least every N turns
+_CTX_STATIC_RESEND_SECS = 2700      # ...or after 45 minutes, whichever first
 _CTX_STATIC_CACHE_MAX = 300         # prune guard for the in-process cache
 
 # ---------------------------------------------------------------------------
@@ -1299,6 +1315,8 @@ def _conversation_inner():
     context_parts = []   # dynamic — changes turn to turn, always sent
     static_parts = []    # static — identical between turns; deduped by the
                          # context-bloat guard below (sent on change/periodic)
+    _ui_state_lines = []  # plain-text state summary mirrored to UI_STATE.md
+                          # (issue #94) — canvas/music state only, no ephemera
 
     # Inject face recognition identity
     if identified_person and identified_person.get('name') and identified_person.get('name') != 'unknown':
@@ -1470,8 +1488,10 @@ def _conversation_inner():
                          .replace('.html', '')
                          .replace('-', ' '))
             context_parts.append(f'[Canvas OPEN: {page_name}]')
+            _ui_state_lines.append(f'Canvas OPEN: {page_name}')
         elif not ui_context.get('canvasVisible'):
             context_parts.append('[Canvas CLOSED]')
+            _ui_state_lines.append('Canvas CLOSED')
         if ui_context.get('canvasMenuOpen'):
             context_parts.append('[Canvas menu visible to user]')
         # Canvas JS errors — auto-injected from browser error buffer
@@ -1486,12 +1506,15 @@ def _conversation_inner():
         if _srv_playing and _srv_track:
             _track_name = _srv_track.get('title') or _srv_track.get('name', 'unknown')
             context_parts.append(f'[Music PLAYING: {_track_name}]')
+            _ui_state_lines.append(f'Music PLAYING: {_track_name}')
         elif _srv_track:
             _track_name = _srv_track.get('title') or _srv_track.get('name', 'unknown')
             context_parts.append(f'[Music PAUSED/STOPPED — last track: {_track_name}]')
+            _ui_state_lines.append(f'Music PAUSED/STOPPED — last track: {_track_name}')
         elif ui_context.get('musicPlaying'):
             track = ui_context.get('musicTrack', 'unknown')
             context_parts.append(f'[Music PLAYING: {track}]')
+            _ui_state_lines.append(f'Music PLAYING: {track}')
 
         # Available music tracks (so agent can use [MUSIC_PLAY:exact name])
         # Names come from a 10s TTL cache (_cached_music_names) so a full
@@ -1513,11 +1536,14 @@ def _conversation_inner():
         # mtime (created_date metadata is date-only and useless for recency).
         # Gives the agent the exact filename + a ready-to-send download link so
         # it never guesses or hands out a broken /music/ URL.
+        # STATIC (#94): only changes when a new song lands — the hash-change
+        # resend in the context-bloat guard delivers it then, instead of
+        # repeating ~150 chars on every turn of the session.
         try:
             from routes.music import get_latest_generated_track
             _latest = get_latest_generated_track()
             if _latest:
-                context_parts.append(
+                static_parts.append(
                     f"[Latest generated song: {_latest['title']!r} "
                     f"(file: {_latest['filename']}) — "
                     f"download link: /generated_music/{_latest['filename']}?download=1]"
@@ -1616,6 +1642,10 @@ def _conversation_inner():
     # right now (regardless of which tenant account they're using). When Mike
     # the developer pops into a client tenant to debug, the agent should treat
     # him as a peer collaborator, not a client. See services/identity.py.
+    # STATIC (#94): the tag + office briefing are stable within a session for
+    # a given Clerk user — they used to repeat ~300-800 chars on EVERY turn
+    # (the exact accumulation PR #297 was called out for in issue #94). A user
+    # switch or briefing change flips the static-blob hash → full resend.
     try:
         from flask import g as _flask_g
         from services.identity import get_current_user_tag as _get_current_user_tag
@@ -1623,7 +1653,7 @@ def _conversation_inner():
         _tenant = os.getenv('JAMBOT_TENANT') or os.getenv('TENANT_NAME') or None
         _user_tag = _get_current_user_tag(_clerk_uid, _tenant)
         if _user_tag:
-            context_parts.append(_user_tag)
+            static_parts.append(_user_tag)
             logger.info(f'### CURRENT_USER injected: clerk_uid={_clerk_uid} tenant={_tenant}')
 
         # Mesh-access gate — refresh the .mesh-admin-session marker on every
@@ -1676,6 +1706,20 @@ def _conversation_inner():
     # __session_start__, or as a periodic refresh; otherwise a 1-line pointer.
     if static_parts:
         _static_blob = ' '.join(static_parts)
+
+        # #94: mirror the full static block + current canvas/music state to
+        # uploads/UI_STATE.md in the agent workspace (atomic, hash-skipped).
+        # This durable copy is what makes the pointer below recoverable after
+        # openclaw auto-compaction strips old history — see services/ui_state.py.
+        # Gated on ui_context: turns without browser UI state (API/proactive)
+        # build a listless static blob and must not clobber the good file.
+        if ui_context:
+            try:
+                from services.paths import UPLOADS_DIR as _ui_uploads_dir
+                from services.ui_state import write_ui_state as _write_ui_state
+                _write_ui_state(_ui_uploads_dir, _static_blob, _ui_state_lines)
+            except Exception as _us_e:
+                logger.warning(f'UI_STATE.md mirror failed (non-fatal): {_us_e}')
         try:
             import hashlib as _hl
             _ctx_key = f'{session_id}:{get_voice_session_key()}'
@@ -1700,8 +1744,10 @@ def _conversation_inner():
                 _rec['skips'] = _rec.get('skips', 0) + 1
                 context_parts.append(
                     '[Standing instructions (voice action tags, canvas page list, track list, '
-                    'profile instructions, canvas style) were already provided earlier this '
-                    'session, are UNCHANGED, and still apply.]'
+                    'profile instructions, canvas style, current user) were already provided '
+                    'earlier this session, are UNCHANGED, and still apply. A full always-current '
+                    'copy lives at uploads/UI_STATE.md in your workspace — re-read it if you no '
+                    'longer remember them.]'
                 )
                 logger.info(f'### CONTEXT DEDUP: skipped {len(_static_blob)} static chars '
                             f'(skip {_rec["skips"]}/{_CTX_STATIC_RESEND_TURNS})')
