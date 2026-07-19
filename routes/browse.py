@@ -179,6 +179,17 @@ def browse_status():
         return jsonify({"error": "browse service unavailable"}), 503
 
 
+@browse_bp.route("/api/browse/ip", methods=["GET"])
+def browse_ip():
+    """Egress IP of the live session — proof of residential masking (#154 P4)."""
+    try:
+        r = requests.get(f"{BROWSE_SERVICE_URL}/session/ip",
+                         params={"tenant": _tenant()}, headers=_svc_headers(), timeout=_TIMEOUT)
+        return Response(r.content, status=r.status_code, content_type="application/json")
+    except requests.RequestException as e:
+        return jsonify({"error": "browse service unavailable"}), 503
+
+
 @browse_bp.route("/api/browse/stop", methods=["POST"])
 def browse_stop():
     _set_active(False)

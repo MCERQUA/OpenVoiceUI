@@ -99,6 +99,7 @@
   <div class="foot">
     <span class="pill" id="state">idle</span>
     <span class="pill" id="control" title="Click the view to take control">agent</span>
+    <span class="pill" id="egress" title="Browsing exit IP" style="display:none"></span>
     <span id="pagetitle"></span>
     <span style="margin-left:auto" id="fps"></span>
   </div>
@@ -259,11 +260,27 @@
     }
   });
 
+  // ── egress IP indicator (#154 Phase 4) ───────────────────────────────────
+  function refreshEgress(){
+    fetch(API + "/api/browse/ip").then(function(r){ return r.json(); })
+      .then(function(ip){
+        var el = $("egress");
+        if (ip && ip.ip){
+          var loc = [ip.city, ip.country].filter(Boolean).join(", ");
+          el.textContent = (ip.proxied ? "🛡 " : "") + ip.ip + (loc ? " · " + loc : "");
+          el.title = ip.proxied ? "Masked — residential exit IP" : "Direct — server IP (not masked)";
+          el.style.borderColor = ip.proxied ? "var(--ok)" : "var(--line)";
+          el.style.color = ip.proxied ? "var(--ok)" : "var(--muted)";
+          el.style.display = "";
+        } else { el.style.display = "none"; }
+      }).catch(function(){});
+  }
+
   // ── init ──────────────────────────────────────────────────────────────────
-  post("/api/browse/status", {}); // warm; ignore result
   fetch(API + "/api/browse/status").then(function(r){ return r.json(); })
     .then(function(s){ if (s && s.url){ $("url").value = s.url; $("pagetitle").textContent = s.title||""; } })
     .catch(function(){});
+  refreshEgress();
   connect();
 })();
 </script>

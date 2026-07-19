@@ -1,6 +1,6 @@
 # Co-Browsing System — Overview & Phased Plan (issue #154)
 
-**Status (2026-07-19):** Phases 1–3 built (browse service + OVU wiring + live viewer + user input passthrough). Phases 4–5 designed, not yet built.
+**Status (2026-07-19):** Phases 1–4 built (browse service + OVU wiring + live viewer + user input passthrough + IP-masking plumbing). Phase 5 designed, not yet built. Phase 4 ships the residential-proxy wiring verified end-to-end; turning masking ON is an operator step (add provider creds).
 
 Server-side co-browsing: a headless Chromium runs **on the VPS**, the agent drives it, and the user watches a **live video stream** of it inside a canvas page — voice stays active throughout. Because it streams frames (CDP screencast) instead of embedding the site, `X-Frame-Options`/CSP frame-blocking (which kills `[CANVAS_URL:]` on Amazon/Google/Facebook/etc.) does not apply. Any site works.
 
@@ -128,16 +128,32 @@ Files:
 
 ---
 
-## Phase 4 — IP masking / residential egress (anti-block)
+## Phase 4 — IP masking / residential egress (anti-block) ✅ BUILT (2026-07-19)
 
 **Goal:** the VPS's datacenter IP is the #1 reason real sites (Cloudflare, retail, social) block or captcha a server-side browser. Route egress through a residential/ISP IP so co-browsing behaves like a real user.
 
-The Phase-1 `proxy` seam makes this a **config + provider** change, not a rewrite. See the dedicated research section below for provider choice. Plan:
-- Add `BROWSE_PROXY_*` config; when set, `routes/browse.py` passes a per-tenant `proxy` object to `/session/start`.
-- Prefer **sticky sessions** (same exit IP for a session's lifetime) so multi-step flows don't trip mid-task IP changes.
-- Pair with a stealth profile (see research) — a clean residential IP with stock headless Chromium still fails automation-protocol fingerprint checks on the hardest targets. Realistic scope: works everywhere for "watch the agent read a page"; the hardest bot-walled flows (login-gated retail checkout) remain best-effort.
-- **Directory/citation policy still applies** (memory `feedback_never_touch_google_business_profiles`): masking is for *browsing/rendering*, never for touching banned identity platforms (GMB, Facebook, Yelp, BBB…).
-- Cost control: residential proxies bill per-GB; screencast frames are server-side only (they do NOT traverse the proxy — only the page's own network egress does), so a browsing session is ~the page's real byte weight. Add a per-tenant GB budget + the existing memory/idle guards.
+The Phase-1 `proxy` seam made this **config + provider**, not a rewrite. Built:
+- **`deploy/browse-service/server.py`** — `BROWSE_PROXY_SERVER/USERNAME/PASSWORD/STICKY` env → `_build_proxy()` → passed to `browser.new_context(proxy=…)`. An explicit per-request proxy (from OVU) still wins; otherwise the service-level env proxy applies to every session. **Sticky sessions:** each session gets a `<tenant>-<rand>` token; if the username contains `{session}` it's templated in, so the provider pins one exit IP for the session's lifetime (multi-step flows don't trip a mid-task IP change). `Session.proxied` flag tracks it.
+- **`/session/ip`** (+ OVU `/api/browse/ip`) — probes the session's **real egress IP** via the context's own `APIRequestContext` (same path/proxy the live browser uses; doesn't touch the user's page). This is the proof-of-masking + a "is the residential proxy working" check. `/health` reports `proxy_configured`; `/session/status` reports `proxied` + `egress_ip`.
+- **`browse-viewer.html`** — footer pill shows the exit IP + location: `🛡 <ip> · <city, country>` green when masked, grey `<ip>` when direct.
+- **`scripts/jambot-browse-service.sh`** — reads `BROWSE_PROXY_*` from `.platform-keys.env` and passes them to the container; prints `egress: residential proxy …` or `egress: DIRECT`.
+
+**Turning it on (operator step):** add to `/mnt/system/base/.platform-keys.env`, then `bash scripts/jambot-browse-service.sh restart`:
+```
+BROWSE_PROXY_SERVER=http://gate.example-provider.com:PORT
+BROWSE_PROXY_USERNAME=<user>-sessid-{session}      # {session} → sticky per session
+BROWSE_PROXY_PASSWORD=<pass>
+```
+Verify with `GET /api/browse/ip` (or the viewer pill) — a residential IP means it's live.
+
+**Provider pick (research below):** start with **DataImpulse** (~$1/GB, non-expiring) or **IPRoyal** (~$1.75/GB), PAYG, sticky sessions. Only add a stealth fork (**Patchright** — drop-in undetected Playwright/Chromium) if a target still blocks with a clean residential IP.
+
+**Verified end-to-end 2026-07-19:** baseline probe returns the Hetzner IP (178.156.162.212, `proxied:false`); with a proxy configured, `proxied:true` and the proxy log shows **every** browser CONNECT (`example.com:443`, `api.ipify.org:443`, `ipwho.is:443`) tunneling through it — so a real provider URL yields a residential exit IP with no code change. Real residential-IP confirmation needs provider creds (operator step).
+
+**Guards that still apply:**
+- **Directory/citation policy** (memory `feedback_never_touch_google_business_profiles`): masking is for *browsing/rendering*, never for touching banned identity platforms (GMB, Facebook, Yelp, BBB…). The SSRF guard stays on regardless of proxy.
+- **Cost:** residential proxies bill per-GB; screencast frames are server-side only (they do NOT traverse the proxy — only the page's own egress does), so a session ≈ the page's real byte weight. A per-tenant GB budget is a Phase-5 add.
+- Residential egress does not defeat automation-protocol fingerprinting on the hardest targets; realistic scope is "watch the agent read/browse a page" everywhere, with login-gated retail checkout best-effort (add Patchright there).
 
 ---
 

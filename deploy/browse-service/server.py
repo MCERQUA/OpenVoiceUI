@@ -46,6 +46,7 @@ import logging
 import os
 import socket
 import time
+import uuid
 from urllib.parse import urlparse, urlsplit
 
 import psutil
@@ -73,6 +74,40 @@ USER_AGENT = os.getenv(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 )
+
+# ── IP masking / residential egress (#154 Phase 4) ───────────────────────────
+# When BROWSE_PROXY_SERVER is set, every session egresses through it — the fix
+# for the #1 server-side-browser blocker (datacenter IP → Cloudflare/retail
+# captchas). Provider-agnostic: point it at DataImpulse / IPRoyal / Decodo /
+# Bright Data. Sticky sessions keep one exit IP for a session's lifetime so a
+# multi-step flow doesn't trip a mid-task IP change — most providers do this by
+# embedding a session token in the username; put "{session}" in
+# BROWSE_PROXY_USERNAME and we template it per tenant-session.
+PROXY_SERVER = os.getenv("BROWSE_PROXY_SERVER", "").strip()
+PROXY_USERNAME = os.getenv("BROWSE_PROXY_USERNAME", "").strip()
+PROXY_PASSWORD = os.getenv("BROWSE_PROXY_PASSWORD", "")
+PROXY_STICKY = os.getenv("BROWSE_PROXY_STICKY", "1").strip() not in ("0", "", "false")
+
+
+def _build_proxy(sticky_session: str) -> dict | None:
+    """Build the Playwright proxy object from env, or None if unconfigured.
+
+    ``sticky_session`` is a per-tenant-session token; when the username template
+    contains "{session}" it is substituted so the provider pins one exit IP for
+    the session (sticky). Without the placeholder the proxy still works but the
+    exit IP may rotate per request (provider-dependent).
+    """
+    if not PROXY_SERVER:
+        return None
+    user = PROXY_USERNAME
+    if PROXY_STICKY and "{session}" in user:
+        user = user.replace("{session}", sticky_session)
+    proxy = {"server": PROXY_SERVER}
+    if user:
+        proxy["username"] = user
+    if PROXY_PASSWORD:
+        proxy["password"] = PROXY_PASSWORD
+    return proxy
 
 # ── SSRF guard ──────────────────────────────────────────────────────────────
 _BLOCKED_NETS = [
@@ -120,11 +155,13 @@ def _validate_url(url: str) -> tuple[bool, str]:
 
 # ── Session model ───────────────────────────────────────────────────────────
 class Session:
-    def __init__(self, tenant: str, context, page, cdp):
+    def __init__(self, tenant: str, context, page, cdp, proxied=False):
         self.tenant = tenant
         self.context = context
         self.page = page
         self.cdp = cdp
+        self.proxied = proxied     # egressing through a residential proxy (#154 P4)
+        self.egress_ip = None      # cached egress IP from the last /session/ip probe
         self.last_activity = time.time()
         self.viewers: set[web.WebSocketResponse] = set()
         self.screencasting = False
@@ -184,15 +221,19 @@ class BrowseService:
                 viewport={"width": width, "height": height},
                 user_agent=USER_AGENT,
             )
-            if proxy:
-                # Seam for the IP-masking phase: {"server","username","password"}
-                ctx_kwargs["proxy"] = proxy
+            # Proxy precedence: an explicit per-request proxy (from OVU) wins;
+            # otherwise fall back to the service-level env proxy (#154 Phase 4).
+            # Sticky session token pins one exit IP for this session's lifetime.
+            sticky = f"{tenant}-{uuid.uuid4().hex[:10]}"
+            eff_proxy = proxy or _build_proxy(sticky)
+            if eff_proxy:
+                ctx_kwargs["proxy"] = eff_proxy
 
             context = await self.browser.new_context(**ctx_kwargs)
             context.set_default_navigation_timeout(NAV_TIMEOUT_MS)
             page = await context.new_page()
             cdp = await context.new_cdp_session(page)
-            sess = Session(tenant, context, page, cdp)
+            sess = Session(tenant, context, page, cdp, proxied=bool(eff_proxy))
             self.sessions[tenant] = sess
 
             # Relay CDP screencast frames to viewers.
@@ -313,6 +354,40 @@ class BrowseService:
         sess.touch()
         return await sess.page.screenshot(full_page=full, type="png")
 
+    async def egress_ip(self, sess: Session) -> dict:
+        """Probe the session's real egress IP (#154 Phase 4 verification).
+
+        Uses the context's own APIRequestContext, so the request goes out the
+        SAME path (and proxy) the live browser uses — this is the proof the
+        residential proxy is actually masking. Does NOT touch the user's page.
+        """
+        sess.touch()
+        info = {"proxied": sess.proxied, "ip": None, "country": None, "error": None}
+        headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+        # ipify is header-permissive; ipwho.is enriches with geo. Try both.
+        try:
+            resp = await sess.context.request.get(
+                "https://api.ipify.org?format=json", headers=headers, timeout=15000)
+            if resp.ok:
+                info["ip"] = (await resp.json()).get("ip")
+                sess.egress_ip = info["ip"]
+            else:
+                info["error"] = f"probe status {resp.status}"
+        except Exception as e:
+            info["error"] = str(e)[:200]
+        # Best-effort geo enrichment (never fatal).
+        if info["ip"]:
+            try:
+                geo = await sess.context.request.get(
+                    f"https://ipwho.is/{info['ip']}", headers=headers, timeout=10000)
+                if geo.ok:
+                    g = await geo.json()
+                    info["country"] = g.get("country_code") or g.get("country")
+                    info["city"] = g.get("city")
+            except Exception:
+                pass
+        return info
+
     # ── user input passthrough (#154 Phase 3) ─────────────────────────────────
     async def apply_user_event(self, sess: Session, evt: dict):
         """Apply a viewer-originated input event to the page.
@@ -423,6 +498,8 @@ async def h_health(request):
         "sessions": len(svc.sessions),
         "max_sessions": MAX_SESSIONS,
         "mem_percent": psutil.virtual_memory().percent,
+        "proxy_configured": bool(PROXY_SERVER),
+        "proxy_sticky": PROXY_STICKY if PROXY_SERVER else None,
     })
 
 
@@ -476,7 +553,17 @@ async def h_status(request):
         "idle_s": round(sess.idle_s, 1),
         "viewers": len(sess.viewers),
         "screencasting": sess.screencasting,
+        "proxied": sess.proxied,
+        "egress_ip": sess.egress_ip,
     })
+
+
+async def h_ip(request):
+    """Return the session's real egress IP — proof the proxy is (or isn't)
+    masking. Also usable as a light 'is the residential proxy working' check."""
+    _require_auth(request)
+    sess = _get_session(request.query.get("tenant", "").strip())
+    return web.json_response(await svc.egress_ip(sess))
 
 
 async def h_stop(request):
@@ -553,6 +640,7 @@ def make_app():
         web.get("/session/screenshot", h_screenshot),
         web.get("/session/dom", h_dom),
         web.get("/session/status", h_status),
+        web.get("/session/ip", h_ip),
         web.post("/session/stop", h_stop),
         web.get("/session/stream", h_stream),
     ])
