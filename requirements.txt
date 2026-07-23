@@ -8,6 +8,11 @@ flask-sock==0.7.0
 # WebSocket & HTTP
 websockets==16.1
 requests==2.34.2
+# httpx is imported directly by several providers (tts_providers/{hume,elevenlabs,resemble,
+# qwen3,qwen3_local}_provider.py, routes/story.py, providers/stt/grok_provider.py). It was
+# previously satisfied only transitively via `groq` — declare it so a clean install cannot
+# break those imports if that transitive edge ever changes.
+httpx==0.28.1
 
 # Environment & config
 python-dotenv==1.2.2
