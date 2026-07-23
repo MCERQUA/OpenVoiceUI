@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="icon" content="settings">
+<title>Booking Setup</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap');
+:root{
+  --bg:#08090e;
+  --s0:rgba(255,255,255,0.025);--s1:rgba(255,255,255,0.04);--s2:rgba(255,255,255,0.06);--s3:rgba(255,255,255,0.09);
+  --b0:rgba(255,255,255,0.06);--b1:rgba(255,255,255,0.09);--b2:rgba(255,255,255,0.14);
+  --t1:#f0f2f5;--t2:#8b92a5;--t3:#505872;--t4:#333b50;
+  --blue:#3b82f6;--blue-s:rgba(59,130,246,0.10);--blue-b:rgba(59,130,246,0.20);
+  --red:#f43f5e;--red-s:rgba(244,63,94,0.10);--red-b:rgba(244,63,94,0.20);
+  --green:#10b981;--green-s:rgba(16,185,129,0.10);--green-b:rgba(16,185,129,0.20);
+  --amber:#f59e0b;--amber-s:rgba(245,158,11,0.10);--amber-b:rgba(245,158,11,0.20);
+  --r:14px;--rs:10px;--rxs:6px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.55;min-height:100vh;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:var(--b0);border-radius:3px}
+.ambient{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.orb{position:absolute;border-radius:50%;filter:blur(100px)}
+
+nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(24px);background:rgba(8,9,14,0.65);border-bottom:1px solid var(--b0);padding:0 20px;height:52px;display:flex;align-items:center;gap:12px}
+.nav-mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#1e3a5f,#3b82f6);display:grid;place-items:center;flex-shrink:0}
+.nav-title{font-size:14px;font-weight:700;letter-spacing:-0.3px}
+.nav-sep{width:1px;height:16px;background:var(--b0)}
+.nav-sub{font-size:12px;color:var(--t3)}
+.nav-r{margin-left:auto}
+.nav-btn{background:none;border:1px solid var(--b0);color:var(--t3);border-radius:var(--rxs);padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 160ms}
+.nav-btn:hover{border-color:var(--blue-b);color:var(--blue);background:var(--blue-s)}
+
+.wrap{position:relative;z-index:1;max-width:720px;margin:0 auto;padding:24px 20px 60px}
+.card{background:var(--s0);border:1px solid var(--b0);border-radius:var(--r);padding:22px 24px;margin-bottom:16px}
+.card h2{font-size:15px;font-weight:700;margin-bottom:4px;display:flex;align-items:center;gap:9px}
+.step-num{width:22px;height:22px;border-radius:7px;background:var(--blue-s);border:1px solid var(--blue-b);color:var(--blue);font-size:12px;font-weight:700;display:grid;place-items:center;flex-shrink:0}
+.card p{font-size:13px;color:var(--t2);margin-bottom:14px}
+.card p.tight{margin-bottom:8px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:11px;font-weight:600;color:var(--t3);letter-spacing:0.03em;text-transform:uppercase;margin-bottom:6px}
+.field input{width:100%;background:var(--s1);border:1px solid var(--b0);border-radius:var(--rxs);color:var(--t1);padding:9px 12px;font-family:inherit;font-size:13px}
+.field input:focus{outline:none;border-color:var(--blue-b)}
+.field .hint{font-size:11px;color:var(--t4);margin-top:5px}
+.btn{border:1px solid var(--b1);background:var(--s2);color:var(--t1);border-radius:var(--rxs);padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 160ms}
+.btn:hover{border-color:var(--b2);background:var(--s3)}
+.btn-primary{background:var(--blue-s);border-color:var(--blue-b);color:var(--blue)}
+.btn-primary:hover{background:rgba(59,130,246,0.18)}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.result{font-size:13px;font-weight:600;padding:8px 12px;border-radius:var(--rxs);display:none}
+.result.ok{display:block;background:var(--green-s);border:1px solid var(--green-b);color:var(--green)}
+.result.err{display:block;background:var(--red-s);border:1px solid var(--red-b);color:var(--red)}
+.result.warn{display:block;background:var(--amber-s);border:1px solid var(--amber-b);color:var(--amber)}
+.embed{position:relative;background:#04050a;border:1px solid var(--b0);border-radius:var(--rs);padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.7;color:#a8d8ff;white-space:pre;overflow-x:auto;margin-top:6px}
+.copy-btn{position:absolute;top:10px;right:10px;background:var(--s2);border:1px solid var(--b1);color:var(--t2);border-radius:var(--rxs);padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit}
+.copy-btn:hover{color:var(--blue);border-color:var(--blue-b)}
+.muted{font-size:12px;color:var(--t3)}
+.kv{font-family:ui-monospace,monospace;font-size:12px;color:var(--t2);background:var(--s1);padding:2px 6px;border-radius:4px}
+.spinner{width:14px;height:14px;border:2px solid var(--b1);border-top-color:var(--blue);border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="ambient"><div class="orb" style="width:380px;height:380px;background:rgba(59,130,246,0.04);top:-90px;right:-40px"></div></div>
+
+<nav>
+  <div class="nav-mark"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+  <span class="nav-title">Booking Setup</span>
+  <div class="nav-sep"></div>
+  <span class="nav-sub">Cal.diy connection</span>
+  <div class="nav-r"><button class="nav-btn" onclick="location.href='/pages/booking.html'">Open Booking</button></div>
+</nav>
+
+<div class="wrap">
+
+  <!-- Step 1: connect -->
+  <div class="card">
+    <h2><span class="step-num">1</span> Connect your Cal.diy account</h2>
+    <p>Enter the API key and username for your account on the shared booking service
+       (<span class="kv" id="apiUrlLabel">cal.jam-bot.com</span>). Your key is stored on the
+       server — never in the browser. Generate the key in Cal.diy under
+       <strong>Settings → Developer → API keys</strong>.</p>
+
+    <div class="field">
+      <label for="apiKey">Cal.diy API Key</label>
+      <input type="password" id="apiKey" placeholder="cal_live_…" autocomplete="off">
+      <div class="hint" id="keyHint"></div>
+    </div>
+    <div class="field">
+      <label for="username">Cal.diy Username</label>
+      <input type="text" id="username" placeholder="acme-roofing" autocomplete="off">
+      <div class="hint">The slug in your booking link — <span class="kv">cal.jam-bot.com/&lt;username&gt;/30min</span></div>
+    </div>
+    <div class="field">
+      <label for="webhookSecret">Webhook Signing Secret <span style="text-transform:none;color:var(--t4)">(optional)</span></label>
+      <input type="password" id="webhookSecret" placeholder="whsec_…" autocomplete="off">
+      <div class="hint">Used to verify incoming booking webhooks. Set this to the same secret
+        you register in Cal.diy when you point a webhook at the URL below.</div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="saveBtn" onclick="save()">Save</button>
+      <button class="btn" id="testBtn" onclick="test()">Test connection</button>
+    </div>
+    <div class="result" id="saveResult" style="margin-top:12px"></div>
+    <div class="result" id="testResult" style="margin-top:8px"></div>
+  </div>
+
+  <!-- Step 2: webhook -->
+  <div class="card">
+    <h2><span class="step-num">2</span> Point Cal.diy webhooks here</h2>
+    <p class="tight">In Cal.diy, add a webhook for the <span class="kv">BOOKING_CREATED</span>,
+      <span class="kv">BOOKING_CANCELLED</span>, and <span class="kv">BOOKING_RESCHEDULED</span> events,
+      pointing at this URL. The signing secret you enter above must match the one Cal.diy uses.</p>
+    <div class="embed" id="webhookUrlBox"><span class="copy-btn" onclick="copyEl('webhookUrlBox')">Copy</span><span id="webhookUrl">loading…</span></div>
+    <p class="muted" style="margin-top:10px">This receiver verifies the
+      <span class="kv">x-cal-signature-256</span> HMAC, logs each event, and fans it out
+      to SMS + CRM automatically.</p>
+  </div>
+
+  <!-- Step 3: embed -->
+  <div class="card">
+    <h2><span class="step-num">3</span> Add the "Book Now" button to a website</h2>
+    <p>Paste these three lines into any client website to add an embedded booking widget.
+       The button opens the booking flow in a popup.</p>
+    <div class="embed" id="embedBox"><span class="copy-btn" onclick="copyEl('embedBox')">Copy</span><span id="embedSnippet">loading…</span></div>
+    <p class="muted" style="margin-top:10px">Change <span class="kv">30min</span> to any event-type slug
+       you've created in Cal.diy.</p>
+  </div>
+
+</div>
+
+<script>
+const API = '/api/booking';
+let CFG = {};
+
+async function loadConfig(){
+  try{
+    const r = await fetch(`${API}/config`);
+    CFG = await r.json();
+    document.getElementById('username').value = CFG.username || '';
+    if(CFG.api_key_masked){
+      document.getElementById('keyHint').textContent = 'Current key: ' + CFG.api_key_masked + ' (leave blank to keep)';
+    }
+    if(CFG.webhook_secret_masked){
+      document.getElementById('webhookSecret').placeholder = CFG.webhook_secret_masked + ' (leave blank to keep)';
+    }
+    const apiUrl = (CFG.api_url || 'https://cal.jam-bot.com').replace(/^https?:\/\//,'');
+    document.getElementById('apiUrlLabel').textContent = apiUrl;
+    document.getElementById('webhookUrl').textContent = CFG.webhook_url || (location.origin + '/api/booking/webhook');
+    renderEmbed();
+  }catch(e){
+    document.getElementById('webhookUrl').textContent = location.origin + '/api/booking/webhook';
+  }
+}
+
+function renderEmbed(){
+  const base = (CFG.api_url || 'https://cal.jam-bot.com').replace(/\/$/,'');
+  const user = CFG.username || 'your-username';
+  const snip =
+`<script src="${base}/embed.js"><\/script>
+<button data-cal-link="${user}/30min"
+        data-cal-config='{"theme":"dark"}'>Book Now</button>`;
+  document.getElementById('embedSnippet').textContent = snip;
+}
+
+async function save(){
+  const out = document.getElementById('saveResult');
+  out.className = 'result'; out.style.display='none';
+  const body = {
+    username: document.getElementById('username').value.trim(),
+  };
+  const key = document.getElementById('apiKey').value.trim();
+  if(key) body.api_key = key;
+  const wsec = document.getElementById('webhookSecret').value.trim();
+  if(wsec) body.webhook_secret = wsec;
+
+  const btn = document.getElementById('saveBtn');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Saving…';
+  try{
+    const r = await fetch(`${API}/config`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d = await r.json();
+    if(r.ok && d.ok){
+      out.className='result ok'; out.textContent = d.configured ? 'Saved. Booking is configured.' : 'Saved — but no API key is set yet.';
+      document.getElementById('apiKey').value=''; document.getElementById('webhookSecret').value='';
+      loadConfig();
+    } else { out.className='result err'; out.textContent = (d && d.error) || 'Save failed.'; }
+  }catch(e){ out.className='result err'; out.textContent='Network error: '+e.message; }
+  finally{ btn.disabled=false; btn.textContent='Save'; }
+}
+
+async function test(){
+  const out = document.getElementById('testResult');
+  out.className='result'; out.style.display='none';
+  const btn = document.getElementById('testBtn');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Testing…';
+  try{
+    const r = await fetch(`${API}/status`);
+    const s = await r.json();
+    if(!s.configured){
+      out.className='result warn'; out.textContent='No API key saved yet — save your key first.';
+    } else if(s.reachable && s.authenticated){
+      out.className='result ok'; out.textContent='Connected. Cal.diy is reachable and your key works.';
+    } else if(s.reachable && s.authenticated===false){
+      out.className='result err'; out.textContent='Reached Cal.diy, but the API key was rejected (HTTP '+(s.http_status||'?')+'). Check the key.';
+    } else {
+      out.className='result warn'; out.textContent='Cal.diy is not reachable yet — the booking service may not be deployed.';
+    }
+  }catch(e){ out.className='result err'; out.textContent='Network error: '+e.message; }
+  finally{ btn.disabled=false; btn.textContent='Test connection'; }
+}
+
+function copyEl(id){
+  const box = document.getElementById(id);
+  const text = box.querySelector('span:last-child').textContent;
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn = box.querySelector('.copy-btn'); const old = btn.textContent;
+    btn.textContent='Copied'; setTimeout(()=>btn.textContent=old, 1500);
+  });
+}
+
+loadConfig();
+</script>
+</body>
+</html>

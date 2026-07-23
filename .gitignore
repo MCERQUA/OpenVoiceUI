@@ -94,6 +94,7 @@ runtime/canvas-manifest.bak
 # "install" pulls it from the plugin's repo into the same folder.
 plugins/*/
 !plugins/example-gateway/
+!plugins/booking/
 !plugins/README.md
 !plugins/.gitkeep
 # Approved plugin catalog stubs (manifest + readme only)

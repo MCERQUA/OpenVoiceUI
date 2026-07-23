@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="icon" content="calendar">
+<title>Booking</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
+
+:root{
+  --bg:#08090e;
+  --s0:rgba(255,255,255,0.025);--s1:rgba(255,255,255,0.04);--s2:rgba(255,255,255,0.06);--s3:rgba(255,255,255,0.09);
+  --b0:rgba(255,255,255,0.06);--b1:rgba(255,255,255,0.09);--b2:rgba(255,255,255,0.14);
+  --t1:#f0f2f5;--t2:#8b92a5;--t3:#505872;--t4:#333b50;
+  --blue:#3b82f6;--blue-s:rgba(59,130,246,0.10);--blue-b:rgba(59,130,246,0.20);
+  --red:#f43f5e;--red-s:rgba(244,63,94,0.10);--red-b:rgba(244,63,94,0.20);
+  --green:#10b981;--green-s:rgba(16,185,129,0.10);--green-b:rgba(16,185,129,0.20);
+  --amber:#f59e0b;--amber-s:rgba(245,158,11,0.10);--amber-b:rgba(245,158,11,0.20);
+  --r:14px;--rs:10px;--rxs:6px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--b0);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--b1)}
+.ambient{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.orb{position:absolute;border-radius:50%;filter:blur(100px)}
+
+nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(24px) saturate(1.2);-webkit-backdrop-filter:blur(24px) saturate(1.2);background:rgba(8,9,14,0.65);border-bottom:1px solid var(--b0);padding:0 20px;height:52px;display:flex;align-items:center;gap:12px}
+.nav-mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#1e3a5f,#3b82f6);display:grid;place-items:center;flex-shrink:0;box-shadow:0 0 24px rgba(59,130,246,0.15),inset 0 1px 0 rgba(255,255,255,0.15)}
+.nav-title{font-size:14px;font-weight:700;letter-spacing:-0.3px}
+.nav-sep{width:1px;height:16px;background:var(--b0)}
+.nav-sub{font-size:12px;font-weight:500;color:var(--t3)}
+.nav-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.pill{font-size:10px;font-weight:700;letter-spacing:0.04em;padding:3px 10px;border-radius:6px;display:flex;align-items:center;gap:5px}
+.pill-live{background:var(--green-s);color:var(--green);border:1px solid var(--green-b)}
+.pill-live::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--green);animation:blink 2s ease infinite}
+.pill-off{background:var(--amber-s);color:var(--amber);border:1px solid var(--amber-b)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.nav-btn{background:none;border:1px solid var(--b0);color:var(--t3);border-radius:var(--rxs);padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 160ms}
+.nav-btn:hover{border-color:var(--blue-b);color:var(--blue);background:var(--blue-s)}
+
+.wrap{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding:18px 20px 40px}
+.sec-title{font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--t3);margin:18px 0 10px}
+
+/* Block-time bar */
+.block-bar{background:var(--s0);border:1px solid var(--b0);border-radius:var(--r);padding:14px 16px;display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;margin-bottom:6px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:0.04em;text-transform:uppercase}
+.field input{background:var(--s1);border:1px solid var(--b0);border-radius:var(--rxs);color:var(--t1);padding:7px 10px;font-family:inherit;font-size:13px;color-scheme:dark}
+.field input:focus{outline:none;border-color:var(--blue-b)}
+.btn{border:1px solid var(--b1);background:var(--s2);color:var(--t1);border-radius:var(--rxs);padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 160ms}
+.btn:hover{border-color:var(--b2);background:var(--s3)}
+.btn-amber{background:var(--amber-s);border-color:var(--amber-b);color:var(--amber)}
+.btn-amber:hover{background:rgba(245,158,11,0.18)}
+
+/* Booking cards */
+.book-list{display:flex;flex-direction:column;gap:8px}
+.book{background:var(--s0);border:1px solid var(--b0);border-radius:var(--rs);padding:14px 16px;display:flex;align-items:center;gap:14px;transition:border-color 160ms}
+.book:hover{border-color:var(--b2)}
+.book-when{display:flex;flex-direction:column;align-items:center;min-width:64px;padding-right:14px;border-right:1px solid var(--b0)}
+.book-day{font-size:22px;font-weight:700;line-height:1;letter-spacing:-1px}
+.book-mon{font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:0.06em;margin-top:3px}
+.book-time{font-size:11px;color:var(--blue);font-weight:600;margin-top:4px}
+.book-info{flex:1;min-width:0}
+.book-title{font-size:14px;font-weight:600}
+.book-who{font-size:12px;color:var(--t2);margin-top:2px}
+.book-meta{font-size:11px;color:var(--t3);margin-top:3px}
+.btn-cancel{background:var(--red-s);border:1px solid var(--red-b);color:var(--red);border-radius:var(--rxs);padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 160ms}
+.btn-cancel:hover{background:rgba(244,63,94,0.18)}
+
+.loading{display:flex;align-items:center;justify-content:center;min-height:200px;color:var(--t3);font-size:14px;gap:10px}
+.spinner{width:18px;height:18px;border:2px solid var(--b1);border-top-color:var(--blue);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.notice{background:var(--amber-s);border:1px solid var(--amber-b);border-radius:var(--rs);padding:16px 20px;color:var(--amber);font-size:13px;margin:14px 0;line-height:1.6}
+.notice a{color:var(--amber);font-weight:700}
+.error-msg{background:var(--red-s);border:1px solid var(--red-b);border-radius:var(--rs);padding:14px 18px;color:var(--red);font-size:13px;margin:12px 0}
+.empty{padding:30px;text-align:center;color:var(--t4);font-size:13px;font-style:italic}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--s3);border:1px solid var(--b2);border-radius:var(--rs);padding:10px 18px;font-size:13px;z-index:200;opacity:0;transition:opacity 200ms;pointer-events:none}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="ambient">
+  <div class="orb" style="width:400px;height:400px;background:rgba(59,130,246,0.04);top:-100px;right:-50px"></div>
+  <div class="orb" style="width:300px;height:300px;background:rgba(16,185,129,0.03);bottom:-80px;left:-40px"></div>
+</div>
+
+<nav>
+  <div class="nav-mark">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+  </div>
+  <span class="nav-title">Booking</span>
+  <div class="nav-sep"></div>
+  <span class="nav-sub">Appointments</span>
+  <div class="nav-r">
+    <span id="statusPill" class="pill pill-off">…</span>
+    <button class="nav-btn" onclick="location.href='/pages/booking-setup.html'">Setup</button>
+    <button class="nav-btn" id="refreshBtn" onclick="loadBookings()">Refresh</button>
+  </div>
+</nav>
+
+<div class="wrap">
+  <div id="notConfigured" style="display:none" class="notice">
+    Booking isn't configured yet. Open <a href="/pages/booking-setup.html">Booking Setup</a>
+    to enter your Cal.diy API key and username.
+  </div>
+
+  <div class="sec-title">Block Time — mark yourself busy for a day</div>
+  <div class="block-bar">
+    <div class="field">
+      <label for="blockDate">Date</label>
+      <input type="date" id="blockDate">
+    </div>
+    <div class="field">
+      <label for="blockReason">Reason (optional)</label>
+      <input type="text" id="blockReason" placeholder="Out of office" style="min-width:220px">
+    </div>
+    <button class="btn btn-amber" id="blockBtn" onclick="blockDay()">Block this day</button>
+  </div>
+
+  <div class="sec-title">Upcoming Bookings</div>
+  <div id="bookingsArea">
+    <div class="loading"><span class="spinner"></span> Loading…</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api/booking';
+let configured = false;
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+async function loadStatus(){
+  try{
+    const r = await fetch(`${API}/status`);
+    const s = await r.json();
+    configured = !!s.configured;
+    const pill = document.getElementById('statusPill');
+    if(configured && s.reachable){
+      pill.className = 'pill pill-live'; pill.textContent = 'CONNECTED';
+    } else if(configured){
+      pill.className = 'pill pill-off'; pill.textContent = 'NOT REACHABLE';
+    } else {
+      pill.className = 'pill pill-off'; pill.textContent = 'NOT CONFIGURED';
+    }
+    document.getElementById('notConfigured').style.display = configured ? 'none' : 'block';
+  }catch(e){
+    document.getElementById('statusPill').textContent = 'ERROR';
+  }
+}
+
+function fmtDate(iso){
+  const d = new Date(iso);
+  if(isNaN(d)) return {day:'?',mon:'',time:''};
+  return {
+    day: d.getDate(),
+    mon: d.toLocaleString(undefined,{month:'short'}),
+    time: d.toLocaleString(undefined,{hour:'numeric',minute:'2-digit'})
+  };
+}
+
+// Normalize Cal.com v2 booking objects into a flat shape for rendering.
+function normalize(b){
+  const start = b.start || b.startTime || (b.startTime) || '';
+  const att = (b.attendees && b.attendees[0]) || {};
+  return {
+    uid: b.uid || b.id || '',
+    title: b.title || b.eventType?.title || 'Appointment',
+    name: att.name || b.responses?.name || '—',
+    email: att.email || b.responses?.email || '',
+    start,
+    duration: b.duration || (b.eventType && b.eventType.length) || null,
+    status: b.status || ''
+  };
+}
+
+async function loadBookings(){
+  await loadStatus();
+  const area = document.getElementById('bookingsArea');
+  if(!configured){ area.innerHTML = ''; return; }
+  area.innerHTML = '<div class="loading"><span class="spinner"></span> Loading…</div>';
+  try{
+    const r = await fetch(`${API}/bookings?status=upcoming`);
+    const data = await r.json();
+    if(!r.ok){
+      area.innerHTML = `<div class="error-msg">${(data && data.error) || 'Failed to load bookings.'}</div>`;
+      return;
+    }
+    // Cal.com v2 returns {data: [...]} or {bookings:[...]} depending on version.
+    let list = data.data || data.bookings || (Array.isArray(data) ? data : []);
+    if(!Array.isArray(list)) list = [];
+    if(list.length === 0){
+      area.innerHTML = '<div class="empty">No upcoming bookings.</div>';
+      return;
+    }
+    area.innerHTML = '<div class="book-list">' + list.map(raw=>{
+      const b = normalize(raw);
+      const f = fmtDate(b.start);
+      return `<div class="book">
+        <div class="book-when">
+          <span class="book-day">${f.day}</span>
+          <span class="book-mon">${f.mon}</span>
+          <span class="book-time">${f.time}</span>
+        </div>
+        <div class="book-info">
+          <div class="book-title">${esc(b.title)}</div>
+          <div class="book-who">${esc(b.name)}${b.email?' · '+esc(b.email):''}</div>
+          <div class="book-meta">${b.duration?b.duration+' min':''}${b.status?' · '+esc(b.status):''}</div>
+        </div>
+        ${b.uid ? `<button class="btn-cancel" onclick="cancelBooking('${b.uid}')">Cancel</button>` : ''}
+      </div>`;
+    }).join('') + '</div>';
+  }catch(e){
+    area.innerHTML = `<div class="error-msg">Network error: ${e.message}</div>`;
+  }
+}
+
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+async function cancelBooking(uid){
+  if(!confirm('Cancel this booking? The customer is notified automatically.')) return;
+  try{
+    const r = await fetch(`${API}/bookings/${encodeURIComponent(uid)}/cancel`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({cancellationReason:'Cancelled from booking dashboard'})
+    });
+    const d = await r.json();
+    if(r.ok){ toast('Booking cancelled'); loadBookings(); }
+    else { toast((d && d.error) || 'Cancel failed'); }
+  }catch(e){ toast('Network error'); }
+}
+
+async function blockDay(){
+  const date = document.getElementById('blockDate').value;
+  if(!date){ toast('Pick a date first'); return; }
+  const reason = document.getElementById('blockReason').value || 'Blocked';
+  const start = `${date}T00:00:00.000Z`;
+  const end = `${date}T23:59:59.000Z`;
+  const btn = document.getElementById('blockBtn');
+  btn.disabled = true; btn.textContent = 'Blocking…';
+  try{
+    const r = await fetch(`${API}/block`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({start, end, reason})
+    });
+    const d = await r.json();
+    if(r.ok){ toast(`Blocked ${date}`); }
+    else { toast((d && d.error) || 'Block failed'); }
+  }catch(e){ toast('Network error'); }
+  finally{ btn.disabled = false; btn.textContent = 'Block this day'; }
+}
+
+// init
+(function(){
+  const t = new Date(); t.setDate(t.getDate()+1);
+  document.getElementById('blockDate').value = t.toISOString().slice(0,10);
+  loadBookings();
+})();
+</script>
+</body>
+</html>
