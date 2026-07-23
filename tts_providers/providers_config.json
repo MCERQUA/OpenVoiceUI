@@ -16,9 +16,11 @@
       ],
       "requires_api_key": false,
       "status": "inactive",
-      "description": "Pocket TTS (Kyutai) — $0 local voice cloning on the macdaddy video/voice node. Clones a per-client brand voice from a ~10-20s reference clip into a reusable .safetensors state, then generates VO clips (~2-3s each). Client-facing via this Voice Cloning Studio canvas; jobs route to mac-claude@mesh over the Syncthing Dropzone bridge.",
+      "description": "Pocket TTS (Kyutai) \u2014 $0 local voice cloning on the macdaddy video/voice node. Clones a per-client brand voice from a ~10-20s reference clip into a reusable .safetensors state, then generates VO clips (~2-3s each). Client-facing via this Voice Cloning Studio canvas; jobs route to mac-claude@mesh over the Syncthing Dropzone bridge.",
       "documentation_url": "https://github.com/kyutai-labs/pocket-tts",
-      "languages": ["en"],
+      "languages": [
+        "en"
+      ],
       "max_characters": 600,
       "notes": "Self-hosted on the macdaddy node (handle_voice_clone). status=inactive until the OVU->mesh Dropzone bridge (POST /api/voice-clone/submit + result ingest) is wired; the studio card stays hidden while inactive, then auto-reveals like qwen3-local. Guardrail: dedicated deterministic handler, source-allowlisted host@mesh, NOT the permissionless claude path.",
       "requires_microphone": false,
@@ -40,7 +42,7 @@
       ],
       "requires_api_key": true,
       "status": "active",
-      "description": "Hume Octave — acting-direction TTS. Per-utterance description directs the performance; custom voices are designed (describe → generate → save). Also the performance-donor stage for Resemble STS character pipelines.",
+      "description": "Hume Octave \u2014 acting-direction TTS. Per-utterance description directs the performance; custom voices are designed (describe \u2192 generate \u2192 save). Also the performance-donor stage for Resemble STS character pipelines.",
       "documentation_url": "https://dev.hume.ai/docs/text-to-speech-tts/overview",
       "languages": [
         "en",
@@ -54,7 +56,7 @@
         "zh"
       ],
       "max_characters": 5000,
-      "notes": "REST /v0/tts (no websocket needed). HUME_API_KEY env + optional HUME_VOICE default. Cloudflare blocks non-browser User-Agents (403/1010) — provider sends a browser UA. save_voice(generation_id, name) keeps a take as a custom voice."
+      "notes": "REST /v0/tts (no websocket needed). HUME_API_KEY env + optional HUME_VOICE default. Cloudflare blocks non-browser User-Agents (403/1010) \u2014 provider sends a browser UA. save_voice(generation_id, name) keeps a take as a custom voice."
     },
     "supertonic": {
       "name": "Supertonic TTS",
@@ -125,7 +127,7 @@
       ],
       "requires_api_key": true,
       "status": "active",
-      "description": "Qwen3-TTS via fal.ai — voice cloning, emotion control, multilingual, 10 languages",
+      "description": "Qwen3-TTS via fal.ai \u2014 voice cloning, emotion control, multilingual, 10 languages",
       "languages": [
         "en",
         "zh",
@@ -165,7 +167,7 @@
       ],
       "requires_api_key": false,
       "status": "active",
-      "description": "Qwen3-TTS-1.7B on residential RTX 3070 GPU — free, no API cost. Cloned voices only. Requires laptop + tunnel to be up.",
+      "description": "Qwen3-TTS-1.7B on residential RTX 3070 GPU \u2014 free, no API cost. Cloned voices only. Requires laptop + tunnel to be up.",
       "languages": [
         "en",
         "zh",
@@ -179,7 +181,7 @@
         "ru"
       ],
       "max_characters": 5000,
-      "notes": "Free local GPU inference via reverse SSH tunnel. Cloned voices only (.pt). Auto-disabled when laptop offline — falls back to qwen3 (fal.ai). OVUI_BRIDGE_AUTH_TOKEN required.",
+      "notes": "Free local GPU inference via reverse SSH tunnel. Cloned voices only (.pt). Auto-disabled when laptop offline \u2014 falls back to qwen3 (fal.ai). OVUI_BRIDGE_AUTH_TOKEN required.",
       "clone_endpoint": "/api/tts/clone",
       "requires_microphone": false,
       "requires_websocket": false,
@@ -206,7 +208,7 @@
       ],
       "requires_api_key": true,
       "status": "active",
-      "description": "Resemble AI Chatterbox — streaming TTS, voice cloning, emotion/exaggeration control, SSML, 90+ languages",
+      "description": "Resemble AI Chatterbox \u2014 streaming TTS, voice cloning, emotion/exaggeration control, SSML, 90+ languages",
       "documentation_url": "https://docs.resemble.ai",
       "languages": [
         "en",
@@ -261,7 +263,7 @@
       ],
       "requires_api_key": true,
       "status": "active",
-      "description": "ElevenLabs — premium TTS with instant voice cloning, multilingual, emotion control",
+      "description": "ElevenLabs \u2014 premium TTS with instant voice cloning, multilingual, emotion control",
       "languages": [
         "en",
         "es",
@@ -311,7 +313,7 @@
       ],
       "requires_api_key": true,
       "status": "active",
-      "description": "Orpheus TTS (canopylabs/orpheus-v1-english) via Groq LPU — ~130-200ms, very natural",
+      "description": "Orpheus TTS (canopylabs/orpheus-v1-english) via Groq LPU \u2014 ~130-200ms, very natural",
       "languages": [
         "en"
       ],
@@ -322,6 +324,38 @@
       "mode": "tts-only",
       "audio_format": "mp3",
       "sample_rate": 24000
+    },
+    "grok": {
+      "name": "Grok / xAI TTS",
+      "provider_id": "grok",
+      "cost_per_minute": 0.0,
+      "quality": "high",
+      "latency": "fast",
+      "voices": [
+        "eve",
+        "ara",
+        "rex",
+        "sal",
+        "leo"
+      ],
+      "features": [
+        "streaming",
+        "websocket",
+        "multilingual",
+        "cloud"
+      ],
+      "requires_api_key": true,
+      "status": "inactive",
+      "description": "Grok / xAI text-to-speech (api.x.ai). Unary REST plus a websocket streaming path.",
+      "documentation_url": "https://docs.x.ai/developers/model-capabilities/audio/text-to-speech",
+      "languages": [
+        "en"
+      ],
+      "max_characters": 5000,
+      "notes": "XAI_API_KEY required; inactive and inert until it is set. Contributed via the Bartok9 fork. Pricing not pinned here \u2014 check xAI's current rates.",
+      "requires_microphone": false,
+      "requires_websocket": false,
+      "mode": "tts-only"
     }
   },
   "default_provider": "supertonic",
