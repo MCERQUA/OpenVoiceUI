@@ -213,6 +213,7 @@ __all__ = [
     'Qwen3LocalProvider',
     'ResembleProvider',
     'ElevenLabsProvider',
+    'GrokProvider',
     'get_provider',
     'list_providers',
     'invalidate',
