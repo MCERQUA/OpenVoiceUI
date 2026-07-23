@@ -495,3 +495,33 @@ def save_config():
         return jsonify({"ok": False, "error": str(e)}), 500
 
     return jsonify({"ok": True, "configured": bool(_api_key())})
+
+
+# ---------------------------------------------------------------------------
+# Manage info — everything the consumer "Cal Setup" canvas page needs in one
+# call, derived from the host-provisioned config. NO v2 API dependency: the
+# public booking page + embed are served by the Cal.diy web app directly, so
+# this works even while the v2 REST API is not deployed (web-app-only MVP,
+# 2026-07-23). The cal_login_* fields are the tenant OWNER's own calendar
+# credentials; the canvas page is Clerk-admin-gated so only the owner sees them.
+# ---------------------------------------------------------------------------
+
+@booking_bp.route("/api/booking/manage", methods=["GET"])
+def manage_info():
+    """Consumer-page payload: booking link, embed base, and owner Cal login."""
+    cfg = _load_config()
+    base = _api_url().rstrip("/")
+    user = _username()
+    provisioned = bool(user)
+    return jsonify({
+        "provisioned": provisioned,
+        "username": user,
+        "api_url": base,
+        "booking_url": f"{base}/{user}" if provisioned else "",
+        "event_url": f"{base}/{user}/30min" if provisioned else "",
+        "embed_base": base,
+        "login_url": f"{base}/auth/login",
+        "cal_login_email": cfg.get("cal_login_email", ""),
+        "cal_login_password": cfg.get("cal_login_password", ""),
+        "provisioned_at": cfg.get("provisioned_at", ""),
+    })

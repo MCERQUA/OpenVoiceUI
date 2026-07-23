@@ -7,8 +7,13 @@
   "type": "page",
   "license": "MIT",
   "requires": "openvoiceui >= 1.0",
-
   "pages": [
+    {
+      "file": "pages/cal-setup.html",
+      "name": "Booking",
+      "title": "Booking",
+      "icon": "calendar"
+    },
     {
       "file": "pages/booking.html",
       "name": "Booking",
@@ -22,7 +27,6 @@
       "icon": "settings"
     }
   ],
-
   "routes": [
     {
       "module": "routes/booking.py",
@@ -30,8 +34,9 @@
       "prefix": "/api/booking"
     }
   ],
-
-  "requires_env": ["CAL_API_KEY"],
+  "requires_env": [
+    "CAL_API_KEY"
+  ],
   "credentials": [
     {
       "id": "cal_diy",
@@ -42,7 +47,9 @@
       "env_var": "CAL_API_KEY",
       "docs_url": "https://cal.com/docs/api-reference/v2/introduction",
       "consumers": {
-        "openclaw": {"type": "env_var"}
+        "openclaw": {
+          "type": "env_var"
+        }
       }
     }
   ]
