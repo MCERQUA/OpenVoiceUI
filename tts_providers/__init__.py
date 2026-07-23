@@ -35,6 +35,7 @@ from .qwen3_provider import Qwen3Provider
 from .qwen3_local_provider import Qwen3LocalProvider
 from .resemble_provider import ResembleProvider
 from .elevenlabs_provider import ElevenLabsProvider
+from .grok_provider import GrokProvider
 
 # Provider registry
 _PROVIDERS = {
@@ -45,6 +46,7 @@ _PROVIDERS = {
     'qwen3-local': Qwen3LocalProvider,
     'resemble': ResembleProvider,
     'elevenlabs': ElevenLabsProvider,
+    'grok': GrokProvider,
 }
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'providers_config.json')
@@ -211,6 +213,7 @@ __all__ = [
     'Qwen3LocalProvider',
     'ResembleProvider',
     'ElevenLabsProvider',
+    'GrokProvider',
     'get_provider',
     'list_providers',
     'invalidate',
