@@ -6,7 +6,7 @@ flask-limiter==4.1.1
 flask-sock==0.7.0
 
 # WebSocket & HTTP
-websockets==16.1
+websockets==16.1.1
 requests==2.34.2
 # httpx is imported directly by several providers (tts_providers/{hume,elevenlabs,resemble,
 # qwen3,qwen3_local}_provider.py, routes/story.py, providers/stt/grok_provider.py). It was
