@@ -971,7 +971,10 @@ def canvas_pages_proxy(path):
                 # directly from the browser with user's own API keys.
                 resp.headers['Content-Security-Policy'] = (
                     "default-src 'none'; "
-                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://games.jam-bot.com blob:; "
+                    # maps.googleapis.com + maps.gstatic.com: required by the `maps` skill's
+                    # Google Maps JS canvas pages. Omitting them silently blanks every map
+                    # (console-only CSP violation). Found 2026-07-24. Do NOT re-strip.
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://games.jam-bot.com https://maps.googleapis.com https://maps.gstatic.com blob:; "
                     "style-src 'unsafe-inline' https://games.jam-bot.com https://fonts.googleapis.com; "
                     "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob: https:; "
@@ -982,7 +985,8 @@ def canvas_pages_proxy(path):
                         "https://api.x.ai https://api.groq.com "
                         "https://api.together.xyz https://openrouter.ai "
                         "https://api.anthropic.com https://api.cohere.ai "
-                        "https://api.dataforseo.com https://sandbox.dataforseo.com; "
+                        "https://api.dataforseo.com https://sandbox.dataforseo.com "
+                        "https://maps.googleapis.com; "
                     "worker-src blob:; "
                     "frame-src 'self' https://*.jam-bot.com https://*.netlify.app https://midiviz.com "
                         "https://w.soundcloud.com https://bandcamp.com https://*.bandcamp.com"
