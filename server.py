@@ -206,6 +206,9 @@ app.register_blueprint(onboarding_bp)
 from routes.image_gen import image_gen_bp
 app.register_blueprint(image_gen_bp)
 
+from routes.meshy import meshy_bp
+app.register_blueprint(meshy_bp)
+
 from routes.chat import chat_bp
 app.register_blueprint(chat_bp)
 
