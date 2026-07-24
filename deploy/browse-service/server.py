@@ -166,6 +166,26 @@ def _validate_url(url: str) -> tuple[bool, str]:
     return True, parsed.geturl()
 
 
+async def _safe_title(page) -> str:
+    """`page.title()` races with in-flight navigation on SPA sites (e.g. reddit
+    client-side redirects): Playwright raises "Execution context was destroyed,
+    most likely because of a navigation" and a bare read 500s the whole request.
+    Wait for the DOM to settle and retry once; never let a title read fail a
+    request — return "" if it can't be read."""
+    for attempt in range(2):
+        try:
+            return await page.title()
+        except Exception:
+            if attempt == 0:
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass
+                continue
+            return ""
+    return ""
+
+
 # ── Session model ───────────────────────────────────────────────────────────
 class Tab:
     """One page/tab within a session's browser context (#154 Phase 5)."""
@@ -457,7 +477,7 @@ class BrowseService:
             else:
                 raise web.HTTPBadRequest(reason=f"unknown action: {action}")
             sess.touch()
-        return {"ok": True, "url": page.url, "title": await page.title()}
+        return {"ok": True, "url": page.url, "title": await _safe_title(page)}
 
     async def extract_dom(self, sess: Session):
         """Simplified page model for the agent: text + links + inputs + buttons."""
@@ -666,7 +686,7 @@ async def h_start(request):
     sess = await svc.start_session(tenant, url, width, height, proxy)
     return web.json_response({
         "ok": True, "tenant": tenant,
-        "url": sess.page.url, "title": await sess.page.title(),
+        "url": sess.page.url, "title": await _safe_title(sess.page),
     })
 
 
@@ -701,7 +721,7 @@ async def h_status(request):
     sess = _get_session(request.query.get("tenant", "").strip())
     return web.json_response({
         "tenant": sess.tenant, "url": sess.page.url,
-        "title": await sess.page.title(),
+        "title": await _safe_title(sess.page),
         "idle_s": round(sess.idle_s, 1),
         "viewers": len(sess.viewers),
         "screencasting": sess.screencasting,
