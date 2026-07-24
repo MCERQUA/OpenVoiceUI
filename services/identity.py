@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +36,14 @@ OFFICE_MATTERS_DIR = os.getenv(
     'OFFICE_MATTERS_DIR',
     '/app/runtime/workspace/Agent/office/matters',
 )
+
+# FR-19: office files are only as fresh as the host-side extraction that
+# built them (see office-build.py). Stale entries (e.g. a "last_seen"
+# months old, or a commitment logged in March) should never be injected as
+# if they're live/open — that reads to the agent as a current promise it
+# needs to act on today. Anything older than this is summarized instead of
+# quoted verbatim.
+OFFICE_FOLLOWUP_MAX_AGE_DAYS = int(os.getenv('OFFICE_FOLLOWUP_MAX_AGE_DAYS', '30'))
 
 
 def _slugify(s: str) -> str:
@@ -68,9 +77,16 @@ def _load_office_briefing(name: str) -> Optional[str]:
             if last_seen and total_events:
                 break
 
-        # Pull commitments (first ~3 from the "Open follow-ups" section)
+        # Pull commitments (first ~3 from the "Open follow-ups" section).
+        # AGE-GUARD (FR-19): a follow-up older than
+        # OFFICE_FOLLOWUP_MAX_AGE_DAYS is NOT injected verbatim as if it's
+        # still open — it's summarized instead. Without this, a March
+        # "I'll get back to you" line reads to the agent as a live promise
+        # made this session, months after the fact.
         commitments = []
+        has_stale_followups = False
         in_block = False
+        now = datetime.now()
         for line in text.splitlines():
             if line.strip().startswith('## Open follow-ups'):
                 in_block = True
@@ -78,7 +94,18 @@ def _load_office_briefing(name: str) -> Optional[str]:
             if in_block and line.startswith('## '):
                 break
             if in_block and line.startswith('- ') and not line.startswith('- (none'):
-                commitments.append(line[2:].strip()[:120])
+                item = line[2:].strip()
+                age_days = None
+                m = re.match(r'^\[(\d{4}-\d{2}-\d{2})[ T]', item)
+                if m:
+                    try:
+                        age_days = (now - datetime.strptime(m.group(1), '%Y-%m-%d')).days
+                    except Exception:
+                        age_days = None
+                if age_days is not None and age_days > OFFICE_FOLLOWUP_MAX_AGE_DAYS:
+                    has_stale_followups = True
+                    continue
+                commitments.append(item[:120])
                 if len(commitments) >= 3:
                     break
 
@@ -116,6 +143,10 @@ def _load_office_briefing(name: str) -> Optional[str]:
         out = [f'Office file present ({meta}).']
         if commitments:
             out.append('Open with them: ' + ' | '.join(commitments))
+            if has_stale_followups:
+                out.append('(older history also on file, not shown — treat only the above as current).')
+        elif has_stale_followups:
+            out.append(f'No commitments in the last {OFFICE_FOLLOWUP_MAX_AGE_DAYS} days (older history available — do not treat as still open).')
         else:
             out.append('No outstanding commitments to them.')
         if matters_top:
