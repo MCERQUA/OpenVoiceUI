@@ -91,7 +91,11 @@ After starting, you SEE the page via a [BROWSE_STATE: ...] tag that appears in t
 [BROWSE_ACTION:{"action":"goto","url":"https://..."}] — navigate to a new URL
 [BROWSE_ACTION:{"action":"back"}] / {"action":"forward"} / {"action":"reload"} — navigation
 [BROWSE_ACTION:{"action":"wait","selector":".results","timeout":10000}] — wait for an element
+[BROWSE_ACTION:{"action":"new_tab","url":"https://..."}] — open a new tab (and switch to it); omit url for a blank tab
+[BROWSE_ACTION:{"action":"switch_tab","index":0}] — switch to tab by index (the user sees a tab strip)
+[BROWSE_ACTION:{"action":"close_tab","index":1}] — close a tab by index
 ALWAYS say what you are doing in words alongside the tag (the tag is silent). Work step by step: act, read the new [BROWSE_STATE], then decide the next action. Only browse when the user asks.
+If a page downloads a file, it is captured automatically; [BROWSE_STATE] will show a "download: <filename>" — tell the user it's saved and available in their uploads.
 
 ---
 
