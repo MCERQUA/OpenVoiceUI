@@ -69,11 +69,25 @@ DEFAULT_W = int(os.getenv("BROWSE_WIDTH", "1280"))
 DEFAULT_H = int(os.getenv("BROWSE_HEIGHT", "800"))
 NAV_TIMEOUT_MS = int(os.getenv("BROWSE_NAV_TIMEOUT_MS", "30000"))
 SCREENCAST_QUALITY = int(os.getenv("BROWSE_SCREENCAST_QUALITY", "60"))
-USER_AGENT = os.getenv(
-    "BROWSE_USER_AGENT",
+# We present as desktop Chrome on Windows rather than headless Chromium on
+# Linux — that part is deliberate. What is NOT deliberate is the version drifting
+# away from the browser actually doing the rendering: a UA claiming Chrome/131
+# while Chromium 130 renders the page is a fingerprint MISMATCH, which is worse
+# for bot detection than a truthful UA (it's exactly what detectors look for).
+# That had already happened by 2026-07-24 (UA 131 vs real 130).
+#
+# So the major version is filled in from the LIVE browser at startup (see
+# BrowserPool.startup) and this is only the template + fallback. An explicit
+# BROWSE_USER_AGENT env override still wins and is left untouched.
+_UA_TEMPLATE = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
 )
+_UA_FALLBACK_MAJOR = "131"
+USER_AGENT = os.getenv("BROWSE_USER_AGENT") or _UA_TEMPLATE.format(
+    major=_UA_FALLBACK_MAJOR
+)
+_UA_PINNED = bool(os.getenv("BROWSE_USER_AGENT"))  # operator override — never rewrite
 
 # ── IP masking / residential egress (#154 Phase 4) ───────────────────────────
 # When BROWSE_PROXY_SERVER is set, every session egresses through it — the fix
@@ -248,8 +262,19 @@ class BrowseService:
                 "--disable-blink-features=AutomationControlled",
             ],
         )
-        logger.info("chromium launched; max_sessions=%d idle_timeout=%ds",
-                    MAX_SESSIONS, IDLE_TIMEOUT_S)
+        # Align the advertised UA major with the browser that actually renders,
+        # so a future Chromium bump can't silently re-open the mismatch above.
+        global USER_AGENT
+        if not _UA_PINNED:
+            try:
+                major = (self.browser.version or "").split(".")[0]
+                if major.isdigit():
+                    USER_AGENT = _UA_TEMPLATE.format(major=major)
+            except Exception as e:      # never block startup over a UA string
+                logger.warning("could not derive UA from browser version: %s", e)
+
+        logger.info("chromium launched v%s; ua=%s max_sessions=%d idle_timeout=%ds",
+                    self.browser.version, USER_AGENT, MAX_SESSIONS, IDLE_TIMEOUT_S)
 
     async def shutdown(self):
         for tenant in list(self.sessions):
