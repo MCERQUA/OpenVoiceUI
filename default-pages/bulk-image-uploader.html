@@ -384,7 +384,7 @@ function upload(file,id,retries){
         setQI(id,100,'ok',null,r);
         const e=ext(r.original_name||file.name);
         files.unshift({name:r.original_name||file.name,url:r.url,size:file.size,ext:e,cat:cat(e),modified:Date.now()/1000});
-        render();updateStor();
+        renderThrottled();updateStorThrottled();
       }catch(e){setQI(id,0,'err','Parse error')}
     }else if(retries<2){
       setQI(id,-1,'up');
@@ -448,6 +448,22 @@ $('tabs').onclick=e=>{const t=e.target.closest('.tab');if(!t)return;filter=t.dat
 $('srch').oninput=()=>render();
 
 // ── Gallery ──
+// Throttled render: the upload path calls render() on EVERY completed file, and
+// render() rebuilds the ENTIRE grid innerHTML. With a large existing library
+// (100+ files) plus 3 concurrent uploads finishing rapidly, that is a full
+// 100+-card DOM teardown several times a second — it froze the tab on a bulk
+// upload to a tenant that already had 100+ images (koolfoam, 2026-07-23). Coalesce
+// the burst: at most one rebuild per ~150ms, and always render the final state.
+let _renderT=null;
+function renderThrottled(){
+  if(_renderT)return;
+  _renderT=setTimeout(()=>{_renderT=null;render();},150);
+}
+let _storT=null;
+function updateStorThrottled(){
+  if(_storT)clearTimeout(_storT);
+  _storT=setTimeout(()=>{_storT=null;updateStor();},600);
+}
 function render(){
   renderTabs();
   const s=$('srch').value.toLowerCase();
