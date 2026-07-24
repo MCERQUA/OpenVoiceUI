@@ -203,6 +203,12 @@ def create_app(config_override: dict = None):
             '/api/icons/',    # GET icon library — generate/upload gated (SEC-9)
             '/api/suno',      # GET status/song-list — generation POSTs gated (SEC-9)
             '/api/profiles',  # GET profile config — activate/save writes gated (SEC-10)
+            '/api/maps/config',  # GET Google-Maps JS API key — canvas iframe pages can't
+                                 # authenticate (window.authFetch not injected there) and the
+                                 # JS key is browser-exposed BY DESIGN (Google Maps JS loads it
+                                 # client-side). Security boundary = HTTP-referrer restriction on
+                                 # the key in Google Cloud (must be *.jam-bot.com). /api/maps/
+                                 # directions (POST, billable server-side calls) stays gated.
         )
         # NOTE: /api/stt/ is intentionally NOT public — the Deepgram token
         # endpoint returns a live secret (SEC-1). All /api/stt/* now requires a
