@@ -357,10 +357,17 @@ def create_app(config_override: dict = None):
             # CDN, which compiles CSS at runtime via eval()/new Function — without unsafe-eval the script
             # loads but generates NO styles → pages still render as raw text. (canvas.py CSP already had
             # these; the global one didn't — that was the real cause of the unstyled SEO dashboard.)
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.jam-bot.com; "
+            # maps.googleapis.com + maps.gstatic.com are REQUIRED for the `maps` skill's
+            # canvas pages (Google Maps JS API). Without them the JS is blocked and every
+            # map page renders an empty box — silently, since the only signal is a console
+            # CSP violation. Found 2026-07-24: the maps skill documented these as allowed
+            # but they were never actually in either CSP. Do NOT re-strip.
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.jam-bot.com https://maps.googleapis.com https://maps.gstatic.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' data: https://fonts.gstatic.com; "
-            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io; "
+            # Map tiles/markers come from maps.gstatic.com, *.googleapis.com (khms tile
+            # shards) and *.ggpht.com (Street View); googleusercontent serves place photos.
+            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.ggpht.com https://*.googleusercontent.com; "
             "media-src 'self' blob:; "
             "connect-src 'self' wss: https:; "
             "frame-src 'self' https://*.clerk.accounts.dev https://*.jam-bot.com https:; "
