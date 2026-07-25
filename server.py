@@ -57,19 +57,52 @@ _whisper_model = None
 
 
 def get_whisper_model():
+    """LEGACY in-process Whisper. Only used if the shared STT service is absent.
+
+    Prefer the shared jambot-parakeet service (see local_stt below): the model is
+    ~680MB and baking it into every one of 24+ OVU containers would be wasteful
+    on a memory-constrained box. faster-whisper is also NOT installed by default
+    (commented out in requirements.txt), so this path normally raises.
+    """
     global _whisper_model
     if _whisper_model is None:
         try:
             from faster_whisper import WhisperModel
         except ImportError:
             raise ImportError(
-                "Local STT requires faster-whisper. Install it with: "
-                "pip install faster-whisper"
+                "Local STT requires either the shared jambot-parakeet service "
+                "(preferred — set PARAKEET_STT_URL) or faster-whisper installed "
+                "in this container."
             )
         logger.info("Loading Faster-Whisper model (first STT request)...")
         _whisper_model = WhisperModel("tiny", device="cpu", compute_type="float32")
         logger.info("Faster-Whisper model ready.")
     return _whisper_model
+
+
+# Shared on-box STT (NVIDIA Parakeet TDT 0.6B v3) on the jambot-shared network.
+# Free, keyless, audio never leaves the server. See deploy/parakeet-stt/.
+PARAKEET_STT_URL = os.getenv("PARAKEET_STT_URL", "http://jambot-parakeet:8770")
+
+
+def _parakeet_transcribe(audio_bytes, filename="audio.webm", timeout=180):
+    """POST to the shared STT service. Returns transcript str, or None if the
+    service is unreachable so the caller can fall back rather than fail."""
+    import requests
+    try:
+        r = requests.post(
+            f"{PARAKEET_STT_URL}/transcribe",
+            files={"audio": (filename, audio_bytes)},
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            logger.warning("parakeet STT http %s: %s", r.status_code, r.text[:200])
+            return None
+        return (r.json() or {}).get("text", "")
+    except Exception as e:
+        # Unreachable is a fallback condition, not an error to surface upward.
+        logger.info("parakeet STT unavailable (%s) — falling back", e)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1184,6 +1217,16 @@ def local_stt():
 
     audio_file = request.files["audio"]
     audio_bytes = audio_file.read()
+
+    # PREFERRED PATH: the shared jambot-parakeet service. One ~680MB model for
+    # the whole fleet instead of a copy per OVU container, and it does its own
+    # ffmpeg normalisation. Falls through to the in-process path below only if
+    # the service is unreachable — a missing shared service degrades, it does
+    # not break voice.
+    _text = _parakeet_transcribe(audio_bytes, audio_file.filename or "audio.webm")
+    if _text is not None:
+        logger.info("Local STT (parakeet): %r", _text)
+        return jsonify({"transcript": _text, "success": True, "engine": "parakeet-tdt-0.6b-v3"})
 
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
         tmp.write(audio_bytes)
