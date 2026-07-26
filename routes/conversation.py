@@ -1383,13 +1383,32 @@ def _conversation_inner():
                     except Exception as _ie:
                         logger.debug('Could not read .image-intel cache: %s', _ie)
                 if _upload_desc is None:
-                    from routes.vision import _call_vision
-                    _img_b64 = base64.b64encode(_img_file.read_bytes()).decode('ascii')
-                    _upload_desc = _call_vision(
-                        _img_b64,
-                        'Describe what you see in this image in detail. Include colors, objects, text, people, layout, and any notable features.',
-                    )
-                    logger.info('Vision analysis of uploaded image via live API succeeded (%d bytes)', _img_file.stat().st_size)
+                    # No cache yet — trigger subscription Claude sweep for this tenant
+                    # (never call paid Groq/OpenAI/Gemini vision APIs for tasks subscription handles)
+                    import subprocess as _sp, re as _re
+                    _tenant_m = _re.search(r'/mnt/clients/([^/]+)/', str(_img_file))
+                    if _tenant_m:
+                        _sweep = '/home/mike/MIKE-AI/scripts/image-intel/image-intel-sweep.py'
+                        try:
+                            _sp.run(
+                                ['python3', _sweep, '--tenant', _tenant_m.group(1), '--limit', '1'],
+                                timeout=45, capture_output=True,
+                            )
+                            if _intel_path.is_file():
+                                import json as _json2
+                                _intel2 = _json2.loads(_intel_path.read_text())
+                                _c2 = _intel2.get('analysis', {}).get('description', '').strip()
+                                if _c2:
+                                    _upload_desc = _c2
+                                    _txt2 = _intel2.get('analysis', {}).get('text_in_image', '').strip()
+                                    if _txt2:
+                                        _upload_desc += f' Text visible: {_txt2}'
+                                    logger.info('Image analyzed via subscription Claude sweep: %s', _img_file.name)
+                        except Exception as _se:
+                            logger.warning('Subscription sweep for image failed: %s', _se)
+                    if _upload_desc is None:
+                        _upload_desc = 'Image received and is being analyzed via subscription Claude. Ask me about it again in about 30 seconds.'
+                        logger.info('Image queued for subscription analysis: %s', _img_file.name)
                 context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
