@@ -80,9 +80,18 @@ _STT_STATIC = {
         'name': 'Groq Whisper', 'source': 'builtin',
         'creds': ['GROQ_API_KEY'], 'note': 'Groq whisper-large (/api/stt/groq).',
     },
+    # Was advertised as 'faster-whisper on-box' with creds:[] while
+    # faster-whisper was NOT installed (commented out in requirements.txt) —
+    # anything picking a provider from this registry would choose it as the free
+    # option and get a runtime failure. Now names what actually serves it.
     'whisper': {
-        'name': 'Whisper (local)', 'source': 'builtin',
-        'creds': [], 'note': 'faster-whisper on-box (/api/stt/local).',
+        'name': 'Parakeet TDT 0.6B v3 (local)', 'source': 'builtin',
+        'creds': [],
+        'note': 'Shared on-box STT via jambot-parakeet:8770 (/api/stt/local). '
+                'No API key, no per-call cost, audio stays on the server. '
+                'Falls back to in-process faster-whisper only if that service '
+                'is unreachable AND the package is installed. '
+                'Model licence CC-BY-4.0 — attribution required.',
     },
     'external': {
         'name': 'External STT', 'source': 'builtin',
