@@ -1336,8 +1336,7 @@ def brave_search():
 
 @app.route("/api/search", methods=["GET", "POST"])
 def web_search():
-    """Web search via DuckDuckGo (no API key required)."""
-    import urllib.request
+    """Web search via DuckDuckGo routed through residential SOCKS5 proxy."""
     import urllib.parse
     from html.parser import HTMLParser
 
@@ -1381,14 +1380,20 @@ def web_search():
             if self._capture:
                 self._text += data
 
+    # Route through residential proxy (avoids datacenter IP blocks)
+    proxy_server = os.getenv("BROWSE_PROXY_SERVER", "")
+    session_proxies = {"http": proxy_server, "https": proxy_server} if proxy_server else None
+
     try:
         encoded = urllib.parse.quote_plus(query)
-        req = urllib.request.Request(
+        resp = requests.get(
             f"https://html.duckduckgo.com/html/?q={encoded}",
             headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
+            proxies=session_proxies,
+            timeout=15,
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            html = resp.read().decode("utf-8")
+        resp.raise_for_status()
+        html = resp.text
         parser = _DDGParser()
         parser.feed(html)
         results = parser.results[:5]
