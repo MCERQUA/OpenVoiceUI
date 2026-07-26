@@ -1383,26 +1383,33 @@ def _conversation_inner():
                     except Exception as _ie:
                         logger.debug('Could not read .image-intel cache: %s', _ie)
                 if _upload_desc is None:
-                    # No cache yet — route to vision@mesh (persistent claude-code/sonnet in tmux)
+                    # No cache yet — route to vision@mesh via openclaw container (has mesh-send + mesh mount)
                     # Non-blocking: mesh task, vision agent writes .image-intel sidecar async
-                    import subprocess as _sp, re as _re
-                    _tenant_m = _re.search(r'/mnt/clients/([^/]+)/', str(_img_file))
-                    if _tenant_m:
-                        _tenant = _tenant_m.group(1)
+                    # OVU runs inside Docker; mesh-send isn't in this image but openclaw-<tenant> has it.
+                    import subprocess as _sp
+                    _tenant = os.getenv('JAMBOT_TENANT', '')
+                    if _tenant:
+                        # Build the HOST path (vision agent runs on host, needs /mnt/clients/ path)
+                        _host_img_path = f'/mnt/clients/{_tenant}/openvoiceui/uploads/{_img_file.name}'
+                        _msg_body = (
+                            f'image_path: {_host_img_path}\n'
+                            f'tenant: {_tenant}\n'
+                            f'filename: {_img_file.name}'
+                        )
+                        _mesh_cmd = (
+                            f'AGENT_URI=openvoiceui@mesh '
+                            f'/mnt/shared-skills/agent-mesh/bin/mesh-send '
+                            f'--to vision@mesh --kind task '
+                            f'--subject analyze-{_img_file.stem[:40]}'
+                        )
                         try:
-                            _msg_body = (
-                                f'image_path: {_img_file}\n'
-                                f'tenant: {_tenant}\n'
-                                f'filename: {_img_file.name}'
-                            )
-                            _env = {**os.environ, 'AGENT_URI': 'openvoiceui@mesh'}
                             _sp.run(
-                                ['mesh-send', '--to', 'vision@mesh', '--kind', 'task',
-                                 '--subject', f'analyze-{_img_file.stem[:40]}'],
+                                ['docker', 'exec', '-i', f'openclaw-{_tenant}',
+                                 'bash', '-c', _mesh_cmd],
                                 input=_msg_body.encode(),
-                                timeout=5, capture_output=True, env=_env,
+                                timeout=8, capture_output=True,
                             )
-                            logger.info('Image analysis queued to vision@mesh: %s', _img_file.name)
+                            logger.info('Image analysis queued to vision@mesh via openclaw-%s: %s', _tenant, _img_file.name)
                         except Exception as _se:
                             logger.warning('Failed to queue vision task to vision@mesh: %s', _se)
                     _upload_desc = 'Image is being analyzed now. Ask me about it in about 30 seconds.'
