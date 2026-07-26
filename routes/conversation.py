@@ -1363,14 +1363,34 @@ def _conversation_inner():
             if 'uploads' not in _img_file.parts:
                 raise ValueError(f'Path traversal blocked: {image_path}')
             if _img_file.is_file() and _img_file.stat().st_size < 20_000_000:  # 20MB safety cap
-                from routes.vision import _call_vision
-                _img_b64 = base64.b64encode(_img_file.read_bytes()).decode('ascii')
-                _upload_desc = _call_vision(
-                    _img_b64,
-                    'Describe what you see in this image in detail. Include colors, objects, text, people, layout, and any notable features.',
-                )
+                # Check .image-intel cache first — avoids live API call when image was pre-analyzed
+                _intel_path = _img_file.parent / '.image-intel' / (_img_file.name + '.json')
+                _upload_desc = None
+                if _intel_path.is_file():
+                    try:
+                        import json as _json
+                        _intel = _json.loads(_intel_path.read_text())
+                        _cached = _intel.get('analysis', {}).get('description', '').strip()
+                        if _cached:
+                            _kw = _intel.get('analysis', {}).get('keywords', [])
+                            _txt = _intel.get('analysis', {}).get('text_in_image', '').strip()
+                            _upload_desc = _cached
+                            if _txt:
+                                _upload_desc += f' Text visible in image: {_txt}'
+                            if _kw:
+                                _upload_desc += f' Keywords: {", ".join(_kw[:10])}'
+                            logger.info('Loaded image analysis from .image-intel cache: %s', _img_file.name)
+                    except Exception as _ie:
+                        logger.debug('Could not read .image-intel cache: %s', _ie)
+                if _upload_desc is None:
+                    from routes.vision import _call_vision
+                    _img_b64 = base64.b64encode(_img_file.read_bytes()).decode('ascii')
+                    _upload_desc = _call_vision(
+                        _img_b64,
+                        'Describe what you see in this image in detail. Include colors, objects, text, people, layout, and any notable features.',
+                    )
+                    logger.info('Vision analysis of uploaded image via live API succeeded (%d bytes)', _img_file.stat().st_size)
                 context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
-                logger.info('Vision analysis of uploaded image succeeded (%d bytes)', _img_file.stat().st_size)
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
                 context_parts.append('[UPLOADED IMAGE: File could not be analyzed — may be too large or missing.]')
