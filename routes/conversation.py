@@ -1383,18 +1383,30 @@ def _conversation_inner():
                     except Exception as _ie:
                         logger.debug('Could not read .image-intel cache: %s', _ie)
                 if _upload_desc is None:
-                    # No cache yet — analyze via headless Claude (subscription, no marginal cost)
-                    # docker run jambot/openclaw:latest has the claude binary; same path as cron sweep
-                    try:
-                        from routes.vision import _call_vision_via_claude
-                        _upload_desc = _call_vision_via_claude(
-                            str(_img_file),
-                            'Describe what you see in this image in detail. Include colors, objects, text, people, layout, and any notable features.',
-                        )
-                        logger.info('Image analyzed live via claude subscription: %s', _img_file.name)
-                    except Exception as _ve:
-                        logger.warning('Claude live vision failed, image queued for cron: %s', _ve)
-                        _upload_desc = 'Image received and is being analyzed. Ask me about it again in about a minute.'
+                    # No cache yet — route to vision@mesh (persistent claude-code/sonnet in tmux)
+                    # Non-blocking: mesh task, vision agent writes .image-intel sidecar async
+                    import subprocess as _sp, re as _re
+                    _tenant_m = _re.search(r'/mnt/clients/([^/]+)/', str(_img_file))
+                    if _tenant_m:
+                        _tenant = _tenant_m.group(1)
+                        try:
+                            _msg_body = (
+                                f'image_path: {_img_file}\n'
+                                f'tenant: {_tenant}\n'
+                                f'filename: {_img_file.name}'
+                            )
+                            _env = {**os.environ, 'AGENT_URI': 'openvoiceui@mesh'}
+                            _sp.run(
+                                ['mesh-send', '--to', 'vision@mesh', '--kind', 'task',
+                                 '--subject', f'analyze-{_img_file.stem[:40]}'],
+                                input=_msg_body.encode(),
+                                timeout=5, capture_output=True, env=_env,
+                            )
+                            logger.info('Image analysis queued to vision@mesh: %s', _img_file.name)
+                        except Exception as _se:
+                            logger.warning('Failed to queue vision task to vision@mesh: %s', _se)
+                    _upload_desc = 'Image is being analyzed now. Ask me about it in about 30 seconds.'
+                    logger.info('Image routed to vision@mesh: %s', _img_file.name)
                 context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
