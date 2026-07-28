@@ -21,6 +21,7 @@ import time
 import requests as http
 from flask import Blueprint, jsonify, request
 from services.paths import UPLOADS_DIR
+from services.metered_spend import log_spend
 
 logger = logging.getLogger(__name__)
 image_gen_bp = Blueprint('image_gen', __name__)
@@ -304,6 +305,9 @@ def generate_image():
                 return jsonify({'error': 'GEMINI_API_KEY not configured on server'}), 503
             imgs_out, text_out = _generate_gemini(model, prompt, images)
 
+        # Spend tally — the call was made (and billed) whether or not an image came back.
+        log_spend('image-gen', model, cost_key='hf-inference' if is_hf else None)
+
         if not imgs_out:
             return jsonify({'error': 'Model returned no image', 'text': text_out}), 502
 
@@ -343,6 +347,7 @@ def enhance_prompt_route():
 
     try:
         enhanced = _enhance_prompt(idea, quality, style)
+        log_spend('image-gen/enhance', 'enhance-prompt')
         if not enhanced:
             return jsonify({'error': 'LLM returned empty response'}), 502
         logger.info('enhance_prompt: idea_len=%d → prompt_len=%d quality=%s', len(idea), len(enhanced), quality)
