@@ -1387,6 +1387,11 @@ def _conversation_inner():
                     # Non-blocking: mesh task, vision agent writes .image-intel sidecar async
                     # OVU runs inside Docker; mesh-send isn't in this image but openclaw-<tenant> has it.
                     import subprocess as _sp
+                    # Initialised BEFORE the `if _tenant` guard on purpose: it is read after that
+                    # block, so a tenant-less request would otherwise raise NameError. Defaulting
+                    # to False also makes the no-tenant path honest — nothing was queued there
+                    # either, so the user must not be told an analysis is coming.
+                    _queued = False
                     _tenant = os.getenv('JAMBOT_TENANT', '')
                     if _tenant:
                         # Build the HOST path (vision agent runs on host, needs /mnt/clients/ path)
@@ -1402,18 +1407,39 @@ def _conversation_inner():
                             f'--to vision@mesh --kind task '
                             f'--subject analyze-{_img_file.stem[:40]}'
                         )
+                        # CHECK THE RETURN CODE. This previously ran with capture_output=True, no
+                        # check=, and no inspection of returncode — then logged "Image analysis
+                        # queued" unconditionally. A mesh-send that exited non-zero (unknown kind,
+                        # missing mailbox, rate limit) was reported as SUCCESS BY THE SENDER while
+                        # nothing was ever queued, and the user was told "being analyzed now" for
+                        # an image nothing would ever look at. Success must come from the receiver,
+                        # or at minimum from the exit code — never from having reached the call.
+                        _queued = False
                         try:
-                            _sp.run(
+                            _r = _sp.run(
                                 ['docker', 'exec', '-i', f'openclaw-{_tenant}',
                                  'bash', '-c', _mesh_cmd],
                                 input=_msg_body.encode(),
                                 timeout=8, capture_output=True,
                             )
-                            logger.info('Image analysis queued to vision@mesh via openclaw-%s: %s', _tenant, _img_file.name)
+                            if _r.returncode == 0:
+                                _queued = True
+                                logger.info('Image analysis queued to vision@mesh via openclaw-%s: %s',
+                                            _tenant, _img_file.name)
+                            else:
+                                logger.error('vision@mesh queue FAILED rc=%s tenant=%s file=%s stderr=%s',
+                                             _r.returncode, _tenant, _img_file.name,
+                                             (_r.stderr or b'').decode('utf-8', 'replace')[:300])
                         except Exception as _se:
                             logger.warning('Failed to queue vision task to vision@mesh: %s', _se)
-                    _upload_desc = 'Image is being analyzed now. Ask me about it in about 30 seconds.'
-                    logger.info('Image routed to vision@mesh: %s', _img_file.name)
+                    # Do not promise an analysis that was never queued.
+                    if _queued:
+                        _upload_desc = 'Image is being analyzed now. Ask me about it in about 30 seconds.'
+                        logger.info('Image routed to vision@mesh: %s', _img_file.name)
+                    else:
+                        _upload_desc = ('Image saved, but automatic analysis could not be started. '
+                                        'Tell the user the image is saved and that you cannot '
+                                        'describe it right now.')
                 context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
