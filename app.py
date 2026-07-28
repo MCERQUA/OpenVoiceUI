@@ -363,11 +363,16 @@ def create_app(config_override: dict = None):
             # CSP violation. Found 2026-07-24: the maps skill documented these as allowed
             # but they were never actually in either CSP. Do NOT re-strip.
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.jam-bot.com https://maps.googleapis.com https://maps.gstatic.com; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            # jsdelivr serves stylesheets as well as scripts (Leaflet, etc). It was in
+            # script-src but NOT style-src, so a canvas page could load a library's JS
+            # and have its CSS silently blocked — which renders as "the widget is
+            # missing and everything overlaps", not as an obvious error. Found 2026-07-27
+            # on allstate's Leaflet map page.
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
             "font-src 'self' data: https://fonts.gstatic.com; "
             # Map tiles/markers come from maps.gstatic.com, *.googleapis.com (khms tile
             # shards) and *.ggpht.com (Street View); googleusercontent serves place photos.
-            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.ggpht.com https://*.googleusercontent.com; "
+            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.ggpht.com https://*.googleusercontent.com;  https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com"
             "media-src 'self' blob:; "
             "connect-src 'self' wss: https:; "
             "frame-src 'self' https://*.clerk.accounts.dev https://*.jam-bot.com https:; "
