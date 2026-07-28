@@ -8,6 +8,7 @@ flask-sock==0.7.0
 # WebSocket & HTTP
 websockets==16.1.1
 requests==2.34.2
+PySocks==1.7.1                 # SOCKS5 proxy support for requests (residential IP routing)
 # httpx is imported directly by several providers (tts_providers/{hume,elevenlabs,resemble,
 # qwen3,qwen3_local}_provider.py, routes/story.py, providers/stt/grok_provider.py). It was
 # previously satisfied only transitively via `groq` — declare it so a clean install cannot
