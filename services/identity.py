@@ -52,7 +52,56 @@ def _slugify(s: str) -> str:
     return s[:60] or 'unknown'
 
 
-def _load_office_briefing(name: str) -> Optional[str]:
+def _resolve_person_file(name: str, clerk_user_id: Optional[str] = None) -> Optional[Path]:
+    """Locate this person's office file.
+
+    Resolution order, strictest first:
+      1. Clerk ID against the file's `clerk_ids:` frontmatter — authoritative, and
+         the only key that survives a display-name change.
+      2. Exact slug of the FULL name, which is what the writer uses
+         (scripts/office/office-build.py: `out_dir / f"{slugify(name)}.md"`).
+
+    There is deliberately NO first-name fallback. Matching on `name.split()[0]`
+    made the reader disagree with the writer and produced two silent failures:
+
+      * WRONG FILE — src has both `rory.md` (clerk user_3AiTy0…/user_3D5jEJ…) and
+        `rory-knight.md` (clerk user_3AiTJc…, a different account). Rory Knight
+        resolved to "rory" and was briefed from the other account's file — its
+        open matters, commitments and history — with nothing to signal the swap.
+      * SILENT MISS — koolfoam's registry name is "Cory Boehs — 18 years
+        insulating Oklahoma, still does field work", written to
+        `cory-boehs-18-years-insulating-oklahoma-still-does-field-wor.md`. The
+        reader looked for `cory.md`, never found it, and the briefing has simply
+        never loaded for that tenant.
+
+    Returning None (no briefing) is the correct outcome when identity is
+    ambiguous — a missing briefing is recoverable, the wrong person's is not.
+    """
+    d = Path(OFFICE_PEOPLE_DIR)
+    if not d.is_dir():
+        return None
+
+    if clerk_user_id:
+        for f in sorted(d.glob('*.md')):
+            try:
+                head = f.read_text(errors='ignore')[:2048]
+            except OSError:
+                continue
+            # Scan the YAML frontmatter only: stop at its closing delimiter so a
+            # clerk id mentioned in prose below can never resolve a person.
+            for i, line in enumerate(head.splitlines()[:40]):
+                if i and line.rstrip() == '---':
+                    break
+                if line.startswith('clerk_ids:'):
+                    if clerk_user_id in line:
+                        return f
+                    break
+
+    exact = d / f'{_slugify(name)}.md'
+    return exact if exact.exists() else None
+
+
+def _load_office_briefing(name: str, clerk_user_id: Optional[str] = None) -> Optional[str]:
     """Return a short briefing summary for `name` from the office filing cabinet.
 
     Pulls the person file and the top 2-3 highest-severity open matters.
@@ -60,9 +109,8 @@ def _load_office_briefing(name: str) -> Optional[str]:
     Fail-open: any error → None (CURRENT_USER tag still goes out without briefing).
     """
     try:
-        slug = _slugify(name.split()[0])  # use first name only
-        person_file = Path(OFFICE_PEOPLE_DIR) / f'{slug}.md'
-        if not person_file.exists():
+        person_file = _resolve_person_file(name, clerk_user_id)
+        if person_file is None:
             return None
 
         text = person_file.read_text(errors='ignore')
@@ -234,7 +282,7 @@ def get_current_user_tag(clerk_user_id: Optional[str], tenant: Optional[str] = N
         # Append the office briefing for clients (the secretary's brief).
         # This is the difference between greeting them as "user" vs greeting
         # them with their open follow-ups + live matters at their company.
-        briefing = _load_office_briefing(name)
+        briefing = _load_office_briefing(name, clerk_user_id)
         if briefing:
             tag += f'\n[OFFICE_BRIEFING: {briefing}]'
         return tag
