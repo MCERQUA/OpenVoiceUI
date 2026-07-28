@@ -30,7 +30,10 @@ GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 HF_TOKEN = os.getenv('HF_TOKEN', '')
 HF_INFERENCE_BASE = 'https://router.huggingface.co/hf-inference/models'
 
-DEFAULT_MODEL = 'nano-banana-pro-preview'
+# Cheap-by-default (Mike 2026-07-28): last month's ~$100 Gemini bill was driven by
+# generation defaulting to Nano Banana PRO (~$0.13-0.24/img). Flash image is ~4-6x
+# cheaper and fine for drafts. Pro is still available — callers must ASK for it.
+DEFAULT_MODEL = 'gemini-3.1-flash-image-preview'
 
 # HuggingFace model IDs — prefix with 'hf:' in the frontend
 HF_MODELS = {
