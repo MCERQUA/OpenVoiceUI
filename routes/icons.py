@@ -374,6 +374,8 @@ def generate_icon_image(prompt, name=None, style=None, allow_reuse=True):
 
     # Call Gemini API
     try:
+        from services.metered_spend import log_spend
+        log_spend('icons/generate', GEMINI_MODEL)
         resp = requests.post(
             f'{GEMINI_URL}?key={GEMINI_API_KEY}',
             json={
