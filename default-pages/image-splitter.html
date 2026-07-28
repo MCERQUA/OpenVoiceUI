@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta name="page-icon" content="tools">
+<title>Image Splitter</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 16px; min-height: 100vh; }
+
+.header { text-align: center; margin-bottom: 16px; }
+.header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.header .subtitle { color: #94a3b8; font-size: 13px; }
+
+.back-btn { position: fixed; top: 16px; left: 16px; background: rgba(30,41,59,0.95); border: 1px solid #334155; color: #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; z-index: 100; }
+.back-btn:hover { background: #1e3a5f; border-color: #3b82f6; }
+
+/* Upload dropzone — shown when no image */
+.dropzone {
+  border: 2px dashed #334155; border-radius: 16px; padding: 60px 24px;
+  text-align: center; color: #64748b; cursor: pointer; transition: all 0.2s;
+  max-width: 720px; margin: 40px auto;
+}
+.dropzone:hover, .dropzone.dragover { border-color: #3b82f6; color: #93c5fd; background: rgba(59,130,246,0.05); }
+.dropzone .dz-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #cbd5e1; }
+.dropzone .dz-sub { font-size: 13px; }
+.dropzone input[type=file] { display: none; }
+
+/* Controls bar */
+.controls {
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  padding: 12px 16px; background: #13141a; border-radius: 12px;
+  border: 1px solid #1e293b; margin-bottom: 16px;
+}
+.controls-params {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  flex: 1 1 auto; min-width: 0;
+}
+.controls-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  flex: 0 0 auto;
+}
+.control-group { display: flex; align-items: center; gap: 6px; }
+.control-group label { font-size: 12px; color: #94a3b8; font-weight: 500; }
+.control-group input[type=number], .control-group input[type=text], .control-group select {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+  padding: 6px 10px; border-radius: 6px; font-size: 13px; width: 64px; text-align: center;
+  font-family: inherit;
+}
+.control-group input[type=text] { width: 140px; text-align: left; }
+.control-group input:focus, .control-group select:focus { outline: none; border-color: #3b82f6; }
+
+.mode-toggle { display: flex; background: #1e293b; border-radius: 8px; padding: 3px; gap: 2px; }
+.mode-toggle button {
+  background: transparent; border: none; color: #94a3b8; padding: 6px 12px;
+  border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+  font-family: inherit;
+}
+.mode-toggle button.active { background: #3b82f6; color: white; }
+
+.btn { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+.btn:hover { background: #2563eb; }
+.btn-secondary { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; }
+.btn-secondary:hover { border-color: #3b82f6; background: #1e3a5f; }
+.btn-success { background: #10b981; }
+.btn-success:hover { background: #059669; }
+.btn-warn { background: #f59e0b; }
+.btn-warn:hover { background: #d97706; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.detect-info { font-size: 11px; color: #94a3b8; padding-left: 8px; font-style: italic; }
+
+/* Main split layout */
+.split-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; }
+@media (max-width: 900px) { .split-layout { grid-template-columns: 1fr; } }
+
+/* Mobile controls — params grid, full-width stacked actions */
+@media (max-width: 720px) {
+  .controls { flex-direction: column; align-items: stretch; gap: 10px; }
+  /* Two-column grid for inputs so they wrap predictably instead of one-at-a-time */
+  .controls-params {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+  }
+  .controls-params .mode-toggle { grid-column: 1 / -1; }
+  .controls-params .control-group { min-width: 0; }
+  .controls-params .control-group input[type=text],
+  .controls-params .control-group input[type=number] { width: 100%; }
+  /* Actions: wrap into a 2-col grid so tap targets stay generous */
+  .controls-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+  .controls-actions .btn { width: 100%; padding: 10px 12px; }
+  /* Primary action (last column) spans full width on its own row for emphasis */
+  .controls-actions .btn-success { grid-column: 1 / -1; }
+}
+@media (max-width: 380px) {
+  /* Very narrow phones: 1 action per row, full width */
+  .controls-actions { grid-template-columns: 1fr; }
+  .controls-actions .btn-success { grid-column: auto; }
+}
+
+.panel { background: #13141a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; }
+.panel h3 { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; font-weight: 600; }
+
+.preview-canvas-wrap { position: relative; }
+#previewCanvas { max-width: 100%; height: auto; display: block; border-radius: 8px; image-rendering: pixelated; }
+
+.cell-grid { display: grid; gap: 10px; max-height: 75vh; overflow-y: auto; padding-right: 4px; }
+.cell-grid::-webkit-scrollbar { width: 8px; }
+.cell-grid::-webkit-scrollbar-track { background: #0a0a0a; }
+.cell-grid::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+.cell {
+  background: #0a0a0a; border: 1px solid #1e293b; border-radius: 8px;
+  padding: 8px; display: flex; flex-direction: column; gap: 6px; transition: all 0.15s;
+}
+.cell:hover { border-color: #3b82f6; }
+.cell .cell-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+.cell .cell-idx { color: #93c5fd; font-weight: 600; }
+.cell .cell-size { color: #64748b; font-family: 'SF Mono', monospace; }
+.cell canvas { width: 100%; height: auto; border-radius: 4px; display: block; background: #fff; }
+.cell .cell-dl { background: #1e293b; border: 1px solid #334155; color: #93c5fd;
+  padding: 5px 10px; border-radius: 5px; font-size: 11px; cursor: pointer; text-align: center;
+  text-decoration: none; transition: all 0.15s; font-family: inherit; }
+.cell .cell-dl:hover { background: #1e3a5f; border-color: #3b82f6; }
+
+.status-bar { font-size: 12px; color: #64748b; padding: 8px 12px; background: #13141a; border-radius: 8px; border: 1px solid #1e293b; margin-top: 12px; }
+.status-bar.error { color: #fca5a5; border-color: #7f1d1d; background: rgba(239,68,68,0.05); }
+.status-bar.success { color: #86efac; border-color: #14532d; background: rgba(16,185,129,0.05); }
+
+/* Click-to-zoom cursor on canvases */
+.cell canvas, #previewCanvas { cursor: zoom-in; }
+
+/* Lightbox */
+.lightbox {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.92);
+  display: none; align-items: center; justify-content: center;
+  z-index: 1000; padding: 24px; cursor: zoom-out;
+}
+.lightbox.open { display: flex; }
+.lightbox-inner { position: relative; max-width: 95vw; max-height: 92vh; }
+.lightbox canvas {
+  max-width: 92vw; max-height: 88vh; display: block;
+  background: #fff; border-radius: 4px;
+  box-shadow: 0 0 40px rgba(0,0,0,0.6);
+  image-rendering: pixelated;
+}
+.lightbox-close {
+  position: absolute; top: -36px; right: 0;
+  background: rgba(30,41,59,0.9); border: 1px solid #334155; color: #e2e8f0;
+  padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  font-family: inherit;
+}
+.lightbox-caption {
+  position: absolute; bottom: -32px; left: 0; right: 0;
+  text-align: center; color: #94a3b8; font-size: 12px;
+}
+
+</style>
+</head>
+<body>
+
+<button class="back-btn" onclick="window.parent.postMessage({type:'canvas-action',action:'navigate',page:'content-library'},'*')">← Back</button>
+
+<div class="header">
+  <h1>Image Splitter</h1>
+  <div class="subtitle">Upload any N×N grid image. Auto-detect or manual. Clean cuts, ZIP download.</div>
+</div>
+
+<!-- Upload dropzone -->
+<div class="dropzone" id="dropzone">
+  <div class="dz-title">Drop an image or click to upload</div>
+  <div class="dz-sub">PNG/JPG · Any grid layout · Works best on AI-generated post grids</div>
+  <input type="file" accept="image/*" id="fileInput">
+</div>
+
+<!-- Main UI (hidden until image loaded) -->
+<div id="mainUi" style="display:none">
+
+  <div class="controls">
+    <div class="controls-params">
+      <div class="mode-toggle">
+        <button id="modeManual" class="active" onclick="setMode('manual')">Manual</button>
+        <button id="modeAuto" onclick="setMode('auto')">Auto-detect</button>
+      </div>
+      <div class="control-group">
+        <label>Cols</label>
+        <input type="number" id="cols" value="4" min="1" max="12" onchange="render()">
+      </div>
+      <div class="control-group">
+        <label>Rows</label>
+        <input type="number" id="rows" value="4" min="1" max="12" onchange="render()">
+      </div>
+      <div class="control-group">
+        <label>Trim px</label>
+        <input type="number" id="trim" value="6" min="0" max="200" onchange="render()">
+      </div>
+      <div class="control-group">
+        <label>Gutter px</label>
+        <input type="number" id="gutter" value="5" min="0" max="200" onchange="render()">
+      </div>
+      <div class="control-group">
+        <label>Prefix</label>
+        <input type="text" id="prefix" value="post-" onchange="render()">
+      </div>
+      <div class="control-group">
+        <label>Inset px</label>
+        <input type="number" id="inset" value="1" min="0" max="50" onchange="render()" title="Crop N pixels from each cell edge to remove anti-alias feathering">
+      </div>
+    </div>
+
+    <div class="controls-actions">
+      <button class="btn btn-secondary" id="detectBtn" onclick="runDetect()">Re-detect</button>
+      <button class="btn btn-secondary" onclick="resetCuts()">Reset cuts</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">New image</button>
+      <button class="btn btn-warn" onclick="uploadCellsToWorkspace()">Save to workspace</button>
+      <button class="btn btn-success" onclick="downloadAllZip()">Download ZIP</button>
+    </div>
+  </div>
+
+  <div class="split-layout">
+    <div class="panel">
+      <h3>Original · cut-line preview</h3>
+      <div class="preview-canvas-wrap">
+        <canvas id="previewCanvas"></canvas>
+      </div>
+      <div id="statusBar" class="status-bar">Ready.</div>
+    </div>
+
+    <div class="panel">
+      <h3 id="cellsTitle">Cells</h3>
+      <div class="cell-grid" id="cellGrid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <div class="lightbox-inner" onclick="event.stopPropagation()">
+    <button class="lightbox-close" onclick="closeLightbox()">Close</button>
+    <canvas id="lightboxCanvas"></canvas>
+    <div class="lightbox-caption" id="lightboxCaption"></div>
+  </div>
+</div>
+
+<script>
+// ====== STATE ======
+let sourceImg = null;
+let mode = 'manual'; // 'manual' | 'auto'
+let detected = null; // { cols:[{start,end}], rows:[{start,end}] } in source px
+const $ = id => document.getElementById(id);
+
+// ====== UPLOAD HANDLING ======
+const dz = $('dropzone');
+const fileInput = $('fileInput');
+
+dz.addEventListener('click', () => fileInput.click());
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+function resetState() {
+  // Clear all cell-related state so loading a new image is a clean slate.
+  sourceImg = null;
+  detected = null;
+  mode = 'manual';
+  $('modeManual').classList.add('active');
+  $('modeAuto').classList.remove('active');
+  $('cellGrid').innerHTML = '';
+  const previewCvs = $('previewCanvas');
+  const pctx = previewCvs.getContext('2d');
+  pctx.clearRect(0, 0, previewCvs.width, previewCvs.height);
+  previewCvs.width = previewCvs.height = 0;
+  // Reset file input so re-picking the same file fires onchange
+  fileInput.value = '';
+}
+
+function loadFile(file) {
+  resetState();
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      sourceImg = img;
+      $('mainUi').style.display = 'block';
+      dz.style.display = 'none';
+      // Try auto-detect first to seed manual params
+      const det = computeDetection();
+      if (det && det.cols >= 2 && det.rows >= 2) {
+        detected = det.cells;
+        // Seed manual inputs from detection
+        $('cols').value = det.cols;
+        $('rows').value = det.rows;
+        $('trim').value = Math.round(det.trim.avg);
+        $('gutter').value = Math.round(det.gutter.avg);
+        setMode('auto');
+        setStatus(`Loaded ${file.name} — detected ${det.cols}×${det.rows}. Cuts are live.`, 'success');
+      } else {
+        setStatus(`Loaded ${file.name}. Auto-detect didn't find a clean grid — switch to Manual mode.`, 'error');
+      }
+      render();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// Show dropzone again for next-image workflow (no page refresh needed)
+function newImage() {
+  resetState();
+  $('mainUi').style.display = 'none';
+  dz.style.display = 'block';
+  setStatus('Ready for next image.');
+}
+
+// Re-run auto-detect on the current image (reset cuts without changing image)
+function resetCuts() {
+  if (!sourceImg) return;
+  detected = null;
+  const det = computeDetection();
+  if (det && det.cols >= 2 && det.rows >= 2) {
+    detected = det.cells;
+    $('cols').value = det.cols;
+    $('rows').value = det.rows;
+    $('trim').value = Math.round(det.trim.avg);
+    $('gutter').value = Math.round(det.gutter.avg);
+    setMode('auto');
+    setStatus(`Re-detected ${det.cols}×${det.rows} · trim ~${Math.round(det.trim.avg)}px · gutter ~${Math.round(det.gutter.avg)}px`, 'success');
+  } else {
+    setMode('manual');
+    setStatus('Re-detect failed — use Manual mode.', 'error');
+  }
+  render();
+}
+
+// ====== MODE TOGGLE ======
+function setMode(m) {
+  mode = m;
+  $('modeManual').classList.toggle('active', m === 'manual');
+  $('modeAuto').classList.toggle('active', m === 'auto');
+  render();
+}
+
+// ====== AUTO-DETECT ======
+function computeDetection() {
+  if (!sourceImg) return null;
+  const W = sourceImg.naturalWidth, H = sourceImg.naturalHeight;
+  // Render to offscreen canvas
+  const cvs = document.createElement('canvas');
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext('2d');
+  ctx.drawImage(sourceImg, 0, 0);
+  let data;
+  try { data = ctx.getImageData(0, 0, W, H); }
+  catch (err) { return null; } // CORS taint
+  const px = data.data;
+
+  // White-pixel ratio per row and per column.
+  // Threshold 200 (not 240) catches anti-alias feather pixels (200-239 RGB) as part of
+  // the gutter, so detected cells exclude the feather zone — no white bleed on edges.
+  const isWhite = idx => px[idx] >= 200 && px[idx+1] >= 200 && px[idx+2] >= 200;
+  const rowWhite = new Float32Array(H);
+  const colWhite = new Float32Array(W);
+  for (let y = 0; y < H; y++) {
+    let cnt = 0;
+    for (let x = 0; x < W; x++) if (isWhite((y*W + x)*4)) cnt++;
+    rowWhite[y] = cnt / W;
+  }
+  for (let x = 0; x < W; x++) {
+    let cnt = 0;
+    for (let y = 0; y < H; y++) if (isWhite((y*W + x)*4)) cnt++;
+    colWhite[x] = cnt / H;
+  }
+
+  // Find white-gap runs. 0.85 threshold catches feathered lines (template peaks at ~91%)
+  // while still rejecting in-cell whitespace on real branded post grids.
+  const rowGaps = findRuns(rowWhite, 0.85);
+  const colGaps = findRuns(colWhite, 0.85);
+
+  // Cells = inverse runs
+  let rowCells = invertRuns(rowGaps, H);
+  let colCells = invertRuns(colGaps, W);
+
+  // Filter phantom cells (sub-size slivers from stray hairlines)
+  colCells = filterPhantoms(colCells);
+  rowCells = filterPhantoms(rowCells);
+
+  if (colCells.length < 1 || rowCells.length < 1) return null;
+
+  // Compute trim (outer) and gutter (inner) from gap runs
+  const trim = computeEdges(rowGaps, colGaps, H, W);
+  const gutter = computeInnerGutters(rowGaps, colGaps);
+
+  return {
+    cols: colCells.length, rows: rowCells.length,
+    trim, gutter,
+    cells: { cols: colCells, rows: rowCells }
+  };
+}
+
+function findRuns(arr, threshold) {
+  const runs = [];
+  let inRun = false, start = 0;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] >= threshold) {
+      if (!inRun) { start = i; inRun = true; }
+    } else {
+      if (inRun) { runs.push({ start, end: i - 1 }); inRun = false; }
+    }
+  }
+  if (inRun) runs.push({ start, end: arr.length - 1 });
+  return runs;
+}
+function invertRuns(runs, total) {
+  const out = [];
+  let prev = 0;
+  for (const r of runs) {
+    if (r.start > prev) out.push({ start: prev, end: r.start - 1 });
+    prev = r.end + 1;
+  }
+  if (prev < total) out.push({ start: prev, end: total - 1 });
+  return out;
+}
+function filterPhantoms(cells) {
+  if (cells.length <= 1) return cells;
+  const sizes = cells.map(c => c.end - c.start + 1);
+  const avg = sizes.reduce((a,b) => a+b, 0) / sizes.length;
+  // Keep cells at least 30% of average — drops 1px phantom slivers
+  return cells.filter((c, i) => sizes[i] >= avg * 0.3);
+}
+function computeEdges(rowGaps, colGaps, H, W) {
+  const top = rowGaps.length ? rowGaps[0].end + 1 : 0;
+  const bottom = rowGaps.length ? H - rowGaps[rowGaps.length-1].start : 0;
+  const left = colGaps.length ? colGaps[0].end + 1 : 0;
+  const right = colGaps.length ? W - colGaps[colGaps.length-1].start : 0;
+  const all = [top, bottom, left, right].filter(v => v > 0);
+  return { top, bottom, left, right, avg: all.length ? all.reduce((a,b)=>a+b,0)/all.length : 0 };
+}
+function computeInnerGutters(rowGaps, colGaps) {
+  // Inner gaps = all except first and last (which are trim)
+  const innerRow = rowGaps.slice(1, -1).map(g => g.end - g.start + 1);
+  const innerCol = colGaps.slice(1, -1).map(g => g.end - g.start + 1);
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
+  return { h: avg(innerRow), v: avg(innerCol), avg: avg([...innerRow, ...innerCol]) };
+}
+
+function runDetect() {
+  const det = computeDetection();
+  if (!det) {
+    setStatus('Auto-detect failed — likely a CORS-tainted image or no white gutters. Use manual mode.', 'error');
+    return;
+  }
+  detected = det.cells;
+  $('cols').value = det.cols;
+  $('rows').value = det.rows;
+  $('trim').value = Math.round(det.trim.avg);
+  $('gutter').value = Math.round(det.gutter.avg);
+  setMode('auto');
+  setStatus(`Detected ${det.cols}×${det.rows} · trim ~${Math.round(det.trim.avg)}px · gutter ~${Math.round(det.gutter.avg)}px`, 'success');
+}
+
+// ====== CELL RECT COMPUTATION ======
+function getCellRects() {
+  if (!sourceImg) return [];
+  const W = sourceImg.naturalWidth, H = sourceImg.naturalHeight;
+  const inset = clampInt($('inset').value, 0, 50);
+
+  const finish = (rect) => {
+    // 1. Tighten to actual content (per-edge, asymmetric feathering)
+    const tightened = tightenToContent(rect);
+    // 2. Apply user inset on top
+    return {
+      x: tightened.x + inset,
+      y: tightened.y + inset,
+      w: Math.max(1, tightened.w - 2 * inset),
+      h: Math.max(1, tightened.h - 2 * inset),
+      idx: rect.idx
+    };
+  };
+
+  if (mode === 'auto' && detected) {
+    const rects = [];
+    let idx = 1;
+    for (const r of detected.rows) {
+      for (const c of detected.cols) {
+        rects.push(finish({
+          x: c.start, y: r.start,
+          w: c.end - c.start + 1, h: r.end - r.start + 1,
+          idx: idx++
+        }));
+      }
+    }
+    return rects;
+  }
+
+  // Manual mode
+  const cols = clampInt($('cols').value, 1, 12);
+  const rows = clampInt($('rows').value, 1, 12);
+  const trim = clampInt($('trim').value, 0, 500);
+  const gutter = clampInt($('gutter').value, 0, 500);
+  const cellW = (W - 2*trim - (cols-1)*gutter) / cols;
+  const cellH = (H - 2*trim - (rows-1)*gutter) / rows;
+  if (cellW <= 0 || cellH <= 0) return [];
+  const rects = [];
+  let idx = 1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      rects.push(finish({
+        x: trim + c * (cellW + gutter),
+        y: trim + r * (cellH + gutter),
+        w: cellW, h: cellH,
+        idx: idx++
+      }));
+    }
+  }
+  return rects;
+}
+
+// Per-cell, per-edge content tightening.
+// Scans inward from each edge to find where actual content starts,
+// skipping anti-alias feathering (which can be asymmetric).
+function tightenToContent(rect) {
+  const rw = Math.round(rect.w), rh = Math.round(rect.h);
+  const rx = Math.round(rect.x), ry = Math.round(rect.y);
+  if (rw < 4 || rh < 4) return rect;
+
+  // Render cell region to offscreen canvas
+  const cvs = document.createElement('canvas');
+  cvs.width = rw; cvs.height = rh;
+  const ctx = cvs.getContext('2d');
+  ctx.drawImage(sourceImg, rx, ry, rw, rh, 0, 0, rw, rh);
+  let data;
+  try { data = ctx.getImageData(0, 0, rw, rh).data; }
+  catch (err) { return rect; } // CORS-tainted, can't read pixels
+
+  // "Content pixel" = clearly non-white (any channel < 100)
+  const isContent = idx => data[idx] < 100 || data[idx+1] < 100 || data[idx+2] < 100;
+  const MAX_SCAN = Math.min(15, Math.floor(Math.min(rw, rh) / 4));
+
+  // Scan from each edge inward, stop when row/col is mostly content (>50%)
+  const rowContent = (y) => {
+    let cnt = 0;
+    for (let x = 0; x < rw; x++) if (isContent((y*rw + x)*4)) cnt++;
+    return cnt / rw;
+  };
+  const colContent = (x) => {
+    let cnt = 0;
+    for (let y = 0; y < rh; y++) if (isContent((y*rw + x)*4)) cnt++;
+    return cnt / rh;
+  };
+
+  let topI = 0, botI = 0, leftI = 0, rightI = 0;
+  for (let i = 0; i < MAX_SCAN; i++) {
+    if (topI === i && rowContent(i) < 0.5) topI = i + 1;
+    if (botI === i && rowContent(rh - 1 - i) < 0.5) botI = i + 1;
+    if (leftI === i && colContent(i) < 0.5) leftI = i + 1;
+    if (rightI === i && colContent(rw - 1 - i) < 0.5) rightI = i + 1;
+  }
+
+  return {
+    x: rx + leftI,
+    y: ry + topI,
+    w: rw - leftI - rightI,
+    h: rh - topI - botI,
+    idx: rect.idx
+  };
+}
+
+function clampInt(v, min, max) {
+  const n = parseInt(v, 10);
+  if (isNaN(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
+
+// ====== RENDERING ======
+function render() {
+  if (!sourceImg) return;
+  const rects = getCellRects();
+  renderPreviewOverlay(rects);
+  renderCellGrid(rects);
+  $('cellsTitle').textContent = `${rects.length} cells · ${mode === 'auto' ? 'auto-detected' : 'manual'}`;
+}
+
+function renderPreviewOverlay(rects) {
+  const cvs = $('previewCanvas');
+  const W = sourceImg.naturalWidth, H = sourceImg.naturalHeight;
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext('2d');
+  ctx.drawImage(sourceImg, 0, 0);
+
+  // Draw cut-line overlays
+  ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
+  ctx.lineWidth = Math.max(1, Math.round(Math.min(W, H) / 500));
+  ctx.setLineDash([8, 6]);
+  for (const r of rects) {
+    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  }
+  ctx.setLineDash([]);
+
+  // Click preview to zoom
+  cvs.onclick = () => openLightbox(cvs, 'Original with cut lines');
+}
+
+function renderCellGrid(rects) {
+  const grid = $('cellGrid');
+  grid.innerHTML = '';
+  const prefix = $('prefix').value || 'post-';
+  const pad = String(rects.length).length;
+  // Adaptive column count based on cell aspect
+  const cols = rects.length <= 4 ? rects.length : rects.length <= 9 ? 3 : 4;
+  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+  for (const r of rects) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    const cvs = document.createElement('canvas');
+    cvs.width = Math.round(r.w); cvs.height = Math.round(r.h);
+    const ctx = cvs.getContext('2d');
+    ctx.drawImage(sourceImg, r.x, r.y, r.w, r.h, 0, 0, cvs.width, cvs.height);
+
+    const head = document.createElement('div');
+    head.className = 'cell-head';
+    const idxSpan = document.createElement('span');
+    idxSpan.className = 'cell-idx';
+    idxSpan.textContent = `#${r.idx}`;
+    const sizeSpan = document.createElement('span');
+    sizeSpan.className = 'cell-size';
+    sizeSpan.textContent = `${Math.round(r.w)}×${Math.round(r.h)}`;
+    head.appendChild(idxSpan); head.appendChild(sizeSpan);
+
+    const dl = document.createElement('a');
+    dl.className = 'cell-dl';
+    dl.textContent = 'Download PNG';
+    const fname = `${prefix}${String(r.idx).padStart(pad, '0')}.png`;
+    dl.download = fname;
+    dl.href = cvs.toDataURL('image/png');
+
+    cell.appendChild(head);
+    cell.appendChild(cvs);
+    cell.appendChild(dl);
+    grid.appendChild(cell);
+
+    // Click cell to zoom
+    cvs.onclick = () => openLightbox(cvs, `Cell #${r.idx} · ${Math.round(r.w)}×${Math.round(r.h)}`);
+  }
+}
+
+// ====== LIGHTBOX ======
+function openLightbox(srcCanvas, caption) {
+  const lb = $('lightbox');
+  const cvs = $('lightboxCanvas');
+  cvs.width = srcCanvas.width;
+  cvs.height = srcCanvas.height;
+  cvs.getContext('2d').drawImage(srcCanvas, 0, 0);
+  $('lightboxCaption').textContent = caption || '';
+  lb.classList.add('open');
+}
+function closeLightbox() {
+  $('lightbox').classList.remove('open');
+}
+// Esc to close
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLightbox();
+});
+
+// ====== DOWNLOAD ALL (ZIP) ======
+async function downloadAllZip() {
+  if (!sourceImg) return;
+  if (typeof JSZip === 'undefined') {
+    setStatus('JSZip failed to load (CDN blocked?). Try individual downloads.', 'error');
+    return;
+  }
+  const rects = getCellRects();
+  if (!rects.length) { setStatus('No cells to download.', 'error'); return; }
+
+  setStatus(`Zipping ${rects.length} cells…`);
+  try {
+    const zip = new JSZip();
+    const prefix = $('prefix').value || 'post-';
+    const pad = String(rects.length).length;
+    for (const r of rects) {
+      const cvs = document.createElement('canvas');
+      cvs.width = Math.round(r.w); cvs.height = Math.round(r.h);
+      const ctx = cvs.getContext('2d');
+      ctx.drawImage(sourceImg, r.x, r.y, r.w, r.h, 0, 0, cvs.width, cvs.height);
+      const blob = await new Promise(res => cvs.toBlob(res, 'image/png'));
+      const name = `${prefix}${String(r.idx).padStart(pad, '0')}.png`;
+      zip.file(name, blob);
+    }
+    const content = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(content);
+    const zipName = `${prefix.replace(/-$/, '')}-${rects.length}cells.zip`;
+    a.download = zipName;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus(`Downloaded ${rects.length} cells as ${zipName}`, 'success');
+  } catch (err) {
+    setStatus(`ZIP failed: ${err.message}`, 'error');
+  }
+}
+
+function setStatus(msg, kind) {
+  const bar = $('statusBar');
+  bar.textContent = msg;
+  bar.className = 'status-bar' + (kind ? ' ' + kind : '');
+}
+
+// ====== UPLOAD CELLS TO WORKSPACE ======
+// Uploads each cropped cell PNG to this tenant's uploads/ folder via the OpenVoiceUI
+// /api/upload endpoint. Same auth pattern as bulk-image-uploader.html.
+async function uploadCellsToWorkspace() {
+  if (!sourceImg) return;
+  const rects = getCellRects();
+  if (!rects.length) { setStatus('No cells to upload.', 'error'); return; }
+
+  // Cache auth token if caller injected one (bulk uploader pattern)
+  const token = window._canvasAuthToken || null;
+
+  setStatus(`Uploading ${rects.length} cells to workspace uploads/…`);
+  const prefix = $('prefix').value || 'post-';
+  const pad = String(rects.length).length;
+  let ok = 0, fail = 0;
+  const failMsgs = [];
+
+  for (const r of rects) {
+    const name = `${prefix}${String(r.idx).padStart(pad, '0')}.png`;
+    // Render cell to its own canvas → PNG blob
+    const cvs = document.createElement('canvas');
+    cvs.width = Math.round(r.w); cvs.height = Math.round(r.h);
+    const ctx = cvs.getContext('2d');
+    ctx.drawImage(sourceImg, r.x, r.y, r.w, r.h, 0, 0, cvs.width, cvs.height);
+    const blob = await new Promise(res => cvs.toBlob(res, 'image/png'));
+    if (!blob) { fail++; failMsgs.push(`${name}: blob failed`); continue; }
+
+    const fd = new FormData();
+    fd.append('file', new File([blob], name, { type: 'image/png' }));
+
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload');
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+      await new Promise((resolve, reject) => {
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300)
+          ? resolve(xhr.responseText)
+          : reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText.slice(0, 120)}`));
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(fd);
+      });
+      ok++;
+      setStatus(`Uploading… ${ok + fail}/${rects.length} (${ok} ok, ${fail} failed)`);
+    } catch (err) {
+      fail++;
+      failMsgs.push(`${name}: ${err.message}`);
+    }
+  }
+
+  if (fail === 0) {
+    setStatus(`Uploaded all ${ok} cells to workspace uploads/ as "${prefix}01…${String(ok).padStart(pad,'0')}.png"`, 'success');
+  } else {
+    setStatus(`Uploaded ${ok}/${rects.length}, ${fail} failed — ${failMsgs.slice(0,2).join('; ')}`, 'error');
+  }
+}
+
+</script>
+</body>
+</html>
