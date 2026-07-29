@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Job Photos</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --surface2: #1e1e1e;
+    --border: #2a2a2a;
+    --accent: #f59e0b;
+    --accent-dim: rgba(245,158,11,0.15);
+    --text: #f1f1f1;
+    --muted: #888;
+    --green: #22c55e;
+    --red: #ef4444;
+    --radius: 12px;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 15px;
+    overflow: hidden;
+  }
+
+  /* ---- App shell ---- */
+  #app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---- Header ---- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    min-height: 56px;
+  }
+
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    flex: 1;
+  }
+
+  .btn-icon {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 22px;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+  }
+
+  /* ---- Viewfinder ---- */
+  #viewfinder-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #000;
+  }
+
+  #video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  #canvas-snap { display: none; }
+
+  /* flash overlay */
+  #flash {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.05s;
+  }
+
+  /* GPS badge */
+  #gps-badge {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  #gps-badge.ok { color: var(--green); }
+  #gps-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* Session counter */
+  #session-counter {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  /* ---- Bottom controls ---- */
+  #controls {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* album row */
+  #album-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  #album-select {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    font-size: 14px;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  #btn-new-album {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  /* note row */
+  #note-wrap {
+    position: relative;
+  }
+  #note-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    font-size: 14px;
+    resize: none;
+    font-family: inherit;
+  }
+  #note-input::placeholder { color: var(--muted); }
+
+  /* shutter row */
+  #shutter-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+  }
+
+  #btn-flip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 44px; height: 44px;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #btn-shutter {
+    width: 70px; height: 70px;
+    border-radius: 50%;
+    background: #fff;
+    border: 4px solid rgba(255,255,255,0.3);
+    cursor: pointer;
+    transition: transform 0.1s, opacity 0.1s;
+    outline: none;
+    position: relative;
+  }
+  #btn-shutter:active { transform: scale(0.92); }
+  #btn-shutter.uploading { background: var(--accent); }
+
+  #btn-view {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 44px; height: 44px;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    position: relative;
+  }
+  #view-count {
+    position: absolute;
+    top: -4px; right: -4px;
+    background: var(--accent);
+    color: #000;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    display: none;
+  }
+
+  /* ---- Toast ---- */
+  #toast {
+    position: fixed;
+    bottom: 0;
+    left: 0; right: 0;
+    padding: 14px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+    text-align: center;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+    z-index: 999;
+  }
+  #toast.show { transform: translateY(0); }
+  #toast.success { border-color: var(--green); color: var(--green); }
+  #toast.error { border-color: var(--red); color: var(--red); }
+
+  /* ---- Modals ---- */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    align-items: flex-end;
+    z-index: 200;
+    display: none;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-sheet {
+    width: 100%;
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    padding: 20px 20px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .modal-sheet h2 {
+    font-size: 16px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .modal-sheet input[type=text] {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 12px;
+    font-size: 15px;
+    font-family: inherit;
+  }
+  .modal-sheet input::placeholder { color: var(--muted); }
+  .modal-actions { display: flex; gap: 10px; }
+  .btn-cancel {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: var(--radius);
+    padding: 13px;
+    font-size: 15px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-primary {
+    flex: 2;
+    background: var(--accent);
+    border: none;
+    color: #000;
+    border-radius: var(--radius);
+    padding: 13px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  /* ---- No camera ---- */
+  #no-camera {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+    padding: 24px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  #no-camera .icon { font-size: 48px; }
+  #no-camera.visible { display: flex; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span style="font-size:22px">📸</span>
+    <h1>Job Photos</h1>
+    <button class="btn-icon" onclick="openAlbumsPage()" title="Browse albums">🗂</button>
+  </header>
+
+  <div id="viewfinder-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas-snap"></canvas>
+    <div id="flash"></div>
+    <div id="gps-badge"><span id="gps-dot"></span><span id="gps-text">No GPS</span></div>
+    <div id="session-counter" style="display:none">0 photos</div>
+    <div id="no-camera">
+      <div class="icon">📷</div>
+      <p>Camera access denied or unavailable.<br>Please allow camera access and reload.</p>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div id="album-row">
+      <select id="album-select">
+        <option value="">— Select album / job —</option>
+      </select>
+      <button id="btn-new-album" onclick="openNewAlbum()">+ New</button>
+    </div>
+
+    <textarea id="note-input" placeholder="Add a note (optional)..." rows="2"></textarea>
+
+    <div id="shutter-row">
+      <button id="btn-flip" onclick="flipCamera()" title="Flip camera">🔄</button>
+      <button id="btn-shutter" onclick="capturePhoto()" aria-label="Capture photo"></button>
+      <a id="btn-view" href="#" onclick="openAlbumsPage(); return false;" title="View albums">
+        🖼
+        <span id="view-count"></span>
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- New album modal -->
+<div class="modal-overlay" id="modal-new-album">
+  <div class="modal-sheet">
+    <h2>New Album</h2>
+    <input type="text" id="new-album-name" placeholder="e.g. Smith Roof Install" maxlength="80">
+    <input type="text" id="new-album-desc" placeholder="Description (optional)" maxlength="160">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeNewAlbum()">Cancel</button>
+      <button class="btn-primary" onclick="createAlbum()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- State ----
+let stream = null;
+let facingMode = 'environment';  // back camera by default
+let lat = null, lng = null;
+let sessionCount = 0;
+let albums = [];
+let uploading = false;
+
+// ---- GPS ----
+function startGPS() {
+  if (!navigator.geolocation) return;
+  const opts = { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 };
+  navigator.geolocation.watchPosition(pos => {
+    lat = pos.coords.latitude;
+    lng = pos.coords.longitude;
+    const el = document.getElementById('gps-badge');
+    el.classList.add('ok');
+    document.getElementById('gps-text').textContent =
+      lat.toFixed(5) + ', ' + lng.toFixed(5);
+  }, () => {
+    document.getElementById('gps-text').textContent = 'No GPS';
+    document.getElementById('gps-badge').classList.remove('ok');
+  }, opts);
+}
+
+// ---- Camera ----
+async function startCamera() {
+  const video = document.getElementById('video');
+  const noCam = document.getElementById('no-camera');
+  try {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); }
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    noCam.classList.remove('visible');
+  } catch (err) {
+    console.error('Camera error:', err);
+    noCam.classList.add('visible');
+  }
+}
+
+function flipCamera() {
+  facingMode = facingMode === 'environment' ? 'user' : 'environment';
+  startCamera();
+}
+
+// ---- Capture ----
+async function capturePhoto() {
+  const albumId = document.getElementById('album-select').value;
+  if (!albumId) {
+    showToast('Select or create an album first', 'error');
+    return;
+  }
+  if (uploading) return;
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas-snap');
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 720;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+
+  // Flash effect
+  const flash = document.getElementById('flash');
+  flash.style.opacity = '1';
+  setTimeout(() => { flash.style.opacity = '0'; }, 80);
+
+  // Convert to blob
+  canvas.toBlob(async (blob) => {
+    if (!blob) { showToast('Capture failed', 'error'); return; }
+    await uploadPhoto(albumId, blob);
+  }, 'image/jpeg', 0.92);
+}
+
+async function uploadPhoto(albumId, blob) {
+  uploading = true;
+  const shutter = document.getElementById('btn-shutter');
+  shutter.classList.add('uploading');
+
+  const note = document.getElementById('note-input').value.trim();
+  const fd = new FormData();
+  fd.append('file', blob, `photo-${Date.now()}.jpg`);
+  if (lat !== null) fd.append('lat', lat.toString());
+  if (lng !== null) fd.append('lng', lng.toString());
+  if (note) fd.append('note', note);
+
+  try {
+    const resp = await fetch(`/api/albums/${albumId}/photos`, { method: 'POST', body: fd });
+    if (!resp.ok) throw new Error(await resp.text());
+    sessionCount++;
+    updateSessionCounter();
+    document.getElementById('note-input').value = '';
+    showToast('Photo saved ✓', 'success');
+    // Refresh albums list in background to update photo count
+    loadAlbums(false);
+  } catch (err) {
+    console.error(err);
+    showToast('Upload failed — ' + err.message, 'error');
+  } finally {
+    uploading = false;
+    shutter.classList.remove('uploading');
+  }
+}
+
+function updateSessionCounter() {
+  const el = document.getElementById('session-counter');
+  el.style.display = 'block';
+  el.textContent = sessionCount + (sessionCount === 1 ? ' photo' : ' photos');
+
+  const viewCount = document.getElementById('view-count');
+  viewCount.style.display = 'block';
+  viewCount.textContent = sessionCount;
+}
+
+// ---- Albums ----
+async function loadAlbums(selectFirst = true) {
+  try {
+    const resp = await fetch('/api/albums');
+    const data = await resp.json();
+    albums = data.albums || [];
+    const sel = document.getElementById('album-select');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">— Select album / job —</option>';
+    albums.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = `${a.name} (${a.photo_count} photos)`;
+      if (a.id === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (selectFirst && albums.length && !current) {
+      sel.value = albums[0].id;
+    }
+  } catch (e) {
+    console.warn('Could not load albums:', e);
+  }
+}
+
+function openNewAlbum() {
+  document.getElementById('modal-new-album').classList.add('open');
+  document.getElementById('new-album-name').focus();
+}
+function closeNewAlbum() {
+  document.getElementById('modal-new-album').classList.remove('open');
+  document.getElementById('new-album-name').value = '';
+  document.getElementById('new-album-desc').value = '';
+}
+
+async function createAlbum() {
+  const name = document.getElementById('new-album-name').value.trim();
+  if (!name) { document.getElementById('new-album-name').focus(); return; }
+  const desc = document.getElementById('new-album-desc').value.trim();
+  try {
+    const resp = await fetch('/api/albums', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description: desc })
+    });
+    const album = await resp.json();
+    closeNewAlbum();
+    await loadAlbums(false);
+    document.getElementById('album-select').value = album.id;
+    showToast(`Album "${name}" created`, 'success');
+  } catch (e) {
+    showToast('Failed to create album', 'error');
+  }
+}
+
+// ---- Navigation ----
+function openAlbumsPage() {
+  // Navigate to job albums page (opens in same tab)
+  window.location.href = '/pages/job-albums.html';
+}
+
+// ---- Toast ----
+let toastTimer = null;
+function showToast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (type ? ' ' + type : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 2200);
+}
+
+// ---- Enter key on new album modal ----
+document.getElementById('new-album-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createAlbum();
+});
+
+// ---- Init ----
+(async function init() {
+  startGPS();
+  await startCamera();
+  await loadAlbums(true);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Job Albums</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --surface2: #1e1e1e;
+    --border: #2a2a2a;
+    --accent: #f59e0b;
+    --text: #f1f1f1;
+    --muted: #777;
+    --green: #22c55e;
+    --red: #ef4444;
+    --radius: 12px;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 15px;
+    overflow: hidden;
+  }
+
+  #app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---- Header ---- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    min-height: 56px;
+  }
+  header h1 { font-size: 16px; font-weight: 600; flex: 1; }
+  .btn-header {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 22px;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+  }
+  .btn-header.text-btn {
+    font-size: 14px;
+    font-weight: 600;
+    padding: 6px 10px;
+    background: var(--accent);
+    color: #000;
+    border-radius: 8px;
+  }
+
+  /* ---- Views ---- */
+  .view {
+    flex: 1;
+    overflow-y: auto;
+    display: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .view.active { display: block; }
+
+  /* ---- Albums list ---- */
+  #albums-view {
+    padding: 16px;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 24px;
+    color: var(--muted);
+  }
+  .empty-state .icon { font-size: 52px; margin-bottom: 12px; }
+  .empty-state p { font-size: 14px; line-height: 1.5; }
+  .empty-state .cta {
+    display: inline-block;
+    margin-top: 20px;
+    background: var(--accent);
+    color: #000;
+    border-radius: var(--radius);
+    padding: 12px 24px;
+    font-weight: 700;
+    font-size: 15px;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+  }
+
+  .albums-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .album-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    -webkit-user-select: none;
+  }
+  .album-card:active { border-color: var(--accent); }
+  .album-cover {
+    width: 100%;
+    aspect-ratio: 4/3;
+    object-fit: cover;
+    background: var(--surface2);
+    display: block;
+  }
+  .album-cover-placeholder {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    color: var(--border);
+  }
+  .album-info { padding: 10px 10px 12px; }
+  .album-name {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+  }
+  .album-meta { font-size: 11px; color: var(--muted); }
+
+  /* ---- Album detail ---- */
+  #album-view {
+    display: none;
+    flex-direction: column;
+  }
+  #album-view.active {
+    display: flex;
+  }
+
+  #album-view .album-header {
+    padding: 14px 16px 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #album-view .album-header h2 { font-size: 16px; font-weight: 700; }
+  #album-view .album-header p { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .detail-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .detail-tab {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    background: none;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    color: var(--muted);
+    font-family: inherit;
+    transition: color 0.15s;
+  }
+  .detail-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab-content { display: none; flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .tab-content.active { display: block; }
+
+  /* Photo grid */
+  .photos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    padding: 2px;
+  }
+  .photo-thumb {
+    aspect-ratio: 1;
+    object-fit: cover;
+    cursor: pointer;
+    width: 100%;
+    display: block;
+    background: var(--surface2);
+    transition: opacity 0.1s;
+  }
+  .photo-thumb:active { opacity: 0.75; }
+
+  /* Before/After slider tab */
+  #ba-tab {
+    padding: 16px;
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #ba-tab.active { display: flex; }
+
+  .ba-selector {
+    display: flex;
+    gap: 8px;
+  }
+  .ba-slot {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    overflow: hidden;
+    position: relative;
+    min-height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .ba-slot img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .ba-slot-label {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0,0,0,0.65);
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .ba-slider-wrap {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius);
+    background: var(--surface2);
+    min-height: 200px;
+  }
+  .ba-slider-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  #ba-after { position: absolute; inset: 0; overflow: hidden; }
+  #ba-after img { position: absolute; right: 0; top: 0; height: 100%; width: 100%; object-fit: cover; object-position: right; }
+  #ba-divider {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 3px;
+    background: #fff;
+    box-shadow: 0 0 8px rgba(0,0,0,0.5);
+    cursor: col-resize;
+    z-index: 10;
+    transform: translateX(-50%);
+  }
+  #ba-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 32px; height: 32px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #333;
+  }
+  .ba-hint { font-size: 12px; color: var(--muted); text-align: center; }
+
+  /* ---- Lightbox ---- */
+  #lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.97);
+    display: none;
+    flex-direction: column;
+    z-index: 500;
+  }
+  #lightbox.open { display: flex; }
+  #lightbox-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  #lightbox-header h3 { flex: 1; font-size: 14px; color: var(--muted); }
+  #lightbox-btn-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+  }
+  #lightbox-img-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  #lightbox-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  #lightbox-footer {
+    padding: 12px 16px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  #lightbox-note { font-size: 14px; color: var(--text); }
+  #lightbox-meta { font-size: 12px; color: var(--muted); }
+  .lightbox-actions { display: flex; gap: 8px; }
+  .lb-btn {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: center;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .lb-btn.accent { background: var(--accent); color: #000; border-color: transparent; font-weight: 700; }
+
+  /* ---- Photo picker sheet (for B/A selection) ---- */
+  #photo-picker-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    z-index: 300;
+    display: none;
+    align-items: flex-end;
+  }
+  #photo-picker-overlay.open { display: flex; }
+  #photo-picker-sheet {
+    width: 100%;
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .picker-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  #picker-grid {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    padding: 2px;
+  }
+  .picker-thumb {
+    aspect-ratio: 1;
+    object-fit: cover;
+    width: 100%;
+    cursor: pointer;
+    transition: opacity 0.1s;
+  }
+  .picker-thumb:active { opacity: 0.7; }
+
+  /* ---- Modal (new album) ---- */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: none;
+    align-items: flex-end;
+    z-index: 200;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-sheet {
+    width: 100%;
+    background: var(--surface);
+    border-radius: 20px 20px 0 0;
+    padding: 20px 20px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .modal-sheet h2 { font-size: 16px; font-weight: 600; text-align: center; }
+  .modal-sheet input[type=text] {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 12px;
+    font-size: 15px;
+    font-family: inherit;
+  }
+  .modal-sheet input::placeholder { color: var(--muted); }
+  .modal-actions { display: flex; gap: 10px; }
+  .btn-cancel {
+    flex: 1; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted); border-radius: var(--radius); padding: 13px;
+    font-size: 15px; cursor: pointer; font-family: inherit;
+  }
+  .btn-primary {
+    flex: 2; background: var(--accent); border: none; color: #000;
+    border-radius: var(--radius); padding: 13px; font-size: 15px;
+    font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+
+  /* ---- Toast ---- */
+  #toast {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 14px 20px; background: var(--surface);
+    border-top: 1px solid var(--border); font-size: 14px;
+    text-align: center; transform: translateY(100%);
+    transition: transform 0.25s ease; z-index: 999;
+  }
+  #toast.show { transform: translateY(0); }
+  #toast.success { border-color: var(--green); color: var(--green); }
+  #toast.error { border-color: var(--red); color: var(--red); }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ---- Header ---- -->
+  <header>
+    <button class="btn-header" id="btn-back" onclick="goBack()" style="display:none">←</button>
+    <span style="font-size:20px" id="header-icon">🗂</span>
+    <h1 id="header-title">Job Albums</h1>
+    <button class="btn-header text-btn" onclick="goCaptureMode()">📸 Capture</button>
+    <button class="btn-header" onclick="openNewAlbumModal()" title="New album">＋</button>
+  </header>
+
+  <!-- ---- Albums list view ---- -->
+  <div class="view active" id="albums-view">
+    <div style="padding:16px">
+      <div id="albums-empty" class="empty-state" style="display:none">
+        <div class="icon">📂</div>
+        <p>No albums yet.<br>Create an album to start organizing job photos.</p>
+        <button class="cta" onclick="openNewAlbumModal()">Create First Album</button>
+      </div>
+      <div class="albums-grid" id="albums-grid"></div>
+    </div>
+  </div>
+
+  <!-- ---- Album detail view ---- -->
+  <div class="view" id="album-view">
+    <div class="album-header">
+      <h2 id="detail-album-name">Album</h2>
+      <p id="detail-album-meta"></p>
+    </div>
+    <div class="detail-tabs">
+      <button class="detail-tab active" onclick="switchTab('photos')">Photos</button>
+      <button class="detail-tab" onclick="switchTab('before-after')">Before / After</button>
+    </div>
+
+    <!-- Photos tab -->
+    <div class="tab-content active" id="tab-photos">
+      <div class="photos-grid" id="photos-grid"></div>
+    </div>
+
+    <!-- Before/After tab -->
+    <div class="tab-content" id="tab-before-after">
+      <div id="ba-tab">
+        <div class="ba-selector">
+          <div class="ba-slot" id="ba-slot-before" onclick="openPhotoPicker('before')">
+            <span style="font-size:28px">📷</span>
+            <span>Before</span>
+          </div>
+          <div class="ba-slot" id="ba-slot-after" onclick="openPhotoPicker('after')">
+            <span style="font-size:28px">📷</span>
+            <span>After</span>
+          </div>
+        </div>
+        <div class="ba-slider-wrap" id="ba-slider-wrap" style="display:none">
+          <img id="ba-before-img" src="" alt="Before">
+          <div id="ba-after" style="width:50%">
+            <img id="ba-after-img" src="" alt="After">
+          </div>
+          <div id="ba-divider" style="left:50%">
+            <div id="ba-handle">⇔</div>
+          </div>
+        </div>
+        <p class="ba-hint" id="ba-hint">Select a before and after photo to compare them.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox">
+  <div id="lightbox-header">
+    <h3 id="lightbox-title"></h3>
+    <button id="lightbox-btn-close" onclick="closeLightbox()">✕</button>
+  </div>
+  <div id="lightbox-img-wrap">
+    <img id="lightbox-img" src="" alt="">
+  </div>
+  <div id="lightbox-footer">
+    <div id="lightbox-note"></div>
+    <div id="lightbox-meta"></div>
+    <div class="lightbox-actions">
+      <a class="lb-btn" id="lightbox-download" href="#" download>⬇ Download</a>
+      <button class="lb-btn accent" id="lightbox-ba-btn" onclick="useForBA()">Compare ⇔</button>
+    </div>
+  </div>
+</div>
+
+<!-- Photo picker (for B/A) -->
+<div id="photo-picker-overlay" onclick="closePhotoPicker()">
+  <div id="photo-picker-sheet" onclick="event.stopPropagation()">
+    <div class="picker-header" id="picker-header">Choose photo</div>
+    <div id="picker-grid"></div>
+  </div>
+</div>
+
+<!-- New album modal -->
+<div class="modal-overlay" id="modal-new-album">
+  <div class="modal-sheet">
+    <h2>New Album</h2>
+    <input type="text" id="new-album-name" placeholder="e.g. Smith Roof Install" maxlength="80">
+    <input type="text" id="new-album-desc" placeholder="Description (optional)" maxlength="160">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeNewAlbumModal()">Cancel</button>
+      <button class="btn-primary" onclick="createAlbum()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ---- State ----
+let currentAlbum = null;
+let currentAlbumPhotos = [];
+let baSlotTarget = null; // 'before' | 'after'
+let baBeforeUrl = null;
+let baAfterUrl = null;
+let lightboxPhoto = null;
+let baSliderActive = false;
+let activeTab = 'photos';
+
+// ---- Navigation ----
+function goBack() {
+  showView('albums');
+  document.getElementById('btn-back').style.display = 'none';
+  document.getElementById('header-icon').textContent = '🗂';
+  document.getElementById('header-title').textContent = 'Job Albums';
+  loadAlbums();
+}
+
+function goCaptureMode() {
+  window.location.href = '/pages/camera-capture.html';
+}
+
+function showView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  if (name === 'albums') {
+    document.getElementById('albums-view').classList.add('active');
+    document.getElementById('album-view').classList.remove('active');
+  } else if (name === 'album') {
+    document.getElementById('albums-view').classList.remove('active');
+    document.getElementById('album-view').classList.add('active');
+  }
+}
+
+// ---- Albums list ----
+async function loadAlbums() {
+  try {
+    const resp = await fetch('/api/albums');
+    const data = await resp.json();
+    const albums = data.albums || [];
+    renderAlbums(albums);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderAlbums(albums) {
+  const grid = document.getElementById('albums-grid');
+  const empty = document.getElementById('albums-empty');
+  grid.innerHTML = '';
+  if (!albums.length) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  albums.forEach(album => {
+    const card = document.createElement('div');
+    card.className = 'album-card';
+    card.onclick = () => openAlbum(album.id);
+    const coverHTML = album.cover_url
+      ? `<img class="album-cover" src="${esc(album.cover_url)}" alt="" loading="lazy">`
+      : `<div class="album-cover-placeholder">📂</div>`;
+    card.innerHTML = `
+      ${coverHTML}
+      <div class="album-info">
+        <div class="album-name">${esc(album.name)}</div>
+        <div class="album-meta">${album.photo_count} photo${album.photo_count !== 1 ? 's' : ''} · ${fmtDate(album.created_at)}</div>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+// ---- Album detail ----
+async function openAlbum(albumId) {
+  try {
+    const resp = await fetch(`/api/albums/${albumId}`);
+    currentAlbum = await resp.json();
+    currentAlbumPhotos = currentAlbum.photos || [];
+    renderAlbumDetail();
+    showView('album');
+    document.getElementById('btn-back').style.display = 'inline';
+    document.getElementById('header-icon').textContent = '📁';
+    document.getElementById('header-title').textContent = currentAlbum.name;
+  } catch (e) {
+    showToast('Could not load album', 'error');
+  }
+}
+
+function renderAlbumDetail() {
+  document.getElementById('detail-album-name').textContent = currentAlbum.name;
+  document.getElementById('detail-album-meta').textContent =
+    `${currentAlbumPhotos.length} photo${currentAlbumPhotos.length !== 1 ? 's' : ''} · Created ${fmtDate(currentAlbum.created_at)}`;
+
+  const grid = document.getElementById('photos-grid');
+  grid.innerHTML = '';
+  if (!currentAlbumPhotos.length) {
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:40px 16px;text-align:center;color:var(--muted);font-size:14px">
+      No photos yet.<br><button onclick="goCaptureMode()" style="margin-top:12px;background:var(--accent);color:#000;border:none;border-radius:8px;padding:10px 20px;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">Capture Photos</button>
+    </div>`;
+    return;
+  }
+  currentAlbumPhotos.forEach((photo, i) => {
+    const img = document.createElement('img');
+    img.className = 'photo-thumb';
+    img.src = photo.url;
+    img.alt = photo.note || `Photo ${i + 1}`;
+    img.loading = 'lazy';
+    img.onclick = () => openLightbox(photo, i);
+    grid.appendChild(img);
+  });
+
+  // Also build picker grid
+  renderPickerGrid();
+}
+
+function switchTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.detail-tab').forEach((t, i) => {
+    t.classList.toggle('active', (i === 0 && name === 'photos') || (i === 1 && name === 'before-after'));
+  });
+  document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+  if (name === 'photos') {
+    document.getElementById('tab-photos').classList.add('active');
+  } else {
+    document.getElementById('tab-before-after').classList.add('active');
+    document.getElementById('ba-tab').style.display = 'flex';
+  }
+}
+
+// ---- Lightbox ----
+function openLightbox(photo, index) {
+  lightboxPhoto = photo;
+  document.getElementById('lightbox-img').src = photo.url;
+  document.getElementById('lightbox-title').textContent =
+    `Photo ${index + 1} of ${currentAlbumPhotos.length}`;
+  document.getElementById('lightbox-note').textContent = photo.note || '';
+  let meta = fmtDate(photo.taken_at);
+  if (photo.lat && photo.lng) meta += ` · GPS: ${parseFloat(photo.lat).toFixed(5)}, ${parseFloat(photo.lng).toFixed(5)}`;
+  document.getElementById('lightbox-meta').textContent = meta;
+  const dl = document.getElementById('lightbox-download');
+  dl.href = photo.url;
+  dl.download = photo.filename;
+  document.getElementById('lightbox').classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  lightboxPhoto = null;
+}
+
+function useForBA() {
+  if (!lightboxPhoto) return;
+  closeLightbox();
+  switchTab('before-after');
+  openPhotoPicker(baBeforeUrl ? 'after' : 'before');
+  setBASlot(baBeforeUrl ? 'after' : 'before', lightboxPhoto.url);
+}
+
+// ---- Before / After ----
+function renderPickerGrid() {
+  const grid = document.getElementById('picker-grid');
+  grid.innerHTML = '';
+  currentAlbumPhotos.forEach(photo => {
+    const img = document.createElement('img');
+    img.className = 'picker-thumb';
+    img.src = photo.url;
+    img.alt = photo.note || '';
+    img.loading = 'lazy';
+    img.onclick = () => pickPhoto(photo.url);
+    grid.appendChild(img);
+  });
+}
+
+function openPhotoPicker(slot) {
+  baSlotTarget = slot;
+  document.getElementById('picker-header').textContent =
+    slot === 'before' ? 'Choose BEFORE photo' : 'Choose AFTER photo';
+  document.getElementById('photo-picker-overlay').classList.add('open');
+}
+function closePhotoPicker() {
+  document.getElementById('photo-picker-overlay').classList.remove('open');
+}
+
+function pickPhoto(url) {
+  setBASlot(baSlotTarget, url);
+  closePhotoPicker();
+}
+
+function setBASlot(slot, url) {
+  const slotEl = document.getElementById(`ba-slot-${slot}`);
+  slotEl.innerHTML = `
+    <img src="${esc(url)}" alt="">
+    <div class="ba-slot-label">${slot === 'before' ? 'BEFORE' : 'AFTER'}</div>`;
+  if (slot === 'before') {
+    baBeforeUrl = url;
+    document.getElementById('ba-before-img').src = url;
+  } else {
+    baAfterUrl = url;
+    document.getElementById('ba-after-img').src = url;
+  }
+  if (baBeforeUrl && baAfterUrl) {
+    showBASlider();
+  }
+}
+
+function showBASlider() {
+  const wrap = document.getElementById('ba-slider-wrap');
+  wrap.style.display = 'block';
+  document.getElementById('ba-hint').textContent = 'Drag the divider to compare.';
+  initBADrag();
+}
+
+function initBADrag() {
+  const wrap = document.getElementById('ba-slider-wrap');
+  const divider = document.getElementById('ba-divider');
+  const afterEl = document.getElementById('ba-after');
+  let dragging = false;
+
+  function setPos(clientX) {
+    const rect = wrap.getBoundingClientRect();
+    let pct = (clientX - rect.left) / rect.width;
+    pct = Math.max(0.05, Math.min(0.95, pct));
+    const pctPx = pct * 100;
+    divider.style.left = pctPx + '%';
+    afterEl.style.width = (100 - pctPx) + '%';
+    // Keep after image filling from the right
+    const afterImg = document.getElementById('ba-after-img');
+    afterImg.style.width = wrap.offsetWidth + 'px';
+    afterImg.style.objectPosition = `${pctPx}% center`;
+  }
+
+  divider.onmousedown = e => { dragging = true; e.preventDefault(); };
+  document.onmousemove = e => { if (dragging) setPos(e.clientX); };
+  document.onmouseup = () => { dragging = false; };
+
+  divider.ontouchstart = e => { dragging = true; };
+  document.ontouchmove = e => {
+    if (dragging && e.touches[0]) {
+      setPos(e.touches[0].clientX);
+      e.preventDefault();
+    }
+  };
+  document.ontouchend = () => { dragging = false; };
+}
+
+// ---- New album modal ----
+function openNewAlbumModal() {
+  document.getElementById('modal-new-album').classList.add('open');
+  document.getElementById('new-album-name').focus();
+}
+function closeNewAlbumModal() {
+  document.getElementById('modal-new-album').classList.remove('open');
+  document.getElementById('new-album-name').value = '';
+  document.getElementById('new-album-desc').value = '';
+}
+async function createAlbum() {
+  const name = document.getElementById('new-album-name').value.trim();
+  if (!name) { document.getElementById('new-album-name').focus(); return; }
+  const desc = document.getElementById('new-album-desc').value.trim();
+  try {
+    const resp = await fetch('/api/albums', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description: desc })
+    });
+    const album = await resp.json();
+    closeNewAlbumModal();
+    showToast(`Album "${name}" created`, 'success');
+    await loadAlbums();
+    openAlbum(album.id);
+  } catch (e) {
+    showToast('Failed to create album', 'error');
+  }
+}
+document.getElementById('new-album-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createAlbum();
+});
+
+// ---- Helpers ----
+function esc(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return iso; }
+}
+
+let toastTimer = null;
+function showToast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (type ? ' ' + type : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 2200);
+}
+
+// ---- Init ----
+loadAlbums();
+</script>
+</body>
+</html>

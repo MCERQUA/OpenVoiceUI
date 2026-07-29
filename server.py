@@ -182,6 +182,9 @@ if DEFAULT_PAGES_DIR.is_dir():
 from routes.static_files import static_files_bp, DJ_SOUNDS, SOUNDS_DIR
 app.register_blueprint(static_files_bp)
 
+from routes.albums import albums_bp
+app.register_blueprint(albums_bp)
+
 from routes.admin import admin_bp
 app.register_blueprint(admin_bp)
 
