@@ -184,6 +184,7 @@ def create_app(config_override: dict = None):
             '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
             '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
             '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
+            '/share/capture/', # Camera Capture share portal — token-gated public access for clients
         )
         # Public for READS ONLY (GET/HEAD/OPTIONS). These prefixes serve config
         # lists the UI loads before Clerk init, but their state-changing methods
