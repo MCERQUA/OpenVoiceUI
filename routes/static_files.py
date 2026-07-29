@@ -298,9 +298,45 @@ def upload_file():
     import uuid
 
     if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
+        import io as _io
+        import time as _time
+        ct = request.content_type or ''
+        # iOS/Cloudflare sometimes sends camera photo as raw binary body (no multipart).
+        # Detect: Content-Type is an image MIME, body has data, no other fields.
+        if (ct.startswith('image/') or ct == 'application/octet-stream') and request.content_length and request.content_length > 0:
+            raw = request.get_data()
+            if raw:
+                ext_guess = mimetypes.guess_extension(ct) or '.jpg'
+                if ext_guess in ('.jpe', '.jpeg'):
+                    ext_guess = '.jpg'
+                fname_raw = f'capture_{int(_time.time())}{ext_guess}'
+                logger.info('upload: raw-body fallback — ct=%s len=%s fname=%s', ct, len(raw), fname_raw)
+                from werkzeug.datastructures import FileStorage
+                f_raw = FileStorage(stream=_io.BytesIO(raw), filename=fname_raw, content_type=ct)
+                # Jump straight to save logic via a local alias
+                _raw_file = f_raw
+            else:
+                _raw_file = None
+        else:
+            _raw_file = None
 
-    f = request.files['file']
+        if _raw_file is None:
+            logger.warning(
+                'upload: no file field — content_type=%r content_length=%r '
+                'files_keys=%r form_keys=%r user_agent=%r',
+                ct,
+                request.content_length,
+                list(request.files.keys()),
+                list(request.form.keys()),
+                request.headers.get('User-Agent', '')[:120],
+            )
+            return jsonify({'error': 'No file provided'}), 400
+
+        # Use the raw-body file as `f` for the rest of the route
+        f = _raw_file
+    else:
+        f = request.files['file']
+
     if not f.filename:
         # iOS camera blobs arrive with no filename — generate one from content-type
         import time as _time
