@@ -182,6 +182,9 @@ if DEFAULT_PAGES_DIR.is_dir():
 from routes.static_files import static_files_bp, DJ_SOUNDS, SOUNDS_DIR
 app.register_blueprint(static_files_bp)
 
+from routes.albums import albums_bp
+app.register_blueprint(albums_bp)
+
 from routes.admin import admin_bp
 app.register_blueprint(admin_bp)
 
@@ -281,6 +284,10 @@ app.register_blueprint(services_bp)
 # Google Maps — /api/maps/config (JS API key for canvas pages) + /api/maps/directions
 from routes.maps import maps_bp
 app.register_blueprint(maps_bp)
+
+# Camera Capture — flagship photo/album system (CompanyCam competitor)
+from routes.capture import capture_bp
+app.register_blueprint(capture_bp, url_prefix='/api/capture')
 
 # WO-1.3 — wire the STT provider registry. autodiscover() loads
 # config/providers.yaml and imports the STT provider modules so their

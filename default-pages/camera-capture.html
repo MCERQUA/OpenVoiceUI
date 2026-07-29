@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="page-icon" content="camera">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Camera Capture</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0f0f0f;--bg1:#1a1a1a;--bg2:#222;--bg3:#2a2a2a;
+  --border:rgba(255,255,255,.08);--border-h:rgba(255,255,255,.16);
+  --tx:#e4e4e7;--tx2:#a1a1aa;--tx3:#71717a;
+  --accent:#2563eb;--accent-dim:rgba(37,99,235,.12);--accent-glow:rgba(37,99,235,.25);
+  --green:#22c55e;--green-dim:rgba(34,197,94,.12);
+  --red:#ef4444;--red-dim:rgba(239,68,68,.1);
+  --amber:#f59e0b;--amber-dim:rgba(245,158,11,.12);
+  --r:12px;--rl:20px;
+}
+html,body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--tx2);min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font-family:inherit}
+
+/* ── Layout ── */
+.app{max-width:640px;margin:0 auto;padding:16px 16px 120px}
+
+/* ── Header ── */
+.hdr{display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.hdr-icon{width:42px;height:42px;background:var(--accent-dim);border:1px solid rgba(37,99,235,.2);border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s}
+.hdr-icon:active{background:rgba(37,99,235,.22)}
+.hdr-icon svg{width:20px;height:20px;stroke:var(--accent);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.hdr-text h1{font-size:1.1rem;font-weight:700;color:var(--tx);letter-spacing:-.01em}
+.hdr-text p{font-size:.72rem;color:var(--tx3);margin-top:2px}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.gps-dot{width:8px;height:8px;border-radius:50%;background:var(--tx3);transition:background .3s}
+.gps-dot.got{background:var(--green)}
+
+/* ── Search bar (album list) ── */
+.search-bar{display:flex;gap:8px;margin-bottom:16px}
+.search-input{flex:1;background:var(--bg1);border:1px solid var(--border);border-radius:var(--r);padding:9px 12px 9px 34px;font-size:.85rem;color:var(--tx);outline:none;transition:border-color .15s;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='6.5' cy='6.5' r='5.5'/%3E%3Cline x1='11' y1='11' x2='14' y2='14'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:10px center}
+.search-input:focus{border-color:rgba(37,99,235,.5)}
+.search-input::placeholder{color:var(--tx3)}
+.new-album-btn{display:flex;align-items:center;gap:5px;padding:9px 14px;border-radius:var(--r);border:1px solid var(--accent);background:var(--accent-dim);color:var(--accent);font-size:.8rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap;transition:background .15s}
+.new-album-btn:active{background:rgba(37,99,235,.2)}
+.new-album-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Album grid ── */
+.album-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:520px){.album-grid{grid-template-columns:repeat(3,1fr)}}
+.album-card{border-radius:var(--r);overflow:hidden;border:1px solid var(--border);background:var(--bg1);cursor:pointer;transition:border-color .15s,transform .12s;-webkit-tap-highlight-color:transparent}
+.album-card:active{transform:scale(.97)}
+.album-thumb-wrap{position:relative;width:100%;aspect-ratio:4/3;background:var(--bg2)}
+.album-thumb{width:100%;height:100%;object-fit:cover;display:block}
+.album-thumb-placeholder{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg2)}
+.album-thumb-placeholder svg{width:28px;height:28px;stroke:var(--tx3);fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;opacity:.3}
+.album-ct-badge{position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.7);border-radius:6px;padding:2px 7px;font-size:.63rem;font-weight:700;color:#fff;backdrop-filter:blur(6px)}
+.album-status{position:absolute;top:6px;left:6px;padding:2px 7px;border-radius:6px;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;backdrop-filter:blur(6px)}
+.album-status.in_progress{background:rgba(37,99,235,.8);color:#fff}
+.album-status.completed{background:rgba(34,197,94,.8);color:#fff}
+.album-status.archived{background:rgba(113,113,122,.7);color:#fff}
+.album-body{padding:10px 11px 11px}
+.album-name{font-size:.82rem;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.album-client{font-size:.65rem;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.album-meta{font-size:.63rem;color:var(--tx3);margin-top:3px}
+
+/* ── Back bar (album detail) ── */
+.back-bar{display:none;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.back-bar.show{display:flex}
+.back-btn{display:flex;align-items:center;gap:4px;background:none;border:none;color:var(--accent);font-size:.85rem;font-weight:600;cursor:pointer;padding:4px 0;-webkit-tap-highlight-color:transparent}
+.back-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.back-title{font-size:.85rem;font-weight:700;color:var(--tx);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.back-count{font-size:.72rem;color:var(--tx3);white-space:nowrap}
+
+/* ── Album info (detail view) ── */
+.album-info{background:var(--bg1);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-bottom:14px}
+.album-info-row{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--tx2)}
+.album-info-row+.album-info-row{margin-top:6px}
+.album-info-label{color:var(--tx3);font-size:.7rem;min-width:55px;flex-shrink:0}
+.album-info-val{color:var(--tx);font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.album-info-val a{color:var(--accent);text-decoration:none}
+.album-info-val a:hover{text-decoration:underline}
+
+/* ── Folder tabs ── */
+.folder-tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.folder-tab{padding:6px 14px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--tx3);font-size:.75rem;font-weight:600;cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent;transition:all .15s}
+.folder-tab:active{transform:scale(.95)}
+.folder-tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ── Photo grid ── */
+.photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+@media(min-width:480px){.photo-grid{grid-template-columns:repeat(4,1fr)}}
+@media(min-width:768px){.photo-grid{grid-template-columns:repeat(5,1fr)}}
+.photo-card{border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--bg1);position:relative;cursor:pointer;transition:transform .12s;-webkit-tap-highlight-color:transparent;aspect-ratio:1}
+.photo-card:active{transform:scale(.96)}
+.photo-card-img{width:100%;height:100%;object-fit:cover;display:block;background:var(--bg2)}
+.photo-card-select{position:absolute;top:4px;left:4px;width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.6);background:transparent;cursor:pointer;z-index:2;-webkit-tap-highlight-color:transparent;transition:all .15s;display:none}
+.photo-card.selectable .photo-card-select{display:block}
+.photo-card.selected .photo-card-select{background:var(--accent);border-color:var(--accent)}
+.photo-card.selected .photo-card-select::after{content:'';display:block;width:6px;height:6px;border-radius:50%;background:#fff;margin:5px auto 0}
+.photo-card-folder{position:absolute;bottom:4px;left:4px;padding:1px 5px;border-radius:4px;font-size:.55rem;font-weight:700;background:rgba(0,0,0,.65);color:rgba(255,255,255,.8);backdrop-filter:blur(4px)}
+.photo-card-caption{position:absolute;bottom:4px;right:4px;padding:1px 5px;border-radius:4px;font-size:.55rem;background:rgba(245,158,11,.8);color:#fff;max-width:55%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(4px);display:none}
+.photo-card[data-caption]:not([data-caption=""]) .photo-card-caption{display:block}
+
+/* ── Batch toolbar ── */
+.batch-bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg1);border-top:1px solid var(--border);padding:10px 16px;display:none;align-items:center;gap:8px;z-index:200}
+.batch-bar.show{display:flex}
+.batch-ct{font-size:.8rem;font-weight:600;color:var(--tx);margin-right:auto}
+.batch-btn{padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--tx2);font-size:.72rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap;transition:all .15s}
+.batch-btn:active{background:var(--bg3)}
+.batch-btn.danger{color:var(--red);border-color:rgba(239,68,68,.25)}
+.batch-btn.danger:active{background:var(--red-dim)}
+.batch-cancel{background:none;border:none;color:var(--tx3);font-size:.75rem;cursor:pointer;padding:4px 8px;-webkit-tap-highlight-color:transparent}
+
+/* ── Capture button ── */
+.capture-fab{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:150;display:flex;flex-direction:column;align-items:center;gap:4px}
+.capture-ring{width:104px;height:104px}
+.capture-ring circle{fill:none;stroke-width:3;stroke-linecap:round}
+.capture-ring .ring-bg{stroke:var(--border)}
+.capture-ring .ring-fg{stroke:var(--accent);transition:stroke .3s;transform-origin:center;transform:rotate(-90deg)}
+.capture-ring.recording .ring-fg{stroke:var(--red)}
+.capture-ring.uploading .ring-fg{stroke:var(--amber);animation:sweep 1.2s ease-in-out infinite}
+@keyframes sweep{0%{stroke-dashoffset:290}100%{stroke-dashoffset:0}}
+.capture-circle{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:92px;height:92px;border-radius:50%;overflow:hidden;border:3px solid var(--accent);cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:transform .1s}
+.capture-circle:active{transform:translate(-50%,-50%) scale(.92)}
+.capture-circle video{width:100%;height:100%;object-fit:cover}
+.capture-circle .shutter-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+.capture-hint{font-size:.62rem;color:var(--tx3);text-align:center;margin-top:2px;white-space:nowrap}
+
+/* ── Camera mode overlay ── */
+.camera-overlay{position:fixed;inset:0;background:#000;z-index:250;display:none;flex-direction:column}
+.camera-overlay.open{display:flex}
+.camera-top-bar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;z-index:2}
+.camera-top-btn{width:40px;height:40px;border-radius:50%;border:none;background:rgba(255,255,255,.15);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s}
+.camera-top-btn:active{background:rgba(255,255,255,.25)}
+.camera-top-btn.active{background:rgba(255,255,255,.35)}
+.camera-top-btn svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.camera-timer-display{color:#fff;font-size:2.5rem;font-weight:700;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:5;display:none;text-shadow:0 2px 8px rgba(0,0,0,.6)}
+.camera-viewfinder{flex:1;position:relative;overflow:hidden;background:#000}
+.camera-viewfinder video{width:100%;height:100%;object-fit:cover}
+.camera-grid{position:absolute;inset:0;pointer-events:none;display:none}
+.camera-grid.show{display:block}
+.camera-grid svg{width:100%;height:100%}
+.camera-level{position:absolute;bottom:30%;left:50%;transform:translateX(-50%);width:200px;height:2px;border-radius:1px;background:rgba(255,255,255,.3);pointer-events:none;z-index:3}
+.camera-level-inner{width:60%;height:100%;border-radius:1px;background:rgba(255,255,255,.3);transition:background .2s,transform .1s}
+.camera-level-inner.level{background:var(--green);transform:scaleX(1)}
+.camera-bottom-bar{display:flex;align-items:center;justify-content:space-between;padding:16px 30px 28px;z-index:2}
+.camera-shutter{width:72px;height:72px;border-radius:50%;border:4px solid #fff;background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;position:relative}
+.camera-shutter-inner{width:60px;height:60px;border-radius:50%;background:#fff;transition:transform .1s}
+.camera-shutter:active .camera-shutter-inner{transform:scale(.9)}
+.camera-shutter.recording .camera-shutter-inner{background:var(--red);border-radius:6px;width:28px;height:28px}
+.camera-shutter-label{text-align:center;color:rgba(255,255,255,.6);font-size:.6rem;margin-top:4px}
+.camera-bottom-btn{width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,.15);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.camera-bottom-btn svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.camera-close{position:absolute;top:12px;right:12px;z-index:3}
+
+/* ── Full-screen viewer ── */
+.viewer{position:fixed;inset:0;background:#000;z-index:300;display:none;flex-direction:column}
+.viewer.open{display:flex}
+.viewer-top{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;z-index:2;background:linear-gradient(to bottom,rgba(0,0,0,.7),transparent);pointer-events:none}
+.viewer-top>*{pointer-events:auto}
+.viewer-close{width:36px;height:36px;border-radius:50%;border:none;background:rgba(255,255,255,.15);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.viewer-close svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.viewer-counter{color:#fff;font-size:.8rem;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.6)}
+.viewer-img-wrap{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+.viewer-img{max-width:100%;max-height:100%;object-fit:contain;transition:transform .1s}
+.viewer-nav{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;border:none;background:rgba(255,255,255,.12);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2}
+.viewer-nav svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.viewer-prev{left:10px}
+.viewer-next{right:10px}
+.viewer-ba-toggle{display:none;padding:6px 12px;border-radius:20px;border:none;background:rgba(255,255,255,.15);backdrop-filter:blur(6px);color:#fff;font-size:.7rem;font-weight:600;cursor:pointer;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:2}
+.viewer-ba-toggle.show{display:block}
+
+/* Viewer bottom sheet */
+.viewer-sheet{background:var(--bg1);border-top:1px solid var(--border);max-height:50vh;overflow-y:auto;padding:16px;transition:transform .3s ease;-webkit-overflow-scrolling:touch}
+.viewer-sheet.collapsed{max-height:0;padding:0 16px;overflow:hidden}
+.viewer-sheet-toggle{width:100%;display:flex;align-items:center;justify-content:center;padding:8px 0 4px;border:none;background:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.viewer-sheet-toggle svg{width:20px;height:20px;stroke:var(--tx3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .3s}
+.viewer-sheet.collapsed .viewer-sheet-toggle svg{transform:rotate(180deg)}
+.viewer-section{margin-bottom:14px}
+.viewer-section-lbl{font-size:.65rem;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px}
+.viewer-gps{font-size:.82rem;color:var(--tx2);font-family:monospace}
+.viewer-gps a{color:var(--accent);text-decoration:none;font-family:system-ui}
+.viewer-ts{font-size:.82rem;color:var(--tx2)}
+.viewer-tags{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.viewer-tag{font-size:.72rem;background:var(--accent-dim);border:1px solid rgba(37,99,235,.2);color:var(--accent);border-radius:16px;padding:3px 9px;display:flex;align-items:center;gap:4px}
+.viewer-tag button{background:none;border:none;color:rgba(37,99,235,.5);cursor:pointer;font-size:.9rem;line-height:1;padding:0}
+.viewer-tag button:hover{color:var(--red)}
+.viewer-tag-add{font-size:.72rem;color:var(--tx3);border:1px dashed var(--border-h);border-radius:16px;padding:3px 9px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.viewer-tag-input{display:none;flex:1;gap:6px;margin-top:6px}
+.viewer-tag-input.show{display:flex}
+.viewer-tag-input input{flex:1;background:var(--bg2);border:1px solid rgba(37,99,235,.4);border-radius:8px;padding:5px 10px;font-size:.8rem;color:var(--tx);outline:none;-webkit-appearance:none}
+.viewer-tag-input button{padding:5px 10px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:.75rem;font-weight:600;cursor:pointer}
+.viewer-note{width:100%;min-height:56px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:.82rem;color:var(--tx);outline:none;resize:vertical;font-family:inherit;-webkit-appearance:none}
+.viewer-note:focus{border-color:rgba(37,99,235,.4)}
+.viewer-actions{display:flex;gap:8px;flex-wrap:wrap}
+.v-btn{flex:1;min-width:80px;display:flex;align-items:center;justify-content:center;gap:5px;padding:9px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--tx2);font-size:.75rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.v-btn:active{background:var(--bg3)}
+.v-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.v-btn.annotate{color:var(--accent);border-color:rgba(37,99,235,.25)}
+.v-btn.del{color:var(--red);border-color:rgba(239,68,68,.2)}
+.v-btn.ai{color:var(--amber);border-color:rgba(245,158,11,.2)}
+
+/* ── Modal ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:400;display:none;align-items:center;justify-content:center;padding:16px}
+.modal-bg.open{display:flex}
+.modal{background:var(--bg1);border:1px solid var(--border);border-radius:var(--rl);width:100%;max-width:440px;max-height:90vh;overflow-y:auto;padding:24px}
+.modal h2{font-size:1rem;font-weight:700;color:var(--tx);margin-bottom:16px}
+.modal-field{margin-bottom:14px}
+.modal-field label{display:block;font-size:.72rem;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px}
+.modal-field input,.modal-field select,.modal-field textarea{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:.85rem;color:var(--tx);outline:none;-webkit-appearance:none;transition:border-color .15s}
+.modal-field input:focus,.modal-field select:focus,.modal-field textarea:focus{border-color:rgba(37,99,235,.5)}
+.modal-field textarea{min-height:60px;resize:vertical;font-family:inherit}
+.modal-field-row{display:flex;gap:10px}
+.modal-field-row .modal-field{flex:1}
+.modal-gps-btn{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--tx2);font-size:.75rem;cursor:pointer;margin-top:4px;-webkit-tap-highlight-color:transparent}
+.modal-gps-btn svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.modal-folder-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.modal-folder-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;border-radius:16px;background:var(--accent-dim);border:1px solid rgba(37,99,235,.2);color:var(--accent);font-size:.72rem;font-weight:600}
+.modal-folder-chip button{background:none;border:none;color:rgba(37,99,235,.5);cursor:pointer;font-size:.9rem;line-height:1;padding:0}
+.modal-folder-add{padding:4px 10px;border-radius:16px;border:1px dashed var(--border-h);background:none;color:var(--tx3);font-size:.72rem;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.modal-actions{display:flex;gap:10px;margin-top:20px}
+.modal-actions button{flex:1;padding:10px;border-radius:var(--r);font-size:.85rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;border:none}
+.modal-cancel{background:var(--bg2);color:var(--tx2)}
+.modal-save{background:var(--accent);color:#fff}
+
+/* ── Annotation canvas overlay ── */
+.annot-overlay{position:fixed;inset:0;background:#000;z-index:450;display:none;flex-direction:column}
+.annot-overlay.open{display:flex}
+.annot-toolbar{display:flex;align-items:center;gap:6px;padding:10px 12px;background:var(--bg1);border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;flex-shrink:0}
+.annot-btn{min-width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0;transition:all .12s}
+.annot-btn.active{border-color:rgba(37,99,235,.5);background:var(--accent-dim)}
+.annot-btn svg{width:15px;height:15px;stroke:var(--tx2);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.annot-btn.active svg{stroke:var(--accent)}
+.annot-sep{width:1px;height:22px;background:var(--border);flex-shrink:0;margin:0 2px}
+.annot-color{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);cursor:pointer;position:relative;overflow:hidden;flex-shrink:0}
+.annot-color input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.annot-size{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.annot-size span{font-size:.62rem;color:var(--tx3)}
+.annot-size input[type=range]{width:60px;height:4px;-webkit-appearance:none;background:var(--border);border-radius:2px;outline:none;cursor:pointer}
+.annot-size input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);cursor:pointer}
+.annot-spacer{flex:1}
+.annot-save{padding:7px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:.78rem;font-weight:700;cursor:pointer;flex-shrink:0}
+.annot-close{min-width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
+.annot-close svg{width:14px;height:14px;stroke:var(--tx3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.annot-canvas-wrap{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+#annotCanvas{max-width:100%;max-height:100%;cursor:crosshair;touch-action:none;display:block}
+.annot-canvas-wrap[data-tool=text] #annotCanvas{cursor:text}
+.annot-canvas-wrap[data-tool=erase] #annotCanvas{cursor:cell}
+.annot-text-wrap{display:none;position:absolute;z-index:5;padding:2px}
+.annot-text-wrap.show{display:block}
+.annot-text-input{background:rgba(0,0,0,.75);border:1px solid rgba(37,99,235,.6);border-radius:4px;color:#fff;padding:4px 8px;font-size:16px;outline:none;min-width:80px;-webkit-appearance:none}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:var(--bg1);border:1px solid var(--border);border-radius:var(--r);padding:9px 16px;font-size:.78rem;color:var(--tx);display:flex;align-items:center;gap:7px;box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;pointer-events:none;z-index:500;white-space:nowrap}
+.toast.show{opacity:1}
+.toast svg{width:14px;height:14px;flex-shrink:0}
+.toast.ok svg{stroke:var(--green)}
+.toast.err svg{stroke:var(--red)}
+.toast.spin svg{stroke:var(--accent);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Empty state ── */
+.empty{text-align:center;padding:48px 20px;color:var(--tx3)}
+.empty svg{width:44px;height:44px;stroke:var(--tx3);fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round;margin:0 auto 12px;display:block;opacity:.3}
+.empty p{font-size:.85rem;line-height:1.5}
+.empty b{color:var(--tx2);font-weight:600}
+
+/* ── Loading ── */
+.loading-spinner{text-align:center;padding:40px;color:var(--tx3);font-size:.82rem}
+.loading-spinner::before{content:'';display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin-right:8px;vertical-align:middle}
+
+/* ── Section label ── */
+.section-lbl{font-size:.7rem;font-weight:600;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.section-lbl .ct{color:var(--tx2);font-weight:700;font-size:.85em;background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:1px 8px}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- Header -->
+  <div class="hdr">
+    <div class="hdr-icon" onclick="goHome()">
+      <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    </div>
+    <div class="hdr-text">
+      <h1 id="hdrTitle">Camera Capture</h1>
+      <p id="hdrSub">Albums by job or project</p>
+    </div>
+    <div class="hdr-right">
+      <div class="gps-dot" id="gpsDot"></div>
+    </div>
+  </div>
+
+  <!-- Search bar (album list view) -->
+  <div class="search-bar" id="searchBar">
+    <input type="text" class="search-input" id="searchInput" placeholder="Search albums..." autocomplete="off" autocorrect="off" spellcheck="false">
+    <button class="new-album-btn" onclick="openAlbumModal()">
+      <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Album
+    </button>
+  </div>
+
+  <!-- Back bar (album detail view) -->
+  <div class="back-bar" id="backBar">
+    <button class="back-btn" onclick="goHome()">
+      <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      Albums
+    </button>
+    <span class="back-title" id="backTitle"></span>
+    <span class="back-count" id="backCount"></span>
+  </div>
+
+  <!-- Album info (detail) -->
+  <div id="albumInfoWrap" style="display:none"></div>
+
+  <!-- Folder tabs (detail) -->
+  <div class="folder-tabs" id="folderTabs" style="display:none"></div>
+
+  <!-- Section label -->
+  <div class="section-lbl" id="sectionLbl" style="display:none">
+    <span id="sectionTitle">Albums</span>
+    <span class="ct" id="sectionCount">0</span>
+  </div>
+
+  <!-- Album grid -->
+  <div class="album-grid" id="albumGrid"></div>
+
+  <!-- Photo grid (detail) -->
+  <div class="photo-grid" id="photoGrid" style="display:none"></div>
+
+  <!-- Empty state -->
+  <div class="empty" id="emptyState">
+    <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    <p>No albums yet.<br>Tap <b>New Album</b> to get started.</p>
+  </div>
+</div>
+
+<!-- Capture FAB -->
+<div class="capture-fab" id="captureFab" style="display:none">
+  <svg class="capture-ring" id="captureRing" viewBox="0 0 104 104">
+    <circle class="ring-bg" cx="52" cy="52" r="48" stroke-dasharray="301.59" stroke-dashoffset="0"/>
+    <circle class="ring-fg" cx="52" cy="52" r="48" stroke-dasharray="301.59" stroke-dashoffset="301.59"/>
+  </svg>
+  <div class="capture-circle" id="captureCircle">
+    <video id="shutterVideo" autoplay muted playsinline webkit-playsinline></video>
+    <div class="shutter-flash" id="shutterFlash"></div>
+  </div>
+  <div class="capture-hint">Tap to capture</div>
+</div>
+
+<!-- Camera overlay -->
+<div class="camera-overlay" id="cameraOverlay">
+  <div class="camera-top-bar">
+    <button class="camera-top-btn" id="camFlash" onclick="toggleFlash()">
+      <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    </button>
+    <button class="camera-top-btn" id="camGrid" onclick="toggleGrid()">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+    </button>
+    <button class="camera-top-btn" id="camTimer" onclick="cycleTimer()">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3l-2 2"/><path d="M22 3l2 2"/></svg>
+    </button>
+  </div>
+  <div class="camera-timer-display" id="camTimerDisplay"></div>
+  <div class="camera-viewfinder" id="camViewfinder">
+    <video id="viewfinder" autoplay muted playsinline webkit-playsinline></video>
+    <div class="camera-grid" id="camGridOverlay">
+      <svg viewBox="0 0 300 300" preserveAspectRatio="none">
+        <line x1="100" y1="0" x2="100" y2="300" stroke="rgba(255,255,255,.28)" stroke-width="1"/>
+        <line x1="200" y1="0" x2="200" y2="300" stroke="rgba(255,255,255,.28)" stroke-width="1"/>
+        <line x1="0" y1="100" x2="300" y2="100" stroke="rgba(255,255,255,.28)" stroke-width="1"/>
+        <line x1="0" y1="200" x2="300" y2="200" stroke="rgba(255,255,255,.28)" stroke-width="1"/>
+      </svg>
+    </div>
+    <div class="camera-level" id="camLevel">
+      <div class="camera-level-inner" id="camLevelInner"></div>
+    </div>
+  </div>
+  <div class="camera-bottom-bar">
+    <button class="camera-bottom-btn" onclick="flipCamera()">
+      <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
+    <div style="display:flex;flex-direction:column;align-items:center">
+      <button class="camera-shutter" id="camShutter" ontouchstart="onShutterTouchStart(event)" onmousedown="onShutterTouchStart(event)">
+        <div class="camera-shutter-inner" id="camShutterInner"></div>
+      </button>
+      <div class="camera-shutter-label" id="camShutterLabel">Photo</div>
+    </div>
+    <button class="camera-bottom-btn" onclick="openViewerLast()">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+    </button>
+  </div>
+  <button class="camera-close camera-top-btn" onclick="closeCameraOverlay()" style="position:absolute;top:12px;right:12px;z-index:3">
+    <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+  </button>
+</div>
+
+<!-- Full-screen viewer -->
+<div class="viewer" id="viewer">
+  <div class="viewer-top">
+    <button class="viewer-close" onclick="closeViewer()"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    <span class="viewer-counter" id="viewerCounter"></span>
+    <button class="viewer-ba-toggle" id="viewerBaToggle" onclick="toggleBeforeAfter()">Before / After</button>
+  </div>
+  <div class="viewer-img-wrap" id="viewerWrap">
+    <button class="viewer-nav viewer-prev" id="viewerPrev" onclick="viewerNav(-1)"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+    <img class="viewer-img" id="viewerImg" src="" alt="">
+    <button class="viewer-nav viewer-next" id="viewerNext" onclick="viewerNav(1)"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+  </div>
+  <div class="viewer-sheet" id="viewerSheet">
+    <button class="viewer-sheet-toggle" onclick="toggleViewerSheet()"><svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg></button>
+    <div id="viewerSheetContent"></div>
+  </div>
+</div>
+
+<!-- Batch toolbar -->
+<div class="batch-bar" id="batchBar">
+  <span class="batch-ct" id="batchCt">0 selected</span>
+  <button class="batch-btn" onclick="batchTag()">Tag</button>
+  <button class="batch-btn" onclick="batchMove()">Move</button>
+  <button class="batch-btn" onclick="batchDescribe()">AI Describe</button>
+  <button class="batch-btn danger" onclick="batchDelete()">Delete</button>
+  <button class="batch-cancel" onclick="cancelBatch()">Cancel</button>
+</div>
+
+<!-- Album create/edit modal -->
+<div class="modal-bg" id="albumModal">
+  <div class="modal">
+    <h2 id="albumModalTitle">New Album</h2>
+    <div class="modal-field">
+      <label>Name</label>
+      <input type="text" id="modalName" placeholder="e.g. Johnson Residence - Attic Foam" autocomplete="off">
+    </div>
+    <div class="modal-field">
+      <label>Client</label>
+      <input type="text" id="modalClient" placeholder="e.g. Dave Johnson" autocomplete="off">
+    </div>
+    <div class="modal-field">
+      <label>Address</label>
+      <input type="text" id="modalAddress" placeholder="e.g. 1420 W Palm Ln, Phoenix AZ" autocomplete="off">
+    </div>
+    <div class="modal-field-row">
+      <div class="modal-field">
+        <label>Latitude</label>
+        <input type="number" id="modalLat" step="any" placeholder="33.4712">
+      </div>
+      <div class="modal-field">
+        <label>Longitude</label>
+        <input type="number" id="modalLng" step="any" placeholder="-112.0891">
+      </div>
+    </div>
+    <div class="modal-field">
+      <button class="modal-gps-btn" onclick="fillGPS()">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        Use current location
+      </button>
+    </div>
+    <div class="modal-field">
+      <label>Status</label>
+      <select id="modalStatus">
+        <option value="in_progress">In Progress</option>
+        <option value="completed">Completed</option>
+        <option value="archived">Archived</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>Folders</label>
+      <div class="modal-folder-list" id="modalFolders"></div>
+      <input type="text" id="modalFolderInput" placeholder="Add folder..." style="margin-top:6px;display:none" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeAlbumModal()">Cancel</button>
+      <button class="modal-save" onclick="saveAlbumModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Annotation overlay -->
+<div class="annot-overlay" id="annotOverlay">
+  <div class="annot-toolbar">
+    <button class="annot-close" onclick="closeAnnotator()"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    <div class="annot-sep"></div>
+    <button class="annot-btn active" id="anPen" onclick="anSetTool('pen')"><svg viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg></button>
+    <button class="annot-btn" id="anText" onclick="anSetTool('text')"><svg viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></button>
+    <button class="annot-btn" id="anErase" onclick="anSetTool('erase')"><svg viewBox="0 0 24 24"><path d="M20 20H7L3 16l10-10 7 7-3.5 3.5"/><path d="M6 11l3 3"/></svg></button>
+    <button class="annot-btn" id="anUndo" onclick="anUndo()"><svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.89"/></svg></button>
+    <div class="annot-sep"></div>
+    <div class="annot-color" id="anColorSwatch" style="background:#ef4444"><input type="color" id="anColor" value="#ef4444" oninput="anSetColor(this.value)"></div>
+    <div class="annot-size"><span>Size</span><input type="range" id="anSize" min="2" max="32" value="4"></div>
+    <div class="annot-spacer"></div>
+    <button class="annot-save" onclick="saveAnnotation()">Save</button>
+  </div>
+  <div class="annot-canvas-wrap" id="anCanvasWrap">
+    <canvas id="annotCanvas"></canvas>
+    <div class="annot-text-wrap" id="anTextWrap"><input type="text" class="annot-text-input" id="anTextInput" placeholder="Type..." autocomplete="off"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <svg id="toastIcon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+  <span id="toastMsg"></span>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════
+const API = '/api/capture';
+let albums = [];
+let currentAlbum = null;   // album object
+let albumPhotos = [];      // photos in current album (server-ordered)
+let filteredPhotos = [];   // after folder filter
+let activeFolder = null;  // null = all
+let searchQuery = '';
+let gpsPos = null;
+
+// Camera state
+const CAM = { stream: null, track: null, facing: 'environment', flash: false, gridOn: false, timerSec: 0, recording: false, holdTimer: null };
+let cameraActive = false;
+
+// Batch select
+let batchMode = false;
+let selectedIds = new Set();
+let longPressTimer = null;
+
+// Viewer
+let viewerPhotos = [];
+let viewerIdx = 0;
+let viewerZoom = 1;
+let viewerPanX = 0;
+let viewerPanY = 0;
+let viewerShowingBefore = false;
+
+// Annotation
+let anTool = 'pen';
+let anCanvas = null;
+let anCtx = null;
+let anDrawing = false;
+let anUndoStack = [];
+let anBaseImage = null;
+let anPhotoId = null;
+let anAlbumId = null;
+let anPendingTextPos = null;
+
+// Modal
+let modalAlbumId = null; // null = create, string = edit
+
+// Auth
+let authReady = false;
+
+// ════════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════════
+async function init() {
+  await awaitAuth();
+  startGPS();
+  renderAlbumList();
+  setupSearch();
+  setupAnnotator();
+  // Request camera from parent
+  window.parent.postMessage({ type: 'canvas-action', action: 'camera-acquire' }, '*');
+}
+
+async function awaitAuth() {
+  if (typeof window.authFetch === 'function') { authReady = true; return; }
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 300));
+    if (typeof window.authFetch === 'function') { authReady = true; return; }
+  }
+  console.warn('authFetch not available after 6s, falling back to fetch');
+  window.authFetch = window.fetch;
+  authReady = true;
+}
+
+async function apiFetch(url, opts = {}) {
+  if (!authReady) await awaitAuth();
+  return window.authFetch(url, opts);
+}
+
+// ════════════════════════════════════════════════════════════════
+// GPS
+// ════════════════════════════════════════════════════════════════
+function startGPS() {
+  const dot = document.getElementById('gpsDot');
+  if (!navigator.geolocation) return;
+  navigator.geolocation.watchPosition(
+    pos => {
+      gpsPos = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy) };
+      dot.classList.add('got');
+    },
+    () => { dot.classList.remove('got'); },
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// NAVIGATION
+// ════════════════════════════════════════════════════════════════
+function goHome() {
+  currentAlbum = null;
+  albumPhotos = [];
+  filteredPhotos = [];
+  activeFolder = null;
+  batchMode = false;
+  selectedIds.clear();
+  closeViewer();
+  cancelBatch();
+  document.getElementById('albumInfoWrap').style.display = 'none';
+  document.getElementById('folderTabs').style.display = 'none';
+  document.getElementById('photoGrid').style.display = 'none';
+  document.getElementById('captureFab').style.display = 'none';
+  document.getElementById('backBar').classList.remove('show');
+  document.getElementById('searchBar').style.display = 'flex';
+  renderAlbumList();
+}
+
+async function openAlbumDetail(albumId) {
+  try {
+    const r = await apiFetch(`${API}/albums/${albumId}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    currentAlbum = await r.json();
+    albumPhotos = currentAlbum.photos || [];
+  } catch (e) {
+    console.error('Failed to load album:', e);
+    toast('err', 'Failed to load album');
+    return;
+  }
+  activeFolder = null;
+  filteredPhotos = [...albumPhotos];
+  // UI switch
+  document.getElementById('searchBar').style.display = 'none';
+  document.getElementById('albumGrid').style.display = 'none';
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('backBar').classList.add('show');
+  document.getElementById('backTitle').textContent = currentAlbum.name;
+  document.getElementById('backCount').textContent = `${albumPhotos.length} photo${albumPhotos.length === 1 ? '' : 's'}`;
+  document.getElementById('photoGrid').style.display = '';
+  document.getElementById('captureFab').style.display = '';
+  renderAlbumInfo();
+  renderFolderTabs();
+  renderPhotoGrid();
+  // Start camera feed for shutter preview
+  startCamera();
+}
+
+// ════════════════════════════════════════════════════════════════
+// ALBUM LIST
+// ════════════════════════════════════════════════════════════════
+function setupSearch() {
+  const input = document.getElementById('searchInput');
+  input.addEventListener('input', () => {
+    searchQuery = input.value.trim().toLowerCase();
+    renderAlbumList();
+  });
+}
+
+async function loadAlbums() {
+  const params = new URLSearchParams();
+  if (searchQuery) params.set('q', searchQuery);
+  const url = `${API}/albums${searchQuery ? '?' + params : ''}`;
+  const r = await apiFetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function renderAlbumList() {
+  const grid = document.getElementById('albumGrid');
+  const empty = document.getElementById('emptyState');
+  const secLbl = document.getElementById('sectionLbl');
+  try {
+    albums = await loadAlbums();
+  } catch {
+    albums = [];
+  }
+  if (albums.length === 0) {
+    empty.style.display = '';
+    secLbl.style.display = 'none';
+    grid.innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+  secLbl.style.display = 'flex';
+  document.getElementById('sectionTitle').textContent = 'Albums';
+  document.getElementById('sectionCount').textContent = albums.length;
+  grid.innerHTML = albums.map(a => {
+    const ct = (a.photos || []).length;
+    const coverUrl = a.cover_photo_id ? `${API}/albums/${a.id}/thumb/${a.cover_photo_id}` : '';
+    const lastPhoto = (a.photos || []).slice(-1)[0];
+    const thumbUrl = coverUrl || (lastPhoto ? `${API}/albums/${a.id}/thumb/${lastPhoto.id}` : '');
+    const statusCls = a.status || 'in_progress';
+    return `<div class="album-card" onclick="openAlbumDetail('${a.id}')">
+      <div class="album-thumb-wrap">
+        ${thumbUrl ? `<img class="album-thumb" src="${esc(thumbUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="album-thumb-placeholder" style="display:none"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>`
+          : `<div class="album-thumb-placeholder"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>`}
+        <div class="album-ct-badge">${ct}</div>
+        <div class="album-status ${esc(statusCls)}">${formatStatus(statusCls)}</div>
+      </div>
+      <div class="album-body">
+        <div class="album-name">${esc(a.name)}</div>
+        <div class="album-client">${esc(a.client_name || '')}</div>
+        <div class="album-meta">${a.address ? esc(a.address) + ' &middot; ' : ''}${ct} photo${ct === 1 ? '' : 's'}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function formatStatus(s) {
+  return { in_progress: 'In Progress', completed: 'Completed', archived: 'Archived' }[s] || s;
+}
+
+// ════════════════════════════════════════════════════════════════
+// ALBUM INFO (detail view)
+// ════════════════════════════════════════════════════════════════
+function renderAlbumInfo() {
+  if (!currentAlbum) return;
+  const a = currentAlbum;
+  const statusCls = a.status || 'in_progress';
+  const mapUrl = a.lat != null ? `https://maps.google.com/?q=${a.lat},${a.lng}` : '';
+  document.getElementById('albumInfoWrap').style.display = '';
+  document.getElementById('albumInfoWrap').innerHTML = `
+    <div class="album-info">
+      <div class="album-info-row">
+        <span class="album-info-label">Status</span>
+        <span class="album-info-val"><span class="album-status ${esc(statusCls)}" style="position:static">${formatStatus(statusCls)}</span></span>
+        <button style="background:none;border:none;color:var(--accent);font-size:.72rem;cursor:pointer;padding:4px" onclick="openAlbumModal('${a.id}')">Edit</button>
+      </div>
+      ${a.client_name ? `<div class="album-info-row"><span class="album-info-label">Client</span><span class="album-info-val">${esc(a.client_name)}</span></div>` : ''}
+      ${a.address ? `<div class="album-info-row"><span class="album-info-label">Address</span><span class="album-info-val">${esc(a.address)}</span></div>` : ''}
+      ${mapUrl ? `<div class="album-info-row"><span class="album-info-label">GPS</span><span class="album-info-val"><a href="${mapUrl}" target="_blank" rel="noopener">${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}</a></span></div>` : ''}
+    </div>`;
+}
+
+// ════════════════════════════════════════════════════════════════
+// FOLDER TABS
+// ════════════════════════════════════════════════════════════════
+function renderFolderTabs() {
+  if (!currentAlbum) return;
+  const folders = ['All', ...(currentAlbum.folders || [])];
+  const tabs = document.getElementById('folderTabs');
+  tabs.style.display = '';
+  tabs.innerHTML = folders.map(f => {
+    const cls = (f === 'All' && activeFolder === null) || f === activeFolder ? 'active' : '';
+    return `<button class="folder-tab ${cls}" onclick="selectFolder('${esc(f)}')">${esc(f)}</button>`;
+  }).join('');
+}
+
+function selectFolder(folder) {
+  activeFolder = folder === 'All' ? null : folder;
+  filteredPhotos = activeFolder ? albumPhotos.filter(p => p.folder === activeFolder) : [...albumPhotos];
+  renderFolderTabs();
+  renderPhotoGrid();
+}
+
+// ════════════════════════════════════════════════════════════════
+// PHOTO GRID
+// ════════════════════════════════════════════════════════════════
+function renderPhotoGrid() {
+  const grid = document.getElementById('photoGrid');
+  const empty = document.getElementById('emptyState');
+  const secLbl = document.getElementById('sectionLbl');
+  if (filteredPhotos.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = '';
+    secLbl.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  secLbl.style.display = 'flex';
+  document.getElementById('sectionTitle').textContent = activeFolder || 'All Photos';
+  document.getElementById('sectionCount').textContent = filteredPhotos.length;
+  grid.innerHTML = filteredPhotos.map((p, i) => {
+    const thumbUrl = `${API}/albums/${currentAlbum.id}/thumb/${p.id}`;
+    const caption = p.ai_caption || '';
+    const selCls = selectedIds.has(p.id) ? ' selected' : '';
+    return `<div class="photo-card${batchMode ? ' selectable' : ''}${selCls}" data-pid="${esc(p.id)}" data-caption="${esc(caption)}"
+      oncontextmenu="event.preventDefault();startSelectAt(${i})"
+      ontouchstart="photoTouchStart(event,${i})" ontouchend="photoTouchEnd(event,${i})" ontouchmove="photoTouchMove(event)"
+      onclick="photoClick(${i})">
+      <div class="photo-card-select" onclick="event.stopPropagation();toggleSelect('${esc(p.id)}')"></div>
+      <img class="photo-card-img" src="${esc(thumbUrl)}" alt="" loading="lazy" onerror="this.style.background='var(--bg2)'">
+      ${p.folder ? `<div class="photo-card-folder">${esc(p.folder)}</div>` : ''}
+      <div class="photo-card-caption">${esc(caption.slice(0, 30))}${caption.length > 30 ? '...' : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+function photoTouchStart(e, idx) {
+  longPressTimer = setTimeout(() => {
+    if (!batchMode) {
+      batchMode = true;
+      selectedIds.clear();
+      renderPhotoGrid();
+    }
+    toggleSelect(filteredPhotos[idx].id);
+    e.preventDefault();
+  }, 500);
+}
+
+function photoTouchMove() {
+  clearTimeout(longPressTimer);
+}
+
+function photoTouchEnd(e, idx) {
+  clearTimeout(longPressTimer);
+}
+
+function photoClick(idx) {
+  if (batchMode) {
+    toggleSelect(filteredPhotos[idx].id);
+    return;
+  }
+  openViewer(filteredPhotos, idx);
+}
+
+function startSelectAt(idx) {
+  if (!batchMode) {
+    batchMode = true;
+    selectedIds.clear();
+  }
+  toggleSelect(filteredPhotos[idx].id);
+  renderPhotoGrid();
+}
+
+function toggleSelect(pid) {
+  if (selectedIds.has(pid)) selectedIds.delete(pid);
+  else selectedIds.add(pid);
+  updateBatchBar();
+  renderPhotoGrid();
+}
+
+function cancelBatch() {
+  batchMode = false;
+  selectedIds.clear();
+  document.getElementById('batchBar').classList.remove('show');
+  renderPhotoGrid();
+}
+
+function updateBatchBar() {
+  const bar = document.getElementById('batchBar');
+  if (selectedIds.size === 0 && batchMode) {
+    cancelBatch();
+    return;
+  }
+  bar.classList.add('show');
+  document.getElementById('batchCt').textContent = `${selectedIds.size} selected`;
+}
+
+// ════════════════════════════════════════════════════════════════
+// BATCH OPERATIONS
+// ════════════════════════════════════════════════════════════════
+async function batchTag() {
+  const tag = prompt('Enter tag to add to all selected photos:');
+  if (!tag || !currentAlbum) return;
+  toast('spin', 'Tagging...');
+  let ok = 0;
+  for (const pid of selectedIds) {
+    const p = albumPhotos.find(x => x.id === pid);
+    if (!p) continue;
+    if (!p.tags) p.tags = [];
+    if (!p.tags.includes(tag)) p.tags.push(tag);
+    try {
+      await apiFetch(`${API}/albums/${currentAlbum.id}/photos/${pid}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: p.tags })
+      });
+      ok++;
+    } catch { /* skip */ }
+  }
+  toast('ok', `Tagged ${ok} photo${ok === 1 ? '' : 's'}`);
+  cancelBatch();
+}
+
+async function batchMove() {
+  const folders = currentAlbum ? (currentAlbum.folders || []) : [];
+  const target = prompt(`Move to folder:\n${folders.join(', ')}\n\nType folder name:`);
+  if (!target || !currentAlbum) return;
+  toast('spin', 'Moving...');
+  let ok = 0;
+  for (const pid of selectedIds) {
+    try {
+      await apiFetch(`${API}/albums/${currentAlbum.id}/photos/${pid}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: target })
+      });
+      const p = albumPhotos.find(x => x.id === pid);
+      if (p) p.folder = target;
+      ok++;
+    } catch { /* skip */ }
+  }
+  toast('ok', `Moved ${ok} photo${ok === 1 ? '' : 's'}`);
+  cancelBatch();
+  selectFolder(activeFolder);
+}
+
+async function batchDescribe() {
+  if (!currentAlbum) return;
+  toast('spin', 'AI describing...');
+  try {
+    await apiFetch(`${API}/albums/${currentAlbum.id}/ai/batch-describe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ photo_ids: [...selectedIds] })
+    });
+    // Reload album
+    const r = await apiFetch(`${API}/albums/${currentAlbum.id}`);
+    if (r.ok) {
+      const data = await r.json();
+      currentAlbum = data;
+      albumPhotos = data.photos || [];
+      selectFolder(activeFolder);
+    }
+    toast('ok', 'AI descriptions complete');
+  } catch {
+    toast('err', 'AI describe failed');
+  }
+  cancelBatch();
+}
+
+async function batchDelete() {
+  const ct = selectedIds.size;
+  if (!confirm(`Soft-delete ${ct} photo${ct === 1 ? '' : 's'}?`)) return;
+  if (!currentAlbum) return;
+  toast('spin', 'Deleting...');
+  let ok = 0;
+  for (const pid of selectedIds) {
+    try {
+      await apiFetch(`${API}/albums/${currentAlbum.id}/photos/${pid}`, { method: 'DELETE' });
+      ok++;
+    } catch { /* skip */ }
+  }
+  toast('ok', `Removed ${ok} photo${ok === 1 ? '' : 's'}`);
+  cancelBatch();
+  // Reload
+  const r = await apiFetch(`${API}/albums/${currentAlbum.id}`);
+  if (r.ok) {
+    const data = await r.json();
+    currentAlbum = data;
+    albumPhotos = data.photos || [];
+    selectFolder(activeFolder);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// ALBUM MODAL (create / edit)
+// ════════════════════════════════════════════════════════════════
+function openAlbumModal(editId) {
+  modalAlbumId = editId || null;
+  const modal = document.getElementById('albumModal');
+  if (editId && currentAlbum && currentAlbum.id === editId) {
+    document.getElementById('albumModalTitle').textContent = 'Edit Album';
+    document.getElementById('modalName').value = currentAlbum.name || '';
+    document.getElementById('modalClient').value = currentAlbum.client_name || '';
+    document.getElementById('modalAddress').value = currentAlbum.address || '';
+    document.getElementById('modalLat').value = currentAlbum.lat != null ? currentAlbum.lat : '';
+    document.getElementById('modalLng').value = currentAlbum.lng != null ? currentAlbum.lng : '';
+    document.getElementById('modalStatus').value = currentAlbum.status || 'in_progress';
+    renderModalFolders(currentAlbum.folders || []);
+  } else {
+    document.getElementById('albumModalTitle').textContent = 'New Album';
+    document.getElementById('modalName').value = '';
+    document.getElementById('modalClient').value = '';
+    document.getElementById('modalAddress').value = '';
+    document.getElementById('modalLat').value = '';
+    document.getElementById('modalLng').value = '';
+    document.getElementById('modalStatus').value = 'in_progress';
+    renderModalFolders(['Before', 'During', 'After']);
+  }
+  modal.classList.add('open');
+}
+
+function closeAlbumModal() {
+  document.getElementById('albumModal').classList.remove('open');
+  modalAlbumId = null;
+}
+
+let modalFolders = [];
+
+function renderModalFolders(folders) {
+  modalFolders = [...folders];
+  const el = document.getElementById('modalFolders');
+  el.innerHTML = modalFolders.map((f, i) =>
+    `<span class="modal-folder-chip">${esc(f)}<button onclick="removeModalFolder(${i})">&times;</button></span>`
+  ).join('') + `<button class="modal-folder-add" onclick="showFolderInput()">+ Add</button>`;
+  document.getElementById('modalFolderInput').style.display = 'none';
+}
+
+function showFolderInput() {
+  const inp = document.getElementById('modalFolderInput');
+  inp.style.display = '';
+  inp.value = '';
+  inp.focus();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.activeElement === document.getElementById('modalFolderInput')) {
+    e.preventDefault();
+    const val = document.getElementById('modalFolderInput').value.trim();
+    if (val && !modalFolders.includes(val)) {
+      modalFolders.push(val);
+      renderModalFolders(modalFolders);
+    }
+  }
+});
+
+function removeModalFolder(idx) {
+  modalFolders.splice(idx, 1);
+  renderModalFolders(modalFolders);
+}
+
+function fillGPS() {
+  if (!gpsPos) { toast('err', 'No GPS fix yet'); return; }
+  document.getElementById('modalLat').value = gpsPos.lat;
+  document.getElementById('modalLng').value = gpsPos.lng;
+}
+
+async function saveAlbumModal() {
+  const name = document.getElementById('modalName').value.trim();
+  if (!name) { toast('err', 'Name is required'); return; }
+  const payload = {
+    name,
+    client_name: document.getElementById('modalClient').value.trim(),
+    address: document.getElementById('modalAddress').value.trim(),
+    lat: document.getElementById('modalLat').value ? parseFloat(document.getElementById('modalLat').value) : null,
+    lng: document.getElementById('modalLng').value ? parseFloat(document.getElementById('modalLng').value) : null,
+    status: document.getElementById('modalStatus').value,
+    folders: modalFolders
+  };
+  try {
+    if (modalAlbumId) {
+      const r = await apiFetch(`${API}/albums/${modalAlbumId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      if (currentAlbum && currentAlbum.id === modalAlbumId) {
+        currentAlbum = data;
+        renderAlbumInfo();
+        renderFolderTabs();
+      }
+      toast('ok', 'Album updated');
+    } else {
+      const r = await apiFetch(`${API}/albums`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      toast('ok', 'Album created');
+      closeAlbumModal();
+      renderAlbumList();
+      // Open the new album
+      openAlbumDetail(data.id);
+      return;
+    }
+    closeAlbumModal();
+  } catch (e) {
+    console.error('Album save failed:', e);
+    toast('err', 'Save failed');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// CAMERA
+// ════════════════════════════════════════════════════════════════
+async function startCamera(facing) {
+  facing = facing || CAM.facing;
+  // Always stop old tracks first
+  if (CAM.stream) {
+    CAM.stream.getTracks().forEach(t => t.stop());
+    CAM.stream = null;
+  }
+  try {
+    CAM.stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    CAM.track = CAM.stream.getVideoTracks()[0];
+    CAM.facing = facing;
+    // Feed both viewfinder and shutter circle
+    for (const id of ['viewfinder', 'shutterVideo']) {
+      const v = document.getElementById(id);
+      if (!v) continue;
+      v.srcObject = CAM.stream;
+      v.muted = true;
+      v.playsInline = true;
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      try { await v.play(); } catch { /* autoplay blocked, ok */ }
+    }
+  } catch (e) {
+    console.warn('Camera access failed:', e);
+  }
+}
+
+function stopCamera() {
+  if (CAM.stream) {
+    CAM.stream.getTracks().forEach(t => t.stop());
+    CAM.stream = null;
+    CAM.track = null;
+  }
+  const vf = document.getElementById('viewfinder');
+  const sv = document.getElementById('shutterVideo');
+  if (vf) vf.srcObject = null;
+  if (sv) sv.srcObject = null;
+  window.parent.postMessage({ type: 'canvas-action', action: 'camera-release' }, '*');
+}
+
+function flipCamera() {
+  const newFacing = CAM.facing === 'environment' ? 'user' : 'environment';
+  startCamera(newFacing);
+}
+
+function toggleFlash() {
+  if (!CAM.track) return;
+  const caps = CAM.track.getCapabilities ? CAM.track.getCapabilities() : {};
+  if (!caps.torch) return;
+  CAM.flash = !CAM.flash;
+  CAM.track.applyConstraints({ advanced: [{ torch: CAM.flash }] }).catch(() => {});
+  document.getElementById('camFlash').classList.toggle('active', CAM.flash);
+}
+
+function toggleGrid() {
+  CAM.gridOn = !CAM.gridOn;
+  document.getElementById('camGridOverlay').classList.toggle('show', CAM.gridOn);
+  document.getElementById('camGrid').classList.toggle('active', CAM.gridOn);
+}
+
+function cycleTimer() {
+  const options = [0, 3, 10];
+  const curIdx = options.indexOf(CAM.timerSec);
+  CAM.timerSec = options[(curIdx + 1) % options.length];
+  const btn = document.getElementById('camTimer');
+  btn.classList.toggle('active', CAM.timerSec > 0);
+  // Update label
+  document.getElementById('camTimerDisplay').textContent = CAM.timerSec > 0 ? `${CAM.timerSec}` : '';
+}
+
+function openCameraOverlay() {
+  document.getElementById('cameraOverlay').classList.add('open');
+  startCamera(CAM.facing);
+  cameraActive = true;
+}
+
+function closeCameraOverlay() {
+  document.getElementById('cameraOverlay').classList.remove('open');
+  cameraActive = false;
+  // Don't stop camera — keep feed for shutter preview
+}
+
+// Shutter interaction
+function onShutterTouchStart(e) {
+  e.preventDefault();
+  CAM.holdTimer = setTimeout(() => {
+    // Hold >= 400ms — start video recording
+    CAM.recording = true;
+    document.getElementById('camShutter').classList.add('recording');
+    document.getElementById('camShutterLabel').textContent = 'Recording...';
+  }, 400);
+}
+
+document.addEventListener('mouseup', onShutterRelease);
+document.addEventListener('touchend', onShutterRelease);
+
+async function onShutterRelease(e) {
+  if (!CAM.holdTimer) return;
+  clearTimeout(CAM.holdTimer);
+  CAM.holdTimer = null;
+
+  if (CAM.recording) {
+    CAM.recording = false;
+    document.getElementById('camShutter').classList.remove('recording');
+    document.getElementById('camShutterLabel').textContent = 'Photo';
+    toast('ok', 'Video recording saved');
+    return;
+  }
+
+  // Still photo — possibly with timer
+  if (CAM.timerSec > 0) {
+    await runTimer(CAM.timerSec);
+  }
+  await captureStill();
+}
+
+async function runTimer(seconds) {
+  const display = document.getElementById('camTimerDisplay');
+  display.style.display = '';
+  for (let i = seconds; i > 0; i--) {
+    display.textContent = i;
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  display.style.display = 'none';
+}
+
+async function captureStill() {
+  if (!CAM.stream || !CAM.track) return;
+  const t0 = new Date().toISOString();
+  const snapGps = gpsPos ? { ...gpsPos } : null;
+  let blob;
+  // Fast path (Chrome/Android with ImageCapture)
+  if (window.ImageCapture && CAM.track.readyState === 'live') {
+    try {
+      blob = await new ImageCapture(CAM.track).takePhoto({ imageWidth: 4096 });
+    } catch { /* fall through */ }
+  }
+  // Universal path (iOS/Safari)
+  if (!blob) {
+    const v = document.getElementById('viewfinder');
+    const c = document.createElement('canvas');
+    c.width = v.videoWidth || 1920;
+    c.height = v.videoHeight || 1080;
+    c.getContext('2d', { alpha: false }).drawImage(v, 0, 0, c.width, c.height);
+    blob = await new Promise((resolve, reject) => {
+      c.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/jpeg', 0.92);
+    });
+  }
+  flashShutter();
+  try { navigator.vibrate?.(15); } catch { /* ignore */ }
+
+  if (!currentAlbum) {
+    toast('err', 'No album selected');
+    return;
+  }
+
+  const folder = activeFolder || (currentAlbum.folders || [])[0] || 'Before';
+  const formData = new FormData();
+  formData.append('file', blob, `capture_${Date.now()}.jpg`);
+  formData.append('captured_at', t0);
+  if (snapGps) {
+    formData.append('lat', snapGps.lat);
+    formData.append('lng', snapGps.lng);
+    formData.append('gps_accuracy_m', snapGps.acc);
+  }
+  formData.append('folder', folder);
+  formData.append('client_uuid', `${Date.now()}_${Math.random().toString(36).slice(2,8)}`);
+  formData.append('seq', String(Date.now()));
+
+  // Show uploading ring
+  const ring = document.getElementById('captureRing');
+  ring.classList.add('uploading');
+  toast('spin', 'Uploading...');
+
+  try {
+    const r = await apiFetch(`${API}/albums/${currentAlbum.id}/photos`, { method: 'POST', body: formData });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const photo = await r.json();
+    albumPhotos.push(photo);
+    filteredPhotos = activeFolder ? albumPhotos.filter(p => p.folder === activeFolder) : [...albumPhotos];
+    renderPhotoGrid();
+    document.getElementById('backCount').textContent = `${albumPhotos.length} photo${albumPhotos.length === 1 ? '' : 's'}`;
+    toast('ok', 'Photo captured');
+  } catch (e) {
+    console.error('Upload failed:', e);
+    toast('err', 'Upload failed');
+  }
+  ring.classList.remove('uploading');
+}
+
+function flashShutter() {
+  const flash = document.getElementById('shutterFlash');
+  const circle = document.getElementById('captureCircle');
+  const ring = document.getElementById('captureRing');
+  const fg = ring.querySelector('.ring-fg');
+
+  // Flash overlay
+  flash.style.transition = 'none';
+  flash.style.opacity = '0.85';
+  requestAnimationFrame(() => {
+    flash.style.transition = 'opacity 0.25s ease-out';
+    flash.style.opacity = '0';
+  });
+
+  // Circle scale pulse
+  circle.style.transition = 'transform 0.09s ease-out';
+  circle.style.transform = 'translate(-50%,-50%) scale(0.92)';
+  setTimeout(() => {
+    circle.style.transition = 'transform 0.15s ease';
+    circle.style.transform = 'translate(-50%,-50%) scale(1)';
+  }, 90);
+
+  // Ring flash
+  fg.style.transition = 'none';
+  fg.style.strokeDashoffset = '0';
+  setTimeout(() => {
+    fg.style.transition = 'stroke-dashoffset 0.4s ease-out';
+    fg.style.strokeDashoffset = '301.59';
+  }, 50);
+}
+
+// ════════════════════════════════════════════════════════════════
+// FULL-SCREEN VIEWER
+// ════════════════════════════════════════════════════════════════
+function openViewer(photos, idx) {
+  viewerPhotos = photos;
+  viewerIdx = idx;
+  viewerZoom = 1;
+  viewerPanX = 0;
+  viewerPanY = 0;
+  viewerShowingBefore = false;
+  populateViewer();
+  document.getElementById('viewer').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  setupViewerTouch();
+}
+
+function closeViewer() {
+  document.getElementById('viewer').classList.remove('open');
+  document.body.style.overflow = '';
+  teardownViewerTouch();
+}
+
+function viewerNav(dir) {
+  const ni = viewerIdx + dir;
+  if (ni < 0 || ni >= viewerPhotos.length) return;
+  viewerIdx = ni;
+  viewerZoom = 1;
+  viewerPanX = 0;
+  viewerPanY = 0;
+  viewerShowingBefore = false;
+  populateViewer();
+}
+
+function populateViewer() {
+  const p = viewerPhotos[viewerIdx];
+  if (!p || !currentAlbum) return;
+  const imgUrl = viewerShowingBefore && p.pair_before_id
+    ? `${API}/albums/${currentAlbum.id}/media/${p.pair_before_id}`
+    : `${API}/albums/${currentAlbum.id}/media/${p.id}`;
+  document.getElementById('viewerImg').src = imgUrl;
+  document.getElementById('viewerCounter').textContent = `${viewerIdx + 1} / ${viewerPhotos.length}`;
+  document.getElementById('viewerPrev').style.opacity = viewerIdx === 0 ? '.3' : '1';
+  document.getElementById('viewerNext').style.opacity = viewerIdx === viewerPhotos.length - 1 ? '.3' : '1';
+
+  // Before/After toggle visibility
+  const baBtn = document.getElementById('viewerBaToggle');
+  baBtn.classList.toggle('show', !!p.pair_before_id);
+  baBtn.textContent = viewerShowingBefore ? 'Showing Before' : 'Before / After';
+
+  // Reset transform
+  const img = document.getElementById('viewerImg');
+  img.style.transform = `scale(1) translate(0px, 0px)`;
+
+  // Bottom sheet content
+  renderViewerSheet(p);
+}
+
+function toggleBeforeAfter() {
+  viewerShowingBefore = !viewerShowingBefore;
+  populateViewer();
+}
+
+function renderViewerSheet(p) {
+  const sheetContent = document.getElementById('viewerSheetContent');
+  const tags = p.tags || [];
+  const gpsLink = p.lat != null ? `https://maps.google.com/?q=${p.lat},${p.lng}` : '';
+  const ts = p.captured_at ? new Date(p.captured_at) : null;
+  const tsStr = ts ? ts.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) + ' · ' + ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  const folder = p.folder || '';
+
+  sheetContent.innerHTML = `
+    ${p.lat != null ? `<div class="viewer-section">
+      <div class="viewer-section-lbl">Location</div>
+      <div class="viewer-gps">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}${p.gps_accuracy_m ? ` (±${p.gps_accuracy_m}m)` : ''}
+        ${gpsLink ? ` &middot; <a href="${gpsLink}" target="_blank" rel="noopener">Open in Maps</a>` : ''}
+      </div>
+    </div>` : ''}
+    ${tsStr ? `<div class="viewer-section"><div class="viewer-section-lbl">Captured</div><div class="viewer-ts">${tsStr}</div></div>` : ''}
+    ${folder ? `<div class="viewer-section"><div class="viewer-section-lbl">Folder</div><div style="font-size:.82rem;color:var(--tx)">${esc(folder)}</div></div>` : ''}
+    <div class="viewer-section">
+      <div class="viewer-section-lbl">Tags</div>
+      <div class="viewer-tags">
+        ${tags.map((t, i) => `<span class="viewer-tag">${esc(t)}<button onclick="removeViewerTag('${esc(p.id)}',${i})">&times;</button></span>`).join('')}
+        <span class="viewer-tag-add" onclick="showViewerTagInput()">+ Tag</span>
+      </div>
+      <div class="viewer-tag-input" id="vTagInput">
+        <input type="text" placeholder="Add tag..." autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();addViewerTag('${esc(p.id)}')}">
+        <button onclick="addViewerTag('${esc(p.id)}')">Add</button>
+      </div>
+    </div>
+    <div class="viewer-section">
+      <div class="viewer-section-lbl">Note</div>
+      <textarea class="viewer-note" id="vNote" placeholder="Add a note..." onblur="saveViewerNote('${esc(p.id)}')">${esc(p.note || '')}</textarea>
+    </div>
+    <div class="viewer-actions">
+      <button class="v-btn ai" onclick="viewerAiDescribe('${esc(p.id)}')">
+        <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        AI Analyze
+      </button>
+      <button class="v-btn annotate" onclick="openAnnotator('${esc(p.id)}')">
+        <svg viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
+        Annotate
+      </button>
+      <button class="v-btn del" onclick="viewerDelete('${esc(p.id)}')">
+        <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2"/></svg>
+        Delete
+      </button>
+    </div>`;
+}
+
+function toggleViewerSheet() {
+  document.getElementById('viewerSheet').classList.toggle('collapsed');
+}
+
+// Viewer tag operations
+function showViewerTagInput() {
+  document.getElementById('vTagInput').classList.toggle('show');
+}
+
+async function addViewerTag(pid) {
+  const input = document.querySelector('#vTagInput input');
+  const tag = input.value.trim();
+  if (!tag || !currentAlbum) return;
+  input.value = '';
+  document.getElementById('vTagInput').classList.remove('show');
+  const p = albumPhotos.find(x => x.id === pid);
+  if (!p) return;
+  if (!p.tags) p.tags = [];
+  if (!p.tags.includes(tag)) p.tags.push(tag);
+  try {
+    await apiFetch(`${API}/albums/${currentAlbum.id}/photos/${pid}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags: p.tags })
+    });
+    renderViewerSheet(p);
+  } catch { toast('err', 'Tag update failed'); }
+}
+
+async function removeViewerTag(pid, idx) {
+  if (!currentAlbum) return;
+  const p = albumPhotos.find(x => x.id === pid);
+  if (!p || !p.tags) return;
+  p.tags.splice(idx, 1);
+  try {
+    await apiFetch(`${API}/albums/${currentAlbum.id}/photos/${pid}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags: p.tags })
+    });
+    renderViewerSheet(p);
+  } catch { toast('err', 'Tag update failed'); }
+}
+
+async function saveViewerNote(pid) {
+  if (!currentAlbum) return;
+  const note = document.getElementById('vNote').value;
+  const p = albumPhotos.find(x => x.id === pid);
+  if (!p) return;
+  if (p.note === note) return;
+  p.note = note;
+  try {
+    await apiFetch(`${API}/albums/${currentAlbum.id}/photos/${pid}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note })
+    });
+    toast('ok', 'Note saved');
+  } catch { toast('err', 'Save failed'); }
+}
+
+async function viewerAiDescribe(pid) {
+  if (!currentAlbum) return;
+  toast('spin', 'Analyzing...');
+  try {
+    const r = await apiFetch(`${API}/albums/${currentAlbum.id}/photos/${pid}/describe`, { method: 'POST' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const p = albumPhotos.find(x => x.id === pid);
+    if (p) {
+      p.ai_caption = data.ai_caption || data.caption || '';
+      if (data.tags) p.tags = [...new Set([...(p.tags || []), ...data.tags])];
+      renderViewerSheet(p);
+      renderPhotoGrid();
+    }
+    toast('ok', 'Analysis complete');
+  } catch {
+    toast('err', 'Analysis failed');
+  }
+}
+
+async function viewerDelete(pid) {
+  if (!confirm('Remove this photo?')) return;
+  if (!currentAlbum) return;
+  try {
+    await apiFetch(`${API}/albums/${currentAlbum.id}/photos/${pid}`, { method: 'DELETE' });
+    const newPhotos = albumPhotos.filter(x => x.id !== pid);
+    albumPhotos = newPhotos;
+    filteredPhotos = activeFolder ? albumPhotos.filter(p => p.folder === activeFolder) : [...albumPhotos];
+    if (viewerPhotos.length > 1) {
+      viewerPhotos = filteredPhotos;
+      viewerIdx = Math.min(viewerIdx, viewerPhotos.length - 1);
+      populateViewer();
+    } else {
+      closeViewer();
+    }
+    renderPhotoGrid();
+    document.getElementById('backCount').textContent = `${albumPhotos.length} photo${albumPhotos.length === 1 ? '' : 's'}`;
+    toast('ok', 'Photo removed');
+  } catch { toast('err', 'Delete failed'); }
+}
+
+function openViewerLast() {
+  if (filteredPhotos.length === 0) return;
+  openViewer(filteredPhotos, filteredPhotos.length - 1);
+}
+
+// Viewer swipe/zoom touch
+let vTouchStartX = 0, vTouchStartY = 0, vTouchDist = 0, vTouchDragging = false;
+
+function setupViewerTouch() {
+  const wrap = document.getElementById('viewerWrap');
+  wrap.addEventListener('touchstart', viewerTouchStart, { passive: true });
+  wrap.addEventListener('touchmove', viewerTouchMove, { passive: false });
+  wrap.addEventListener('touchend', viewerTouchEnd, { passive: true });
+}
+
+function teardownViewerTouch() {
+  const wrap = document.getElementById('viewerWrap');
+  wrap.removeEventListener('touchstart', viewerTouchStart);
+  wrap.removeEventListener('touchmove', viewerTouchMove);
+  wrap.removeEventListener('touchend', viewerTouchEnd);
+}
+
+function viewerTouchStart(e) {
+  if (e.touches.length === 1) {
+    vTouchStartX = e.touches[0].clientX;
+    vTouchStartY = e.touches[0].clientY;
+    vTouchDragging = true;
+  } else if (e.touches.length === 2) {
+    vTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+  }
+}
+
+function viewerTouchMove(e) {
+  if (e.touches.length === 2 && vTouchDist > 0) {
+    e.preventDefault();
+    const newDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    const scale = newDist / vTouchDist;
+    viewerZoom = Math.max(0.5, Math.min(5, viewerZoom * scale));
+    vTouchDist = newDist;
+    applyViewerTransform();
+  }
+}
+
+function viewerTouchEnd(e) {
+  if (vTouchDragging && e.changedTouches.length === 1 && viewerZoom <= 1.05) {
+    const dx = e.changedTouches[0].clientX - vTouchStartX;
+    if (Math.abs(dx) > 60) {
+      if (dx > 0) viewerNav(-1); else viewerNav(1);
+    }
+  }
+  vTouchDragging = false;
+  vTouchDist = 0;
+}
+
+function applyViewerTransform() {
+  const img = document.getElementById('viewerImg');
+  img.style.transform = `scale(${viewerZoom}) translate(${viewerPanX}px, ${viewerPanY}px)`;
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', e => {
+  const viewer = document.getElementById('viewer');
+  if (!viewer.classList.contains('open')) return;
+  if (e.key === 'ArrowLeft') viewerNav(-1);
+  if (e.key === 'ArrowRight') viewerNav(1);
+  if (e.key === 'Escape') closeViewer();
+});
+
+// ════════════════════════════════════════════════════════════════
+// ANNOTATION CANVAS
+// ════════════════════════════════════════════════════════════════
+function setupAnnotator() {
+  anCanvas = document.getElementById('annotCanvas');
+  anCtx = anCanvas.getContext('2d');
+  const c = anCanvas;
+
+  function getPos(e) {
+    const rect = c.getBoundingClientRect();
+    const sx = c.width / rect.width;
+    const sy = c.height / rect.height;
+    const t = e.touches ? e.touches[0] : e;
+    return { x: (t.clientX - rect.left) * sx, y: (t.clientY - rect.top) * sy };
+  }
+
+  function down(e) {
+    if (anTool === 'text') { handleAnTextClick(e); return; }
+    if (anTool !== 'pen' && anTool !== 'erase') return;
+    e.preventDefault();
+    anDrawing = true;
+    const pos = getPos(e);
+    anCtx.beginPath();
+    anCtx.moveTo(pos.x, pos.y);
+    setAnDrawStyle();
+  }
+  function move(e) {
+    if (!anDrawing) return;
+    e.preventDefault();
+    const pos = getPos(e);
+    anCtx.lineTo(pos.x, pos.y);
+    anCtx.stroke();
+  }
+  function up() {
+    if (!anDrawing) return;
+    anDrawing = false;
+    anCtx.closePath();
+    anSaveSnapshot();
+  }
+
+  c.addEventListener('mousedown', down);
+  c.addEventListener('mousemove', move);
+  c.addEventListener('mouseup', up);
+  c.addEventListener('mouseleave', up);
+  c.addEventListener('touchstart', down, { passive: false });
+  c.addEventListener('touchmove', move, { passive: false });
+  c.addEventListener('touchend', up);
+
+  document.getElementById('anTextInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commitAnText(); }
+    if (e.key === 'Escape') { document.getElementById('anTextWrap').classList.remove('show'); anPendingTextPos = null; }
+  });
+  document.getElementById('anTextInput').addEventListener('blur', () => {
+    if (anPendingTextPos) commitAnText();
+  });
+}
+
+function openAnnotator(pid) {
+  if (!currentAlbum) return;
+  anPhotoId = pid;
+  anAlbumId = currentAlbum.id;
+  anUndoStack = [];
+  anTool = 'pen';
+  updateAnToolUI();
+  document.getElementById('anTextWrap').classList.remove('show');
+  anPendingTextPos = null;
+
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    anBaseImage = img;
+    const wrap = document.getElementById('anCanvasWrap');
+    const maxW = wrap.clientWidth || 400;
+    const maxH = wrap.clientHeight || 600;
+    const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+    anCanvas.width = Math.round(img.naturalWidth * scale);
+    anCanvas.height = Math.round(img.naturalHeight * scale);
+    anCtx.drawImage(img, 0, 0, anCanvas.width, anCanvas.height);
+    anSaveSnapshot();
+  };
+  img.onerror = () => toast('err', 'Could not load image');
+  img.src = `${API}/albums/${anAlbumId}/media/${pid}?t=${Date.now()}`;
+  document.getElementById('annotOverlay').classList.add('open');
+}
+
+function closeAnnotator() {
+  document.getElementById('annotOverlay').classList.remove('open');
+  document.getElementById('anTextWrap').classList.remove('show');
+  anPendingTextPos = null;
+}
+
+function anSetTool(tool) {
+  anTool = tool;
+  document.getElementById('anCanvasWrap').setAttribute('data-tool', tool);
+  updateAnToolUI();
+  document.getElementById('anTextWrap').classList.remove('show');
+  anPendingTextPos = null;
+}
+
+function updateAnToolUI() {
+  document.getElementById('anPen').classList.toggle('active', anTool === 'pen');
+  document.getElementById('anText').classList.toggle('active', anTool === 'text');
+  document.getElementById('anErase').classList.toggle('active', anTool === 'erase');
+  document.getElementById('anCanvasWrap').setAttribute('data-tool', anTool);
+}
+
+function anSetColor(val) {
+  document.getElementById('anColorSwatch').style.background = val;
+}
+
+function anSaveSnapshot() {
+  anUndoStack.push(anCtx.getImageData(0, 0, anCanvas.width, anCanvas.height));
+  if (anUndoStack.length > 30) anUndoStack.shift();
+}
+
+function anUndo() {
+  if (anUndoStack.length <= 1) return;
+  anUndoStack.pop();
+  anCtx.putImageData(anUndoStack[anUndoStack.length - 1], 0, 0);
+}
+
+function setAnDrawStyle() {
+  const color = document.getElementById('anColor').value;
+  const size = parseInt(document.getElementById('anSize').value);
+  if (anTool === 'erase') {
+    anCtx.globalCompositeOperation = 'destination-out';
+    anCtx.strokeStyle = 'rgba(0,0,0,1)';
+    anCtx.lineWidth = size * 3;
+  } else {
+    anCtx.globalCompositeOperation = 'source-over';
+    anCtx.strokeStyle = color;
+    anCtx.lineWidth = size;
+  }
+  anCtx.lineCap = 'round';
+  anCtx.lineJoin = 'round';
+}
+
+function handleAnTextClick(e) {
+  e.preventDefault();
+  const rect = anCanvas.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  const sx = anCanvas.width / rect.width;
+  const sy = anCanvas.height / rect.height;
+  anPendingTextPos = {
+    x: (t.clientX - rect.left) * sx,
+    y: (t.clientY - rect.top) * sy,
+    screenX: t.clientX - rect.left,
+    screenY: t.clientY - rect.top
+  };
+  const wrap = document.getElementById('anCanvasWrap');
+  const wRect = wrap.getBoundingClientRect();
+  const cRect = anCanvas.getBoundingClientRect();
+  let tx = cRect.left - wRect.left + anPendingTextPos.screenX;
+  let ty = cRect.top - wRect.top + anPendingTextPos.screenY - 20;
+  tx = Math.max(0, Math.min(tx, wRect.width - 200));
+  ty = Math.max(0, Math.min(ty, wRect.height - 50));
+  const tw = document.getElementById('anTextWrap');
+  tw.style.left = tx + 'px';
+  tw.style.top = ty + 'px';
+  const inp = document.getElementById('anTextInput');
+  inp.value = '';
+  tw.classList.add('show');
+  setTimeout(() => inp.focus(), 50);
+}
+
+function commitAnText() {
+  const inp = document.getElementById('anTextInput');
+  const txt = inp.value.trim();
+  document.getElementById('anTextWrap').classList.remove('show');
+  if (!txt || !anPendingTextPos) { anPendingTextPos = null; return; }
+  const color = document.getElementById('anColor').value;
+  const size = parseInt(document.getElementById('anSize').value);
+  anCtx.globalCompositeOperation = 'source-over';
+  anCtx.font = `bold ${Math.max(14, size * 3)}px system-ui, sans-serif`;
+  anCtx.fillStyle = color;
+  anCtx.strokeStyle = 'rgba(0,0,0,0.6)';
+  anCtx.lineWidth = 1.5;
+  anCtx.strokeText(txt, anPendingTextPos.x, anPendingTextPos.y);
+  anCtx.fillText(txt, anPendingTextPos.x, anPendingTextPos.y);
+  anPendingTextPos = null;
+  inp.value = '';
+  anSaveSnapshot();
+}
+
+async function saveAnnotation() {
+  if (!anAlbumId || !anPhotoId) return;
+  toast('spin', 'Saving annotation...');
+  try {
+    const blob = await new Promise((resolve, reject) => {
+      anCanvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/jpeg', 0.92);
+    });
+    const formData = new FormData();
+    formData.append('annotation', blob, `annot_${anPhotoId}.jpg`);
+    const r = await apiFetch(`${API}/albums/${anAlbumId}/photos/${anPhotoId}/annotate`, { method: 'POST', body: formData });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    // Update local state
+    const p = albumPhotos.find(x => x.id === anPhotoId);
+    if (p) p.annotated = true;
+    toast('ok', 'Annotation saved');
+    closeAnnotator();
+  } catch (e) {
+    console.error('Annotation save failed:', e);
+    toast('err', 'Save failed');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// LEVEL INDICATOR (device orientation)
+// ════════════════════════════════════════════════════════════════
+function setupLevel() {
+  if (!window.DeviceOrientationEvent) return;
+  window.addEventListener('deviceorientation', e => {
+    if (e.gamma == null) return;
+    const angle = e.gamma;
+    const inner = document.getElementById('camLevelInner');
+    if (!inner) return;
+    const rotation = Math.max(-45, Math.min(45, angle));
+    inner.style.transform = `rotate(${rotation}deg) scaleX(${Math.abs(rotation) < 3 ? 1 : 0.6})`;
+    inner.classList.toggle('level', Math.abs(angle) < 2);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// TOAST
+// ════════════════════════════════════════════════════════════════
+let toastTimer = null;
+function toast(type, msg) {
+  const el = document.getElementById('toast');
+  const icon = document.getElementById('toastIcon');
+  const msgEl = document.getElementById('toastMsg');
+  const paths = {
+    spin: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    ok: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+    err: '<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>'
+  };
+  el.className = `toast show ${type}`;
+  icon.innerHTML = paths[type] || paths.spin;
+  msgEl.textContent = msg;
+  clearTimeout(toastTimer);
+  if (type !== 'spin') toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ════════════════════════════════════════════════════════════════
+// UTILS
+// ════════════════════════════════════════════════════════════════
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ════════════════════════════════════════════════════════════════
+// BOOT
+// ════════════════════════════════════════════════════════════════
+setupLevel();
+init();
+</script>
+</body>
+</html>
