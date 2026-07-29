@@ -10589,5 +10589,59 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
             }
         }, 200);
 
+        // ------------------------------------------------------------------
+        // Camera arbitration bridge — allows canvas iframes (e.g. Camera
+        // Capture) to request/release the camera without conflicting with
+        // the main vision module.  Without this, iOS mutes the earlier
+        // stream when a second getUserMedia fires (WebKit limitation).
+        // ------------------------------------------------------------------
+        (function () {
+            const CAMERA_OWNER_NONE    = 0;
+            const CAMERA_OWNER_VISION  = 1;
+            const CAMERA_OWNER_CAPTURE = 2;
+            let cameraOwner = CAMERA_OWNER_NONE;
+
+            function _releaseVision() {
+                const cam = window.cameraModule;
+                if (cam && cam.stream) { cam.stop(); }
+            }
+
+            window.addEventListener('message', function (e) {
+                if (!e.data || e.data.type !== 'camera-arbitration') return;
+                const action = e.data.action;
+                const reply  = (ok, msg) => {
+                    e.source.postMessage({ type: 'camera-arbitration-reply', ok, msg, reqId: e.data.reqId }, '*');
+                };
+
+                switch (action) {
+                    case 'request': {
+                        const who = e.data.owner || 'capture';
+                        if (cameraOwner !== CAMERA_OWNER_NONE && cameraOwner !== (who === 'capture' ? CAMERA_OWNER_CAPTURE : CAMERA_OWNER_VISION)) {
+                            reply(false, 'camera-busy');
+                            return;
+                        }
+                        if (who === 'capture') {
+                            // Release vision camera so the capture iframe can open its own stream
+                            _releaseVision();
+                            cameraOwner = CAMERA_OWNER_CAPTURE;
+                        } else {
+                            cameraOwner = CAMERA_OWNER_VISION;
+                        }
+                        reply(true, 'granted');
+                        break;
+                    }
+                    case 'release': {
+                        const who = e.data.owner || 'capture';
+                        if ((who === 'capture' && cameraOwner === CAMERA_OWNER_CAPTURE) ||
+                            (who === 'vision'  && cameraOwner === CAMERA_OWNER_VISION)) {
+                            cameraOwner = CAMERA_OWNER_NONE;
+                        }
+                        reply(true, 'released');
+                        break;
+                    }
+                }
+            });
+        })();
+
         // Start initialization
         init().catch(console.error);

@@ -285,6 +285,10 @@ app.register_blueprint(services_bp)
 from routes.maps import maps_bp
 app.register_blueprint(maps_bp)
 
+# Camera Capture — flagship photo/album system (CompanyCam competitor)
+from routes.capture import capture_bp
+app.register_blueprint(capture_bp, url_prefix='/api/capture')
+
 # WO-1.3 — wire the STT provider registry. autodiscover() loads
 # config/providers.yaml and imports the STT provider modules so their
 # registry.register() calls fire; the Service Catalog then reads STT ids from
