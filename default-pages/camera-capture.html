@@ -16,6 +16,7 @@
   --blue:#3b82f6;--blue-dim:rgba(59,130,246,.12);--blue-glow:rgba(59,130,246,.07);
   --green:#22c55e;--green-dim:rgba(34,197,94,.12);
   --red:#f87171;--red-dim:rgba(248,113,113,.1);
+  --amber:#f59e0b;--amber-dim:rgba(245,158,11,.12);
   --r:10px;--r-lg:16px;
 }
 html,body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--tx-2);min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden}
@@ -58,8 +59,7 @@ html,body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;backg
   box-shadow:0 0 0 6px rgba(59,130,246,.13),0 0 0 12px rgba(59,130,246,.06),0 8px 28px rgba(59,130,246,.3);
   display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
   transition:transform .12s,box-shadow .12s;
-  -webkit-tap-highlight-color:transparent;
-  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;
 }
 .capture-btn:active{transform:scale(.96);box-shadow:0 0 0 4px rgba(59,130,246,.18),0 4px 14px rgba(59,130,246,.28)}
 .capture-btn svg{width:38px;height:38px;stroke:#fff;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
@@ -90,25 +90,13 @@ html,body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;backg
 /* ── ALBUM GRID ── */
 .album-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 @media(min-width:480px){.album-grid{grid-template-columns:repeat(3,1fr)}}
-
-.album-card{
-  border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);
-  background:var(--bg-1);cursor:pointer;
-  transition:border-color .15s,transform .12s,box-shadow .15s;
-  -webkit-tap-highlight-color:transparent;
-}
+.album-card{border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);background:var(--bg-1);cursor:pointer;transition:border-color .15s,transform .12s,box-shadow .15s;-webkit-tap-highlight-color:transparent}
 .album-card:hover{border-color:rgba(59,130,246,.3);transform:scale(1.015);box-shadow:0 4px 16px rgba(0,0,0,.3)}
 .album-card:active{transform:scale(.98)}
 .album-thumb{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--bg-3)}
 .album-thumb-blank{width:100%;aspect-ratio:4/3;background:var(--bg-3);display:flex;align-items:center;justify-content:center;position:relative}
 .album-thumb-blank svg{width:28px;height:28px;stroke:var(--tx-3);fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;opacity:.3}
-.album-ct-badge{
-  position:absolute;bottom:7px;right:7px;
-  background:rgba(0,0,0,.72);border-radius:6px;
-  padding:2px 7px;font-size:.64rem;font-weight:700;color:#fff;
-  backdrop-filter:blur(6px);
-  border:1px solid rgba(255,255,255,.1);
-}
+.album-ct-badge{position:absolute;bottom:7px;right:7px;background:rgba(0,0,0,.72);border-radius:6px;padding:2px 7px;font-size:.64rem;font-weight:700;color:#fff;backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.1)}
 .album-body{padding:10px 11px 11px}
 .album-name{font-size:.82rem;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
 .album-meta{font-size:.65rem;color:var(--tx-3)}
@@ -117,36 +105,19 @@ html,body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;backg
 /* ── PHOTO GRID (inside album) ── */
 .photo-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 @media(min-width:480px){.photo-grid{grid-template-columns:repeat(3,1fr)}}
-
-.card{
-  border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);
-  background:var(--bg-1);position:relative;cursor:pointer;
-  transition:border-color .15s,transform .12s;
-  -webkit-tap-highlight-color:transparent;
-}
+.card{border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);background:var(--bg-1);position:relative;cursor:pointer;transition:border-color .15s,transform .12s;-webkit-tap-highlight-color:transparent}
 .card:hover{border-color:var(--border-h);transform:scale(1.01)}
 .card-img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--bg-3)}
 .card-img-placeholder{width:100%;aspect-ratio:4/3;background:var(--bg-3);display:flex;align-items:center;justify-content:center}
 .card-img-placeholder svg{width:26px;height:26px;stroke:var(--tx-3);fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
 .card-body{padding:8px}
 .card-ts{font-size:.7rem;color:var(--tx-3)}
-.card-gps{font-size:.62rem;color:var(--tx-3);margin-top:2px;display:flex;align-items:center;gap:3px}
-.card-gps svg{width:9px;height:9px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
-.card-badge{
-  position:absolute;top:6px;right:6px;
-  background:rgba(0,0,0,.65);border-radius:4px;
-  padding:2px 5px;font-size:.6rem;color:rgba(255,255,255,.7);
-  backdrop-filter:blur(4px);
-}
-.card-del{
-  position:absolute;top:6px;left:6px;
-  width:26px;height:26px;border-radius:50%;
-  background:rgba(248,113,113,.85);border:none;cursor:pointer;
-  display:none;align-items:center;justify-content:center;
-  -webkit-tap-highlight-color:transparent;
-}
-.card:hover .card-del,.card:focus-within .card-del{display:flex}
-.card-del svg{width:12px;height:12px;stroke:#fff;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.card-kws{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.card-kw{font-size:.58rem;background:var(--blue-dim);border:1px solid rgba(59,130,246,.2);color:var(--blue);border-radius:4px;padding:1px 5px;line-height:1.4}
+.card-note{font-size:.64rem;color:var(--tx-3);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-vision{font-size:.62rem;color:var(--amber);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.8}
+.card-badge{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.65);border-radius:4px;padding:2px 5px;font-size:.6rem;color:rgba(255,255,255,.7);backdrop-filter:blur(4px)}
+.card-edited-badge{position:absolute;top:6px;left:6px;background:rgba(59,130,246,.75);border-radius:4px;padding:2px 5px;font-size:.58rem;color:#fff;backdrop-filter:blur(4px)}
 
 /* ── Empty state ── */
 .empty{text-align:center;padding:52px 20px;color:var(--tx-3)}
@@ -154,21 +125,142 @@ html,body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;backg
 .empty p{font-size:.85rem;line-height:1.5}
 .empty b{color:var(--tx-2);font-weight:600}
 
-/* ── Lightbox ── */
-.lb{position:fixed;inset:0;background:rgba(0,0,0,.93);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:200;padding:16px}
-.lb.open{display:flex}
-.lb-img{max-width:100%;max-height:70vh;border-radius:var(--r-lg);object-fit:contain}
-.lb-meta{margin-top:12px;text-align:center;width:100%;max-width:400px}
-.lb-job{font-size:1rem;font-weight:700;color:var(--blue);margin-bottom:4px}
-.lb-info{font-size:.75rem;color:var(--tx-2)}
-.lb-close{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);border-radius:50%;width:36px;height:36px;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
-.lb-close svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.lb-actions{display:flex;gap:8px;margin-top:14px}
-.lb-btn{padding:8px 16px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg-2);color:var(--tx);font-size:.8rem;cursor:pointer;-webkit-tap-highlight-color:transparent;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
-.lb-btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.lb-btn:hover{border-color:var(--border-h);background:var(--bg-3)}
-
 input[type="file"]{display:none}
+
+/* ═══════════════════════════════════════════
+   PHOTO DETAIL PANEL
+═══════════════════════════════════════════ */
+.detail-overlay{
+  position:fixed;inset:0;background:var(--bg);z-index:300;
+  display:none;flex-direction:column;overflow-y:auto;
+}
+.detail-overlay.open{display:flex}
+
+.detail-hdr{
+  position:sticky;top:0;z-index:10;
+  display:flex;align-items:center;gap:10px;
+  padding:14px 16px;background:var(--bg);border-bottom:1px solid var(--border);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+}
+.detail-back{display:flex;align-items:center;gap:4px;background:none;border:none;color:var(--blue);font-size:.85rem;font-weight:600;cursor:pointer;padding:4px 0;-webkit-tap-highlight-color:transparent;flex-shrink:0}
+.detail-back svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.detail-nav{margin-left:auto;display:flex;align-items:center;gap:4px}
+.detail-nav-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color .15s}
+.detail-nav-btn:hover{border-color:var(--border-h)}
+.detail-nav-btn svg{width:14px;height:14px;stroke:var(--tx-2);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.detail-nav-ct{font-size:.72rem;color:var(--tx-3);padding:0 4px}
+
+.detail-photo-wrap{position:relative;background:#000;max-height:55vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.detail-photo{max-width:100%;max-height:55vh;object-fit:contain;display:block}
+
+.detail-body{padding:16px;flex:1}
+
+.detail-section{margin-bottom:18px}
+.detail-section-lbl{font-size:.65rem;font-weight:700;color:var(--tx-3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px}
+
+/* Album edit */
+.detail-album-row{display:flex;align-items:center;gap:8px}
+.detail-album-val{font-size:.9rem;font-weight:700;color:var(--tx);flex:1}
+.detail-album-input{flex:1;background:var(--bg-2);border:1px solid rgba(59,130,246,.4);border-radius:8px;padding:7px 10px;font-size:.88rem;color:var(--tx);outline:none;-webkit-appearance:none}
+.detail-edit-btn{font-size:.7rem;color:var(--blue);background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:6px;-webkit-tap-highlight-color:transparent}
+.detail-edit-btn:hover{background:var(--blue-dim)}
+.detail-save-btn{font-size:.7rem;color:var(--green);background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:6px;-webkit-tap-highlight-color:transparent}
+
+/* Keywords */
+.detail-kws{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.detail-kw{display:flex;align-items:center;gap:4px;font-size:.75rem;background:var(--blue-dim);border:1px solid rgba(59,130,246,.25);color:var(--blue);border-radius:20px;padding:4px 10px;cursor:default}
+.detail-kw-del{background:none;border:none;cursor:pointer;color:rgba(59,130,246,.6);font-size:.85rem;line-height:1;padding:0;-webkit-tap-highlight-color:transparent}
+.detail-kw-del:hover{color:var(--red)}
+.detail-kw-add{display:flex;align-items:center;gap:4px;font-size:.75rem;color:var(--tx-3);border:1px dashed var(--border-h);border-radius:20px;padding:4px 10px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color .15s,color .15s}
+.detail-kw-add:hover{border-color:var(--blue);color:var(--blue)}
+.detail-kw-add svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.detail-kw-input-row{display:flex;gap:6px;margin-top:6px;display:none}
+.detail-kw-input-row.show{display:flex}
+.detail-kw-input{flex:1;background:var(--bg-2);border:1px solid rgba(59,130,246,.4);border-radius:8px;padding:6px 10px;font-size:.82rem;color:var(--tx);outline:none;-webkit-appearance:none}
+.detail-kw-input-add{padding:6px 12px;border-radius:8px;border:none;background:var(--blue);color:#fff;font-size:.8rem;font-weight:600;cursor:pointer}
+
+/* Notes */
+.detail-notes{width:100%;min-height:70px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;font-size:.85rem;color:var(--tx);outline:none;resize:vertical;font-family:inherit;-webkit-appearance:none;transition:border-color .15s}
+.detail-notes:focus{border-color:rgba(59,130,246,.4);box-shadow:0 0 0 3px rgba(59,130,246,.07)}
+.detail-notes::placeholder{color:var(--tx-3)}
+.detail-notes-save{margin-top:6px;font-size:.72rem;color:var(--tx-3);display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.notes-save-btn{background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--tx-2);font-size:.72rem;padding:4px 10px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color .15s}
+.notes-save-btn:hover{border-color:var(--blue);color:var(--blue)}
+
+/* GPS */
+.detail-gps-row{display:flex;align-items:center;gap:8px}
+.detail-gps-coords{font-size:.82rem;color:var(--tx-2);font-family:monospace}
+.detail-gps-acc{font-size:.68rem;color:var(--tx-3)}
+.detail-gps-link{font-size:.72rem;color:var(--blue);text-decoration:none;margin-left:auto;-webkit-tap-highlight-color:transparent}
+.detail-gps-link:hover{text-decoration:underline}
+
+/* Timestamp */
+.detail-ts{font-size:.85rem;color:var(--tx-2)}
+
+/* Vision */
+.detail-vision-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg-2);color:var(--tx-2);font-size:.78rem;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color .15s,background .15s}
+.detail-vision-btn:hover{border-color:rgba(59,130,246,.4);background:var(--blue-dim);color:var(--blue)}
+.detail-vision-btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.detail-vision-btn.loading{opacity:.6;cursor:not-allowed}
+.detail-vision-desc{font-size:.82rem;color:var(--tx-2);line-height:1.6;margin-top:8px;padding:10px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r)}
+
+/* Action buttons */
+.detail-actions{display:flex;gap:8px;padding:0 16px 32px;flex-wrap:wrap}
+.det-btn{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:11px 8px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg-2);color:var(--tx-2);font-size:.8rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent;text-decoration:none;transition:border-color .15s,background .15s}
+.det-btn:hover{border-color:var(--border-h);background:var(--bg-3)}
+.det-btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.det-btn-draw{color:var(--blue);border-color:rgba(59,130,246,.3)}
+.det-btn-draw:hover{background:var(--blue-dim)}
+.det-btn-del{color:var(--red);border-color:rgba(248,113,113,.2)}
+.det-btn-del:hover{background:var(--red-dim)}
+
+/* ═══════════════════════════════════════════
+   CANVAS EDITOR (draw / annotate)
+═══════════════════════════════════════════ */
+.editor-overlay{
+  position:fixed;inset:0;background:#000;z-index:400;
+  display:none;flex-direction:column;
+}
+.editor-overlay.open{display:flex}
+
+.editor-toolbar{
+  display:flex;align-items:center;gap:6px;
+  padding:10px 12px;background:var(--bg-1);border-bottom:1px solid var(--border);
+  flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
+}
+.ed-btn{min-width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:all .12s;flex-shrink:0}
+.ed-btn:hover,.ed-btn.active{border-color:rgba(59,130,246,.5);background:var(--blue-dim)}
+.ed-btn svg{width:16px;height:16px;stroke:var(--tx-2);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ed-btn.active svg{stroke:var(--blue)}
+.ed-sep{width:1px;height:24px;background:var(--border);flex-shrink:0;margin:0 2px}
+.ed-color-swatch{width:28px;height:28px;border-radius:50%;border:2px solid var(--border);cursor:pointer;flex-shrink:0;position:relative;overflow:hidden}
+.ed-color-swatch input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.ed-size-wrap{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.ed-size-lbl{font-size:.65rem;color:var(--tx-3)}
+.ed-size-slider{width:64px;height:4px;-webkit-appearance:none;background:var(--border);border-radius:2px;outline:none;cursor:pointer}
+.ed-size-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--blue);cursor:pointer}
+.ed-spacer{flex:1}
+.ed-save-btn{padding:8px 16px;border-radius:8px;border:none;background:var(--blue);color:#fff;font-size:.8rem;font-weight:700;cursor:pointer;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.ed-save-btn:active{opacity:.85}
+.ed-close-btn{min-width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;flex-shrink:0}
+.ed-close-btn svg{width:15px;height:15px;stroke:var(--tx-3);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+.editor-canvas-wrap{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+#editorCanvas{max-width:100%;max-height:100%;cursor:crosshair;touch-action:none;display:block}
+.editor-canvas-wrap[data-tool="text"] #editorCanvas{cursor:text}
+.editor-canvas-wrap[data-tool="erase"] #editorCanvas{cursor:cell}
+
+.editor-text-input-wrap{
+  display:none;position:absolute;z-index:5;
+  padding:2px;
+}
+.editor-text-input-wrap.show{display:block}
+.editor-text-input{
+  background:rgba(0,0,0,.75);border:1px solid rgba(59,130,246,.6);
+  border-radius:4px;color:#fff;padding:4px 8px;
+  font-size:16px;outline:none;min-width:80px;
+  -webkit-appearance:none;
+}
 </style>
 </head>
 <body>
@@ -245,38 +337,183 @@ input[type="file"]{display:none}
   <span id="toastMsg">Uploading…</span>
 </div>
 
-<!-- Lightbox -->
-<div class="lb" id="lb" onclick="closeLb(event)">
-  <button class="lb-close" onclick="closeLb()">
-    <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-  </button>
-  <img class="lb-img" id="lbImg" src="" alt="">
-  <div class="lb-meta">
-    <div class="lb-job" id="lbJob"></div>
-    <div class="lb-info" id="lbInfo"></div>
+<!-- ═══════ PHOTO DETAIL PANEL ═══════ -->
+<div class="detail-overlay" id="detailOverlay">
+
+  <div class="detail-hdr">
+    <button class="detail-back" onclick="closeDetail()">
+      <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      Back
+    </button>
+    <div class="detail-nav">
+      <button class="detail-nav-btn" id="detNavPrev" onclick="detailNav(-1)" title="Previous">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <span class="detail-nav-ct" id="detNavCt"></span>
+      <button class="detail-nav-btn" id="detNavNext" onclick="detailNav(1)" title="Next">
+        <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
   </div>
-  <div class="lb-actions">
-    <a class="lb-btn" id="lbDownload" href="#" download>
+
+  <!-- Photo -->
+  <div class="detail-photo-wrap">
+    <img class="detail-photo" id="detPhoto" src="" alt="">
+  </div>
+
+  <div class="detail-body">
+
+    <!-- Album -->
+    <div class="detail-section">
+      <div class="detail-section-lbl">Album</div>
+      <div class="detail-album-row" id="detAlbumRow">
+        <span class="detail-album-val" id="detAlbumVal"></span>
+        <button class="detail-edit-btn" onclick="startAlbumEdit()">Edit</button>
+      </div>
+      <div class="detail-album-row" id="detAlbumEditRow" style="display:none">
+        <input type="text" class="detail-album-input" id="detAlbumInput" autocomplete="off" autocorrect="off" spellcheck="false">
+        <button class="detail-save-btn" onclick="saveAlbum()">Save</button>
+      </div>
+    </div>
+
+    <!-- Keywords -->
+    <div class="detail-section">
+      <div class="detail-section-lbl">Keywords</div>
+      <div class="detail-kws" id="detKws"></div>
+      <div class="detail-kw-input-row" id="kwInputRow">
+        <input type="text" class="detail-kw-input" id="kwInput" placeholder="Add keyword…" autocomplete="off" autocorrect="off" spellcheck="false">
+        <button class="detail-kw-input-add" onclick="addKwFromInput()">Add</button>
+      </div>
+    </div>
+
+    <!-- Notes -->
+    <div class="detail-section">
+      <div class="detail-section-lbl">Notes</div>
+      <textarea class="detail-notes" id="detNotes" placeholder="Add notes, observations, or details about this photo…" rows="3"></textarea>
+      <div class="detail-notes-save">
+        <button class="notes-save-btn" onclick="saveNotes()">Save Note</button>
+      </div>
+    </div>
+
+    <!-- GPS -->
+    <div class="detail-section" id="detGpsSection">
+      <div class="detail-section-lbl">Location</div>
+      <div class="detail-gps-row">
+        <div>
+          <div class="detail-gps-coords" id="detGpsCoords"></div>
+          <div class="detail-gps-acc" id="detGpsAcc"></div>
+        </div>
+        <a class="detail-gps-link" id="detGpsLink" href="#" target="_blank" rel="noopener">Open in Maps</a>
+      </div>
+    </div>
+
+    <!-- Captured -->
+    <div class="detail-section">
+      <div class="detail-section-lbl">Captured</div>
+      <div class="detail-ts" id="detTs"></div>
+    </div>
+
+    <!-- Vision -->
+    <div class="detail-section">
+      <div class="detail-section-lbl">AI Description</div>
+      <button class="detail-vision-btn" id="visionBtn" onclick="analyzePhoto()">
+        <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span id="visionBtnTxt">Analyze Photo</span>
+      </button>
+      <div class="detail-vision-desc" id="detVisionDesc" style="display:none"></div>
+    </div>
+
+  </div>
+
+  <!-- Actions -->
+  <div class="detail-actions">
+    <button class="det-btn det-btn-draw" onclick="openEditor()">
+      <svg viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+      Draw / Annotate
+    </button>
+    <a class="det-btn" id="detDownload" href="#" download>
       <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       Download
     </a>
-    <button class="lb-btn" onclick="deleteLbPhoto()">
+    <button class="det-btn det-btn-del" onclick="deleteDetailPhoto()">
       <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2"/></svg>
       Remove
     </button>
   </div>
+
+</div>
+
+<!-- ═══════ CANVAS EDITOR ═══════ -->
+<div class="editor-overlay" id="editorOverlay">
+  <div class="editor-toolbar">
+    <button class="ed-close-btn" onclick="closeEditor()" title="Close">
+      <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+    <div class="ed-sep"></div>
+    <!-- Tool buttons -->
+    <button class="ed-btn active" id="edPen" onclick="setTool('pen')" title="Pen">
+      <svg viewBox="0 0 24 24"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
+    </button>
+    <button class="ed-btn" id="edText" onclick="setTool('text')" title="Add text">
+      <svg viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+    </button>
+    <button class="ed-btn" id="edErase" onclick="setTool('erase')" title="Eraser">
+      <svg viewBox="0 0 24 24"><path d="M20 20H7L3 16l10-10 7 7-3.5 3.5"/><path d="M6.0253 11.0253l2.9497 2.9497"/></svg>
+    </button>
+    <button class="ed-btn" id="edUndo" onclick="edUndo()" title="Undo">
+      <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.89"/></svg>
+    </button>
+    <div class="ed-sep"></div>
+    <!-- Color -->
+    <div class="ed-color-swatch" id="edColorSwatch" style="background:#ef4444">
+      <input type="color" id="edColor" value="#ef4444" oninput="onColorChange(this.value)">
+    </div>
+    <!-- Size -->
+    <div class="ed-size-wrap">
+      <span class="ed-size-lbl">Size</span>
+      <input type="range" class="ed-size-slider" id="edSize" min="2" max="32" value="4">
+    </div>
+    <div class="ed-spacer"></div>
+    <button class="ed-save-btn" onclick="saveEdited()">Save</button>
+  </div>
+
+  <div class="editor-canvas-wrap" id="edCanvasWrap">
+    <canvas id="editorCanvas"></canvas>
+    <!-- Floating text input -->
+    <div class="editor-text-input-wrap" id="edTextWrap">
+      <input type="text" class="editor-text-input" id="edTextInput" placeholder="Type…" autocomplete="off">
+    </div>
+  </div>
 </div>
 
 <script>
-// ── State ──
+// ─────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────
 const MANIFEST_KEY = 'capture-manifest.json';
 let photos = [];
 let gpsPos = null;
 let activeAlbum = null;
-let lbPhotoId = null;
-let toastTimer = null;
 
-// ── Init ──
+// Detail state
+let detPhotoId = null;
+let detAlbumPhotos = [];
+let detIdx = 0;
+let kwInputOpen = false;
+
+// Editor state
+let edTool = 'pen';
+let edCanvas = null;
+let edCtx = null;
+let edDrawing = false;
+let edUndoStack = [];
+let edBaseImage = null;
+let edPhotoId = null;
+let pendingTextPos = null;
+
+// ─────────────────────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────────────────────
 async function init() {
   await loadManifest();
   renderAlbums();
@@ -287,9 +524,27 @@ async function init() {
   document.getElementById('jobInput').addEventListener('input', e => {
     sessionStorage.setItem('cc_lastjob', e.target.value.trim());
   });
+
+  // Editor setup
+  edCanvas = document.getElementById('editorCanvas');
+  edCtx = edCanvas.getContext('2d');
+  setupEditorEvents();
+
+  // Notes autosave on blur
+  document.getElementById('detNotes').addEventListener('blur', saveNotes);
+  // Keyword input enter
+  document.getElementById('kwInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); addKwFromInput(); }
+  });
+  // Album input enter
+  document.getElementById('detAlbumInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); saveAlbum(); }
+  });
 }
 
-// ── GPS ──
+// ─────────────────────────────────────────────────────────────
+// GPS
+// ─────────────────────────────────────────────────────────────
 function startGPS() {
   const badge = document.getElementById('gpsBadge');
   const lbl = document.getElementById('gpsLabel');
@@ -305,12 +560,21 @@ function startGPS() {
   );
 }
 
-// ── Manifest ──
+// ─────────────────────────────────────────────────────────────
+// Manifest
+// ─────────────────────────────────────────────────────────────
 async function loadManifest() {
   try {
     const r = await fetch('/api/canvas/data/' + MANIFEST_KEY, {cache: 'no-cache'});
     const d = await r.json();
     photos = Array.isArray(d.photos) ? d.photos : [];
+    // Migrate old photos missing new fields
+    for (const p of photos) {
+      if (!p.keywords) p.keywords = [];
+      if (!p.note) p.note = '';
+      if (!p.visionDesc) p.visionDesc = '';
+      if (!p.editedUrl) p.editedUrl = null;
+    }
   } catch { photos = []; }
 }
 
@@ -324,9 +588,12 @@ async function saveManifest() {
   } catch(e) { console.error('manifest save failed', e); }
 }
 
-// ── Navigation ──
+// ─────────────────────────────────────────────────────────────
+// Navigation
+// ─────────────────────────────────────────────────────────────
 function goHome() {
   activeAlbum = null;
+  closeDetail();
   renderAlbums();
 }
 
@@ -337,51 +604,45 @@ function openAlbum(name) {
   renderPhotoView();
 }
 
-// ── Build albums ──
+// ─────────────────────────────────────────────────────────────
+// Albums
+// ─────────────────────────────────────────────────────────────
 function buildAlbums() {
   const map = {};
   for (const p of photos) {
     const key = p.job || '__untagged__';
-    if (!map[key]) {
-      map[key] = {name: key, photos: [], lastTs: p.ts, thumb: p.url};
-    }
+    if (!map[key]) map[key] = {name: key, photos: [], lastTs: p.ts, thumb: p.editedUrl || p.url};
     map[key].photos.push(p);
-    if (p.ts > map[key].lastTs) { map[key].lastTs = p.ts; map[key].thumb = p.url; }
+    if (p.ts > map[key].lastTs) { map[key].lastTs = p.ts; map[key].thumb = p.editedUrl || p.url; }
   }
-  return Object.values(map).sort((a, b) => {
+  return Object.values(map).sort((a,b) => {
     if (a.name === '__untagged__') return 1;
     if (b.name === '__untagged__') return -1;
     return b.lastTs.localeCompare(a.lastTs);
   });
 }
 
-// ── Render albums view ──
 function renderAlbums() {
   const albumGrid = document.getElementById('albumGrid');
   const photoGrid = document.getElementById('photoGrid');
   const empty = document.getElementById('emptyState');
   const sectionLbl = document.getElementById('sectionLbl');
   const backBar = document.getElementById('backBar');
-
   albumGrid.style.display = '';
   photoGrid.style.display = 'none';
   backBar.classList.remove('show');
-
   const albums = buildAlbums();
-
   if (albums.length === 0) {
     empty.style.display = '';
     sectionLbl.style.display = 'none';
     albumGrid.innerHTML = '';
     return;
   }
-
   empty.style.display = 'none';
   sectionLbl.style.display = 'flex';
   document.getElementById('sectionTitle').textContent = 'Albums';
   document.getElementById('sectionCount').textContent = albums.length;
-
-  albumGrid.innerHTML = albums.map(a => albumCardHtml(a)).join('');
+  albumGrid.innerHTML = albums.map(albumCardHtml).join('');
 }
 
 function albumCardHtml(a) {
@@ -408,67 +669,70 @@ function albumCardHtml(a) {
   </div>`;
 }
 
-// ── Render photo view (inside album) ──
+// ─────────────────────────────────────────────────────────────
+// Photo Grid
+// ─────────────────────────────────────────────────────────────
 function renderPhotoView() {
-  const albumGrid = document.getElementById('albumGrid');
+  document.getElementById('albumGrid').style.display = 'none';
   const photoGrid = document.getElementById('photoGrid');
-  const empty = document.getElementById('emptyState');
-  const sectionLbl = document.getElementById('sectionLbl');
-  const backBar = document.getElementById('backBar');
-
-  albumGrid.style.display = 'none';
   photoGrid.style.display = '';
-  backBar.classList.add('show');
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('backBar').classList.add('show');
 
-  const albumPhotos = activeAlbum === '__untagged__'
-    ? photos.filter(p => !p.job)
-    : photos.filter(p => p.job === activeAlbum);
-
+  const albumPhotos = getAlbumPhotos(activeAlbum);
   const label = activeAlbum === '__untagged__' ? 'Untagged' : activeAlbum;
   document.getElementById('backAlbumName').textContent = label;
   document.getElementById('backAlbumCt').textContent = `${albumPhotos.length} photo${albumPhotos.length===1?'':'s'}`;
 
+  const sectionLbl = document.getElementById('sectionLbl');
   if (albumPhotos.length === 0) {
-    empty.style.display = '';
+    document.getElementById('emptyState').style.display = '';
     sectionLbl.style.display = 'none';
     photoGrid.innerHTML = '';
     return;
   }
-
-  empty.style.display = 'none';
   sectionLbl.style.display = 'flex';
   document.getElementById('sectionTitle').textContent = label;
   document.getElementById('sectionCount').textContent = albumPhotos.length;
+  photoGrid.innerHTML = albumPhotos.map(photoCardHtml).join('');
+}
 
-  photoGrid.innerHTML = albumPhotos.map(p => photoCardHtml(p)).join('');
+function getAlbumPhotos(album) {
+  return album === '__untagged__'
+    ? photos.filter(p => !p.job)
+    : photos.filter(p => p.job === album);
 }
 
 function photoCardHtml(p) {
   const ts = new Date(p.ts);
   const dateStr = ts.toLocaleDateString([], {month:'short', day:'numeric'});
   const timeStr = ts.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  const gpsStr = p.lat ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : 'No GPS';
-  return `<div class="card" onclick="openLb('${esc(p.id)}')">
-    <img class="card-img" src="${esc(p.url)}" alt="" loading="lazy"
+  const displayUrl = p.editedUrl || p.url;
+  const kws = (p.keywords||[]).slice(0,3);
+  const kwsHtml = kws.map(k => `<span class="card-kw">${esc(k)}</span>`).join('');
+  const editedBadge = p.editedUrl ? '<div class="card-edited-badge">Edited</div>' : '';
+  const noteHtml = p.note ? `<div class="card-note">${esc(p.note)}</div>` : '';
+  const visionHtml = p.visionDesc ? `<div class="card-vision">&#9673; ${esc(p.visionDesc.slice(0,60))}${p.visionDesc.length>60?'…':''}</div>` : '';
+  return `<div class="card" onclick="openDetail('${esc(p.id)}')">
+    ${editedBadge}
+    <img class="card-img" src="${esc(displayUrl)}" alt="" loading="lazy"
          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
     <div class="card-img-placeholder" style="display:none">
       <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
     </div>
     <div class="card-body">
       <div class="card-ts">${dateStr} ${timeStr}</div>
-      <div class="card-gps">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
-        ${esc(gpsStr)}
-      </div>
+      ${kws.length ? `<div class="card-kws">${kwsHtml}</div>` : ''}
+      ${noteHtml}
+      ${visionHtml}
     </div>
     <div class="card-badge">#${esc(p.id.slice(-4))}</div>
-    <button class="card-del" onclick="event.stopPropagation();deletePhoto('${esc(p.id)}')">
-      <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-    </button>
   </div>`;
 }
 
-// ── Capture ──
+// ─────────────────────────────────────────────────────────────
+// Capture & Upload
+// ─────────────────────────────────────────────────────────────
 function triggerCapture() {
   document.getElementById('fileInput').click();
 }
@@ -484,9 +748,7 @@ async function onFilesSelected(e) {
     const d = new Date();
     job = d.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'});
   }
-  for (const file of files) {
-    await uploadPhoto(file, job, snapGps);
-  }
+  for (const file of files) await uploadPhoto(file, job, snapGps);
 }
 
 async function uploadPhoto(file, job, snapGps) {
@@ -495,34 +757,24 @@ async function uploadPhoto(file, job, snapGps) {
   try {
     blob = await new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = (e) => resolve(new Blob([e.target.result], {type: file.type || 'image/jpeg'}));
+      reader.onload = e => resolve(new Blob([e.target.result], {type: file.type || 'image/jpeg'}));
       reader.onerror = reject;
       reader.readAsArrayBuffer(file);
     });
-  } catch(err) {
-    showToast('err', 'Upload failed');
-    return;
-  }
-  if (!blob || blob.size === 0) {
-    showToast('err', 'Upload failed');
-    return;
-  }
+  } catch { showToast('err', 'Upload failed'); return; }
+  if (!blob || blob.size === 0) { showToast('err', 'Upload failed'); return; }
   const ct = blob.type || file.type || 'image/jpeg';
   try {
-    const r = await fetch('/api/upload', {method: 'POST', body: blob, headers: {'Content-Type': ct}});
+    const r = await fetch('/api/upload', {method:'POST', body:blob, headers:{'Content-Type':ct}});
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     const url = d.url || `/uploads/${d.filename || d.name}`;
     const photo = {
       id: Date.now() + '_' + Math.random().toString(36).slice(2,7),
-      url,
-      filename: d.filename || d.name || file.name,
-      job: job || '',
-      lat: snapGps ? snapGps.lat : null,
-      lng: snapGps ? snapGps.lng : null,
-      gpsAcc: snapGps ? snapGps.acc : null,
-      ts: new Date().toISOString(),
-      note: ''
+      url, filename: d.filename || d.name || file.name,
+      job: job || '', lat: snapGps?.lat ?? null, lng: snapGps?.lng ?? null,
+      gpsAcc: snapGps?.acc ?? null, ts: new Date().toISOString(),
+      note: '', keywords: [], visionDesc: '', editedUrl: null
     };
     photos.unshift(photo);
     await saveManifest();
@@ -539,53 +791,480 @@ async function uploadPhoto(file, job, snapGps) {
   }
 }
 
-// ── Delete ──
+// ─────────────────────────────────────────────────────────────
+// Delete
+// ─────────────────────────────────────────────────────────────
 async function deletePhoto(id) {
   photos = photos.filter(p => p.id !== id);
   await saveManifest();
-  if (lbPhotoId === id) closeLb();
-  if (activeAlbum !== null) {
-    renderPhotoView();
-    const remaining = activeAlbum === '__untagged__'
-      ? photos.filter(p => !p.job) : photos.filter(p => p.job === activeAlbum);
-    if (remaining.length === 0) goHome();
+}
+
+async function deleteDetailPhoto() {
+  if (!detPhotoId) return;
+  await deletePhoto(detPhotoId);
+  // Try to go to next/prev
+  const remaining = getAlbumPhotos(activeAlbum).filter(p => p.id !== detPhotoId);
+  if (remaining.length > 0) {
+    const ni = Math.min(detIdx, remaining.length - 1);
+    openDetail(remaining[ni].id);
   } else {
-    renderAlbums();
+    closeDetail();
+    if (activeAlbum) renderPhotoView(); else renderAlbums();
   }
   showToast('ok', 'Removed');
 }
 
-async function deleteLbPhoto() {
-  if (!lbPhotoId) return;
-  await deletePhoto(lbPhotoId);
-}
-
-// ── Lightbox ──
-function openLb(id) {
+// ─────────────────────────────────────────────────────────────
+// Photo Detail Panel
+// ─────────────────────────────────────────────────────────────
+function openDetail(id) {
   const p = photos.find(x => x.id === id);
   if (!p) return;
-  lbPhotoId = id;
-  const ts = new Date(p.ts);
-  document.getElementById('lbImg').src = p.url;
-  document.getElementById('lbJob').textContent = p.job || 'Untagged';
-  document.getElementById('lbInfo').textContent =
-    `${ts.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})} · ${ts.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` +
-    (p.lat ? ` · GPS ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : '');
-  const dlBtn = document.getElementById('lbDownload');
-  dlBtn.href = p.url;
-  dlBtn.download = p.filename || 'capture.jpg';
-  document.getElementById('lb').classList.add('open');
+  detPhotoId = id;
+  detAlbumPhotos = getAlbumPhotos(activeAlbum);
+  detIdx = detAlbumPhotos.findIndex(x => x.id === id);
+  populateDetail(p);
+  document.getElementById('detailOverlay').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
 
-function closeLb(e) {
-  if (e && e.target !== document.getElementById('lb')) return;
-  document.getElementById('lb').classList.remove('open');
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('open');
   document.body.style.overflow = '';
-  lbPhotoId = null;
+  detPhotoId = null;
+  if (activeAlbum !== null) renderPhotoView();
 }
 
-// ── Toast ──
+function detailNav(dir) {
+  const ni = detIdx + dir;
+  if (ni < 0 || ni >= detAlbumPhotos.length) return;
+  detIdx = ni;
+  detPhotoId = detAlbumPhotos[ni].id;
+  populateDetail(detAlbumPhotos[ni]);
+}
+
+function populateDetail(p) {
+  // Photo
+  const displayUrl = p.editedUrl || p.url;
+  document.getElementById('detPhoto').src = displayUrl;
+  document.getElementById('detDownload').href = displayUrl;
+  document.getElementById('detDownload').download = p.filename || 'capture.jpg';
+
+  // Nav counter
+  document.getElementById('detNavCt').textContent = `${detIdx+1} / ${detAlbumPhotos.length}`;
+  document.getElementById('detNavPrev').style.opacity = detIdx === 0 ? '.3' : '1';
+  document.getElementById('detNavNext').style.opacity = detIdx === detAlbumPhotos.length-1 ? '.3' : '1';
+
+  // Album
+  document.getElementById('detAlbumVal').textContent = p.job || 'Untagged';
+  document.getElementById('detAlbumInput').value = p.job || '';
+  document.getElementById('detAlbumRow').style.display = 'flex';
+  document.getElementById('detAlbumEditRow').style.display = 'none';
+
+  // Keywords
+  renderDetailKws(p);
+
+  // Notes
+  document.getElementById('detNotes').value = p.note || '';
+
+  // GPS
+  const gpsSection = document.getElementById('detGpsSection');
+  if (p.lat !== null && p.lat !== undefined) {
+    gpsSection.style.display = '';
+    document.getElementById('detGpsCoords').textContent = `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`;
+    document.getElementById('detGpsAcc').textContent = p.gpsAcc ? `±${p.gpsAcc}m accuracy` : '';
+    document.getElementById('detGpsLink').href = `https://maps.google.com/?q=${p.lat},${p.lng}`;
+  } else {
+    gpsSection.style.display = 'none';
+  }
+
+  // Timestamp
+  const ts = new Date(p.ts);
+  document.getElementById('detTs').textContent =
+    ts.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric', year:'numeric'}) +
+    ' · ' + ts.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+
+  // Vision
+  const vBtn = document.getElementById('visionBtn');
+  const vDesc = document.getElementById('detVisionDesc');
+  if (p.visionDesc) {
+    document.getElementById('visionBtnTxt').textContent = 'Re-analyze';
+    vDesc.textContent = p.visionDesc;
+    vDesc.style.display = '';
+  } else {
+    document.getElementById('visionBtnTxt').textContent = 'Analyze Photo';
+    vDesc.style.display = 'none';
+  }
+  vBtn.classList.remove('loading');
+  vBtn.disabled = false;
+
+  // Close keyword input row
+  kwInputOpen = false;
+  document.getElementById('kwInputRow').classList.remove('show');
+
+  // Scroll detail to top
+  document.getElementById('detailOverlay').scrollTop = 0;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Album editing in detail
+// ─────────────────────────────────────────────────────────────
+function startAlbumEdit() {
+  document.getElementById('detAlbumRow').style.display = 'none';
+  document.getElementById('detAlbumEditRow').style.display = 'flex';
+  document.getElementById('detAlbumInput').focus();
+}
+
+async function saveAlbum() {
+  const p = photos.find(x => x.id === detPhotoId);
+  if (!p) return;
+  const newAlbum = document.getElementById('detAlbumInput').value.trim();
+  p.job = newAlbum;
+  await saveManifest();
+  document.getElementById('detAlbumVal').textContent = newAlbum || 'Untagged';
+  document.getElementById('detAlbumRow').style.display = 'flex';
+  document.getElementById('detAlbumEditRow').style.display = 'none';
+  showToast('ok', 'Album updated');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Keywords
+// ─────────────────────────────────────────────────────────────
+function renderDetailKws(p) {
+  const kws = p.keywords || [];
+  const kwContainer = document.getElementById('detKws');
+  let html = kws.map((k,i) => `
+    <span class="detail-kw">
+      ${esc(k)}
+      <button class="detail-kw-del" onclick="removeKw(${i})" title="Remove">&times;</button>
+    </span>
+  `).join('');
+  html += `<span class="detail-kw-add" onclick="toggleKwInput()">
+    <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Add
+  </span>`;
+  kwContainer.innerHTML = html;
+}
+
+function toggleKwInput() {
+  kwInputOpen = !kwInputOpen;
+  const row = document.getElementById('kwInputRow');
+  if (kwInputOpen) { row.classList.add('show'); document.getElementById('kwInput').focus(); }
+  else { row.classList.remove('show'); }
+}
+
+async function removeKw(idx) {
+  const p = photos.find(x => x.id === detPhotoId);
+  if (!p) return;
+  p.keywords.splice(idx, 1);
+  renderDetailKws(p);
+  await saveManifest();
+}
+
+async function addKwFromInput() {
+  const input = document.getElementById('kwInput');
+  const kw = input.value.trim();
+  if (!kw) return;
+  const p = photos.find(x => x.id === detPhotoId);
+  if (!p) return;
+  if (!p.keywords.includes(kw)) {
+    p.keywords.push(kw);
+    renderDetailKws(p);
+    await saveManifest();
+    // Update card grid in background
+    if (activeAlbum !== null) renderPhotoView();
+  }
+  input.value = '';
+  input.focus();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Notes
+// ─────────────────────────────────────────────────────────────
+async function saveNotes() {
+  const p = photos.find(x => x.id === detPhotoId);
+  if (!p) return;
+  const note = document.getElementById('detNotes').value.trim();
+  if (p.note === note) return;
+  p.note = note;
+  await saveManifest();
+  showToast('ok', 'Note saved');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Vision Analysis
+// ─────────────────────────────────────────────────────────────
+async function analyzePhoto() {
+  const p = photos.find(x => x.id === detPhotoId);
+  if (!p) return;
+  const btn = document.getElementById('visionBtn');
+  const btnTxt = document.getElementById('visionBtnTxt');
+  const vDesc = document.getElementById('detVisionDesc');
+  btn.classList.add('loading');
+  btn.disabled = true;
+  btnTxt.textContent = 'Analyzing…';
+  try {
+    // Fetch the image as base64
+    const imgResp = await fetch(p.url, {cache:'no-cache'});
+    const blob = await imgResp.blob();
+    const b64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    const vResp = await fetch('/api/vision', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        image: b64,
+        prompt: 'Describe this photo in detail. Include: what is shown, any text visible, notable features, condition of subjects if relevant, and anything that would be useful for a contractor, inspector, or content creator to know. Be concise but thorough.'
+      })
+    });
+    if (!vResp.ok) throw new Error(`Vision API ${vResp.status}`);
+    const vData = await vResp.json();
+    const desc = vData.description || 'No description returned.';
+    p.visionDesc = desc;
+    await saveManifest();
+    vDesc.textContent = desc;
+    vDesc.style.display = '';
+    btnTxt.textContent = 'Re-analyze';
+    // Update card
+    if (activeAlbum !== null) renderPhotoView();
+  } catch(err) {
+    console.error('Vision failed:', err);
+    vDesc.textContent = 'Analysis failed — check your connection and try again.';
+    vDesc.style.display = '';
+    btnTxt.textContent = 'Analyze Photo';
+  }
+  btn.classList.remove('loading');
+  btn.disabled = false;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Canvas Editor
+// ─────────────────────────────────────────────────────────────
+function openEditor() {
+  const p = photos.find(x => x.id === detPhotoId);
+  if (!p) return;
+  edPhotoId = p.id;
+  edUndoStack = [];
+  edTool = 'pen';
+  updateEdToolUI();
+
+  // Load image onto canvas
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    edBaseImage = img;
+    // Size canvas to fit screen
+    const wrap = document.getElementById('edCanvasWrap');
+    const maxW = wrap.clientWidth;
+    const maxH = wrap.clientHeight;
+    const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+    edCanvas.width = Math.round(img.naturalWidth * scale);
+    edCanvas.height = Math.round(img.naturalHeight * scale);
+    edCtx.drawImage(img, 0, 0, edCanvas.width, edCanvas.height);
+    saveEditorSnapshot();
+  };
+  img.onerror = () => showToast('err', 'Could not load image for editing');
+  const displayUrl = p.editedUrl || p.url;
+  img.src = displayUrl + '?t=' + Date.now();
+
+  document.getElementById('editorOverlay').classList.add('open');
+}
+
+function closeEditor() {
+  document.getElementById('editorOverlay').classList.remove('open');
+  document.getElementById('edTextWrap').classList.remove('show');
+  pendingTextPos = null;
+}
+
+function setTool(tool) {
+  edTool = tool;
+  document.getElementById('edCanvasWrap').setAttribute('data-tool', tool);
+  updateEdToolUI();
+  document.getElementById('edTextWrap').classList.remove('show');
+  pendingTextPos = null;
+}
+
+function updateEdToolUI() {
+  document.getElementById('edPen').classList.toggle('active', edTool==='pen');
+  document.getElementById('edText').classList.toggle('active', edTool==='text');
+  document.getElementById('edErase').classList.toggle('active', edTool==='erase');
+  document.getElementById('edCanvasWrap').setAttribute('data-tool', edTool);
+}
+
+function onColorChange(val) {
+  document.getElementById('edColorSwatch').style.background = val;
+}
+
+function saveEditorSnapshot() {
+  edUndoStack.push(edCtx.getImageData(0, 0, edCanvas.width, edCanvas.height));
+  if (edUndoStack.length > 30) edUndoStack.shift();
+}
+
+function edUndo() {
+  if (edUndoStack.length <= 1) return;
+  edUndoStack.pop();
+  edCtx.putImageData(edUndoStack[edUndoStack.length-1], 0, 0);
+}
+
+// Drawing events
+function setupEditorEvents() {
+  const c = edCanvas;
+
+  function getPos(e) {
+    const rect = c.getBoundingClientRect();
+    const scaleX = c.width / rect.width;
+    const scaleY = c.height / rect.height;
+    const touch = e.touches ? e.touches[0] : e;
+    return {
+      x: (touch.clientX - rect.left) * scaleX,
+      y: (touch.clientY - rect.top) * scaleY
+    };
+  }
+
+  function penDown(e) {
+    if (edTool === 'text') { handleTextClick(e); return; }
+    if (edTool !== 'pen' && edTool !== 'erase') return;
+    e.preventDefault();
+    edDrawing = true;
+    const pos = getPos(e);
+    edCtx.beginPath();
+    edCtx.moveTo(pos.x, pos.y);
+    setDrawStyle();
+  }
+  function penMove(e) {
+    if (!edDrawing) return;
+    e.preventDefault();
+    const pos = getPos(e);
+    edCtx.lineTo(pos.x, pos.y);
+    edCtx.stroke();
+  }
+  function penUp(e) {
+    if (!edDrawing) return;
+    edDrawing = false;
+    edCtx.closePath();
+    saveEditorSnapshot();
+  }
+
+  c.addEventListener('mousedown', penDown);
+  c.addEventListener('mousemove', penMove);
+  c.addEventListener('mouseup', penUp);
+  c.addEventListener('mouseleave', penUp);
+  c.addEventListener('touchstart', penDown, {passive:false});
+  c.addEventListener('touchmove', penMove, {passive:false});
+  c.addEventListener('touchend', penUp);
+
+  // Text input commit on Enter/blur
+  const textInput = document.getElementById('edTextInput');
+  textInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commitText(); }
+    if (e.key === 'Escape') { document.getElementById('edTextWrap').classList.remove('show'); pendingTextPos = null; }
+  });
+  textInput.addEventListener('blur', () => {
+    if (pendingTextPos) commitText();
+  });
+}
+
+function setDrawStyle() {
+  const color = document.getElementById('edColor').value;
+  const size = parseInt(document.getElementById('edSize').value);
+  if (edTool === 'erase') {
+    edCtx.globalCompositeOperation = 'destination-out';
+    edCtx.strokeStyle = 'rgba(0,0,0,1)';
+    edCtx.lineWidth = size * 3;
+  } else {
+    edCtx.globalCompositeOperation = 'source-over';
+    edCtx.strokeStyle = color;
+    edCtx.lineWidth = size;
+  }
+  edCtx.lineCap = 'round';
+  edCtx.lineJoin = 'round';
+}
+
+function handleTextClick(e) {
+  e.preventDefault();
+  const rect = edCanvas.getBoundingClientRect();
+  const touch = e.touches ? e.touches[0] : e;
+  const scaleX = edCanvas.width / rect.width;
+  const scaleY = edCanvas.height / rect.height;
+  pendingTextPos = {
+    x: (touch.clientX - rect.left) * scaleX,
+    y: (touch.clientY - rect.top) * scaleY,
+    screenX: touch.clientX - rect.left,
+    screenY: touch.clientY - rect.top
+  };
+  const wrap = document.getElementById('edTextWrap');
+  const input = document.getElementById('edTextInput');
+  // Position the floating input near click, staying in-bounds
+  const wrapEl = document.getElementById('edCanvasWrap');
+  const wRect = wrapEl.getBoundingClientRect();
+  const cRect = edCanvas.getBoundingClientRect();
+  let tx = cRect.left - wRect.left + pendingTextPos.screenX;
+  let ty = cRect.top - wRect.top + pendingTextPos.screenY - 20;
+  tx = Math.max(0, Math.min(tx, wRect.width - 200));
+  ty = Math.max(0, Math.min(ty, wRect.height - 50));
+  wrap.style.left = tx + 'px';
+  wrap.style.top = ty + 'px';
+  input.value = '';
+  wrap.classList.add('show');
+  setTimeout(() => input.focus(), 50);
+}
+
+function commitText() {
+  const input = document.getElementById('edTextInput');
+  const txt = input.value.trim();
+  document.getElementById('edTextWrap').classList.remove('show');
+  if (!txt || !pendingTextPos) { pendingTextPos = null; return; }
+  const color = document.getElementById('edColor').value;
+  const size = parseInt(document.getElementById('edSize').value);
+  edCtx.globalCompositeOperation = 'source-over';
+  edCtx.font = `bold ${Math.max(14, size * 3)}px system-ui, sans-serif`;
+  edCtx.fillStyle = color;
+  edCtx.strokeStyle = 'rgba(0,0,0,0.6)';
+  edCtx.lineWidth = 1.5;
+  edCtx.strokeText(txt, pendingTextPos.x, pendingTextPos.y);
+  edCtx.fillText(txt, pendingTextPos.x, pendingTextPos.y);
+  pendingTextPos = null;
+  input.value = '';
+  saveEditorSnapshot();
+}
+
+async function saveEdited() {
+  const p = photos.find(x => x.id === edPhotoId);
+  if (!p) return;
+  showToast('uploading', 'Saving edited photo…');
+  try {
+    const blob = await new Promise((resolve, reject) => {
+      edCanvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/jpeg', 0.92);
+    });
+    const r = await fetch('/api/upload', {
+      method:'POST', body:blob,
+      headers:{'Content-Type':'image/jpeg'}
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    const editedUrl = d.url || `/uploads/${d.filename || d.name}`;
+    p.editedUrl = editedUrl;
+    await saveManifest();
+    // Update detail view
+    document.getElementById('detPhoto').src = editedUrl;
+    document.getElementById('detDownload').href = editedUrl;
+    if (activeAlbum !== null) renderPhotoView();
+    showToast('ok', 'Edited photo saved');
+    closeEditor();
+  } catch(err) {
+    console.error(err);
+    showToast('err', 'Save failed');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Toast
+// ─────────────────────────────────────────────────────────────
+let toastTimer = null;
 function showToast(type, msg) {
   const el = document.getElementById('toast');
   const icon = document.getElementById('toastIcon');
@@ -595,13 +1274,11 @@ function showToast(type, msg) {
     ok: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
     err: '<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>'
   };
-  el.className = 'upload-toast show toast-' + (type === 'uploading' ? 'spin' : type === 'ok' ? 'ok' : 'err');
+  el.className = 'upload-toast show toast-' + (type==='uploading'?'spin':type==='ok'?'ok':'err');
   icon.innerHTML = iconPaths[type] || iconPaths.uploading;
   msgEl.textContent = msg;
   clearTimeout(toastTimer);
-  if (type !== 'uploading') {
-    toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
-  }
+  if (type !== 'uploading') toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
 }
 
 function esc(s) {
