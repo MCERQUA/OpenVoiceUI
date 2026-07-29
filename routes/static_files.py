@@ -302,7 +302,15 @@ def upload_file():
 
     f = request.files['file']
     if not f.filename:
-        return jsonify({'error': 'Empty filename'}), 400
+        # iOS camera blobs arrive with no filename — generate one from content-type
+        import time as _time
+        ct = f.content_type or 'image/jpeg'
+        ext_guess = mimetypes.guess_extension(ct) or '.jpg'
+        # mimetypes sometimes returns .jpe or .jpeg — normalize to .jpg
+        if ext_guess in ('.jpe', '.jpeg'):
+            ext_guess = '.jpg'
+        f.filename = f'capture_{int(_time.time())}{ext_guess}'
+        logger.info('upload: empty filename from client; generated fallback %s (content_type=%s)', f.filename, ct)
 
     # --- Sanitize filename, validate extension ---
     original_name = Path(f.filename).name
