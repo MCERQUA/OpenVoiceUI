@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="page-icon" content="camera">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Site Capture</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--bg-1:#111113;--bg-2:#19191b;--bg-3:#222225;
+  --border:#2a2a2d;--border-h:#3a3a3d;
+  --tx:#ececef;--tx-2:#a0a0a6;--tx-3:#6e6e76;
+  --orange:#f97316;--orange-dim:rgba(249,115,22,.12);--orange-glow:rgba(249,115,22,.08);
+  --blue:#3b82f6;--blue-dim:rgba(59,130,246,.1);
+  --green:#22c55e;--green-dim:rgba(34,197,94,.12);
+  --red:#ef4444;--red-dim:rgba(239,68,68,.1);
+  --amber:#f59e0b;
+  --r:8px;--r-lg:14px;
+}
+html,body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--tx-2);min-height:100vh;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+/* ── Layout ── */
+.app{max-width:600px;margin:0 auto;padding:16px;padding-bottom:100px}
+
+/* ── Header ── */
+.hdr{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+.hdr-icon{width:38px;height:38px;background:var(--orange-dim);border:1px solid rgba(249,115,22,.25);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.hdr-icon svg{width:20px;height:20px;stroke:var(--orange);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.hdr-text h1{font-size:1.1rem;font-weight:700;color:var(--tx);letter-spacing:-.01em}
+.hdr-text p{font-size:.73rem;color:var(--tx-3);margin-top:1px}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.gps-badge{display:flex;align-items:center;gap:4px;font-size:.68rem;padding:3px 8px;border-radius:20px;border:1px solid var(--border);background:var(--bg-2);color:var(--tx-3);transition:all .3s}
+.gps-badge.got{border-color:rgba(34,197,94,.3);background:var(--green-dim);color:var(--green)}
+.gps-badge svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Back bar ── */
+.back-bar{display:none;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.back-bar.show{display:flex}
+.back-btn{display:flex;align-items:center;gap:5px;background:none;border:none;color:var(--orange);font-size:.85rem;font-weight:600;cursor:pointer;padding:4px 0;-webkit-tap-highlight-color:transparent}
+.back-btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.back-album-name{font-size:.85rem;font-weight:700;color:var(--tx);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.back-ct{font-size:.72rem;color:var(--tx-3);white-space:nowrap}
+
+/* ── Job bar ── */
+.job-bar{display:flex;gap:8px;margin-bottom:20px;align-items:center}
+.job-lbl{font-size:.72rem;font-weight:600;color:var(--tx-3);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.job-input{flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r);padding:9px 12px;font-size:.88rem;color:var(--tx);outline:none;transition:border-color .15s;-webkit-appearance:none}
+.job-input:focus{border-color:var(--orange)}
+.job-input::placeholder{color:var(--tx-3)}
+
+/* ── BIG CAPTURE BUTTON ── */
+.capture-wrap{text-align:center;margin:28px 0 24px}
+.capture-btn{
+  width:140px;height:140px;border-radius:50%;border:none;cursor:pointer;
+  background:linear-gradient(145deg,#f97316,#ea580c);
+  box-shadow:0 0 0 6px rgba(249,115,22,.15),0 0 0 12px rgba(249,115,22,.07),0 8px 32px rgba(249,115,22,.35);
+  display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  transition:transform .12s,box-shadow .12s;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+.capture-btn:active{transform:scale(.95);box-shadow:0 0 0 4px rgba(249,115,22,.2),0 4px 16px rgba(249,115,22,.3)}
+.capture-btn svg{width:40px;height:40px;stroke:#fff;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.capture-btn span{font-size:.72rem;font-weight:700;color:rgba(255,255,255,.9);letter-spacing:.08em;text-transform:uppercase}
+.capture-hint{font-size:.72rem;color:var(--tx-3);margin-top:10px}
+.capture-hint b{color:var(--tx-2)}
+
+/* ── Upload progress ── */
+.upload-toast{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:10px 16px;font-size:.8rem;color:var(--tx);
+  display:flex;align-items:center;gap:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.4);
+  opacity:0;transition:opacity .2s;pointer-events:none;z-index:100;white-space:nowrap;
+}
+.upload-toast.show{opacity:1}
+.upload-toast svg{width:14px;height:14px;flex-shrink:0}
+.toast-ok svg{stroke:var(--green)}
+.toast-err svg{stroke:var(--red)}
+.toast-spin svg{stroke:var(--orange);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Section label ── */
+.section-lbl{font-size:.72rem;font-weight:600;color:var(--tx-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+.section-lbl .ct{color:var(--tx-2);font-weight:700;font-size:.85em}
+
+/* ── ALBUM GRID ── */
+.album-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:480px){.album-grid{grid-template-columns:repeat(3,1fr)}}
+
+.album-card{
+  border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);
+  background:var(--bg-1);cursor:pointer;transition:border-color .15s,transform .12s;
+  -webkit-tap-highlight-color:transparent;
+}
+.album-card:hover{border-color:var(--orange);transform:scale(1.01)}
+.album-thumb{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--bg-3)}
+.album-thumb-blank{width:100%;aspect-ratio:4/3;background:var(--bg-3);display:flex;align-items:center;justify-content:center;position:relative}
+.album-thumb-blank svg{width:32px;height:32px;stroke:var(--tx-3);fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;opacity:.4}
+.album-ct-badge{
+  position:absolute;bottom:8px;right:8px;
+  background:rgba(0,0,0,.7);border-radius:5px;
+  padding:2px 7px;font-size:.65rem;font-weight:700;color:#fff;
+  backdrop-filter:blur(4px);
+}
+.album-body{padding:9px 10px}
+.album-name{font-size:.82rem;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
+.album-meta{font-size:.65rem;color:var(--tx-3)}
+.album-untagged .album-name{color:var(--tx-3);font-weight:500}
+
+/* ── PHOTO GRID (inside album) ── */
+.photo-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:480px){.photo-grid{grid-template-columns:repeat(3,1fr)}}
+
+.card{
+  border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);
+  background:var(--bg-1);position:relative;cursor:pointer;
+  transition:border-color .15s,transform .12s;
+  -webkit-tap-highlight-color:transparent;
+}
+.card:hover{border-color:var(--border-h);transform:scale(1.01)}
+.card-img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--bg-3)}
+.card-img-placeholder{width:100%;aspect-ratio:4/3;background:var(--bg-3);display:flex;align-items:center;justify-content:center}
+.card-img-placeholder svg{width:28px;height:28px;stroke:var(--tx-3);fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.card-body{padding:8px}
+.card-ts{font-size:.7rem;color:var(--tx-3)}
+.card-gps{font-size:.62rem;color:var(--tx-3);margin-top:2px;display:flex;align-items:center;gap:3px}
+.card-gps svg{width:9px;height:9px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.card-badge{
+  position:absolute;top:6px;right:6px;
+  background:rgba(0,0,0,.65);border-radius:4px;
+  padding:2px 5px;font-size:.6rem;color:rgba(255,255,255,.8);
+  backdrop-filter:blur(4px);
+}
+.card-del{
+  position:absolute;top:6px;left:6px;
+  width:24px;height:24px;border-radius:50%;
+  background:rgba(239,68,68,.85);border:none;cursor:pointer;
+  display:none;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent;
+}
+.card:hover .card-del,.card:focus-within .card-del{display:flex}
+.card-del svg{width:12px;height:12px;stroke:#fff;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Empty state ── */
+.empty{text-align:center;padding:48px 20px;color:var(--tx-3)}
+.empty svg{width:48px;height:48px;stroke:var(--tx-3);fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round;margin:0 auto 12px;display:block;opacity:.4}
+.empty p{font-size:.85rem}
+.empty b{color:var(--tx-2)}
+
+/* ── Lightbox ── */
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:200;padding:16px}
+.lb.open{display:flex}
+.lb-img{max-width:100%;max-height:70vh;border-radius:var(--r-lg);object-fit:contain}
+.lb-meta{margin-top:12px;text-align:center;width:100%;max-width:400px}
+.lb-job{font-size:1rem;font-weight:700;color:var(--orange);margin-bottom:4px}
+.lb-info{font-size:.75rem;color:var(--tx-2)}
+.lb-close{position:absolute;top:16px;right:16px;background:rgba(255,255,255,.1);border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
+.lb-close svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.lb-actions{display:flex;gap:8px;margin-top:14px}
+.lb-btn{padding:8px 16px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg-2);color:var(--tx);font-size:.8rem;cursor:pointer;-webkit-tap-highlight-color:transparent;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+.lb-btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.lb-btn:hover{border-color:var(--border-h);background:var(--bg-3)}
+
+input[type="file"]{display:none}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="hdr-icon" id="hdrIcon" onclick="goHome()">
+      <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    </div>
+    <div class="hdr-text">
+      <h1 id="hdrTitle">Site Capture</h1>
+      <p id="hdrSub">Albums by job</p>
+    </div>
+    <div class="hdr-right">
+      <div class="gps-badge" id="gpsBadge">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        <span id="gpsLabel">GPS…</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Back bar (album view only) -->
+  <div class="back-bar" id="backBar">
+    <button class="back-btn" onclick="goHome()">
+      <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      Albums
+    </button>
+    <span class="back-album-name" id="backAlbumName"></span>
+    <span class="back-ct" id="backAlbumCt"></span>
+  </div>
+
+  <!-- Job bar (capture bar) -->
+  <div class="job-bar" id="jobBar">
+    <span class="job-lbl">Album</span>
+    <input type="text" id="jobInput" class="job-input" placeholder="Job name or address…" autocomplete="off" autocorrect="off" spellcheck="false">
+  </div>
+
+  <!-- Big capture button -->
+  <div class="capture-wrap">
+    <button class="capture-btn" id="captureBtn" onclick="triggerCapture()">
+      <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      <span>Capture</span>
+    </button>
+    <div class="capture-hint" id="captureHint">Opens camera — <b>auto-saves to album</b></div>
+  </div>
+
+  <!-- Hidden file input -->
+  <input type="file" id="fileInput" accept="image/*" capture="environment" multiple>
+
+  <!-- Section label -->
+  <div class="section-lbl" id="sectionLbl" style="display:none">
+    <span id="sectionTitle">Albums</span>
+    <span class="ct" id="sectionCount">0</span>
+  </div>
+
+  <!-- Album grid -->
+  <div class="album-grid" id="albumGrid"></div>
+
+  <!-- Photo grid (inside album) -->
+  <div class="photo-grid" id="photoGrid" style="display:none"></div>
+
+  <!-- Empty state -->
+  <div class="empty" id="emptyState">
+    <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    <p>No albums yet.<br>Enter a job name, tap <b>Capture</b>.</p>
+  </div>
+
+</div>
+
+<!-- Upload toast -->
+<div class="upload-toast" id="toast">
+  <svg id="toastIcon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+  <span id="toastMsg">Uploading…</span>
+</div>
+
+<!-- Lightbox -->
+<div class="lb" id="lb" onclick="closeLb(event)">
+  <button class="lb-close" onclick="closeLb()">
+    <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+  </button>
+  <img class="lb-img" id="lbImg" src="" alt="">
+  <div class="lb-meta">
+    <div class="lb-job" id="lbJob"></div>
+    <div class="lb-info" id="lbInfo"></div>
+  </div>
+  <div class="lb-actions">
+    <a class="lb-btn" id="lbDownload" href="#" download>
+      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Download
+    </a>
+    <button class="lb-btn" onclick="deleteLbPhoto()">
+      <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2"/></svg>
+      Remove
+    </button>
+  </div>
+</div>
+
+<script>
+// ── State ──
+const MANIFEST_KEY = 'capture-manifest.json';
+let photos = [];      // [{id, url, filename, job, lat, lng, ts, note}]
+let gpsPos = null;
+let activeAlbum = null;  // null = albums view, string = inside that album
+let lbPhotoId = null;
+let toastTimer = null;
+
+// ── Init ──
+async function init() {
+  await loadManifest();
+  renderAlbums();
+  startGPS();
+  document.getElementById('fileInput').addEventListener('change', onFilesSelected);
+  // Restore last job
+  const lastJob = sessionStorage.getItem('sc_lastjob');
+  if (lastJob) document.getElementById('jobInput').value = lastJob;
+  document.getElementById('jobInput').addEventListener('input', e => {
+    sessionStorage.setItem('sc_lastjob', e.target.value.trim());
+  });
+}
+
+// ── GPS ──
+function startGPS() {
+  const badge = document.getElementById('gpsBadge');
+  const lbl = document.getElementById('gpsLabel');
+  if (!navigator.geolocation) { lbl.textContent = 'No GPS'; return; }
+  navigator.geolocation.watchPosition(
+    pos => {
+      gpsPos = {lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy)};
+      lbl.textContent = `±${gpsPos.acc}m`;
+      badge.classList.add('got');
+    },
+    () => { lbl.textContent = 'GPS off'; badge.classList.remove('got'); },
+    {enableHighAccuracy: true, maximumAge: 10000, timeout: 15000}
+  );
+}
+
+// ── Manifest ──
+async function loadManifest() {
+  try {
+    const r = await fetch('/api/canvas/data/' + MANIFEST_KEY, {cache: 'no-cache'});
+    const d = await r.json();
+    photos = Array.isArray(d.photos) ? d.photos : [];
+  } catch { photos = []; }
+}
+
+async function saveManifest() {
+  try {
+    await fetch('/api/canvas/data/' + MANIFEST_KEY, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({photos, updated: new Date().toISOString()})
+    });
+  } catch(e) { console.error('manifest save failed', e); }
+}
+
+// ── Navigation ──
+function goHome() {
+  activeAlbum = null;
+  renderAlbums();
+}
+
+function openAlbum(name) {
+  activeAlbum = name;
+  // Pre-fill job input with album name for quick capture
+  document.getElementById('jobInput').value = name === '__untagged__' ? '' : name;
+  sessionStorage.setItem('sc_lastjob', document.getElementById('jobInput').value);
+  renderPhotoView();
+}
+
+// ── Build albums ──
+function buildAlbums() {
+  const map = {};
+  for (const p of photos) {
+    const key = p.job || '__untagged__';
+    if (!map[key]) {
+      map[key] = {name: key, photos: [], lastTs: p.ts, thumb: p.url};
+    }
+    map[key].photos.push(p);
+    if (p.ts > map[key].lastTs) { map[key].lastTs = p.ts; map[key].thumb = p.url; }
+  }
+  // Sort: named albums by lastTs desc, untagged last
+  return Object.values(map).sort((a, b) => {
+    if (a.name === '__untagged__') return 1;
+    if (b.name === '__untagged__') return -1;
+    return b.lastTs.localeCompare(a.lastTs);
+  });
+}
+
+// ── Render albums view ──
+function renderAlbums() {
+  const albumGrid = document.getElementById('albumGrid');
+  const photoGrid = document.getElementById('photoGrid');
+  const empty = document.getElementById('emptyState');
+  const sectionLbl = document.getElementById('sectionLbl');
+  const backBar = document.getElementById('backBar');
+
+  albumGrid.style.display = '';
+  photoGrid.style.display = 'none';
+  backBar.classList.remove('show');
+
+  const albums = buildAlbums();
+
+  if (albums.length === 0) {
+    empty.style.display = '';
+    sectionLbl.style.display = 'none';
+    albumGrid.innerHTML = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  sectionLbl.style.display = 'flex';
+  document.getElementById('sectionTitle').textContent = 'Albums';
+  document.getElementById('sectionCount').textContent = albums.length;
+
+  albumGrid.innerHTML = albums.map(a => albumCardHtml(a)).join('');
+}
+
+function albumCardHtml(a) {
+  const isUntagged = a.name === '__untagged__';
+  const label = isUntagged ? 'Untagged' : a.name;
+  const ct = a.photos.length;
+  const ts = new Date(a.lastTs);
+  const dateStr = ts.toLocaleDateString([], {month:'short', day:'numeric'});
+  const untagCls = isUntagged ? ' album-untagged' : '';
+  const onclick = `openAlbum(${JSON.stringify(a.name)})`;
+  return `<div class="album-card${untagCls}" onclick="${onclick}">
+    <div style="position:relative">
+      <img class="album-thumb" src="${esc(a.thumb)}" alt="${esc(label)}" loading="lazy"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <div class="album-thumb-blank" style="display:none">
+        <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </div>
+      <div class="album-ct-badge">${ct}</div>
+    </div>
+    <div class="album-body">
+      <div class="album-name">${esc(label)}</div>
+      <div class="album-meta">${ct} photo${ct===1?'':'s'} &middot; ${dateStr}</div>
+    </div>
+  </div>`;
+}
+
+// ── Render photo view (inside album) ──
+function renderPhotoView() {
+  const albumGrid = document.getElementById('albumGrid');
+  const photoGrid = document.getElementById('photoGrid');
+  const empty = document.getElementById('emptyState');
+  const sectionLbl = document.getElementById('sectionLbl');
+  const backBar = document.getElementById('backBar');
+
+  albumGrid.style.display = 'none';
+  photoGrid.style.display = '';
+  backBar.classList.add('show');
+
+  const albumPhotos = activeAlbum === '__untagged__'
+    ? photos.filter(p => !p.job)
+    : photos.filter(p => p.job === activeAlbum);
+
+  const label = activeAlbum === '__untagged__' ? 'Untagged' : activeAlbum;
+  document.getElementById('backAlbumName').textContent = label;
+  document.getElementById('backAlbumCt').textContent = `${albumPhotos.length} photo${albumPhotos.length===1?'':'s'}`;
+
+  if (albumPhotos.length === 0) {
+    empty.style.display = '';
+    sectionLbl.style.display = 'none';
+    photoGrid.innerHTML = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  sectionLbl.style.display = 'flex';
+  document.getElementById('sectionTitle').textContent = label;
+  document.getElementById('sectionCount').textContent = albumPhotos.length;
+
+  photoGrid.innerHTML = albumPhotos.map(p => photoCardHtml(p)).join('');
+}
+
+function photoCardHtml(p) {
+  const ts = new Date(p.ts);
+  const dateStr = ts.toLocaleDateString([], {month:'short', day:'numeric'});
+  const timeStr = ts.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  const gpsStr = p.lat ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : 'No GPS';
+  return `<div class="card" onclick="openLb('${esc(p.id)}')">
+    <img class="card-img" src="${esc(p.url)}" alt="" loading="lazy"
+         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+    <div class="card-img-placeholder" style="display:none">
+      <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    </div>
+    <div class="card-body">
+      <div class="card-ts">${dateStr} ${timeStr}</div>
+      <div class="card-gps">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        ${esc(gpsStr)}
+      </div>
+    </div>
+    <div class="card-badge">#${esc(p.id.slice(-4))}</div>
+    <button class="card-del" onclick="event.stopPropagation();deletePhoto('${esc(p.id)}')">
+      <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>`;
+}
+
+// ── Capture ──
+function triggerCapture() {
+  document.getElementById('fileInput').click();
+}
+
+async function onFilesSelected(e) {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  e.target.value = '';
+  const snapGps = gpsPos ? {...gpsPos} : null;
+  // Use job input; if inside an album and input is empty, use album name
+  let job = document.getElementById('jobInput').value.trim();
+  if (!job && activeAlbum && activeAlbum !== '__untagged__') job = activeAlbum;
+  // Default to today's date if no job provided
+  if (!job) {
+    const d = new Date();
+    job = d.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'});
+  }
+  for (const file of files) {
+    await uploadPhoto(file, job, snapGps);
+  }
+}
+
+async function uploadPhoto(file, job, snapGps) {
+  showToast('uploading', 'Uploading…');
+  const fd = new FormData();
+  const fname = file.name || ('capture_' + Date.now() + '.jpg');
+  fd.append('file', file, fname);
+  try {
+    const r = await fetch('/api/upload', {method: 'POST', body: fd});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    const url = d.url || `/uploads/${d.filename || d.name}`;
+    const photo = {
+      id: Date.now() + '_' + Math.random().toString(36).slice(2,7),
+      url,
+      filename: d.filename || d.name || file.name,
+      job: job || '',
+      lat: snapGps ? snapGps.lat : null,
+      lng: snapGps ? snapGps.lng : null,
+      gpsAcc: snapGps ? snapGps.acc : null,
+      ts: new Date().toISOString(),
+      note: ''
+    };
+    photos.unshift(photo);
+    await saveManifest();
+    // Refresh whichever view is active
+    if (activeAlbum !== null) {
+      // If we just created a new album via capture (job changed), switch to it
+      if (activeAlbum !== photo.job) {
+        activeAlbum = photo.job;
+      }
+      renderPhotoView();
+    } else {
+      renderAlbums();
+    }
+    showToast('ok', `Saved to album: ${photo.job}`);
+  } catch(err) {
+    console.error(err);
+    showToast('err', 'Upload failed');
+  }
+}
+
+// ── Delete ──
+async function deletePhoto(id) {
+  photos = photos.filter(p => p.id !== id);
+  await saveManifest();
+  if (lbPhotoId === id) closeLb();
+  if (activeAlbum !== null) {
+    renderPhotoView();
+    // If album is now empty, go home
+    const remaining = activeAlbum === '__untagged__'
+      ? photos.filter(p => !p.job) : photos.filter(p => p.job === activeAlbum);
+    if (remaining.length === 0) goHome();
+  } else {
+    renderAlbums();
+  }
+  showToast('ok', 'Removed');
+}
+
+async function deleteLbPhoto() {
+  if (!lbPhotoId) return;
+  await deletePhoto(lbPhotoId);
+}
+
+// ── Lightbox ──
+function openLb(id) {
+  const p = photos.find(x => x.id === id);
+  if (!p) return;
+  lbPhotoId = id;
+  const ts = new Date(p.ts);
+  document.getElementById('lbImg').src = p.url;
+  document.getElementById('lbJob').textContent = p.job || 'Untagged';
+  document.getElementById('lbInfo').textContent =
+    `${ts.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})} · ${ts.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` +
+    (p.lat ? ` · GPS ${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : '');
+  const dlBtn = document.getElementById('lbDownload');
+  dlBtn.href = p.url;
+  dlBtn.download = p.filename || 'capture.jpg';
+  document.getElementById('lb').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLb(e) {
+  if (e && e.target !== document.getElementById('lb')) return;
+  document.getElementById('lb').classList.remove('open');
+  document.body.style.overflow = '';
+  lbPhotoId = null;
+}
+
+// ── Toast ──
+function showToast(type, msg) {
+  const el = document.getElementById('toast');
+  const icon = document.getElementById('toastIcon');
+  const msgEl = document.getElementById('toastMsg');
+  const iconPaths = {
+    uploading: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    ok: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+    err: '<circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/>'
+  };
+  el.className = 'upload-toast show toast-' + (type === 'uploading' ? 'spin' : type === 'ok' ? 'ok' : 'err');
+  icon.innerHTML = iconPaths[type] || iconPaths.uploading;
+  msgEl.textContent = msg;
+  clearTimeout(toastTimer);
+  if (type !== 'uploading') {
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+  }
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+init();
+</script>
+</body>
+</html>
