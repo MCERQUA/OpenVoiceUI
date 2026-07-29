@@ -160,6 +160,13 @@ body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; pa
   padding: 5px 10px; border-radius: 5px; font-size: 11px; cursor: pointer; text-align: center;
   text-decoration: none; transition: all 0.15s; font-family: inherit; }
 .cell .cell-dl:hover { background: #1e3a5f; border-color: #3b82f6; }
+.cell .cell-actions { display: flex; gap: 6px; }
+.cell .cell-actions .cell-dl { flex: 1; }
+.cell .cell-save { flex: 1; background: #065f46; border: 1px solid #10b981; color: #d1fae5;
+  padding: 5px 10px; border-radius: 5px; font-size: 11px; cursor: pointer; text-align: center;
+  font-family: inherit; font-weight: 600; transition: all 0.15s; }
+.cell .cell-save:hover { background: #047857; }
+.cell .cell-save:disabled { opacity: 0.6; cursor: default; background: #064e3b; }
 
 .status-bar { font-size: 12px; color: #64748b; padding: 8px 12px; background: #13141a; border-radius: 8px; border: 1px solid #1e293b; margin-top: 12px; }
 .status-bar.error { color: #fca5a5; border-color: #7f1d1d; background: rgba(239,68,68,0.05); }
@@ -198,7 +205,7 @@ body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; pa
 </head>
 <body>
 
-<button class="back-btn" onclick="window.parent.postMessage({type:'canvas-action',action:'navigate',page:'content-library'},'*')">← Back</button>
+<button class="back-btn" onclick="window.parent.postMessage({type:'canvas-action',action:'navigate',page:'desktop'},'*')">← Back</button>
 
 <div class="header">
   <h1>Image Splitter</h1>
@@ -796,6 +803,29 @@ function cellToBlob(cvs) {
   const f = fmt();
   return new Promise(res => cvs.toBlob(res, f.mime, f.lossy ? quality() : undefined));
 }
+// Save one cell to the tenant's uploads/ via /api/upload — same auth + endpoint as the
+// batch "Save to workspace", scoped to a single cell (the per-image Save button).
+async function saveCellToUploads(r, pad, btn) {
+  const token = window._canvasAuthToken || null;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const blob = await cellToBlob(makeCellCanvas(r, 0));
+    if (!blob) throw new Error('encode failed');
+    const fd = new FormData();
+    fd.append('file', new File([blob], cellFilename(r, pad), { type: fmt().mime }));
+    const resp = await fetch('/api/upload', {
+      method: 'POST', body: fd,
+      headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    btn.textContent = '✓ Saved';
+    setStatus(`Saved ${cellFilename(r, pad)} to uploads/`, 'success');
+  } catch (e) {
+    btn.disabled = false; btn.textContent = orig;
+    setStatus(`Save failed for cell #${r.idx}: ${e.message}`, 'error');
+  }
+}
 
 // ====== SELECTION ======
 function syncSelection(count) {
@@ -961,9 +991,21 @@ function renderCellGrid(rects) {
       URL.revokeObjectURL(a.href);
     };
 
+    // Per-cell Save → uploads just this one cell to the tenant's uploads/ (obvious
+    // one-click alongside Download; batch "Save to workspace" still saves the selection).
+    const save = document.createElement('button');
+    save.className = 'cell-save';
+    save.textContent = 'Save';
+    save.onclick = () => saveCellToUploads(r, pad, save);
+
+    const actions = document.createElement('div');
+    actions.className = 'cell-actions';
+    actions.appendChild(dl);
+    actions.appendChild(save);
+
     cell.appendChild(head);
     cell.appendChild(cvs);
-    cell.appendChild(dl);
+    cell.appendChild(actions);
     grid.appendChild(cell);
 
     // Click cell to zoom (full-size render, not the thumbnail)
