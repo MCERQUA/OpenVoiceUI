@@ -660,10 +660,51 @@ def delete_photo(album_id, photo_id):
 # AI endpoints
 # ---------------------------------------------------------------------------
 
+DESCRIBE_PROMPT = (
+    'Describe this construction/insulation job photo in one sentence. '
+    'Then list 3-5 relevant tags as comma-separated words only on a new line.'
+)
+
+
+def _parse_caption_and_tags(text: str) -> dict:
+    """Split a vision response into {caption, tags}.
+
+    Convention: first line is the sentence, second line is comma-separated tags.
+    """
+    lines = (text or '').strip().split('\n')
+    caption = lines[0].strip() if lines else ''
+    tags = []
+    if len(lines) > 1:
+        tags = [t.strip() for t in lines[1].split(',') if t.strip()]
+    return {'caption': caption, 'tags': tags[:8]}
+
+
 def _describe_with_vision(image_path: Path) -> dict:
     """Send image to a vision model, return {caption, tags}.
 
-    Uses Groq if GROQ_API_KEY is set, else Anthropic (haiku tier).
+    Delegates to routes.vision._call_vision, which is the ONE place provider
+    selection lives. Capture media is always on disk, so this takes the
+    file_path branch: headless Claude Code on the subscription, no marginal cost.
+
+    Why delegate rather than call a provider directly: this function used to
+    duplicate its own Groq call pinned to 'llama-4-scout-17b-16e-instruct'.
+    Groq decommissioned that model; d2a3dbb fixed the copy in routes/vision.py
+    and this copy kept 404ing, so every AI caption in the capture app failed
+    while the identical feature worked elsewhere. Two copies of provider logic
+    means one of them is always the stale one -- keep it at one.
+    """
+    from routes.vision import _call_vision
+
+    text = _call_vision('', DESCRIBE_PROMPT, file_path=str(image_path))
+    return _parse_caption_and_tags(text)
+
+
+def _describe_with_vision_legacy_direct(image_path: Path) -> dict:
+    """Superseded by _describe_with_vision. Retained for reference/fallback only.
+
+    Direct provider calls, kept per the never-delete rule. Do NOT wire this
+    back in without first re-checking that the pinned model ids are still
+    served -- both were stale as of 2026-07-30.
     """
     ext = image_path.suffix.lower()
     mime = 'image/jpeg' if ext in ('.jpg', '.jpeg') else 'image/png'
