@@ -10,13 +10,20 @@ This route only OWNS the order record + status read-back. It deliberately does N
 mesh queue (OVU has no mesh mount) — the voice agent is the bridge, per the confirmed contract
 in docs/jambot/grid-creator-spec.md.
 
-Order/status files live in the tenant runtime (OVU-writable, host-visible):
-  runtime/grid-orders/<request_id>.json         # created by this route (status=queued)
-  runtime/grid-orders/<request_id>.status.json  # written by the Mac on progress/completion
+Order/status files live UNDER the uploads/ dir — the one runtime subdir that is bind-mounted
+to the host (`/mnt/clients/<t>/openvoiceui/uploads/`) AND is world-writable (drwxrwxrwx), so
+BOTH this route (container uid 1001) and the Mac creative node (host uid 1000) can write to it.
+A top-level runtime/grid-orders/ would live only inside the container fs — the Mac's host-side
+marker would be invisible to the page. Do NOT move this out from under uploads/ without adding a
+corresponding compose bind-mount to every tenant.
+  uploads/grid-orders/<request_id>.json         # created by this route (status=queued)
+  uploads/grid-orders/<request_id>.status.json  # written by the Mac on progress/completion
+Host path the Mac writes to: /mnt/clients/<client_id>/openvoiceui/uploads/grid-orders/
 """
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -26,12 +33,19 @@ from services.paths import RUNTIME_DIR
 
 grid_gen_bp = Blueprint('grid_gen', __name__)
 
-ORDERS_DIR = RUNTIME_DIR / 'grid-orders'
+# Under uploads/ (bind-mounted + world-writable) so the Mac's host-side markers are visible here.
+ORDERS_DIR = RUNTIME_DIR / 'uploads' / 'grid-orders'
 _VALID_TYPES = {'post', 'logo', 'character', 'mascot'}
 
 
 def _orders_dir() -> Path:
     ORDERS_DIR.mkdir(parents=True, exist_ok=True)
+    # This route usually creates the dir first (order placed before the Mac ever sees it); make
+    # it world-writable so the Mac (different uid) can drop status markers into the same dir.
+    try:
+        os.chmod(ORDERS_DIR, 0o777)
+    except OSError:
+        pass
     return ORDERS_DIR
 
 
