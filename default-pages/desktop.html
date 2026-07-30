@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026.7.12 -->
+<!-- openvoiceui-version: 2026.7.13 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -860,6 +860,8 @@ const ICONS = {
   chart:`<svg viewBox="0 0 48 48"><rect x="2" y="2" width="44" height="44" rx="6" fill="#0f172a"/><rect x="7" y="28" width="7" height="13" rx="1" fill="#3b82f6" opacity=".6"/><rect x="16" y="20" width="7" height="21" rx="1" fill="#3b82f6" opacity=".75"/><rect x="25" y="13" width="7" height="28" rx="1" fill="#3b82f6" opacity=".9"/><rect x="34" y="8" width="7" height="33" rx="1" fill="#60a5fa"/><line x1="4" y1="44" x2="44" y2="44" stroke="#334155" stroke-width="1"/><line x1="4" y1="44" x2="4" y2="4" stroke="#334155" stroke-width="1"/></svg>`,
   calendar:`<svg viewBox="0 0 48 48"><rect x="4" y="8" width="40" height="36" rx="5" fill="#0f172a"/><rect x="4" y="8" width="40" height="10" rx="5" fill="#3b82f6"/><rect x="4" y="14" width="40" height="4" fill="#3b82f6"/><rect x="14" y="4" width="4" height="9" rx="2" fill="#93c5fd"/><rect x="30" y="4" width="4" height="9" rx="2" fill="#93c5fd"/><g fill="#334155"><rect x="10" y="22" width="5" height="5" rx="1"/><rect x="18" y="22" width="5" height="5" rx="1"/><rect x="26" y="22" width="5" height="5" rx="1"/><rect x="34" y="22" width="5" height="5" rx="1"/><rect x="10" y="30" width="5" height="5" rx="1"/><rect x="26" y="30" width="5" height="5" rx="1"/><rect x="34" y="30" width="5" height="5" rx="1"/></g><rect x="18" y="30" width="5" height="5" rx="1" fill="#4ade80"/></svg>`,
   booking:`<svg viewBox="0 0 48 48"><rect x="4" y="8" width="40" height="36" rx="5" fill="#0f172a"/><rect x="4" y="8" width="40" height="10" rx="5" fill="#3b82f6"/><rect x="4" y="14" width="40" height="4" fill="#3b82f6"/><rect x="14" y="4" width="4" height="9" rx="2" fill="#93c5fd"/><rect x="30" y="4" width="4" height="9" rx="2" fill="#93c5fd"/><g fill="#334155"><rect x="10" y="22" width="5" height="5" rx="1"/><rect x="18" y="22" width="5" height="5" rx="1"/><rect x="26" y="22" width="5" height="5" rx="1"/><rect x="34" y="22" width="5" height="5" rx="1"/><rect x="10" y="30" width="5" height="5" rx="1"/><rect x="26" y="30" width="5" height="5" rx="1"/><rect x="34" y="30" width="5" height="5" rx="1"/></g><rect x="18" y="30" width="5" height="5" rx="1" fill="#4ade80"/></svg>`,
+  grid:`<svg viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="6" fill="#0f172a"/><rect x="9" y="9" width="8" height="8" rx="1.5" fill="#3b82f6"/><rect x="20" y="9" width="8" height="8" rx="1.5" fill="#60a5fa"/><rect x="31" y="9" width="8" height="8" rx="1.5" fill="#3b82f6"/><rect x="9" y="20" width="8" height="8" rx="1.5" fill="#60a5fa"/><rect x="20" y="20" width="8" height="8" rx="1.5" fill="#4ade80"/><rect x="31" y="20" width="8" height="8" rx="1.5" fill="#60a5fa"/><rect x="9" y="31" width="8" height="8" rx="1.5" fill="#3b82f6"/><rect x="20" y="31" width="8" height="8" rx="1.5" fill="#60a5fa"/><rect x="31" y="31" width="8" height="8" rx="1.5" fill="#3b82f6"/></svg>`,
+  split:`<svg viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="6" fill="#0f172a"/><rect x="9" y="9" width="13" height="13" rx="1.5" fill="#3b82f6"/><rect x="26" y="9" width="13" height="13" rx="1.5" fill="#60a5fa"/><rect x="9" y="26" width="13" height="13" rx="1.5" fill="#60a5fa"/><rect x="26" y="26" width="13" height="13" rx="1.5" fill="#3b82f6"/><line x1="24" y1="6" x2="24" y2="42" stroke="#f8fafc" stroke-width="1.5" stroke-dasharray="3 3"/><line x1="6" y1="24" x2="42" y2="24" stroke="#f8fafc" stroke-width="1.5" stroke-dasharray="3 3"/><g transform="translate(24,24)"><circle cx="-3.5" cy="3" r="2.3" fill="#0f172a" stroke="#ef4444" stroke-width="1.5"/><circle cx="3.5" cy="3" r="2.3" fill="#0f172a" stroke="#ef4444" stroke-width="1.5"/><path d="M-3.5,1 L4.5,-6 M3.5,1 L-4.5,-6" stroke="#ef4444" stroke-width="1.6" stroke-linecap="round"/></g></svg>`,
 };
 
 function getIcon(type) { return ICONS[type] || ICONS.document; }
@@ -2628,6 +2630,7 @@ function getPageIconType(cat, pageId, pageName) {
     'terminal':'terminal','system-ops-v2':'terminal','live-monitor':'tools',
     'file-explorer':'computer',
     'ai-app-library':'folder','ai-image-creator':'folder',
+    'grid-creator':'grid','image-splitter':'split',
   };
   if (pidMap[pid]) return pidMap[pid];
   // Pattern-based overrides
