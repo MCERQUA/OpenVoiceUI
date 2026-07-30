@@ -109,8 +109,9 @@ def _call_vision_via_claude(container_img_path: str, prompt: str) -> str:
     and sources CLAUDE_CODE_OAUTH_TOKEN from the mounted platform-keys env. Same
     subscription path as the image-intel cron sweep; no Groq/Gemini/OpenAI.
 
-    container_img_path: path to image inside the OVU container (/app/runtime/uploads/<file>).
-    Converts to the host filesystem path for the docker-run -v bind.
+    container_img_path: path to image inside the OVU container, anywhere under
+    /app/runtime/ (uploads/, captures/albums/<id>/media/, ...). Converts to the
+    host filesystem path for the docker-run -v bind.
     """
     import subprocess
 
@@ -118,10 +119,40 @@ def _call_vision_via_claude(container_img_path: str, prompt: str) -> str:
     if not tenant:
         raise ValueError('CLIENT_NAME env not set — cannot derive host image path')
 
-    filename = Path(container_img_path).name
-    host_img_path = f'/mnt/clients/{tenant}/openvoiceui/uploads/{filename}'
+    # Map the whole container subtree, not just uploads/. The previous version
+    # took only the basename and forced .../openvoiceui/uploads/<name>, so any
+    # caller outside uploads/ (capture album media, for one) resolved to a path
+    # that does not exist -- and the failure surfaced as an unhelpful "claude
+    # vision returned empty" rather than "wrong path". Prefix-swap keeps the
+    # subdirectories intact and is byte-identical for the uploads/ case.
+    tenant_root = f'/mnt/clients/{tenant}/openvoiceui'
+    _CONTAINER_RUNTIME = '/app/runtime/'
+    cpath = str(container_img_path)
+    if cpath.startswith(_CONTAINER_RUNTIME):
+        host_img_path = f'{tenant_root}/{cpath[len(_CONTAINER_RUNTIME):]}'
+    else:
+        # Bare filename or unrecognised root — preserve the historical behaviour.
+        host_img_path = f'{tenant_root}/uploads/{Path(cpath).name}'
 
-    vision_prompt = f'Read the image file at {host_img_path} and then: {prompt}'
+    # Bind the ONE image in at a fixed path instead of relying on /mnt traversal.
+    #
+    # Why: the container runs as uid 1000 with groups=1000(node) only. Host
+    # supplementary group membership (mike in openvoiceui) does NOT carry into a
+    # container, so uid 1000 cannot traverse /mnt/clients (0750 mike:openvoiceui)
+    # or /mnt/clients/<tenant> (0770 <tenant>:openvoiceui) -- verified 2026-07-30:
+    # reading BOTH a captures/ file and an uploads/ file through -v /mnt:/mnt:ro
+    # returned EACCES, so this arm could never read any tenant file for any
+    # tenant. The docker daemon resolves a bind SOURCE as root, so mounting the
+    # file directly sidesteps parent-directory traversal entirely; only the
+    # file's own mode matters inside (media is 0644). This is also tighter than
+    # exposing all of /mnt to the ephemeral container.
+    src = Path(host_img_path)
+    if not src.is_file():
+        raise RuntimeError(f'vision source image not found on host: {host_img_path}')
+
+    ext = src.suffix.lower() or '.jpg'
+    in_container = f'/tmp/vision-input{ext}'
+    vision_prompt = f'Read the image file at {in_container} and then: {prompt}'
 
     # Source platform keys to get CLAUDE_CODE_OAUTH_TOKEN, then run claude with full path
     bash_cmd = (
@@ -133,7 +164,10 @@ def _call_vision_via_claude(container_img_path: str, prompt: str) -> str:
 
     proc = subprocess.run(
         ['docker', 'run', '--rm',
+         # /mnt stays mounted for .platform-keys.env (under /mnt/system, which IS
+         # traversable by uid 1000). The image comes in as its own bind.
          '-v', '/mnt:/mnt:ro',
+         '-v', f'{host_img_path}:{in_container}:ro',
          '-e', f'VISION_PROMPT={vision_prompt}',
          'jambot/openclaw:latest',
          '/bin/bash', '-c', bash_cmd],
@@ -150,6 +184,22 @@ def _call_vision_via_claude(container_img_path: str, prompt: str) -> str:
     result = proc.stdout.strip()
     if not result:
         raise RuntimeError('claude vision returned empty response')
+
+    # A refusal or read-failure is a FAILURE, not a description. Without this the
+    # EACCES above surfaced as the caption "I wasn't able to access that file --
+    # the read failed with a permission error", which callers then stored as a
+    # photo's ai_caption. Storing an apology as data is worse than erroring: it
+    # looks like a successful describe forever after.
+    _low = result.lower()
+    _read_failed = (
+        'eacces' in _low
+        or 'permission denied' in _low
+        or ("wasn't able to" in _low and 'file' in _low)
+        or ('unable to' in _low and ('read' in _low or 'access' in _low))
+        or ('no such file' in _low)
+    )
+    if _read_failed:
+        raise RuntimeError(f'claude vision could not read the image: {result[:200]}')
 
     return result
 
