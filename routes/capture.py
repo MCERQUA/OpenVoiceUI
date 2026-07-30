@@ -57,6 +57,12 @@ THUMB_SIZE = 400
 THUMB_QUALITY = 85
 DEFAULT_FOLDERS = ["Before", "During", "After", "Damage", "Completion"]
 
+# Per-album geofence radius in metres. A house lot is 20-40m wide, so 120m
+# already spans several neighbours -- deliberately loose enough to catch a
+# parked truck, tight enough to exclude the next street. Commercial sites
+# override this per album; /albums/nearby honours the per-album value.
+DEFAULT_GEOFENCE_M = 120
+
 # Vision model keys -- haiku tier (cheap, fast)
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
@@ -174,6 +180,13 @@ def _album_summary(album_data: dict) -> dict:
         'photo_count': len(photos),
         'cover_url': cover_url,
         'updated_at': album_data.get('updated_at', ''),
+        # Geo fields MUST be in the summary: /albums/nearby matches against
+        # index.json only, and skips any entry whose lat is None. Omitting these
+        # made GPS auto-suggest return [] for every album at every distance —
+        # a silently dead feature, not a miss. Keep them here.
+        'lat': album_data.get('lat'),
+        'lng': album_data.get('lng'),
+        'geofence_m': album_data.get('geofence_m', DEFAULT_GEOFENCE_M),
     }
 
 
@@ -251,7 +264,7 @@ def create_album():
         'address': body.get('address', ''),
         'lat': body.get('lat'),
         'lng': body.get('lng'),
-        'geofence_m': body.get('geofence_m', 120),
+        'geofence_m': body.get('geofence_m', DEFAULT_GEOFENCE_M),
         'status': 'in_progress',
         'folders': list(body.get('folders')) if body.get('folders') else list(DEFAULT_FOLDERS),
         'share': {'token': None, 'enabled': False, 'scope': 'all'},
@@ -335,11 +348,40 @@ def albums_nearby():
     for entry in index:
         a_lat = entry.get('lat')
         a_lng = entry.get('lng')
+        fence_m = entry.get('geofence_m')
+
+        # Self-heal entries written before geo fields were added to the summary.
+        # Falling back to album.json means no migration pass is needed and a
+        # stale index degrades to "slower", never to "silently no matches".
+        if a_lat is None or a_lng is None or fence_m is None:
+            album_path = ALBUMS_SUBDIR / str(entry.get('id', '')) / 'album.json'
+            if album_path.exists():
+                full = _read_json_safe(album_path, default={}) or {}
+                if a_lat is None:
+                    a_lat = full.get('lat')
+                if a_lng is None:
+                    a_lng = full.get('lng')
+                if fence_m is None:
+                    fence_m = full.get('geofence_m')
+
         if a_lat is None or a_lng is None:
             continue
+
+        # Match against the album's OWN fence, bounded by the caller's radius.
+        # A single caller-wide radius is wrong in both directions: 120m is right
+        # for a house and far too tight for a 40-acre commercial site.
+        try:
+            fence_km = float(fence_m) / 1000.0
+        except (TypeError, ValueError):
+            fence_km = DEFAULT_GEOFENCE_M / 1000.0
+        limit_km = min(radius_km, fence_km) if fence_km > 0 else radius_km
+
         dist = _haversine_km(lat, lng, a_lat, a_lng)
-        if dist <= radius_km:
+        if dist <= limit_km:
             result = dict(entry)
+            result['lat'] = a_lat
+            result['lng'] = a_lng
+            result['geofence_m'] = fence_m
             result['distance_m'] = round(dist * 1000, 1)
             results.append(result)
 
