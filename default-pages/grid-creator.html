@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta name="page-icon" content="grid">
+<title>Grid Creator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { max-width: 100vw; overflow-x: hidden; }
+body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 12px; min-height: 100vh; }
+.back-btn { position: fixed; top: 12px; left: 12px; background: rgba(30,41,59,0.95); border: 1px solid #334155; color: #e2e8f0; padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; z-index: 100; min-height: 40px; }
+.back-btn:hover { background: #1e3a5f; border-color: #3b82f6; }
+.header { text-align: center; margin: 44px 0 16px; }
+.header h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.header .subtitle { color: #94a3b8; font-size: 13px; }
+
+.card { background: #13141a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; margin: 0 auto 14px; max-width: 640px; }
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.field label { font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+.field input, .field select, .field textarea {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 10px 12px; border-radius: 8px;
+  font-size: 14px; font-family: inherit; width: 100%; min-height: 44px; }
+.field textarea { min-height: 84px; resize: vertical; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #3b82f6; }
+.row { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.seg { display: flex; background: #1e293b; border-radius: 10px; padding: 4px; gap: 3px; }
+.seg button { flex: 1; background: transparent; border: none; color: #94a3b8; padding: 9px 6px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 40px; }
+.seg button.active { background: #3b82f6; color: white; }
+.btn { width: 100%; background: #10b981; color: white; border: none; padding: 13px; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; min-height: 48px; }
+.btn:hover { background: #059669; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.hint { font-size: 12px; color: #64748b; margin-top: 8px; line-height: 1.5; }
+
+/* Queue */
+.queue { max-width: 640px; margin: 0 auto; }
+.queue h3 { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; font-weight: 600; }
+.job { background: #13141a; border: 1px solid #1e293b; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.job-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.job-title { font-weight: 600; font-size: 14px; }
+.job-sub { font-size: 12px; color: #94a3b8; margin-top: 3px; }
+.pill { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.4px; }
+.pill.queued { background: #1e293b; color: #93c5fd; }
+.pill.running { background: #78350f; color: #fcd34d; }
+.pill.done { background: #064e3b; color: #6ee7b7; }
+.pill.failed { background: #7f1d1d; color: #fca5a5; }
+.pill.needs-brand-kit { background: #581c87; color: #e9d5ff; }
+.job-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 10px; }
+.job-results img { width: 100%; border-radius: 6px; display: block; background: #fff; }
+.job-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+.job-actions a, .job-actions button { flex: 1; min-width: 120px; text-align: center; text-decoration: none; background: #1e293b; border: 1px solid #334155; color: #93c5fd; padding: 9px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.job-actions a:hover, .job-actions button:hover { border-color: #3b82f6; background: #1e3a5f; }
+.empty { color: #64748b; font-size: 13px; text-align: center; padding: 20px; }
+
+@media (min-width: 720px) { body { padding: 16px; } .header { margin-top: 8px; } }
+</style>
+</head>
+<body>
+<button class="back-btn" onclick="window.parent.postMessage({type:'canvas-action',action:'menu'},'*')">← Back</button>
+
+<div class="header">
+  <h1>Grid Creator</h1>
+  <div class="subtitle">Order a grid of options — logos, characters, or branded posts</div>
+</div>
+
+<div class="card">
+  <div class="field">
+    <label>What do you want?</label>
+    <div class="seg" id="typeSeg">
+      <button data-type="post" class="active">Posts</button>
+      <button data-type="logo">Logos</button>
+      <button data-type="character">Characters</button>
+      <button data-type="mascot">Mascots</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Brief — describe what you want (not a finished prompt)</label>
+    <textarea id="brief" placeholder="e.g. bold modern logo options for a spray-foam insulation company, clean and trustworthy"></textarea>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label>How many</label>
+      <input type="number" id="count" value="9" min="1" max="24">
+    </div>
+    <div class="field">
+      <label>Aspect</label>
+      <select id="aspect">
+        <option value="1:1" selected>1:1 · square</option>
+        <option value="4:5">4:5 · portrait</option>
+        <option value="9:16">9:16 · story</option>
+        <option value="16:9">16:9 · wide</option>
+      </select>
+    </div>
+  </div>
+  <div class="field">
+    <label>Layout</label>
+    <div class="seg" id="layoutSeg">
+      <button data-layout="composite" class="active">One grid (cut in splitter)</button>
+      <button data-layout="separate">Separate images</button>
+    </div>
+  </div>
+  <button class="btn" id="orderBtn" onclick="placeOrder()">Generate grid</button>
+  <div class="hint">Your brand is applied automatically — the creative node uses this account's brand kit. Generation runs on the Mac via ChatGPT (no per-image cost) and one order runs at a time (~90s per image).</div>
+</div>
+
+<div class="queue">
+  <h3>Your orders</h3>
+  <div id="jobList"><div class="empty">No orders yet. Place one above.</div></div>
+</div>
+
+<script>
+const $ = s => document.getElementById(s);
+let gridType = 'post', layout = 'composite';
+document.querySelectorAll('#typeSeg button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#typeSeg button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); gridType = b.dataset.type;
+});
+document.querySelectorAll('#layoutSeg button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#layoutSeg button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); layout = b.dataset.layout;
+});
+
+// Orders persist to the SERVER (VPS is the source of truth — never localStorage).
+let jobs = [];
+async function loadJobs() {
+  try {
+    const r = await fetch('/api/grid-gen/orders', { cache: 'no-store' });
+    if (r.ok) { jobs = await r.json(); renderJobs(); }
+  } catch (e) {}
+}
+
+function uuid() { return 'gg-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+
+async function placeOrder() {
+  const brief = $('brief').value.trim();
+  if (!brief) { $('brief').focus(); return; }
+  const count = Math.max(1, Math.min(24, parseInt($('count').value) || 9));
+  const req = { request_id: uuid(), grid_type: gridType, brief, count, aspect: $('aspect').value, layout };
+  $('orderBtn').disabled = true; $('orderBtn').textContent = 'Sending…';
+  // Record the order server-side (status starts 'queued'); the agent + Mac fill the rest.
+  try { await fetch('/api/grid-gen/orders', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(req) }); } catch (e) {}
+  // Agent-shortcut: send the order to THIS tenant's voice agent as a turn. The agent
+  // mesh-sends it to the Mac under its own identity, so the Mac knows which client/brand.
+  const line = `[GRID-GEN] request_id=${req.request_id} type=${req.grid_type} count=${req.count} `
+             + `aspect=${req.aspect} layout=${req.layout} brief="${brief.replace(/"/g,"'")}"`;
+  window.parent.postMessage({ type: 'canvas-action', action: 'speak', text: line }, '*');
+  $('orderBtn').disabled = false; $('orderBtn').textContent = 'Generate grid';
+  $('brief').value = '';
+  setTimeout(loadJobs, 800);
+}
+
+function etaText(j) {
+  if (j.status !== 'queued' && j.status !== 'running') return '';
+  const secs = (j.count || 9) * 90;
+  const m = Math.round(secs / 60);
+  return ` · ~${m} min`;
+}
+function renderJobs() {
+  const el = $('jobList');
+  if (!jobs.length) { el.innerHTML = '<div class="empty">No orders yet. Place one above.</div>'; return; }
+  el.innerHTML = '';
+  for (const j of jobs) {
+    const div = document.createElement('div'); div.className = 'job';
+    const status = j.status || 'queued';
+    let inner = `<div class="job-head">
+        <div><div class="job-title">${j.grid_type || 'grid'} · ${j.count || '?'} · ${j.layout || ''}</div>
+        <div class="job-sub">${(j.brief||'').slice(0,80)}${etaText(j)}</div></div>
+        <span class="pill ${status}">${status.replace('-',' ')}</span></div>`;
+    if (status === 'needs-brand-kit')
+      inner += `<div class="hint">This client has no brand kit on the Mac yet — the creative node asked for palette + logo before it can generate.</div>`;
+    if (status === 'failed' && j.error)
+      inner += `<div class="hint">Error: ${j.error}</div>`;
+    if (status === 'done' && (j.files||[]).length) {
+      inner += `<div class="job-results">` + j.files.map(f => `<img src="/uploads/${f}" loading="lazy">`).join('') + `</div>`;
+      inner += `<div class="job-actions">
+        <a href="#" onclick="cutInSplitter('${(j.files||[])[0]||''}');return false;">Cut in splitter →</a>
+      </div>`;
+    }
+    div.innerHTML = inner; el.appendChild(div);
+  }
+}
+function cutInSplitter(file) {
+  // Hand the first grid image to the splitter (it loads by ?src=)
+  window.parent.postMessage({ type: 'canvas-action', action: 'navigate', page: 'image-splitter' }, '*');
+}
+
+// Poll for status updates (the Mac writes markers the server exposes here).
+loadJobs();
+setInterval(loadJobs, 5000);
+</script>
+</body>
+</html>
