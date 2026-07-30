@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026-07-30-refs -->
+<!-- openvoiceui-version: 2026-07-30-splitter-handoff -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -294,8 +294,11 @@ function renderJobs() {
   }
 }
 function cutInSplitter(file) {
-  // Hand the first grid image to the splitter (it loads by ?src=)
-  window.parent.postMessage({ type: 'canvas-action', action: 'navigate', page: 'image-splitter' }, '*');
+  // Hand the grid image to the splitter. `navigate` drops query strings, so use `open-url`
+  // which loads the URL into the canvas iframe verbatim — the splitter reads ?src= on load.
+  if (!file) { window.parent.postMessage({ type: 'canvas-action', action: 'navigate', page: 'image-splitter' }, '*'); return; }
+  const url = '/pages/image-splitter.html?src=' + encodeURIComponent('/uploads/' + file);
+  window.parent.postMessage({ type: 'canvas-action', action: 'open-url', url }, '*');
 }
 
 // Poll for status updates (the Mac writes markers the server exposes here).
