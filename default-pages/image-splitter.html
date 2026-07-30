@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- openvoiceui-version: 2026-07-30-splitter-srcload -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -337,34 +338,46 @@ function resetState() {
   fileInput.value = '';
 }
 
+// Shared: seed UI + detection from a loaded Image. Used by both file upload and ?src= URL load.
+function applyLoadedImage(img, label) {
+  sourceImg = img;
+  $('mainUi').style.display = 'block';
+  dz.style.display = 'none';
+  const det = computeDetection();
+  if (det && det.cols >= 2 && det.rows >= 2) {
+    detected = det.cells;
+    $('cols').value = det.cols;
+    $('rows').value = det.rows;
+    $('trim').value = Math.round(det.trim.avg);
+    $('gutter').value = Math.round(det.gutter.avg);
+    setMode('auto');
+    setStatus(`Loaded ${label} — detected ${det.cols}×${det.rows}. Cuts are live.`, 'success');
+  } else {
+    setStatus(`Loaded ${label}. Auto-detect didn't find a clean grid — switch to Manual mode.`, 'error');
+  }
+  render();
+}
+
 function loadFile(file) {
   resetState();
   const reader = new FileReader();
   reader.onload = e => {
     const img = new Image();
-    img.onload = () => {
-      sourceImg = img;
-      $('mainUi').style.display = 'block';
-      dz.style.display = 'none';
-      // Try auto-detect first to seed manual params
-      const det = computeDetection();
-      if (det && det.cols >= 2 && det.rows >= 2) {
-        detected = det.cells;
-        // Seed manual inputs from detection
-        $('cols').value = det.cols;
-        $('rows').value = det.rows;
-        $('trim').value = Math.round(det.trim.avg);
-        $('gutter').value = Math.round(det.gutter.avg);
-        setMode('auto');
-        setStatus(`Loaded ${file.name} — detected ${det.cols}×${det.rows}. Cuts are live.`, 'success');
-      } else {
-        setStatus(`Loaded ${file.name}. Auto-detect didn't find a clean grid — switch to Manual mode.`, 'error');
-      }
-      render();
-    };
+    img.onload = () => applyLoadedImage(img, file.name);
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+// Load an image already on the server (e.g. handed over from the Grid Creator via ?src=).
+function loadFromUrl(src) {
+  resetState();
+  const img = new Image();
+  img.crossOrigin = 'anonymous';  // same-origin /uploads/, but keep the canvas untainted for export
+  const label = (src.split('/').pop() || 'image').split('?')[0];
+  img.onload = () => applyLoadedImage(img, label);
+  img.onerror = () => setStatus(`Couldn't load ${label} — try uploading it manually.`, 'error');
+  img.src = src;
 }
 
 // Show dropzone again for next-image workflow (no page refresh needed).
@@ -1174,6 +1187,15 @@ async function uploadCellsToWorkspace() {
     setStatus(`Uploaded ${ok}/${rects.length}, ${fail} failed — ${failMsgs.slice(0,2).join('; ')}`, 'error');
   }
 }
+
+// ====== Grid Creator hand-off: ?src=/uploads/<file> loads that image on open ======
+// Runs LAST so every function/const it depends on is already defined.
+(function () {
+  try {
+    const src = new URLSearchParams(window.location.search).get('src');
+    if (src && /^\/uploads\/[^?#]+$/.test(src)) loadFromUrl(src);  // same-origin uploads paths only
+  } catch (e) {}
+})();
 
 </script>
 </body>
