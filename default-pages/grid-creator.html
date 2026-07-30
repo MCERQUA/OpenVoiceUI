@@ -54,6 +54,28 @@ body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; pa
 .job-actions a:hover, .job-actions button:hover { border-color: #3b82f6; background: #1e3a5f; }
 .empty { color: #64748b; font-size: 13px; text-align: center; padding: 20px; }
 
+/* Reference images */
+.ref-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ref-actions button { flex: 1; min-width: 130px; background: #1e293b; border: 1px solid #334155; color: #93c5fd; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 44px; }
+.ref-actions button:hover { border-color: #3b82f6; background: #1e3a5f; }
+.ref-chosen { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin-top: 10px; }
+.ref-chosen:empty { display: none; }
+.ref-thumb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid #334155; background: #fff; }
+.ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ref-thumb .x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,0.7); color: #fff; border: none; font-size: 13px; line-height: 20px; cursor: pointer; padding: 0; }
+/* Picker overlay */
+.picker { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: none; flex-direction: column; padding: 12px; }
+.picker.open { display: flex; }
+.picker-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.picker-head h3 { font-size: 15px; font-weight: 700; }
+.picker-head button { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 40px; }
+.picker-head .done-btn { background: #10b981; border-color: #10b981; color: #fff; }
+.picker-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; align-content: start; }
+.picker-cell { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 2px solid transparent; background: #13141a; cursor: pointer; }
+.picker-cell img { width: 100%; height: 100%; object-fit: cover; display: block; background: #fff; }
+.picker-cell.sel { border-color: #3b82f6; }
+.picker-cell.sel::after { content: '✓'; position: absolute; top: 3px; right: 5px; color: #fff; background: #3b82f6; border-radius: 50%; width: 20px; height: 20px; line-height: 20px; text-align: center; font-size: 13px; font-weight: 700; }
+
 @media (min-width: 720px) { body { padding: 16px; } .header { margin-top: 8px; } }
 </style>
 </head>
@@ -78,6 +100,16 @@ body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; pa
   <div class="field">
     <label>Brief — describe what you want (not a finished prompt)</label>
     <textarea id="brief" placeholder="e.g. bold modern logo options for a spray-foam insulation company, clean and trustworthy"></textarea>
+  </div>
+  <div class="field">
+    <label>Reference images (optional) — a logo, a real photo, a style to match</label>
+    <div class="ref-actions">
+      <button type="button" onclick="document.getElementById('refUpload').click()">⬆ Upload</button>
+      <button type="button" onclick="openPicker()">🗂 Choose from uploads</button>
+    </div>
+    <input type="file" id="refUpload" accept="image/*,.heic,.heif,.avif,.webp" multiple style="display:none" onchange="uploadRefs(this.files)">
+    <div class="ref-chosen" id="refChosen"></div>
+    <div class="hint" id="refHint" style="margin-top:6px"></div>
   </div>
   <div class="row">
     <div class="field">
@@ -110,6 +142,18 @@ body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; pa
   <div id="jobList"><div class="empty">No orders yet. Place one above.</div></div>
 </div>
 
+<!-- Pick-from-uploads overlay -->
+<div class="picker" id="picker">
+  <div class="picker-head">
+    <h3>Choose reference images</h3>
+    <div>
+      <button type="button" onclick="closePicker(false)">Cancel</button>
+      <button type="button" class="done-btn" onclick="closePicker(true)">Use selected</button>
+    </div>
+  </div>
+  <div class="picker-grid" id="pickerGrid"><div class="empty">Loading…</div></div>
+</div>
+
 <script>
 const $ = s => document.getElementById(s);
 let gridType = 'post', layout = 'composite';
@@ -133,13 +177,78 @@ async function loadJobs() {
 
 function uuid() { return 'gg-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
 
+// ---- Reference images: upload new OR pick from this tenant's uploads/ ----
+// Refs are filenames living in uploads/. They ride in the order POST (server-side record),
+// NOT the agent speak line — the Mac reads them from the order record and passes them to the
+// generator as --img inputs.
+let chosenRefs = [];  // [{name, url}]
+function renderRefs() {
+  const el = $('refChosen');
+  el.innerHTML = chosenRefs.map((r, i) =>
+    `<div class="ref-thumb"><img src="${r.url}" loading="lazy"><button class="x" onclick="removeRef(${i})">×</button></div>`
+  ).join('');
+  $('refHint').textContent = chosenRefs.length ? `${chosenRefs.length} reference image${chosenRefs.length>1?'s':''} attached` : '';
+}
+function addRef(name, url) {
+  if (!name || chosenRefs.some(r => r.name === name)) return;
+  if (chosenRefs.length >= 6) { $('refHint').textContent = 'Up to 6 reference images.'; return; }
+  chosenRefs.push({ name, url: url || ('/uploads/' + name) }); renderRefs();
+}
+function removeRef(i) { chosenRefs.splice(i, 1); renderRefs(); }
+
+async function uploadRefs(files) {
+  if (!files || !files.length) return;
+  $('refHint').textContent = 'Uploading…';
+  for (const f of files) {
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const r = await fetch('/api/upload', { method: 'POST', body: fd });
+      if (r.ok) { const d = await r.json(); if (d.filename) addRef(d.filename, d.url); }
+    } catch (e) {}
+  }
+  $('refUpload').value = ''; renderRefs();
+}
+
+async function openPicker() {
+  const grid = $('pickerGrid'); grid.innerHTML = '<div class="empty">Loading…</div>';
+  $('picker').classList.add('open');
+  let items = [];
+  try { const r = await fetch('/api/grid-gen/uploads', { cache: 'no-store' }); if (r.ok) items = await r.json(); } catch (e) {}
+  if (!items.length) { grid.innerHTML = '<div class="empty">No images in your uploads yet. Use Upload instead.</div>'; return; }
+  const picked = new Set(chosenRefs.map(r => r.name));
+  grid.innerHTML = '';
+  for (const it of items) {
+    const c = document.createElement('div');
+    c.className = 'picker-cell' + (picked.has(it.name) ? ' sel' : '');
+    c.innerHTML = `<img src="${it.url}" loading="lazy">`;
+    c.onclick = () => { c.classList.toggle('sel'); };
+    c.dataset.name = it.name; c.dataset.url = it.url;
+    grid.appendChild(c);
+  }
+}
+function closePicker(apply) {
+  if (apply) {
+    // Items shown in this picker view; deselecting one removes it, but refs NOT shown here
+    // (e.g. just-uploaded) are preserved.
+    const shown = new Set([...document.querySelectorAll('.picker-cell')].map(c => c.dataset.name));
+    chosenRefs = chosenRefs.filter(r => !shown.has(r.name));
+    [...document.querySelectorAll('.picker-cell.sel')].forEach(c => {
+      if (chosenRefs.length < 6 && !chosenRefs.some(r => r.name === c.dataset.name))
+        chosenRefs.push({ name: c.dataset.name, url: c.dataset.url });
+    });
+    renderRefs();
+  }
+  $('picker').classList.remove('open');
+}
+
 async function placeOrder() {
   const brief = $('brief').value.trim();
   if (!brief) { $('brief').focus(); return; }
   const count = Math.max(1, Math.min(24, parseInt($('count').value) || 9));
-  const req = { request_id: uuid(), grid_type: gridType, brief, count, aspect: $('aspect').value, layout };
+  const req = { request_id: uuid(), grid_type: gridType, brief, count, aspect: $('aspect').value, layout,
+                refs: chosenRefs.map(r => r.name) };
   $('orderBtn').disabled = true; $('orderBtn').textContent = 'Sending…';
-  // Record the order server-side (status starts 'queued'); the agent + Mac fill the rest.
+  // Record the order server-side (status starts 'queued', includes refs); agent + Mac fill the rest.
   try { await fetch('/api/grid-gen/orders', { method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify(req) }); } catch (e) {}
   // Agent-shortcut: send the order to THIS tenant's voice agent as a turn. The agent
@@ -149,6 +258,7 @@ async function placeOrder() {
   window.parent.postMessage({ type: 'canvas-action', action: 'speak', text: line }, '*');
   $('orderBtn').disabled = false; $('orderBtn').textContent = 'Generate grid';
   $('brief').value = '';
+  chosenRefs = []; renderRefs();
   setTimeout(loadJobs, 800);
 }
 
