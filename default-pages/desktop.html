@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026.7.13 -->
+<!-- openvoiceui-version: 2026.7.14 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1041,7 +1041,8 @@ async function fetchManifest(forceSync) {
         newPages[pageId] = {
           name: mp.display_name || pageId,
           cat: mp.category || 'uncategorized',
-          iconUrl: (mp.icon && /^(\/|https?:)/.test(mp.icon)) ? mp.icon : null,
+          // Locked-icon pages never carry a generated iconUrl — the named glyph always wins.
+          iconUrl: LOCKED_ICONS[pageId] ? null : ((mp.icon && /^(\/|https?:)/.test(mp.icon)) ? mp.icon : null),
         };
       });
     }
@@ -2603,9 +2604,22 @@ function buildExplorerGrid(catId) {
   return html;
 }
 
+// ===== LOCKED ICONS — authoritative registry =====================================
+// "This icon, for this app, EVERYWHERE (every client, every desktop that renders it)."
+// A page id listed here ALWAYS uses the named ICONS[...] glyph and can never be overridden
+// by a generated iconUrl, a manifest guess, or the fuzzy name/category resolver below.
+// This is the single source of truth — to lock another app's icon, add one line here
+// (page-id stem -> ICONS key) and roll desktop.html. Keep this list curated + commented.
+const LOCKED_ICONS = {
+  'grid-creator':   'grid',    // Grid Creator — order grids of options (2026-07-30)
+  'image-splitter': 'split',   // Image Splitter — cut a grid into cells (2026-07-30)
+};
+
 function getPageIconType(cat, pageId, pageName) {
   const n = (pageName || pageId || '').toLowerCase();
   const pid = (pageId || '').toLowerCase();
+  // Locked icons win over EVERYTHING — file-type, pidMap, patterns, category.
+  if (LOCKED_ICONS[pid]) return LOCKED_ICONS[pid];
   // File-type icons — a literal extension on the id/name (e.g. an uploaded
   // image/video/audio/pdf surfaced as a desktop shortcut) is a stronger
   // signal than name-keyword guessing, so it's checked first.
@@ -2630,7 +2644,6 @@ function getPageIconType(cat, pageId, pageName) {
     'terminal':'terminal','system-ops-v2':'terminal','live-monitor':'tools',
     'file-explorer':'computer',
     'ai-app-library':'folder','ai-image-creator':'folder',
-    'grid-creator':'grid','image-splitter':'split',
   };
   if (pidMap[pid]) return pidMap[pid];
   // Pattern-based overrides
