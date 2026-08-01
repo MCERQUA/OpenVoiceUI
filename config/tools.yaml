@@ -1,0 +1,303 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Voice Agent Tool Catalog — THE single source of truth for the tool surface
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Spec: docs/jambot/voice-agent-tool-bus.md
+# Framework: future-dev-plans/17-MULTI-AGENT-FRAMEWORK.md
+#
+# Three projections are GENERATED from this file by services/tool_catalog.py:
+#
+#   1. realtime_tools()  → OpenAI-Realtime-shaped tools[] for session.update
+#                          (Grok Voice, OpenAI Realtime; Hume derives from it)
+#   2. marker_specs()    → the [MARKER] regex set for text-streaming agents
+#                          (clawdbot / OpenClaw / Hermes) — kept working
+#   3. prompt_docs()     → the "here are your tools" system-prompt block
+#
+# ── RULES ──────────────────────────────────────────────────────────────────
+#
+#  * NEVER hand-write a marker regex in VoiceSession.js or app.js again.
+#    Add the tool here. A marker that exists in code but not in this catalog
+#    is INVISIBLE to every realtime agent.
+#
+#  * `capability` gates the tool. A tool whose capability is not in the
+#    profile's allowlist is NOT SENT to the model at all — it never learns the
+#    tool exists. Refusal-by-omission beats refusal-by-rejection.
+#
+#  * `dangerous: true` requires an EXPLICIT per-profile opt-in on top of the
+#    capability. Used for anything that executes code or spends money.
+#
+#  * `execution` decides the routing:
+#      client       → browser, via EventBridge. Inline result.
+#      server_sync  → POST /api/tools/invoke, returns fast. Inline result.
+#      server_async → POST /api/tools/invoke, returns {job_id} immediately;
+#                     the real answer arrives later over /ws/agent-events.
+#
+#  * Parity note: the `marker:` block must stay behaviour-identical to the
+#    hand-written parser in src/core/VoiceSession.js (_checkCmdsInStream /
+#    _stripCmdTags) until Phase 2 migrates that file to generated output.
+#    Those regexes are load-bearing for every OpenClaw tenant.
+# ═══════════════════════════════════════════════════════════════════════════
+
+version: 1
+
+# ── Capability tags ────────────────────────────────────────────────────────
+# Profiles allowlist these. Descriptions are surfaced in the admin UI.
+capabilities:
+  canvas:   "Show, close and drive canvas pages on the display"
+  music:    "Control music playback"
+  audio_fx: "Play sound effects and DJ stingers"
+  face:     "Face recognition enrolment"
+  session:  "Session lifecycle — sleep, reset"
+  media_gen: "Generate new media (costs money)"
+  code:     "Dispatch coding work to a server-side CLI agent"
+
+
+tools:
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # CANVAS — client-side, via EventBridge
+  # ═════════════════════════════════════════════════════════════════════════
+
+  - name: open_canvas_page
+    description: >-
+      Display a canvas page on the user's screen. Use when the user asks to see,
+      open, show or pull up a page. Pass the page name without the .html suffix.
+    execution: client
+    capability: canvas
+    event: cmd:canvas_page
+    marker:
+      form: "[CANVAS:<page>]"
+      pattern: '\[CANVAS:([^\]]+)\]'
+      groups: [page]
+      dedupe_key: CANVAS_PAGE
+    params:
+      type: object
+      properties:
+        page:
+          type: string
+          description: "Page name without extension, e.g. 'dashboard' or 'weather'."
+      required: [page]
+
+  - name: open_canvas_menu
+    description: >-
+      Open the canvas page picker so the user can choose a page themselves. Use
+      when the user asks what pages exist or wants to browse them.
+    execution: client
+    capability: canvas
+    event: cmd:canvas_menu
+    marker:
+      form: "[CANVAS_MENU]"
+      pattern: '\[CANVAS_MENU\]'
+      groups: []
+      dedupe_key: CANVAS_MENU
+    params:
+      type: object
+      properties: {}
+
+  - name: screenshot_canvas
+    description: >-
+      Capture what is currently displayed on the canvas so you can look at it.
+      Use when the user asks about something on screen that you cannot otherwise see.
+    execution: client
+    capability: canvas
+    event: cmd:canvas_screenshot
+    marker:
+      form: "[CANVAS_SCREENSHOT]"
+      pattern: '\[CANVAS_SCREENSHOT\]'
+      groups: []
+      dedupe_key: CANVAS_SCREENSHOT
+    params:
+      type: object
+      properties: {}
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # MUSIC — client-side
+  # ═════════════════════════════════════════════════════════════════════════
+
+  - name: play_music
+    description: >-
+      Start music playback. Omit `track` to resume or play whatever is queued;
+      pass a track name to play something specific.
+    execution: client
+    capability: music
+    event: cmd:music_play
+    marker:
+      form: "[MUSIC_PLAY]  or  [MUSIC_PLAY:<track>]"
+      pattern: '\[MUSIC_PLAY(?::([^\]]+))?\]'
+      groups: [track]
+      dedupe_key: MUSIC_PLAY
+    params:
+      type: object
+      properties:
+        track:
+          type: string
+          description: "Optional track name. Omit to resume/play the current queue."
+
+  - name: stop_music
+    description: "Stop music playback."
+    execution: client
+    capability: music
+    event: cmd:music_stop
+    marker:
+      form: "[MUSIC_STOP]"
+      pattern: '\[MUSIC_STOP\]'
+      groups: []
+      dedupe_key: MUSIC_STOP
+    params:
+      type: object
+      properties: {}
+
+  - name: next_track
+    description: "Skip to the next track."
+    execution: client
+    capability: music
+    event: cmd:music_next
+    marker:
+      form: "[MUSIC_NEXT]"
+      pattern: '\[MUSIC_NEXT\]'
+      groups: []
+      dedupe_key: MUSIC_NEXT
+    params:
+      type: object
+      properties: {}
+
+  - name: play_spotify
+    description: "Play a specific track on Spotify."
+    execution: client
+    capability: music
+    event: cmd:spotify
+    marker:
+      form: "[SPOTIFY:<track>|<artist>]"
+      pattern: '\[SPOTIFY:([^|\]]+)(?:\|([^\]]+))?\]'
+      groups: [track, artist]
+      dedupe_key: SPOTIFY
+    params:
+      type: object
+      properties:
+        track:  { type: string, description: "Track title." }
+        artist: { type: string, description: "Artist name (optional but improves the match)." }
+      required: [track]
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # AUDIO FX — client-side
+  # ═════════════════════════════════════════════════════════════════════════
+
+  - name: play_sound
+    description: >-
+      Play a short sound effect or DJ stinger. Use sparingly, for emphasis.
+    execution: client
+    capability: audio_fx
+    event: cmd:sound
+    marker:
+      form: "[SOUND:<name>]"
+      pattern: '\[SOUND:([^\]]+)\]'
+      groups: [sound]
+      dedupe_key: SOUND
+    params:
+      type: object
+      properties:
+        sound:
+          type: string
+          description: "Sound effect id, e.g. 'air_horn'."
+      required: [sound]
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # FACE / SESSION — client-side
+  # ═════════════════════════════════════════════════════════════════════════
+
+  - name: register_face
+    description: >-
+      Enrol the face currently visible on camera under a given name, so you can
+      recognise that person later.
+    execution: client
+    capability: face
+    event: cmd:register_face
+    marker:
+      form: "[REGISTER_FACE:<name>]"
+      pattern: '\[REGISTER_FACE:([^\]]+)\]'
+      groups: [name]
+      dedupe_key: REGISTER_FACE
+    params:
+      type: object
+      properties:
+        name:
+          type: string
+          description: "Name to associate with the visible face."
+      required: [name]
+
+  - name: sleep
+    description: >-
+      Go dormant and wait for the wake word. Use when the user says goodbye,
+      says they're done, or asks you to go to sleep.
+    execution: client
+    capability: session
+    event: cmd:sleep
+    marker:
+      form: "[SLEEP]"
+      pattern: '\[SLEEP\]'
+      groups: []
+      dedupe_key: SLEEP
+    params:
+      type: object
+      properties: {}
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # MEDIA GENERATION — server-side, async, COSTS MONEY
+  # ═════════════════════════════════════════════════════════════════════════
+  # Every generated asset is written to the server the moment it is produced,
+  # before any UI decision. Root CLAUDE.md is authoritative on this.
+
+  - name: generate_song
+    description: >-
+      Generate an original song from a text description. Takes a few minutes —
+      you will be told when it is ready, so acknowledge and carry on talking.
+    execution: server_async
+    capability: media_gen
+    dangerous: true          # spends real credits
+    handler: suno_generate
+    marker:
+      form: "[SUNO_GENERATE:<prompt>]"
+      pattern: '\[SUNO_GENERATE:([^\]]+)\]'
+      groups: [prompt]
+      dedupe_key: SUNO_GENERATE
+    params:
+      type: object
+      properties:
+        prompt:
+          type: string
+          description: "Description of the song — style, mood, subject, vocals."
+      required: [prompt]
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # CODE — server-side, async, dispatches a CLI agent
+  # ═════════════════════════════════════════════════════════════════════════
+  # THE reason this bus exists. The voice agent does no coding itself; it hands
+  # a brief to a CLI agent on the server and reports the conclusion when it
+  # lands. See docs/jambot/voice-agent-tool-bus.md §3 and §4.
+
+  - name: code_task
+    description: >-
+      Hand a coding or build task to the server's CLI coding agent. Use for
+      anything that means writing, editing, fixing or building code or pages.
+      Returns immediately with a job id — say you're on it and keep talking.
+      You will be told the outcome when the agent finishes.
+    execution: server_async
+    capability: code
+    dangerous: true          # executes a CLI agent on the host
+    handler: code_task
+    # No marker: text-streaming agents (OpenClaw) already ARE coding agents.
+    # Exposing this to them would be a self-dispatch loop.
+    marker: null
+    params:
+      type: object
+      properties:
+        brief:
+          type: string
+          description: >-
+            Full self-contained description of the work. The CLI agent cannot
+            hear the conversation — restate everything it needs to know.
+        target:
+          type: string
+          description: >-
+            Optional file or page the work applies to, e.g. 'dashboard.html'.
+      required: [brief]

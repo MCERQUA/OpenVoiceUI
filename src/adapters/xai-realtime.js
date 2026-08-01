@@ -22,6 +22,7 @@
  */
 
 import { AgentEvents, AgentActions } from '../core/EventBridge.js';
+import { toolBridge } from '../shell/tool-bridge.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -138,6 +139,7 @@ export const XAIRealtimeAdapter = {
      * xAI handles STT + LLM + TTS internally — no separate STT provider needed.
      */
     capabilities: [
+        'tools',            // native function calling via the Voice Agent Tool Bus
         'canvas',
     ],
 
@@ -160,6 +162,7 @@ export const XAIRealtimeAdapter = {
     _destroyed:       false,
     _unsubscribers:   [],
     _sessionReady:    false,         // True after session.created received
+    _instructions:    '',            // Full instruction string incl. tool guidance
 
     // ─────────────────────────────────────────────────────────────────────────
     // INIT
@@ -186,6 +189,21 @@ export const XAIRealtimeAdapter = {
             }
         } catch (err) {
             console.warn('[xAI-Realtime] Config check failed:', err.message);
+        }
+
+        // Tool bus — loads the capability-filtered catalog for this profile and
+        // opens the job-completion stream. Must finish before _onSessionCreated
+        // fires, since session.update carries the tools[] array.
+        // Spec: docs/jambot/voice-agent-tool-bus.md
+        try {
+            await toolBridge.init(bridge, {
+                profileId: this._config.profile_id || this._config.id || 'xai-realtime',
+                sessionId: this._config.session_id || null,
+            });
+        } catch (err) {
+            // Never block voice on the tool bus. A Grok that can talk but not act
+            // beats a Grok that won't connect.
+            console.error('[xAI-Realtime] Tool bus init failed — continuing without tools:', err);
         }
 
         // Subscribe to UI → Agent actions
@@ -260,6 +278,10 @@ export const XAIRealtimeAdapter = {
 
         this._unsubscribers.forEach(unsub => unsub());
         this._unsubscribers = [];
+
+        // Closes the SSE job stream. Without this a profile switch leaks a
+        // connection that keeps announcing jobs into a dead bridge.
+        try { toolBridge.destroy(); } catch (_) {}
 
         if (this._audioContext) {
             try { await this._audioContext.close(); } catch (_) {}
@@ -409,6 +431,18 @@ export const XAIRealtimeAdapter = {
                 this._bridge.emit(AgentEvents.MOOD,          { mood: 'happy' });
                 break;
 
+            // ── Function calling (Voice Agent Tool Bus) ──────────────────────
+            // The OpenAI Realtime protocol streams arguments as deltas, then
+            // emits .done with the complete JSON string. We only act on .done —
+            // acting on partial JSON would fire tools on truncated arguments.
+            case 'response.function_call_arguments.done':
+                this._handleFunctionCall(msg);
+                break;
+
+            case 'response.function_call_arguments.delta':
+                // Ignored by design — see above.
+                break;
+
             case 'error': {
                 const errMsg = msg.error?.message || msg.message || 'Unknown xAI error';
                 const errCode = msg.error?.code   || msg.code    || '';
@@ -429,28 +463,57 @@ export const XAIRealtimeAdapter = {
         this._sessionReady = true;
 
         // Get system_prompt from profile config
-        const instructions = this._config.system_prompt
+        let instructions = this._config.system_prompt
             || 'You are Grok, a witty and helpful voice assistant created by xAI. Be conversational, clear, and concise.';
 
-        this._sendJSON({
-            type: 'session.update',
-            session: {
-                modalities:   ['audio', 'text'],
-                instructions,
-                voice:        'Celeste',
-                input_audio_format:  'pcm16',
-                output_audio_format: 'pcm16',
-                input_audio_transcription: {
-                    model: 'whisper-1',
-                },
-                turn_detection: {
-                    type:                 'server_vad',
-                    threshold:            0.5,
-                    prefix_padding_ms:    300,
-                    silence_duration_ms:  600,
-                },
+        // Tools the profile has granted. A tool absent from this array is one the
+        // model never learns exists — capability gating by omission
+        // (docs/jambot/voice-agent-tool-bus.md §4).
+        const tools = toolBridge.realtimeTools();
+
+        if (tools.length) {
+            // Realtime models need to be told HOW to behave around async tools,
+            // not just that they exist. Without this they tend to go silent and
+            // wait for a result that arrives minutes later on a different turn.
+            instructions +=
+                '\n\nYou have tools. Call them instead of describing what you would do. ' +
+                'Some tools return immediately with a job id instead of a result — when that ' +
+                'happens, say briefly that you have started it and CARRY ON with the ' +
+                'conversation. Do not wait or go quiet. You will be told the outcome when it ' +
+                'finishes, and you should relay it in one short sentence when it arrives.';
+        }
+
+        const session = {
+            modalities:   ['audio', 'text'],
+            instructions,
+            voice:        'Celeste',
+            input_audio_format:  'pcm16',
+            output_audio_format: 'pcm16',
+            input_audio_transcription: {
+                model: 'whisper-1',
             },
-        });
+            turn_detection: {
+                type:                 'server_vad',
+                threshold:            0.5,
+                prefix_padding_ms:    300,
+                silence_duration_ms:  600,
+            },
+        };
+
+        if (tools.length) {
+            session.tools       = tools;
+            session.tool_choice = 'auto';
+            console.log(`[xAI-Realtime] Offering ${tools.length} tool(s):`,
+                        tools.map(t => t.name).join(', '));
+        }
+
+        // Remember the FULL instruction string. _sendContextUpdate rebuilds
+        // instructions from scratch; without this it would silently drop the
+        // async-tool behaviour guidance above on the first context inject, and
+        // the model would start going quiet on dispatched jobs again.
+        this._instructions = instructions;
+
+        this._sendJSON({ type: 'session.update', session });
 
         this._bridge.emit(AgentEvents.CONNECTED);
         this._bridge.emit(AgentEvents.STATE_CHANGED, { state: 'listening' });
@@ -471,13 +534,69 @@ export const XAIRealtimeAdapter = {
     },
 
     /**
+     * Execute a tool the model asked for and hand the result back.
+     *
+     * Protocol (OpenAI Realtime, which xAI implements):
+     *   in  ← response.function_call_arguments.done { call_id, name, arguments }
+     *   out → conversation.item.create { type: 'function_call_output', call_id, output }
+     *   out → response.create            (so the model speaks about the result)
+     *
+     * `output` MUST be a string — the API rejects a bare object.
+     *
+     * Every path here returns something. A tool call left unanswered wedges the
+     * conversation: the model waits on a call_id that never resolves and the
+     * user hears silence. Failures are reported as results, not swallowed.
+     */
+    async _handleFunctionCall(msg) {
+        const callId = msg.call_id || msg.item_id;
+        const name   = msg.name;
+
+        if (!callId || !name) {
+            console.warn('[xAI-Realtime] Malformed function call — ignoring:', msg);
+            return;
+        }
+
+        console.log(`[xAI-Realtime] → tool call: ${name}`, msg.arguments);
+
+        let outcome;
+        try {
+            outcome = await toolBridge.invoke(name, msg.arguments);
+        } catch (err) {
+            console.error(`[xAI-Realtime] Tool "${name}" threw:`, err);
+            outcome = { ok: false, error: err.message || 'Tool execution failed.' };
+        }
+
+        const output = outcome.ok
+            ? JSON.stringify({ ok: true, result: outcome.result, job_id: outcome.job_id })
+            : JSON.stringify({ ok: false, error: outcome.error });
+
+        this._sendJSON({
+            type: 'conversation.item.create',
+            item: {
+                type:    'function_call_output',
+                call_id: callId,
+                output,
+            },
+        });
+
+        this._sendJSON({ type: 'response.create' });
+
+        this._bridge.emit(AgentEvents.TOOL_CALLED, {
+            name,
+            params: {},
+            result: outcome.ok ? outcome.result : outcome.error,
+        });
+    },
+
+    /**
      * Silently update the session instructions with new context.
      * Does NOT trigger a response — purely injects background info.
      */
     _sendContextUpdate(text) {
         if (!text) return;
-        const instructions = this._config.system_prompt
-            ? `${this._config.system_prompt}\n\n[Context update]: ${text}`
+        const base = this._instructions || this._config.system_prompt || '';
+        const instructions = base
+            ? `${base}\n\n[Context update]: ${text}`
             : text;
 
         this._sendJSON({
