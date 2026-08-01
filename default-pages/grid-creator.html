@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<!-- openvoiceui-version: 2026-07-30-splitter-handoff -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta name="page-icon" content="grid">
+<title>Grid Creator</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { max-width: 100vw; overflow-x: hidden; }
+body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 12px; min-height: 100vh; }
+.back-btn { position: fixed; top: 12px; left: 12px; background: rgba(30,41,59,0.95); border: 1px solid #334155; color: #e2e8f0; padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; z-index: 100; min-height: 40px; }
+.back-btn:hover { background: #1e3a5f; border-color: #3b82f6; }
+.header { text-align: center; margin: 44px 0 16px; }
+.header h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.header .subtitle { color: #94a3b8; font-size: 13px; }
+
+.card { background: #13141a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; margin: 0 auto 14px; max-width: 640px; }
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.field label { font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+.field input, .field select, .field textarea {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 10px 12px; border-radius: 8px;
+  font-size: 14px; font-family: inherit; width: 100%; min-height: 44px; }
+.field textarea { min-height: 84px; resize: vertical; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #3b82f6; }
+.row { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.seg { display: flex; background: #1e293b; border-radius: 10px; padding: 4px; gap: 3px; }
+.seg button { flex: 1; background: transparent; border: none; color: #94a3b8; padding: 9px 6px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 40px; }
+.seg button.active { background: #3b82f6; color: white; }
+.btn { width: 100%; background: #10b981; color: white; border: none; padding: 13px; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; min-height: 48px; }
+.btn:hover { background: #059669; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.hint { font-size: 12px; color: #64748b; margin-top: 8px; line-height: 1.5; }
+
+/* Queue */
+.queue { max-width: 640px; margin: 0 auto; }
+.queue h3 { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; font-weight: 600; }
+.job { background: #13141a; border: 1px solid #1e293b; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.job-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.job-title { font-weight: 600; font-size: 14px; }
+.job-sub { font-size: 12px; color: #94a3b8; margin-top: 3px; }
+.pill { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.4px; }
+.pill.queued { background: #1e293b; color: #93c5fd; }
+.pill.running { background: #78350f; color: #fcd34d; }
+.pill.done { background: #064e3b; color: #6ee7b7; }
+.pill.failed { background: #7f1d1d; color: #fca5a5; }
+.pill.needs-brand-kit { background: #581c87; color: #e9d5ff; }
+.job-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 10px; }
+.job-results img { width: 100%; border-radius: 6px; display: block; background: #fff; }
+.job-actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+.job-actions a, .job-actions button { flex: 1; min-width: 120px; text-align: center; text-decoration: none; background: #1e293b; border: 1px solid #334155; color: #93c5fd; padding: 9px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.job-actions a:hover, .job-actions button:hover { border-color: #3b82f6; background: #1e3a5f; }
+.empty { color: #64748b; font-size: 13px; text-align: center; padding: 20px; }
+
+/* Reference images */
+.ref-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ref-actions button { flex: 1; min-width: 130px; background: #1e293b; border: 1px solid #334155; color: #93c5fd; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 44px; }
+.ref-actions button:hover { border-color: #3b82f6; background: #1e3a5f; }
+.ref-chosen { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin-top: 10px; }
+.ref-chosen:empty { display: none; }
+.ref-thumb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid #334155; background: #fff; }
+.ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ref-thumb .x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; background: rgba(0,0,0,0.7); color: #fff; border: none; font-size: 13px; line-height: 20px; cursor: pointer; padding: 0; }
+/* Picker overlay */
+.picker { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: none; flex-direction: column; padding: 12px; }
+.picker.open { display: flex; }
+.picker-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.picker-head h3 { font-size: 15px; font-weight: 700; }
+.picker-head button { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 40px; }
+.picker-head .done-btn { background: #10b981; border-color: #10b981; color: #fff; }
+.picker-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; align-content: start; }
+.picker-cell { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 2px solid transparent; background: #13141a; cursor: pointer; }
+.picker-cell img { width: 100%; height: 100%; object-fit: cover; display: block; background: #fff; }
+.picker-cell.sel { border-color: #3b82f6; }
+.picker-cell.sel::after { content: '✓'; position: absolute; top: 3px; right: 5px; color: #fff; background: #3b82f6; border-radius: 50%; width: 20px; height: 20px; line-height: 20px; text-align: center; font-size: 13px; font-weight: 700; }
+
+@media (min-width: 720px) { body { padding: 16px; } .header { margin-top: 8px; } }
+</style>
+</head>
+<body>
+<button class="back-btn" onclick="window.parent.postMessage({type:'canvas-action',action:'menu'},'*')">← Back</button>
+
+<div class="header">
+  <h1>Grid Creator</h1>
+  <div class="subtitle">Order a grid of options — logos, characters, or branded posts</div>
+</div>
+
+<div class="card">
+  <div class="field">
+    <label>What do you want?</label>
+    <div class="seg" id="typeSeg">
+      <button data-type="post" class="active">Posts</button>
+      <button data-type="logo">Logos</button>
+      <button data-type="character">Characters</button>
+      <button data-type="mascot">Mascots</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>Brief — describe what you want (not a finished prompt)</label>
+    <textarea id="brief" placeholder="e.g. bold modern logo options for a spray-foam insulation company, clean and trustworthy"></textarea>
+  </div>
+  <div class="field">
+    <label>Reference images (optional) — a logo, a real photo, a style to match</label>
+    <div class="ref-actions">
+      <button type="button" onclick="document.getElementById('refUpload').click()">⬆ Upload</button>
+      <button type="button" onclick="openPicker()">🗂 Choose from uploads</button>
+    </div>
+    <input type="file" id="refUpload" accept="image/*,.heic,.heif,.avif,.webp" multiple style="display:none" onchange="uploadRefs(this.files)">
+    <div class="ref-chosen" id="refChosen"></div>
+    <div class="hint" id="refHint" style="margin-top:6px"></div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label>How many</label>
+      <input type="number" id="count" value="9" min="1" max="24">
+    </div>
+    <div class="field">
+      <label>Aspect</label>
+      <select id="aspect">
+        <option value="1:1" selected>1:1 · square</option>
+        <option value="4:5">4:5 · portrait</option>
+        <option value="9:16">9:16 · story</option>
+        <option value="16:9">16:9 · wide</option>
+      </select>
+    </div>
+  </div>
+  <div class="field">
+    <label>Layout</label>
+    <div class="seg" id="layoutSeg">
+      <button data-layout="composite" class="active">One grid (cut in splitter)</button>
+      <button data-layout="separate">Separate images</button>
+    </div>
+  </div>
+  <button class="btn" id="orderBtn" onclick="placeOrder()">Generate grid</button>
+  <div class="hint">Your brand is applied automatically — the creative node uses this account's brand kit. Generation runs on the Mac via ChatGPT (no per-image cost) and one order runs at a time (~90s per image).</div>
+</div>
+
+<div class="queue">
+  <h3>Your orders</h3>
+  <div id="jobList"><div class="empty">No orders yet. Place one above.</div></div>
+</div>
+
+<!-- Pick-from-uploads overlay -->
+<div class="picker" id="picker">
+  <div class="picker-head">
+    <h3>Choose reference images</h3>
+    <div>
+      <button type="button" onclick="closePicker(false)">Cancel</button>
+      <button type="button" class="done-btn" onclick="closePicker(true)">Use selected</button>
+    </div>
+  </div>
+  <div class="picker-grid" id="pickerGrid"><div class="empty">Loading…</div></div>
+</div>
+
+<script>
+const $ = s => document.getElementById(s);
+let gridType = 'post', layout = 'composite';
+document.querySelectorAll('#typeSeg button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#typeSeg button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); gridType = b.dataset.type;
+});
+document.querySelectorAll('#layoutSeg button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#layoutSeg button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); layout = b.dataset.layout;
+});
+
+// Orders persist to the SERVER (VPS is the source of truth — never localStorage).
+let jobs = [];
+async function loadJobs() {
+  try {
+    const r = await fetch('/api/grid-gen/orders', { cache: 'no-store' });
+    if (r.ok) { jobs = await r.json(); renderJobs(); }
+  } catch (e) {}
+}
+
+function uuid() { return 'gg-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+
+// ---- Reference images: upload new OR pick from this tenant's uploads/ ----
+// Refs are filenames living in uploads/. They ride in the order POST (server-side record),
+// NOT the agent speak line — the Mac reads them from the order record and passes them to the
+// generator as --img inputs.
+let chosenRefs = [];  // [{name, url}]
+function renderRefs() {
+  const el = $('refChosen');
+  el.innerHTML = chosenRefs.map((r, i) =>
+    `<div class="ref-thumb"><img src="${r.url}" loading="lazy"><button class="x" onclick="removeRef(${i})">×</button></div>`
+  ).join('');
+  $('refHint').textContent = chosenRefs.length ? `${chosenRefs.length} reference image${chosenRefs.length>1?'s':''} attached` : '';
+}
+function addRef(name, url) {
+  if (!name || chosenRefs.some(r => r.name === name)) return;
+  if (chosenRefs.length >= 6) { $('refHint').textContent = 'Up to 6 reference images.'; return; }
+  chosenRefs.push({ name, url: url || ('/uploads/' + name) }); renderRefs();
+}
+function removeRef(i) { chosenRefs.splice(i, 1); renderRefs(); }
+
+async function uploadRefs(files) {
+  if (!files || !files.length) return;
+  $('refHint').textContent = 'Uploading…';
+  for (const f of files) {
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const r = await fetch('/api/upload', { method: 'POST', body: fd });
+      if (r.ok) { const d = await r.json(); if (d.filename) addRef(d.filename, d.url); }
+    } catch (e) {}
+  }
+  $('refUpload').value = ''; renderRefs();
+}
+
+async function openPicker() {
+  const grid = $('pickerGrid'); grid.innerHTML = '<div class="empty">Loading…</div>';
+  $('picker').classList.add('open');
+  let items = [];
+  try { const r = await fetch('/api/grid-gen/uploads', { cache: 'no-store' }); if (r.ok) items = await r.json(); } catch (e) {}
+  if (!items.length) { grid.innerHTML = '<div class="empty">No images in your uploads yet. Use Upload instead.</div>'; return; }
+  const picked = new Set(chosenRefs.map(r => r.name));
+  grid.innerHTML = '';
+  for (const it of items) {
+    const c = document.createElement('div');
+    c.className = 'picker-cell' + (picked.has(it.name) ? ' sel' : '');
+    c.innerHTML = `<img src="${it.url}" loading="lazy">`;
+    c.onclick = () => { c.classList.toggle('sel'); };
+    c.dataset.name = it.name; c.dataset.url = it.url;
+    grid.appendChild(c);
+  }
+}
+function closePicker(apply) {
+  if (apply) {
+    // Items shown in this picker view; deselecting one removes it, but refs NOT shown here
+    // (e.g. just-uploaded) are preserved.
+    const shown = new Set([...document.querySelectorAll('.picker-cell')].map(c => c.dataset.name));
+    chosenRefs = chosenRefs.filter(r => !shown.has(r.name));
+    [...document.querySelectorAll('.picker-cell.sel')].forEach(c => {
+      if (chosenRefs.length < 6 && !chosenRefs.some(r => r.name === c.dataset.name))
+        chosenRefs.push({ name: c.dataset.name, url: c.dataset.url });
+    });
+    renderRefs();
+  }
+  $('picker').classList.remove('open');
+}
+
+async function placeOrder() {
+  const brief = $('brief').value.trim();
+  if (!brief) { $('brief').focus(); return; }
+  const count = Math.max(1, Math.min(24, parseInt($('count').value) || 9));
+  const req = { request_id: uuid(), grid_type: gridType, brief, count, aspect: $('aspect').value, layout,
+                refs: chosenRefs.map(r => r.name) };
+  $('orderBtn').disabled = true; $('orderBtn').textContent = 'Sending…';
+  // Record the order server-side (status starts 'queued', includes refs); agent + Mac fill the rest.
+  try { await fetch('/api/grid-gen/orders', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(req) }); } catch (e) {}
+  // Agent-shortcut: send the order to THIS tenant's voice agent as a turn. The agent
+  // mesh-sends it to the Mac under its own identity, so the Mac knows which client/brand.
+  const line = `[GRID-GEN] request_id=${req.request_id} type=${req.grid_type} count=${req.count} `
+             + `aspect=${req.aspect} layout=${req.layout} brief="${brief.replace(/"/g,"'")}"`;
+  window.parent.postMessage({ type: 'canvas-action', action: 'speak', text: line }, '*');
+  $('orderBtn').disabled = false; $('orderBtn').textContent = 'Generate grid';
+  $('brief').value = '';
+  chosenRefs = []; renderRefs();
+  setTimeout(loadJobs, 800);
+}
+
+function etaText(j) {
+  if (j.status !== 'queued' && j.status !== 'running') return '';
+  const secs = (j.count || 9) * 90;
+  const m = Math.round(secs / 60);
+  return ` · ~${m} min`;
+}
+function renderJobs() {
+  const el = $('jobList');
+  if (!jobs.length) { el.innerHTML = '<div class="empty">No orders yet. Place one above.</div>'; return; }
+  el.innerHTML = '';
+  for (const j of jobs) {
+    const div = document.createElement('div'); div.className = 'job';
+    const status = j.status || 'queued';
+    let inner = `<div class="job-head">
+        <div><div class="job-title">${j.grid_type || 'grid'} · ${j.count || '?'} · ${j.layout || ''}</div>
+        <div class="job-sub">${(j.brief||'').slice(0,80)}${etaText(j)}</div></div>
+        <span class="pill ${status}">${status.replace('-',' ')}</span></div>`;
+    if (status === 'needs-brand-kit')
+      inner += `<div class="hint">This client has no brand kit on the Mac yet — the creative node asked for palette + logo before it can generate.</div>`;
+    if (status === 'failed' && j.error)
+      inner += `<div class="hint">Error: ${j.error}</div>`;
+    if (status === 'done' && (j.files||[]).length) {
+      inner += `<div class="job-results">` + j.files.map(f => `<img src="/uploads/${f}" loading="lazy">`).join('') + `</div>`;
+      inner += `<div class="job-actions">
+        <a href="#" onclick="cutInSplitter('${(j.files||[])[0]||''}');return false;">Cut in splitter →</a>
+      </div>`;
+    }
+    div.innerHTML = inner; el.appendChild(div);
+  }
+}
+function cutInSplitter(file) {
+  // Hand the grid image to the splitter. `navigate` drops query strings, so use `open-url`
+  // which loads the URL into the canvas iframe verbatim — the splitter reads ?src= on load.
+  if (!file) { window.parent.postMessage({ type: 'canvas-action', action: 'navigate', page: 'image-splitter' }, '*'); return; }
+  const url = '/pages/image-splitter.html?src=' + encodeURIComponent('/uploads/' + file);
+  window.parent.postMessage({ type: 'canvas-action', action: 'open-url', url }, '*');
+}
+
+// Poll for status updates (the Mac writes markers the server exposes here).
+loadJobs();
+setInterval(loadJobs, 5000);
+</script>
+</body>
+</html>

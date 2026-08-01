@@ -374,8 +374,6 @@ def generate_icon_image(prompt, name=None, style=None, allow_reuse=True):
 
     # Call Gemini API
     try:
-        from services.metered_spend import log_spend
-        log_spend('icons/generate', GEMINI_MODEL)
         resp = requests.post(
             f'{GEMINI_URL}?key={GEMINI_API_KEY}',
             json={
@@ -388,6 +386,11 @@ def generate_icon_image(prompt, name=None, style=None, allow_reuse=True):
         )
         resp.raise_for_status()
         result = resp.json()
+        # Bill ONLY a successful (2xx) call. Logging before the POST counted every
+        # 429 rejection as spend (Google does not bill 429s) — inflated the tally
+        # ~35x during the auto-icon 429-storm (0 successes / 874 attempts, 2026-07-29).
+        from services.metered_spend import log_spend
+        log_spend('icons/generate', GEMINI_MODEL)
     except requests.RequestException as e:
         raise IconGenerationError(f'Gemini API error: {str(e)}', status=502)
 

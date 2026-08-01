@@ -391,6 +391,15 @@ def _kick_off_pending_icon_generation(manifest: dict) -> None:
     (confirmed live: 429s across 139 pages) and none of them recovered until
     their independent 6h cooldowns expired. Only one batch may run at a time,
     fleet-wide within this process."""
+    # GATED OFF by default (2026-07-29): auto-icon gen on Gemini was 100% 429-failing
+    # (josh 588/0, danielle 286/0 — zero icons produced, permanent retry storm because
+    # failed pages stay pending and re-fire every sync). Mike confirmed pages show only
+    # default icons. Re-enable ONLY once icon-gen is repointed off Gemini to the Mac's
+    # ComfyUI (env AUTO_ICON_GEN=on). Root fix = the Mac creative node, not this path.
+    import os
+    if os.getenv('AUTO_ICON_GEN', '').strip().lower() not in ('1', 'true', 'yes', 'on'):
+        return
+
     if not _icon_gen_lock.acquire(blocking=False):
         return  # a batch is already in flight — this sync cycle's backlog will be picked up next time
     now = time.time()

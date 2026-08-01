@@ -1,193 +1,163 @@
 <!DOCTYPE html>
+<!-- openvoiceui-version: 2026-07-30-splitter-icon -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta name="page-icon" content="tools">
+<meta name="page-icon" content="split">
 <title>Image Splitter</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 16px; min-height: 100vh; }
+html, body { max-width: 100vw; overflow-x: hidden; }
+body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; padding: 12px; min-height: 100vh; }
 
-.header { text-align: center; margin-bottom: 16px; }
-.header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.header { text-align: center; margin: 44px 0 14px; }
+.header h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
 .header .subtitle { color: #94a3b8; font-size: 13px; }
 
-.back-btn { position: fixed; top: 16px; left: 16px; background: rgba(30,41,59,0.95); border: 1px solid #334155; color: #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; z-index: 100; }
+.back-btn { position: fixed; top: 12px; left: 12px; background: rgba(30,41,59,0.95); border: 1px solid #334155; color: #e2e8f0; padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; z-index: 100; min-height: 40px; }
 .back-btn:hover { background: #1e3a5f; border-color: #3b82f6; }
 
-/* Upload dropzone — shown when no image */
-.dropzone {
-  border: 2px dashed #334155; border-radius: 16px; padding: 60px 24px;
-  text-align: center; color: #64748b; cursor: pointer; transition: all 0.2s;
-  max-width: 720px; margin: 40px auto;
-}
+/* Upload dropzone */
+.dropzone { border: 2px dashed #334155; border-radius: 16px; padding: 44px 20px; text-align: center; color: #64748b; cursor: pointer; transition: all 0.2s; max-width: 720px; margin: 24px auto; }
 .dropzone:hover, .dropzone.dragover { border-color: #3b82f6; color: #93c5fd; background: rgba(59,130,246,0.05); }
-.dropzone .dz-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; color: #cbd5e1; }
+.dropzone .dz-title { font-size: 17px; font-weight: 600; margin-bottom: 8px; color: #cbd5e1; }
 .dropzone .dz-sub { font-size: 13px; }
 .dropzone input[type=file] { display: none; }
 
-/* Controls bar */
-.controls {
-  display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
-  padding: 12px 16px; background: #13141a; border-radius: 12px;
-  border: 1px solid #1e293b; margin-bottom: 16px;
-}
-.controls-params {
-  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
-  flex: 1 1 auto; min-width: 0;
-}
-.controls-actions {
-  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-  flex: 0 0 auto;
-}
-.control-group { display: flex; align-items: center; gap: 6px; }
-.control-group label { font-size: 12px; color: #94a3b8; font-weight: 500; }
+/* ---- CONTROLS: mobile-first. Base = a clean card with a 2-col field grid;
+   desktop widens it to an inline wrap row. ---- */
+.controls { background: #13141a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 12px; }
+.controls-params { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; align-items: end; }
+.controls-actions { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+
+.control-group { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.control-group label { font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
 .control-group input[type=number], .control-group input[type=text], .control-group select {
-  background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
-  padding: 6px 10px; border-radius: 6px; font-size: 13px; width: 64px; text-align: center;
-  font-family: inherit;
-}
-.control-group input[type=text] { width: 140px; text-align: left; }
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 9px 10px; border-radius: 8px;
+  font-size: 14px; width: 100%; font-family: inherit; min-height: 40px; }
+.control-group select { text-align: left; }
+.control-group input[type=text] { width: 100%; }
 .control-group input:focus, .control-group select:focus { outline: none; border-color: #3b82f6; }
+.control-group input[type=range] { width: 100%; accent-color: #3b82f6; min-height: 24px; }
+.control-group .range-val { font-size: 12px; color: #93c5fd; font-family: 'SF Mono', monospace; }
+.control-group.checkbox { flex-direction: row; align-items: center; }
+.control-group.checkbox label { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; text-transform: none; letter-spacing: 0; font-size: 13px; }
+.control-group input[type=checkbox] { accent-color: #3b82f6; width: 18px; height: 18px; cursor: pointer; }
+.control-group.hidden { display: none; }
+/* horizontal separator hidden on mobile; a subtle rule on desktop */
+.ctl-sep { display: none; }
 
-.mode-toggle { display: flex; background: #1e293b; border-radius: 8px; padding: 3px; gap: 2px; }
-.mode-toggle button {
-  background: transparent; border: none; color: #94a3b8; padding: 6px 12px;
-  border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s;
-  font-family: inherit;
-}
+.mode-toggle { grid-column: 1 / -1; display: flex; background: #1e293b; border-radius: 10px; padding: 4px; gap: 3px; }
+.mode-toggle button { flex: 1; background: transparent; border: none; color: #94a3b8; padding: 9px 8px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit; min-height: 38px; }
 .mode-toggle button.active { background: #3b82f6; color: white; }
+.mode-toggle button#modeCustom { display: none; }
+.mode-toggle button#modeCustom.visible { display: block; }
+.mode-toggle button#modeCustom.active { background: #8b5cf6; }
 
-.btn { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+.btn { background: #3b82f6; color: white; border: none; padding: 11px 14px; border-radius: 9px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit; min-height: 44px; width: 100%; }
 .btn:hover { background: #2563eb; }
 .btn-secondary { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; }
 .btn-secondary:hover { border-color: #3b82f6; background: #1e3a5f; }
-.btn-success { background: #10b981; }
+.btn-success { background: #10b981; grid-column: 1 / -1; }
 .btn-success:hover { background: #059669; }
 .btn-warn { background: #f59e0b; }
 .btn-warn:hover { background: #d97706; }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-tiny { padding: 6px 10px; font-size: 12px; border-radius: 7px; min-height: 34px; width: auto; }
 
-.detect-info { font-size: 11px; color: #94a3b8; padding-left: 8px; font-style: italic; }
+.detect-info { font-size: 11px; color: #94a3b8; font-style: italic; grid-column: 1 / -1; }
 
-/* Main split layout */
-.split-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; }
-@media (max-width: 900px) { .split-layout { grid-template-columns: 1fr; } }
+/* ---- LAYOUT: mobile = single column (preview above cells) ---- */
+.split-layout { display: grid; grid-template-columns: 1fr; gap: 14px; }
 
-/* Mobile controls — params grid, full-width stacked actions */
-@media (max-width: 720px) {
-  .controls { flex-direction: column; align-items: stretch; gap: 10px; }
-  /* Two-column grid for inputs so they wrap predictably instead of one-at-a-time */
-  .controls-params {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 10px;
-  }
-  .controls-params .mode-toggle { grid-column: 1 / -1; }
-  .controls-params .control-group { min-width: 0; }
-  .controls-params .control-group input[type=text],
-  .controls-params .control-group input[type=number] { width: 100%; }
-  /* Actions: wrap into a 2-col grid so tap targets stay generous */
-  .controls-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    width: 100%;
-  }
-  .controls-actions .btn { width: 100%; padding: 10px 12px; }
-  /* Primary action (last column) spans full width on its own row for emphasis */
-  .controls-actions .btn-success { grid-column: 1 / -1; }
-}
-@media (max-width: 380px) {
-  /* Very narrow phones: 1 action per row, full width */
-  .controls-actions { grid-template-columns: 1fr; }
-  .controls-actions .btn-success { grid-column: auto; }
-}
-
-.panel { background: #13141a; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; }
+.panel { background: #13141a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; min-width: 0; }
 .panel h3 { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; font-weight: 600; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.panel-head h3 { margin-bottom: 0; }
+.panel-head .sel-actions { display: flex; gap: 6px; }
 
-.preview-canvas-wrap { position: relative; }
-#previewCanvas { max-width: 100%; height: auto; display: block; border-radius: 8px; image-rendering: pixelated; }
+.preview-canvas-wrap { position: relative; max-width: 100%; }
+#previewCanvas { max-width: 100%; height: auto; display: block; border-radius: 8px; image-rendering: pixelated; touch-action: none; cursor: zoom-in; }
+.drag-hint { font-size: 11px; color: #64748b; margin-top: 8px; font-style: italic; }
 
-.cell-grid { display: grid; gap: 10px; max-height: 75vh; overflow-y: auto; padding-right: 4px; }
+/* Cells: CSS-driven responsive columns — fit ANY width, never clip */
+.cell-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
 .cell-grid::-webkit-scrollbar { width: 8px; }
 .cell-grid::-webkit-scrollbar-track { background: #0a0a0a; }
 .cell-grid::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
 
-.cell {
-  background: #0a0a0a; border: 1px solid #1e293b; border-radius: 8px;
-  padding: 8px; display: flex; flex-direction: column; gap: 6px; transition: all 0.15s;
-}
+.cell { background: #0a0a0a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; transition: all 0.15s; min-width: 0; }
 .cell:hover { border-color: #3b82f6; }
-.cell .cell-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
-.cell .cell-idx { color: #93c5fd; font-weight: 600; }
+.cell.deselected { opacity: 0.38; border-color: #1e293b; }
+.cell.deselected:hover { opacity: 0.6; }
+.cell .cell-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; gap: 6px; }
+.cell .cell-idx { color: #93c5fd; font-weight: 600; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.cell .cell-idx input[type=checkbox] { accent-color: #3b82f6; width: 15px; height: 15px; cursor: pointer; }
 .cell .cell-size { color: #64748b; font-family: 'SF Mono', monospace; }
-.cell canvas { width: 100%; height: auto; border-radius: 4px; display: block; background: #fff; }
-.cell .cell-dl { background: #1e293b; border: 1px solid #334155; color: #93c5fd;
-  padding: 5px 10px; border-radius: 5px; font-size: 11px; cursor: pointer; text-align: center;
-  text-decoration: none; transition: all 0.15s; font-family: inherit; }
+.cell canvas { width: 100%; height: auto; border-radius: 4px; display: block; background: #fff; cursor: zoom-in; }
+.cell .cell-dl { background: #1e293b; border: 1px solid #334155; color: #93c5fd; padding: 7px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center; text-decoration: none; transition: all 0.15s; font-family: inherit; min-height: 34px; display: flex; align-items: center; justify-content: center; }
 .cell .cell-dl:hover { background: #1e3a5f; border-color: #3b82f6; }
 .cell .cell-actions { display: flex; gap: 6px; }
 .cell .cell-actions .cell-dl { flex: 1; }
-.cell .cell-save { flex: 1; background: #065f46; border: 1px solid #10b981; color: #d1fae5;
-  padding: 5px 10px; border-radius: 5px; font-size: 11px; cursor: pointer; text-align: center;
-  font-family: inherit; font-weight: 600; transition: all 0.15s; }
+.cell .cell-save { flex: 1; background: #065f46; border: 1px solid #10b981; color: #d1fae5; padding: 7px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center; font-family: inherit; font-weight: 600; transition: all 0.15s; min-height: 34px; }
 .cell .cell-save:hover { background: #047857; }
 .cell .cell-save:disabled { opacity: 0.6; cursor: default; background: #064e3b; }
 
-.status-bar { font-size: 12px; color: #64748b; padding: 8px 12px; background: #13141a; border-radius: 8px; border: 1px solid #1e293b; margin-top: 12px; }
+.status-bar { font-size: 12px; color: #64748b; padding: 9px 12px; background: #13141a; border-radius: 8px; border: 1px solid #1e293b; margin-top: 12px; }
 .status-bar.error { color: #fca5a5; border-color: #7f1d1d; background: rgba(239,68,68,0.05); }
 .status-bar.success { color: #86efac; border-color: #14532d; background: rgba(16,185,129,0.05); }
 
-/* Click-to-zoom cursor on canvases */
-.cell canvas, #previewCanvas { cursor: zoom-in; }
-
 /* Lightbox */
-.lightbox {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.92);
-  display: none; align-items: center; justify-content: center;
-  z-index: 1000; padding: 24px; cursor: zoom-out;
-}
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.92); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; cursor: zoom-out; }
 .lightbox.open { display: flex; }
 .lightbox-inner { position: relative; max-width: 95vw; max-height: 92vh; }
-.lightbox canvas {
-  max-width: 92vw; max-height: 88vh; display: block;
-  background: #fff; border-radius: 4px;
-  box-shadow: 0 0 40px rgba(0,0,0,0.6);
-  image-rendering: pixelated;
-}
-.lightbox-close {
-  position: absolute; top: -36px; right: 0;
-  background: rgba(30,41,59,0.9); border: 1px solid #334155; color: #e2e8f0;
-  padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer;
-  font-family: inherit;
-}
-.lightbox-caption {
-  position: absolute; bottom: -32px; left: 0; right: 0;
-  text-align: center; color: #94a3b8; font-size: 12px;
-}
+.lightbox canvas { max-width: 92vw; max-height: 84vh; display: block; background: #fff; border-radius: 4px; box-shadow: 0 0 40px rgba(0,0,0,0.6); image-rendering: pixelated; }
+.lightbox-close { position: absolute; top: -38px; right: 0; background: rgba(30,41,59,0.9); border: 1px solid #334155; color: #e2e8f0; padding: 8px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit; min-height: 38px; }
+.lightbox-caption { position: absolute; bottom: -30px; left: 0; right: 0; text-align: center; color: #94a3b8; font-size: 12px; }
 
+/* ---- DESKTOP (mobile-first: enhancements layer up from 720px) ---- */
+@media (min-width: 720px) {
+  body { padding: 16px; }
+  .header { margin-top: 8px; }
+  .controls { flex-direction: row; flex-wrap: wrap; align-items: flex-end; padding: 12px 16px; }
+  .controls-params { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; flex: 1 1 auto; }
+  .controls-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: 0 0 auto; align-items: center; }
+  .control-group { flex-direction: column; }
+  .control-group input[type=number] { width: 72px; }
+  .control-group input[type=text] { width: 150px; }
+  .control-group select { width: auto; }
+  .control-group input[type=range] { width: 110px; }
+  .ctl-sep { display: block; width: 1px; align-self: stretch; background: #1e293b; margin: 0 4px; }
+  .mode-toggle { grid-column: auto; }
+  .mode-toggle button { flex: 0 0 auto; }
+  .btn { width: auto; }
+  .btn-success { grid-column: auto; }
+  .detect-info { grid-column: auto; }
+}
+@media (min-width: 900px) {
+  .split-layout { grid-template-columns: minmax(0,1fr) minmax(0,1.2fr); }
+  .cell-grid { max-height: 75vh; overflow-y: auto; padding-right: 4px; }
+}
 </style>
 </head>
 <body>
 
-<button class="back-btn" onclick="window.parent.postMessage({type:'canvas-action',action:'navigate',page:'content-library'},'*')">← Back</button>
+<button class="back-btn" onclick="window.parent.postMessage({type:'canvas-action',action:'menu'},'*')">← Back</button>
 
 <div class="header">
   <h1>Image Splitter</h1>
-  <div class="subtitle">Upload any N×N grid image. Auto-detect or manual. Clean cuts, ZIP download.</div>
+  <div class="subtitle">Upload any N×N grid image. Auto-detect, drag the cut lines, pick your cells. PNG/JPG/WebP, ZIP download.</div>
 </div>
 
 <!-- Upload dropzone -->
 <div class="dropzone" id="dropzone">
   <div class="dz-title">Drop an image or click to upload</div>
   <div class="dz-sub">PNG/JPG · Any grid layout · Works best on AI-generated post grids</div>
-  <input type="file" accept="image/*" id="fileInput">
+  <input type="file" accept="image/*,.heic,.heif,.HEIC,.HEIF,.avif,.webp,.gif,.bmp,.tiff,.tif" id="fileInput">
 </div>
 
 <!-- Main UI (hidden until image loaded) -->
@@ -198,37 +168,86 @@ body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; pa
       <div class="mode-toggle">
         <button id="modeManual" class="active" onclick="setMode('manual')">Manual</button>
         <button id="modeAuto" onclick="setMode('auto')">Auto-detect</button>
+        <button id="modeCustom" onclick="setMode('custom')" title="Cut lines dragged by hand">Custom</button>
       </div>
       <div class="control-group">
         <label>Cols</label>
-        <input type="number" id="cols" value="4" min="1" max="12" onchange="render()">
+        <input type="number" id="cols" value="4" min="1" max="12" onchange="onGridParamChange()">
       </div>
       <div class="control-group">
         <label>Rows</label>
-        <input type="number" id="rows" value="4" min="1" max="12" onchange="render()">
+        <input type="number" id="rows" value="4" min="1" max="12" onchange="onGridParamChange()">
       </div>
       <div class="control-group">
         <label>Trim px</label>
-        <input type="number" id="trim" value="6" min="0" max="200" onchange="render()">
+        <input type="number" id="trim" value="6" min="0" max="200" onchange="onGridParamChange()">
       </div>
       <div class="control-group">
         <label>Gutter px</label>
-        <input type="number" id="gutter" value="5" min="0" max="200" onchange="render()">
-      </div>
-      <div class="control-group">
-        <label>Prefix</label>
-        <input type="text" id="prefix" value="post-" onchange="render()">
+        <input type="number" id="gutter" value="5" min="0" max="200" onchange="onGridParamChange()">
       </div>
       <div class="control-group">
         <label>Inset px</label>
         <input type="number" id="inset" value="1" min="0" max="50" onchange="render()" title="Crop N pixels from each cell edge to remove anti-alias feathering">
+      </div>
+      <div class="control-group checkbox">
+        <label title="Scan each cell edge inward and snap to where real content starts. Turn off if it is eating your artwork.">
+          <input type="checkbox" id="tighten" checked onchange="render()"> Tighten
+        </label>
+      </div>
+
+      <div class="ctl-sep"></div>
+
+      <div class="control-group">
+        <label>Format</label>
+        <select id="format" onchange="onFormatChange()">
+          <option value="png" selected>PNG</option>
+          <option value="jpeg">JPG</option>
+          <option value="webp">WebP</option>
+        </select>
+      </div>
+      <div class="control-group hidden" id="qualityGroup">
+        <label>Quality</label>
+        <input type="range" id="quality" min="40" max="100" value="92" oninput="onQualityInput()">
+        <span class="range-val" id="qualityVal">92</span>
+      </div>
+      <div class="control-group">
+        <label>Size</label>
+        <select id="sizePreset" onchange="onSizeChange()">
+          <option value="original" selected>Original</option>
+          <option value="1080x1080">1080×1080 · IG square</option>
+          <option value="1080x1350">1080×1350 · IG portrait</option>
+          <option value="1080x1920">1080×1920 · Story</option>
+          <option value="1200x628">1200×628 · Link card</option>
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
+      <div class="control-group hidden" id="customSizeGroup">
+        <label>W×H</label>
+        <input type="number" id="customW" value="1080" min="1" max="8000" onchange="render()">
+        <input type="number" id="customH" value="1080" min="1" max="8000" onchange="render()">
+      </div>
+      <div class="control-group hidden" id="fitGroup">
+        <label>Fit</label>
+        <select id="fit" onchange="render()">
+          <option value="cover" selected>Cover · crop</option>
+          <option value="contain">Contain · pad</option>
+          <option value="stretch">Stretch</option>
+        </select>
+      </div>
+
+      <div class="ctl-sep"></div>
+
+      <div class="control-group">
+        <label>Prefix</label>
+        <input type="text" id="prefix" value="post-" onchange="render()">
       </div>
     </div>
 
     <div class="controls-actions">
       <button class="btn btn-secondary" id="detectBtn" onclick="runDetect()">Re-detect</button>
       <button class="btn btn-secondary" onclick="resetCuts()">Reset cuts</button>
-      <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">New image</button>
+      <button class="btn btn-secondary" onclick="newImage()">New image</button>
       <button class="btn btn-warn" onclick="uploadCellsToWorkspace()">Save to workspace</button>
       <button class="btn btn-success" onclick="downloadAllZip()">Download ZIP</button>
     </div>
@@ -240,11 +259,19 @@ body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; pa
       <div class="preview-canvas-wrap">
         <canvas id="previewCanvas"></canvas>
       </div>
+      <div class="drag-hint">Drag any red cut line to nudge it. Click the image to zoom.</div>
       <div id="statusBar" class="status-bar">Ready.</div>
     </div>
 
     <div class="panel">
-      <h3 id="cellsTitle">Cells</h3>
+      <div class="panel-head">
+        <h3 id="cellsTitle">Cells</h3>
+        <div class="sel-actions">
+          <button class="btn btn-secondary btn-tiny" onclick="selectAll(true)">All</button>
+          <button class="btn btn-secondary btn-tiny" onclick="selectAll(false)">None</button>
+          <button class="btn btn-secondary btn-tiny" onclick="invertSelection()">Invert</button>
+        </div>
+      </div>
       <div class="cell-grid" id="cellGrid"></div>
     </div>
   </div>
@@ -262,9 +289,20 @@ body { background: #0a0a0a; color: #e2e8f0; font-family: 'Inter', sans-serif; pa
 <script>
 // ====== STATE ======
 let sourceImg = null;
-let mode = 'manual'; // 'manual' | 'auto'
-let detected = null; // { cols:[{start,end}], rows:[{start,end}] } in source px
+let mode = 'manual';      // 'manual' | 'auto' | 'custom'
+let detected = null;      // { cols:[{start,end}], rows:[{start,end}] } in source px, from auto-detect
+let customBands = null;   // same shape — set once the user drags a cut line
+let selected = new Set(); // cell idx values included in ZIP / upload
+let lastCellCount = -1;   // detect grid changes so selection resets sensibly
 const $ = id => document.getElementById(id);
+
+const FORMATS = {
+  png:  { mime: 'image/png',  ext: 'png',  lossy: false },
+  jpeg: { mime: 'image/jpeg', ext: 'jpg',  lossy: true  },
+  webp: { mime: 'image/webp', ext: 'webp', lossy: true  },
+};
+const fmt = () => FORMATS[$('format').value] || FORMATS.png;
+const quality = () => clampInt($('quality').value, 40, 100) / 100;
 
 // ====== UPLOAD HANDLING ======
 const dz = $('dropzone');
@@ -284,9 +322,13 @@ function resetState() {
   // Clear all cell-related state so loading a new image is a clean slate.
   sourceImg = null;
   detected = null;
+  customBands = null;
+  selected = new Set();
+  lastCellCount = -1;
   mode = 'manual';
   $('modeManual').classList.add('active');
   $('modeAuto').classList.remove('active');
+  $('modeCustom').classList.remove('active', 'visible');
   $('cellGrid').innerHTML = '';
   const previewCvs = $('previewCanvas');
   const pctx = previewCvs.getContext('2d');
@@ -296,48 +338,65 @@ function resetState() {
   fileInput.value = '';
 }
 
+// Shared: seed UI + detection from a loaded Image. Used by both file upload and ?src= URL load.
+function applyLoadedImage(img, label) {
+  sourceImg = img;
+  $('mainUi').style.display = 'block';
+  dz.style.display = 'none';
+  const det = computeDetection();
+  if (det && det.cols >= 2 && det.rows >= 2) {
+    detected = det.cells;
+    $('cols').value = det.cols;
+    $('rows').value = det.rows;
+    $('trim').value = Math.round(det.trim.avg);
+    $('gutter').value = Math.round(det.gutter.avg);
+    setMode('auto');
+    setStatus(`Loaded ${label} — detected ${det.cols}×${det.rows}. Cuts are live.`, 'success');
+  } else {
+    setStatus(`Loaded ${label}. Auto-detect didn't find a clean grid — switch to Manual mode.`, 'error');
+  }
+  render();
+}
+
 function loadFile(file) {
   resetState();
   const reader = new FileReader();
   reader.onload = e => {
     const img = new Image();
-    img.onload = () => {
-      sourceImg = img;
-      $('mainUi').style.display = 'block';
-      dz.style.display = 'none';
-      // Try auto-detect first to seed manual params
-      const det = computeDetection();
-      if (det && det.cols >= 2 && det.rows >= 2) {
-        detected = det.cells;
-        // Seed manual inputs from detection
-        $('cols').value = det.cols;
-        $('rows').value = det.rows;
-        $('trim').value = Math.round(det.trim.avg);
-        $('gutter').value = Math.round(det.gutter.avg);
-        setMode('auto');
-        setStatus(`Loaded ${file.name} — detected ${det.cols}×${det.rows}. Cuts are live.`, 'success');
-      } else {
-        setStatus(`Loaded ${file.name}. Auto-detect didn't find a clean grid — switch to Manual mode.`, 'error');
-      }
-      render();
-    };
+    img.onload = () => applyLoadedImage(img, file.name);
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
-// Show dropzone again for next-image workflow (no page refresh needed)
+// Load an image already on the server (e.g. handed over from the Grid Creator via ?src=).
+function loadFromUrl(src) {
+  resetState();
+  const img = new Image();
+  img.crossOrigin = 'anonymous';  // same-origin /uploads/, but keep the canvas untainted for export
+  const label = (src.split('/').pop() || 'image').split('?')[0];
+  img.onload = () => applyLoadedImage(img, label);
+  img.onerror = () => setStatus(`Couldn't load ${label} — try uploading it manually.`, 'error');
+  img.src = src;
+}
+
+// Show dropzone again for next-image workflow (no page refresh needed).
+// Wired to the "New image" button — previously this function existed but nothing called it,
+// so the dropzone could never come back and stale status text survived the next load.
 function newImage() {
   resetState();
   $('mainUi').style.display = 'none';
   dz.style.display = 'block';
   setStatus('Ready for next image.');
+  fileInput.click();
 }
 
 // Re-run auto-detect on the current image (reset cuts without changing image)
 function resetCuts() {
   if (!sourceImg) return;
   detected = null;
+  customBands = null;
+  $('modeCustom').classList.remove('visible');
   const det = computeDetection();
   if (det && det.cols >= 2 && det.rows >= 2) {
     detected = det.cells;
@@ -356,9 +415,42 @@ function resetCuts() {
 
 // ====== MODE TOGGLE ======
 function setMode(m) {
+  // Leaving custom by hand discards the dragged bands — otherwise "Manual" would
+  // silently keep showing dragged cuts and the number inputs would look broken again.
+  if (m !== 'custom') { customBands = null; $('modeCustom').classList.remove('visible'); }
   mode = m;
   $('modeManual').classList.toggle('active', m === 'manual');
   $('modeAuto').classList.toggle('active', m === 'auto');
+  $('modeCustom').classList.toggle('active', m === 'custom');
+  render();
+}
+
+// Cols/Rows/Trim/Gutter only mean anything in manual mode. Before this, editing them
+// while in Auto (or after dragging) changed nothing at all — the input moved, the cuts
+// did not, with no explanation. Now touching one takes you to Manual and applies it.
+function onGridParamChange() {
+  if (mode !== 'manual') {
+    const was = mode;
+    setMode('manual');
+    setStatus(`Switched to Manual — ${was === 'auto' ? 'auto-detected' : 'dragged'} cuts replaced by your grid numbers. "Reset cuts" re-detects.`);
+    return;
+  }
+  render();
+}
+
+function onFormatChange() {
+  $('qualityGroup').classList.toggle('hidden', !fmt().lossy);
+  render();
+}
+function onQualityInput() {
+  $('qualityVal').textContent = $('quality').value;
+  render();
+}
+function onSizeChange() {
+  const v = $('sizePreset').value;
+  $('customSizeGroup').classList.toggle('hidden', v !== 'custom');
+  // Fit only matters when we are forcing a size the cell does not already have
+  $('fitGroup').classList.toggle('hidden', v === 'original');
   render();
 }
 
@@ -472,6 +564,8 @@ function runDetect() {
     return;
   }
   detected = det.cells;
+  customBands = null;
+  $('modeCustom').classList.remove('visible');
   $('cols').value = det.cols;
   $('rows').value = det.rows;
   $('trim').value = Math.round(det.trim.avg);
@@ -480,58 +574,75 @@ function runDetect() {
   setStatus(`Detected ${det.cols}×${det.rows} · trim ~${Math.round(det.trim.avg)}px · gutter ~${Math.round(det.gutter.avg)}px`, 'success');
 }
 
-// ====== CELL RECT COMPUTATION ======
-function getCellRects() {
-  if (!sourceImg) return [];
-  const W = sourceImg.naturalWidth, H = sourceImg.naturalHeight;
-  const inset = clampInt($('inset').value, 0, 50);
-
-  const finish = (rect) => {
-    // 1. Tighten to actual content (per-edge, asymmetric feathering)
-    const tightened = tightenToContent(rect);
-    // 2. Apply user inset on top
-    return {
-      x: tightened.x + inset,
-      y: tightened.y + inset,
-      w: Math.max(1, tightened.w - 2 * inset),
-      h: Math.max(1, tightened.h - 2 * inset),
-      idx: rect.idx
-    };
-  };
+// ====== BANDS — the single source of truth for where the cuts are ======
+// Every mode resolves to the same {cols:[{start,end}], rows:[{start,end}]} shape in source px.
+// Auto and Manual DERIVE bands; dragging PINS them into customBands. One representation means
+// drag, export, preview and tightening all read the same numbers.
+function getBands() {
+  if (!sourceImg) return null;
+  if (customBands) return customBands;
 
   if (mode === 'auto' && detected) {
-    const rects = [];
-    let idx = 1;
-    for (const r of detected.rows) {
-      for (const c of detected.cols) {
-        rects.push(finish({
-          x: c.start, y: r.start,
-          w: c.end - c.start + 1, h: r.end - r.start + 1,
-          idx: idx++
-        }));
-      }
-    }
-    return rects;
+    return {
+      cols: detected.cols.map(c => ({ ...c })),
+      rows: detected.rows.map(r => ({ ...r })),
+    };
   }
 
-  // Manual mode
+  // Manual: even grid from cols/rows/trim/gutter
+  const W = sourceImg.naturalWidth, H = sourceImg.naturalHeight;
   const cols = clampInt($('cols').value, 1, 12);
   const rows = clampInt($('rows').value, 1, 12);
   const trim = clampInt($('trim').value, 0, 500);
   const gutter = clampInt($('gutter').value, 0, 500);
   const cellW = (W - 2*trim - (cols-1)*gutter) / cols;
   const cellH = (H - 2*trim - (rows-1)*gutter) / rows;
-  if (cellW <= 0 || cellH <= 0) return [];
+  if (cellW <= 0 || cellH <= 0) return null;
+
+  // Round BOTH edges off the exact float base, never off the already-rounded start —
+  // otherwise rounding error accumulates into the gaps and a grid that does not divide
+  // evenly comes out with 5,6,5px gutters when 5 was asked for. Deriving each edge
+  // independently keeps every gutter exactly `gutter` and lets the leftover pixel land
+  // inside a cell, where it is invisible, instead of in the gap.
+  const colBands = [], rowBands = [];
+  for (let c = 0; c < cols; c++) {
+    const base = trim + c * (cellW + gutter);
+    colBands.push({ start: Math.round(base), end: Math.round(base + cellW) - 1 });
+  }
+  for (let r = 0; r < rows; r++) {
+    const base = trim + r * (cellH + gutter);
+    rowBands.push({ start: Math.round(base), end: Math.round(base + cellH) - 1 });
+  }
+  return { cols: colBands, rows: rowBands };
+}
+
+// ====== CELL RECT COMPUTATION ======
+function getCellRects(opts) {
+  const skipTighten = opts && opts.skipTighten;
+  const bands = getBands();
+  if (!bands) return [];
+  const inset = clampInt($('inset').value, 0, 50);
+  const doTighten = !skipTighten && $('tighten').checked;
+
   const rects = [];
   let idx = 1;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      rects.push(finish({
-        x: trim + c * (cellW + gutter),
-        y: trim + r * (cellH + gutter),
-        w: cellW, h: cellH,
+  for (const r of bands.rows) {
+    for (const c of bands.cols) {
+      let rect = {
+        x: c.start, y: r.start,
+        w: c.end - c.start + 1, h: r.end - r.start + 1,
         idx: idx++
-      }));
+      };
+      // 1. Tighten to actual content (per-edge, asymmetric feathering)
+      if (doTighten) rect = tightenToContent(rect);
+      // 2. Apply user inset on top
+      rects.push({
+        x: rect.x + inset,
+        y: rect.y + inset,
+        w: Math.max(1, rect.w - 2 * inset),
+        h: Math.max(1, rect.h - 2 * inset),
+        idx: rect.idx
+      });
     }
   }
   return rects;
@@ -593,13 +704,146 @@ function clampInt(v, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+// ====== OUTPUT SIZING + ENCODING ======
+function getOutputSize(r) {
+  const preset = $('sizePreset').value;
+  if (preset === 'original') return [Math.max(1, Math.round(r.w)), Math.max(1, Math.round(r.h))];
+  if (preset === 'custom') {
+    return [clampInt($('customW').value, 1, 8000), clampInt($('customH').value, 1, 8000)];
+  }
+  const [w, h] = preset.split('x').map(Number);
+  return [w, h];
+}
+
+// One renderer for thumbnails, lightbox, downloads, ZIP and workspace upload — so the
+// preview you approve is pixel-for-pixel the file you get. maxPx only scales the whole
+// output down for cheap thumbnails; framing/crop math is identical.
+function makeCellCanvas(r, maxPx) {
+  let [outW, outH] = getOutputSize(r);
+  if (maxPx && Math.max(outW, outH) > maxPx) {
+    const s = maxPx / Math.max(outW, outH);
+    outW = Math.max(1, Math.round(outW * s));
+    outH = Math.max(1, Math.round(outH * s));
+  }
+  const cvs = document.createElement('canvas');
+  cvs.width = outW; cvs.height = outH;
+  const ctx = cvs.getContext('2d');
+
+  // JPEG has no alpha — pad with white instead of the black a bare canvas encodes to.
+  if (fmt().mime === 'image/jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, outW, outH); }
+
+  const sw = Math.max(1, Math.round(r.w)), sh = Math.max(1, Math.round(r.h));
+  const preset = $('sizePreset').value;
+  const fit = preset === 'original' ? 'stretch' : $('fit').value;
+
+  if (fit === 'stretch') {
+    ctx.drawImage(sourceImg, r.x, r.y, sw, sh, 0, 0, outW, outH);
+  } else {
+    const scale = fit === 'cover'
+      ? Math.max(outW / sw, outH / sh)   // fill the frame, crop the overflow
+      : Math.min(outW / sw, outH / sh);  // fit inside the frame, pad the rest
+    const dw = sw * scale, dh = sh * scale;
+    ctx.drawImage(sourceImg, r.x, r.y, sw, sh, (outW - dw) / 2, (outH - dh) / 2, dw, dh);
+  }
+  return cvs;
+}
+
+function cellFilename(r, pad) {
+  const prefix = $('prefix').value || 'post-';
+  return `${prefix}${String(r.idx).padStart(pad, '0')}.${fmt().ext}`;
+}
+function cellToBlob(cvs) {
+  const f = fmt();
+  return new Promise(res => cvs.toBlob(res, f.mime, f.lossy ? quality() : undefined));
+}
+// Save one cell to the tenant's uploads/ via /api/upload — same auth + endpoint as the
+// batch "Save to workspace", scoped to a single cell (the per-image Save button).
+async function saveCellToUploads(r, pad, btn) {
+  const token = window._canvasAuthToken || null;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const blob = await cellToBlob(makeCellCanvas(r, 0));
+    if (!blob) throw new Error('encode failed');
+    const fd = new FormData();
+    fd.append('file', new File([blob], cellFilename(r, pad), { type: fmt().mime }));
+    const resp = await fetch('/api/upload', {
+      method: 'POST', body: fd,
+      headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    btn.textContent = '✓ Saved';
+    setStatus(`Saved ${cellFilename(r, pad)} to uploads/`, 'success');
+  } catch (e) {
+    btn.disabled = false; btn.textContent = orig;
+    setStatus(`Save failed for cell #${r.idx}: ${e.message}`, 'error');
+  }
+}
+
+// ====== SELECTION ======
+function syncSelection(count) {
+  // A different grid means the old idx set is meaningless — start fresh with everything on.
+  if (count !== lastCellCount) {
+    selected = new Set(Array.from({ length: count }, (_, i) => i + 1));
+    lastCellCount = count;
+  }
+}
+function toggleCell(idx, on) {
+  if (on) selected.add(idx); else selected.delete(idx);
+  const cellEl = document.querySelector(`.cell[data-idx="${idx}"]`);
+  if (cellEl) cellEl.classList.toggle('deselected', !on);
+  updateCellsTitle();
+  render({ previewOnly: true });   // keep the dimmed-cell overlay in step with the checkboxes
+}
+function selectAll(on) {
+  if (on) selected = new Set(Array.from({ length: lastCellCount }, (_, i) => i + 1));
+  else selected = new Set();
+  refreshSelectionUi();
+}
+function invertSelection() {
+  const next = new Set();
+  for (let i = 1; i <= lastCellCount; i++) if (!selected.has(i)) next.add(i);
+  selected = next;
+  refreshSelectionUi();
+}
+function refreshSelectionUi() {
+  document.querySelectorAll('.cell').forEach(el => {
+    const idx = Number(el.dataset.idx);
+    const on = selected.has(idx);
+    el.classList.toggle('deselected', !on);
+    const cb = el.querySelector('input[type=checkbox]');
+    if (cb) cb.checked = on;
+  });
+  updateCellsTitle();
+  render({ previewOnly: true });
+}
+function selectedRects(rects) {
+  return rects.filter(r => selected.has(r.idx));
+}
+
 // ====== RENDERING ======
-function render() {
+// opts.fast        — skip content-tightening (only safe mid-drag; it does a getImageData per
+//                    cell and cannot run at pointermove rate)
+// opts.previewOnly  — redraw the overlay but leave the cell grid alone (selection toggles)
+function render(opts) {
   if (!sourceImg) return;
-  const rects = getCellRects();
+  opts = opts || {};
+  const rects = getCellRects({ skipTighten: opts.fast });
   renderPreviewOverlay(rects);
+  if (opts.previewOnly) return;
+  syncSelection(rects.length);
   renderCellGrid(rects);
-  $('cellsTitle').textContent = `${rects.length} cells · ${mode === 'auto' ? 'auto-detected' : 'manual'}`;
+  updateCellsTitle();
+}
+
+function modeLabel() {
+  return mode === 'auto' ? 'auto-detected' : mode === 'custom' ? 'hand-adjusted' : 'manual';
+}
+function updateCellsTitle() {
+  const n = lastCellCount < 0 ? 0 : lastCellCount;
+  const s = selected.size;
+  const sel = s === n ? 'all selected' : `${s} of ${n} selected`;
+  $('cellsTitle').textContent = `${n} cells · ${modeLabel()} · ${sel}`;
 }
 
 function renderPreviewOverlay(rects) {
@@ -609,82 +853,102 @@ function renderPreviewOverlay(rects) {
   const ctx = cvs.getContext('2d');
   ctx.drawImage(sourceImg, 0, 0);
 
+  const lw = Math.max(1, Math.round(Math.min(W, H) / 500));
+
+  // Dim the cells that will not be exported, so selection is visible on the original too
+  if (lastCellCount > 0) {
+    ctx.fillStyle = 'rgba(10,10,10,0.62)';
+    for (const r of rects) if (!selected.has(r.idx)) ctx.fillRect(r.x, r.y, r.w, r.h);
+  }
+
   // Draw cut-line overlays
   ctx.strokeStyle = 'rgba(255, 60, 60, 0.85)';
-  ctx.lineWidth = Math.max(1, Math.round(Math.min(W, H) / 500));
+  ctx.lineWidth = lw;
   ctx.setLineDash([8, 6]);
   for (const r of rects) {
     ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
   }
   ctx.setLineDash([]);
 
-  // Click preview to zoom
-  cvs.onclick = () => openLightbox(cvs, 'Original with cut lines');
-}
-
-// Save one cell canvas to the tenant's uploads/ via /api/upload (same path as the
-// batch "Save to workspace", scoped to a single cell so you can keep just the ones you want).
-async function saveCellToUploads(cvs, fname, btn) {
-  const token = window._canvasAuthToken || null;
-  const orig = btn.textContent;
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try {
-    const blob = await new Promise(res => cvs.toBlob(res, 'image/png'));
-    if (!blob) throw new Error('render failed');
-    const fd = new FormData();
-    fd.append('file', new File([blob], fname, { type: 'image/png' }));
-    const resp = await fetch('/api/upload', {
-      method: 'POST', body: fd,
-      headers: token ? { 'Authorization': 'Bearer ' + token } : {},
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    btn.textContent = '✓ Saved';
-    setStatus(`Saved ${fname} to uploads/`, 'success');
-  } catch (e) {
-    btn.disabled = false; btn.textContent = orig;
-    setStatus(`Save failed for ${fname}: ${e.message}`, 'error');
+  // Draw draggable band edges as solid lines with grips, so it is obvious they are handles
+  const bands = getBands();
+  if (bands) {
+    const grip = Math.max(6, lw * 4);
+    ctx.strokeStyle = 'rgba(147, 197, 253, 0.9)';
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.95)';
+    ctx.lineWidth = lw;
+    for (const c of bands.cols) {
+      for (const x of [c.start, c.end + 1]) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.fillRect(x - grip / 2, H / 2 - grip * 1.5, grip, grip * 3);
+      }
+    }
+    for (const r of bands.rows) {
+      for (const y of [r.start, r.end + 1]) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        ctx.fillRect(W / 2 - grip * 1.5, y - grip / 2, grip * 3, grip);
+      }
+    }
   }
 }
 
 function renderCellGrid(rects) {
   const grid = $('cellGrid');
   grid.innerHTML = '';
-  const prefix = $('prefix').value || 'post-';
   const pad = String(rects.length).length;
-  // Adaptive column count based on cell aspect
-  const cols = rects.length <= 4 ? rects.length : rects.length <= 9 ? 3 : 4;
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  // Columns are CSS-driven (auto-fill/minmax) so cells fit ANY width — phone to
+  // desktop — instead of a hardcoded count that clipped off-screen on mobile.
 
   for (const r of rects) {
     const cell = document.createElement('div');
-    cell.className = 'cell';
-    const cvs = document.createElement('canvas');
-    cvs.width = Math.round(r.w); cvs.height = Math.round(r.h);
-    const ctx = cvs.getContext('2d');
-    ctx.drawImage(sourceImg, r.x, r.y, r.w, r.h, 0, 0, cvs.width, cvs.height);
+    cell.className = 'cell' + (selected.has(r.idx) ? '' : ' deselected');
+    cell.dataset.idx = r.idx;
+
+    // Thumbnail goes through the SAME pipeline as the export — crop/pad included
+    const cvs = makeCellCanvas(r, 420);
+    const [outW, outH] = getOutputSize(r);
 
     const head = document.createElement('div');
     head.className = 'cell-head';
-    const idxSpan = document.createElement('span');
-    idxSpan.className = 'cell-idx';
-    idxSpan.textContent = `#${r.idx}`;
+
+    const idxLabel = document.createElement('label');
+    idxLabel.className = 'cell-idx';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selected.has(r.idx);
+    cb.onchange = () => toggleCell(r.idx, cb.checked);
+    idxLabel.appendChild(cb);
+    idxLabel.appendChild(document.createTextNode(`#${r.idx}`));
+
     const sizeSpan = document.createElement('span');
     sizeSpan.className = 'cell-size';
-    sizeSpan.textContent = `${Math.round(r.w)}×${Math.round(r.h)}`;
-    head.appendChild(idxSpan); head.appendChild(sizeSpan);
+    sizeSpan.textContent = `${outW}×${outH}`;
+    head.appendChild(idxLabel); head.appendChild(sizeSpan);
 
-    const fname = `${prefix}${String(r.idx).padStart(pad, '0')}.png`;
+    // Build the file only when actually clicked — a data URL per cell per render was
+    // megabytes of churn on every slider nudge.
     const dl = document.createElement('a');
     dl.className = 'cell-dl';
-    dl.textContent = 'Download';
-    dl.download = fname;
-    dl.href = cvs.toDataURL('image/png');
+    dl.href = '#';
+    dl.textContent = `Download ${fmt().ext.toUpperCase()}`;
+    dl.onclick = async (e) => {
+      e.preventDefault();
+      const full = makeCellCanvas(r, 0);
+      const blob = await cellToBlob(full);
+      if (!blob) { setStatus(`Could not encode cell #${r.idx} as ${fmt().ext}.`, 'error'); return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = cellFilename(r, pad);
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
 
-    // Per-cell Save → adds just this one cell to the tenant's uploads/
+    // Per-cell Save → uploads just this one cell to the tenant's uploads/ (obvious
+    // one-click alongside Download; batch "Save to workspace" still saves the selection).
     const save = document.createElement('button');
     save.className = 'cell-save';
     save.textContent = 'Save';
-    save.onclick = () => saveCellToUploads(cvs, fname, save);
+    save.onclick = () => saveCellToUploads(r, pad, save);
 
     const actions = document.createElement('div');
     actions.className = 'cell-actions';
@@ -696,10 +960,118 @@ function renderCellGrid(rects) {
     cell.appendChild(actions);
     grid.appendChild(cell);
 
-    // Click cell to zoom
-    cvs.onclick = () => openLightbox(cvs, `Cell #${r.idx} · ${Math.round(r.w)}×${Math.round(r.h)}`);
+    // Click cell to zoom (full-size render, not the thumbnail)
+    cvs.onclick = () => openLightbox(makeCellCanvas(r, 0), `Cell #${r.idx} · ${outW}×${outH} · ${fmt().ext.toUpperCase()}`);
   }
 }
+
+// ====== DRAGGABLE CUT LINES ======
+// Hit-test against band edges in SOURCE px, converted from pointer position through the
+// canvas display scale (the preview is CSS-scaled to fit the panel).
+let drag = null;      // { axis, bandIdx, edge }
+let didDrag = false;
+
+function canvasScale() {
+  const cvs = $('previewCanvas');
+  const rect = cvs.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return { sx: cvs.width / rect.width, sy: cvs.height / rect.height, rect };
+}
+function pointerSrc(e) {
+  const s = canvasScale();
+  if (!s) return null;
+  const p = e.touches ? e.touches[0] : e;
+  return { x: (p.clientX - s.rect.left) * s.sx, y: (p.clientY - s.rect.top) * s.sy, s };
+}
+function hitEdge(pos) {
+  const bands = getBands();
+  if (!bands || !pos) return null;
+  const tolX = 7 * pos.s.sx, tolY = 7 * pos.s.sy;
+  let best = null;
+  bands.cols.forEach((b, i) => {
+    for (const [edge, v] of [['start', b.start], ['end', b.end + 1]]) {
+      const d = Math.abs(pos.x - v) / pos.s.sx;
+      if (Math.abs(pos.x - v) <= tolX && (!best || d < best.d)) best = { axis: 'cols', bandIdx: i, edge, d };
+    }
+  });
+  bands.rows.forEach((b, i) => {
+    for (const [edge, v] of [['start', b.start], ['end', b.end + 1]]) {
+      const d = Math.abs(pos.y - v) / pos.s.sy;
+      if (Math.abs(pos.y - v) <= tolY && (!best || d < best.d)) best = { axis: 'rows', bandIdx: i, edge, d };
+    }
+  });
+  return best;
+}
+
+// Pin whatever the current mode derived into an editable copy, then keep editing that.
+function ensureCustomBands() {
+  if (customBands) return customBands;
+  const b = getBands();
+  if (!b) return null;
+  customBands = { cols: b.cols.map(c => ({ ...c })), rows: b.rows.map(r => ({ ...r })) };
+  mode = 'custom';
+  $('modeManual').classList.remove('active');
+  $('modeAuto').classList.remove('active');
+  $('modeCustom').classList.add('active', 'visible');
+  return customBands;
+}
+
+const MIN_BAND = 4;
+function applyDrag(pos) {
+  const bands = ensureCustomBands();
+  if (!bands || !drag) return;
+  const list = bands[drag.axis];
+  const band = list[drag.bandIdx];
+  const limit = drag.axis === 'cols' ? sourceImg.naturalWidth : sourceImg.naturalHeight;
+  const v = Math.round(drag.axis === 'cols' ? pos.x : pos.y);
+
+  if (drag.edge === 'start') {
+    const prev = list[drag.bandIdx - 1];
+    const lo = prev ? prev.end + 1 : 0;
+    band.start = Math.max(lo, Math.min(v, band.end - MIN_BAND));
+  } else {
+    const next = list[drag.bandIdx + 1];
+    const hi = next ? next.start - 1 : limit - 1;
+    band.end = Math.min(hi, Math.max(v - 1, band.start + MIN_BAND));
+  }
+}
+
+const preview = $('previewCanvas');
+preview.addEventListener('pointerdown', e => {
+  const pos = pointerSrc(e);
+  const hit = hitEdge(pos);
+  if (!hit) return;
+  e.preventDefault();
+  drag = hit; didDrag = false;
+  preview.setPointerCapture(e.pointerId);
+});
+preview.addEventListener('pointermove', e => {
+  const pos = pointerSrc(e);
+  if (!pos) return;
+  if (!drag) {
+    const hit = hitEdge(pos);
+    preview.style.cursor = hit ? (hit.axis === 'cols' ? 'col-resize' : 'row-resize') : 'zoom-in';
+    return;
+  }
+  e.preventDefault();
+  didDrag = true;
+  applyDrag(pos);
+  render({ previewOnly: true, fast: true });   // cheap during drag — no tightening, no cell rebuild
+});
+function endDrag(e) {
+  if (!drag) return;
+  drag = null;
+  try { preview.releasePointerCapture(e.pointerId); } catch (_) {}
+  render();                        // full pass: tighten, rebuild cells, update counts
+  setStatus('Cut lines adjusted by hand. "Reset cuts" re-detects, or edit Cols/Rows to go back to an even grid.');
+}
+preview.addEventListener('pointerup', endDrag);
+preview.addEventListener('pointercancel', endDrag);
+
+preview.addEventListener('click', () => {
+  if (didDrag) { didDrag = false; return; }   // a drag must not also open the lightbox
+  openLightbox($('previewCanvas'), 'Original with cut lines');
+});
 
 // ====== LIGHTBOX ======
 function openLightbox(srcCanvas, caption) {
@@ -726,26 +1098,26 @@ async function downloadAllZip() {
     setStatus('JSZip failed to load (CDN blocked?). Try individual downloads.', 'error');
     return;
   }
-  const rects = getCellRects();
-  if (!rects.length) { setStatus('No cells to download.', 'error'); return; }
+  const all = getCellRects();
+  const rects = selectedRects(all);
+  if (!rects.length) {
+    setStatus(all.length ? 'No cells selected — tick at least one.' : 'No cells to download.', 'error');
+    return;
+  }
 
-  setStatus(`Zipping ${rects.length} cells…`);
+  setStatus(`Zipping ${rects.length} of ${all.length} cells…`);
   try {
     const zip = new JSZip();
-    const prefix = $('prefix').value || 'post-';
-    const pad = String(rects.length).length;
+    const pad = String(all.length).length;
     for (const r of rects) {
-      const cvs = document.createElement('canvas');
-      cvs.width = Math.round(r.w); cvs.height = Math.round(r.h);
-      const ctx = cvs.getContext('2d');
-      ctx.drawImage(sourceImg, r.x, r.y, r.w, r.h, 0, 0, cvs.width, cvs.height);
-      const blob = await new Promise(res => cvs.toBlob(res, 'image/png'));
-      const name = `${prefix}${String(r.idx).padStart(pad, '0')}.png`;
-      zip.file(name, blob);
+      const blob = await cellToBlob(makeCellCanvas(r, 0));
+      if (!blob) throw new Error(`could not encode cell #${r.idx} as ${fmt().ext}`);
+      zip.file(cellFilename(r, pad), blob);
     }
     const content = await zip.generateAsync({ type: 'blob' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(content);
+    const prefix = $('prefix').value || 'post-';
     const zipName = `${prefix.replace(/-$/, '')}-${rects.length}cells.zip`;
     a.download = zipName;
     a.click();
@@ -763,34 +1135,32 @@ function setStatus(msg, kind) {
 }
 
 // ====== UPLOAD CELLS TO WORKSPACE ======
-// Uploads each cropped cell PNG to this tenant's uploads/ folder via the OpenVoiceUI
+// Uploads each selected cell to this tenant's uploads/ folder via the OpenVoiceUI
 // /api/upload endpoint. Same auth pattern as bulk-image-uploader.html.
 async function uploadCellsToWorkspace() {
   if (!sourceImg) return;
-  const rects = getCellRects();
-  if (!rects.length) { setStatus('No cells to upload.', 'error'); return; }
+  const all = getCellRects();
+  const rects = selectedRects(all);
+  if (!rects.length) {
+    setStatus(all.length ? 'No cells selected — tick at least one.' : 'No cells to upload.', 'error');
+    return;
+  }
 
   // Cache auth token if caller injected one (bulk uploader pattern)
   const token = window._canvasAuthToken || null;
 
   setStatus(`Uploading ${rects.length} cells to workspace uploads/…`);
-  const prefix = $('prefix').value || 'post-';
-  const pad = String(rects.length).length;
+  const pad = String(all.length).length;
   let ok = 0, fail = 0;
   const failMsgs = [];
 
   for (const r of rects) {
-    const name = `${prefix}${String(r.idx).padStart(pad, '0')}.png`;
-    // Render cell to its own canvas → PNG blob
-    const cvs = document.createElement('canvas');
-    cvs.width = Math.round(r.w); cvs.height = Math.round(r.h);
-    const ctx = cvs.getContext('2d');
-    ctx.drawImage(sourceImg, r.x, r.y, r.w, r.h, 0, 0, cvs.width, cvs.height);
-    const blob = await new Promise(res => cvs.toBlob(res, 'image/png'));
-    if (!blob) { fail++; failMsgs.push(`${name}: blob failed`); continue; }
+    const name = cellFilename(r, pad);
+    const blob = await cellToBlob(makeCellCanvas(r, 0));
+    if (!blob) { fail++; failMsgs.push(`${name}: encode failed`); continue; }
 
     const fd = new FormData();
-    fd.append('file', new File([blob], name, { type: 'image/png' }));
+    fd.append('file', new File([blob], name, { type: fmt().mime }));
 
     try {
       const xhr = new XMLHttpRequest();
@@ -812,11 +1182,20 @@ async function uploadCellsToWorkspace() {
   }
 
   if (fail === 0) {
-    setStatus(`Uploaded all ${ok} cells to workspace uploads/ as "${prefix}01…${String(ok).padStart(pad,'0')}.png"`, 'success');
+    setStatus(`Uploaded all ${ok} cells to workspace uploads/ as .${fmt().ext}`, 'success');
   } else {
     setStatus(`Uploaded ${ok}/${rects.length}, ${fail} failed — ${failMsgs.slice(0,2).join('; ')}`, 'error');
   }
 }
+
+// ====== Grid Creator hand-off: ?src=/uploads/<file> loads that image on open ======
+// Runs LAST so every function/const it depends on is already defined.
+(function () {
+  try {
+    const src = new URLSearchParams(window.location.search).get('src');
+    if (src && /^\/uploads\/[^?#]+$/.test(src)) loadFromUrl(src);  // same-origin uploads paths only
+  } catch (e) {}
+})();
 
 </script>
 </body>
