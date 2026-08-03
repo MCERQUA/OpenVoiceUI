@@ -8,14 +8,21 @@ POST   /api/canvas/styles/<id>/archive    — archive custom (nothing is ever de
 POST   /api/canvas/styles/<id>/unarchive
 POST   /api/canvas/styles/<id>/activate   — set tenant-active style, render agent files
 GET    /api/canvas/styles/<id>/preview    — the style's template/demo page as HTML
+POST   /api/canvas/styles/from-website    — spool a brand-review job (host worker)
+GET    /api/canvas/styles/from-website/<job_id> — poll that job
 
 Store + renderer: services/canvas_styles.py
+Brand review pipeline: scripts/brand-style/ on the HOST (this container has no
+browser and no coding agent), reached through the durable tool-job spool.
 """
 import logging
+import os
+import re
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request
 
 from services import canvas_styles as store
+from services import tool_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +166,112 @@ def lint_page(page_id):
         logger.error('lint failed for %s: %s', page_id, exc)
         return jsonify({'error': 'lint failed'}), 500
     return jsonify({'page_id': safe, 'ok': not issues, 'issues': issues})
+
+
+_URL_SHAPE_RE = re.compile(
+    r'^(?:https?://)?'
+    r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}'
+    r'(?::\d{2,5})?(?:[/?#]\S*)?$',
+    re.I,
+)
+
+
+@canvas_styles_bp.post('/api/canvas/styles/from-website')
+def style_from_website():
+    """Ask the host to review a website and build a matching style.
+
+    This container cannot do the work: it has no browser to render the site and
+    no coding agent to judge what it sees. So the request is spooled to the same
+    durable job bus the voice tools use, and the host worker
+    (scripts/tool-job-worker.py -> handle_brand_style) executes it.
+
+    The shape check here is a courtesy so the user gets an instant, readable
+    error for a typo. It is NOT the security boundary — the host worker does the
+    real SSRF check (public_url_or_reason) against every resolved address, since
+    that is the process that will actually open the URL.
+    """
+    data = request.get_json(silent=True) or {}
+    url = (data.get('url') or '').strip()
+    if not url:
+        return jsonify({'error': 'a website URL is required'}), 400
+    if len(url) > 500:
+        return jsonify({'error': 'that URL is too long'}), 400
+    if not _URL_SHAPE_RE.match(url):
+        return jsonify({'error': "that doesn't look like a website address — "
+                                 'try something like example.com'}), 400
+
+    # Provenance only — the worker derives the real tenant from the job file's
+    # own path (/mnt/clients/<tenant>/...), which is authoritative and cannot be
+    # wrong even on tenants that never set these env vars.
+    tenant = (os.getenv('JAMBOT_TENANT') or os.getenv('TENANT_NAME')
+              or os.getenv('CLIENT_NAME') or None)
+    job = tool_jobs.create(
+        'brand_style',
+        {'url': url},
+        tenant=tenant,
+        user_id=getattr(g, 'clerk_user_id', None),
+    )
+    logger.info('brand style requested: job=%s url=%s tenant=%s', job['id'], url, tenant)
+    return jsonify({
+        'ok': True,
+        'job_id': job['id'],
+        'status': job['status'],
+        'message': 'Reviewing the site — this takes a few minutes.',
+    }), 202
+
+
+@canvas_styles_bp.get('/api/canvas/styles/from-website')
+def style_from_website_latest():
+    """The most recent brand-review job, so the picker can resume after a reload.
+
+    The browser stores NOTHING (root CLAUDE.md: the VPS is the database). A user
+    who refreshes mid-review must still see it running, and the only way to know
+    that without client storage is to ask the server.
+    """
+    jobs = [j for j in tool_jobs.list_jobs() if j.get('tool') == 'brand_style']
+    if not jobs:
+        return jsonify({'job': None})
+    return jsonify({'job': _brand_job_view(jobs[0])})
+
+
+def _brand_job_view(job: dict) -> dict:
+    out = {
+        'job_id': job['id'],
+        'status': job.get('status'),
+        'url': (job.get('params') or {}).get('url'),
+        'progress': job.get('progress'),
+        'error': job.get('error'),
+        'created_at': job.get('created_at'),
+    }
+    result = job.get('result') or {}
+    style_id = job.get('style_id')
+    if not style_id:
+        for art in result.get('artifacts') or []:
+            if art.get('type') == 'canvas_style':
+                style_id = art.get('id')
+                break
+    if style_id:
+        # Report the style only if it is REALLY in the store. A finished job
+        # claiming a style that the picker cannot then show is worse than a
+        # failure, because it looks like success.
+        exists = store.get_style(style_id) is not None
+        out['style_id'] = style_id if exists else None
+        out['style_missing'] = not exists
+        if exists:
+            out['preview_url'] = f'/api/canvas/styles/{style_id}/preview'
+    if result.get('summary'):
+        out['summary'] = result['summary']
+    return out
+
+
+@canvas_styles_bp.get('/api/canvas/styles/from-website/<job_id>')
+def style_from_website_status(job_id):
+    job = tool_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'job not found'}), 404
+    if job.get('tool') != 'brand_style':
+        return jsonify({'error': 'not a brand-style job'}), 400
+    return jsonify(_brand_job_view(job))
 
 
 @canvas_styles_bp.get('/api/canvas/styles/<style_id>/preview')

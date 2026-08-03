@@ -1,4 +1,4 @@
-<!-- openvoiceui-version: 1 -->
+<!-- openvoiceui-version: 2 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -62,6 +62,59 @@ svg{display:block}
 }
 .hero .active-line .dot{width:9px;height:9px;border-radius:50%;background:var(--green);flex:none}
 .hero .active-line strong{color:var(--text);font-weight:600}
+
+/* ---------- Match my website ---------- */
+.sr-only{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);white-space:nowrap;border:0;
+}
+.brandbox{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:22px;margin-bottom:26px;
+  display:grid;grid-template-columns:1fr auto;gap:8px 24px;align-items:end;
+}
+.brandbox-copy{grid-column:1/-1;max-width:64ch}
+.brandbox h2{
+  display:flex;align-items:center;gap:9px;
+  font-size:1.05rem;font-weight:700;letter-spacing:-.01em;color:var(--text);
+}
+.brandbox h2 svg{width:19px;height:19px;color:var(--blue);flex:none}
+.brandbox p{color:var(--muted);margin-top:6px;font-size:.93rem;line-height:1.55}
+.brandbox-form{display:flex;gap:10px;min-width:0}
+.brandbox-form input{
+  flex:1;min-width:0;font:inherit;font-size:.95rem;color:var(--text);
+  background:var(--bg);border:1px solid var(--border-strong);border-radius:10px;
+  padding:10px 13px;transition:border-color .15s,box-shadow .15s;
+}
+.brandbox-form input::placeholder{color:var(--faint)}
+.brandbox-form input:focus{
+  outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft);
+}
+.brandbox-form input[aria-invalid="true"]{border-color:var(--red)}
+.brandbox-form .btn{white-space:nowrap}
+.brandbox-hint{color:var(--faint);font-size:.82rem;grid-column:1/-1;margin-top:-2px}
+.brandbox-hint.is-error{color:var(--red)}
+.brandbox-status{
+  grid-column:1/-1;display:flex;align-items:center;gap:12px;margin-top:4px;
+  background:var(--blue-soft);border:1px solid #dbeafe;border-radius:10px;padding:12px 14px;
+}
+.brandbox-status.is-done{background:var(--green-soft);border-color:#dcfce7}
+.brandbox-status.is-error{background:var(--red-soft);border-color:#fee2e2}
+.brandbox-status .bs-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.brandbox-status strong{font-size:.9rem;font-weight:600;color:var(--text)}
+.brandbox-status span{font-size:.84rem;color:var(--muted)}
+.spinner{
+  width:16px;height:16px;flex:none;border-radius:50%;
+  border:2px solid #bfdbfe;border-top-color:var(--blue);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation-duration:2.4s}}
+@media (max-width:640px){
+  .brandbox{grid-template-columns:1fr;padding:18px}
+  .brandbox-form{flex-direction:column}
+  .brandbox-form .btn{width:100%;justify-content:center}
+}
 
 /* ---------- Grid + cards ---------- */
 .grid{
@@ -294,6 +347,35 @@ details.advanced .adv-body{padding:0 18px 16px}
       <span>Current style: <strong id="activeName">&mdash;</strong></span>
     </div>
   </header>
+
+  <!-- Match my website -->
+  <section class="brandbox" id="brandBox" aria-labelledby="brandTitle">
+    <div class="brandbox-copy">
+      <h2 id="brandTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18z"/></svg>
+        Match my website
+      </h2>
+      <p>Enter your website and we&rsquo;ll study its colours, type and layout, then build a style
+         that matches your brand &mdash; so quotes and pages your assistant creates look like they
+         came from the same company your customers already know.</p>
+    </div>
+    <form class="brandbox-form" id="brandForm" autocomplete="off">
+      <label class="sr-only" for="brandUrl">Your website address</label>
+      <input type="text" id="brandUrl" name="url" inputmode="url" spellcheck="false"
+             placeholder="yourcompany.com" aria-describedby="brandHint">
+      <button class="btn btn-primary" id="brandBtn" type="submit">Build my style</button>
+    </form>
+    <p class="brandbox-hint" id="brandHint">Takes a few minutes. You can leave this page &mdash; it keeps working.</p>
+
+    <div class="brandbox-status hidden" id="brandStatus" role="status" aria-live="polite">
+      <span class="spinner" id="brandSpinner" aria-hidden="true"></span>
+      <div class="bs-text">
+        <strong id="brandStatusTitle">Reviewing your site&hellip;</strong>
+        <span id="brandStatusDetail"></span>
+      </div>
+      <button class="btn btn-secondary hidden" id="brandSeeBtn" type="button">See it</button>
+    </div>
+  </section>
 
   <!-- Loading skeletons -->
   <div class="grid" id="skeletons" aria-hidden="true">
@@ -1009,10 +1091,158 @@ details.advanced .adv-body{padding:0 18px 16px}
   });
 
   // -------------------------------------------------------------------
+  // Match my website
+  //
+  // No client-side state at all: the server owns the job, and the page asks it
+  // what is happening. A refresh mid-review picks the same job back up, and two
+  // tabs agree — which localStorage could never give us (and which the root
+  // CLAUDE.md forbids anyway: the VPS is the database).
+  // -------------------------------------------------------------------
+  var BRAND_API = API + '/from-website';
+  var brandPoll = null;
+
+  function setBrandStatus(kind, title, detail, styleId) {
+    var box = $('brandStatus');
+    box.classList.remove('hidden', 'is-done', 'is-error');
+    if (kind !== 'running') box.classList.add(kind === 'done' ? 'is-done' : 'is-error');
+    $('brandSpinner').classList.toggle('hidden', kind !== 'running');
+    $('brandStatusTitle').textContent = title;
+    $('brandStatusDetail').textContent = detail || '';
+
+    var see = $('brandSeeBtn');
+    see.classList.toggle('hidden', !styleId);
+    see.onclick = styleId ? function () {
+      var found = null;
+      for (var i = 0; i < state.styles.length; i++) {
+        if (state.styles[i].id === styleId) found = state.styles[i];
+      }
+      if (found) openPreview(found);
+    } : null;
+  }
+
+  function setBrandBusy(busy) {
+    $('brandBtn').disabled = busy;
+    $('brandUrl').disabled = busy;
+    $('brandBtn').textContent = busy ? 'Working…' : 'Build my style';
+  }
+
+  function stopBrandPoll() {
+    if (brandPoll) { clearInterval(brandPoll); brandPoll = null; }
+  }
+
+  function applyBrandJob(job, opts) {
+    opts = opts || {};
+    if (!job) { setBrandBusy(false); return; }
+
+    if (job.status === 'queued' || job.status === 'running') {
+      setBrandBusy(true);
+      setBrandStatus('running',
+        'Reviewing ' + (job.url || 'your site') + '…',
+        job.progress || 'Queued — starting shortly.');
+      return;
+    }
+
+    stopBrandPoll();
+    setBrandBusy(false);
+
+    if (job.status === 'done' && job.style_id) {
+      setBrandStatus('done', 'Your brand style is ready',
+        job.summary || 'It is in the gallery below.', job.style_id);
+      // Reload so the new style appears with a live preview, then offer it.
+      loadStyles(true).then(function () {
+        if (opts.announce) {
+          toast('Built a style from ' + (job.url || 'your website'), {kind: 'ok'});
+        }
+      });
+      return;
+    }
+
+    if (job.status === 'done' && job.style_missing) {
+      // Job says success, store disagrees. Say so plainly rather than showing a
+      // ready state for something the gallery cannot render.
+      setBrandStatus('error', 'The review finished but the style did not save',
+        'Nothing was added to your gallery. Try again, or ask your assistant.');
+      return;
+    }
+
+    if (job.status === 'failed') {
+      setBrandStatus('error', 'We could not build a style from that site',
+        job.error || 'Something went wrong during the review.');
+      return;
+    }
+
+    setBrandStatus('error', 'That review stopped unexpectedly',
+      'Status: ' + (job.status || 'unknown'));
+  }
+
+  function pollBrandJob(jobId) {
+    stopBrandPoll();
+    brandPoll = setInterval(function () {
+      fetchJson(BRAND_API + '/' + encodeURIComponent(jobId))
+        .then(function (job) { applyBrandJob(job, {announce: true}); })
+        .catch(function () { /* transient — keep polling */ });
+    }, 5000);
+  }
+
+  $('brandForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var input = $('brandUrl');
+    var url = (input.value || '').trim();
+    var hint = $('brandHint');
+    hint.classList.remove('is-error');
+    input.removeAttribute('aria-invalid');
+
+    if (!url) {
+      hint.textContent = 'Enter your website address first.';
+      hint.classList.add('is-error');
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+      return;
+    }
+
+    setBrandBusy(true);
+    hint.textContent = 'Takes a few minutes. You can leave this page — it keeps working.';
+    fetch(BRAND_API, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url}),
+    }).then(function (r) {
+      return r.json().then(function (d) { return {ok: r.ok, data: d}; });
+    }).then(function (res) {
+      if (!res.ok) {
+        setBrandBusy(false);
+        hint.textContent = res.data.error || 'That request was rejected.';
+        hint.classList.add('is-error');
+        input.setAttribute('aria-invalid', 'true');
+        return;
+      }
+      setBrandStatus('running', 'Reviewing ' + url + '…',
+        'Opening it in a browser and measuring the design.');
+      pollBrandJob(res.data.job_id);
+    }).catch(function () {
+      setBrandBusy(false);
+      hint.textContent = 'Could not reach the server. Check your connection and try again.';
+      hint.classList.add('is-error');
+    });
+  });
+
+  function resumeBrandJob() {
+    return fetchJson(BRAND_API).then(function (data) {
+      var job = data && data.job;
+      if (!job) return;
+      applyBrandJob(job);
+      if (job.status === 'queued' || job.status === 'running') {
+        $('brandUrl').value = job.url || '';
+        pollBrandJob(job.job_id);
+      }
+    }).catch(function () { /* the picker still works without this */ });
+  }
+
+  // -------------------------------------------------------------------
   // Boot
   // -------------------------------------------------------------------
   $('retryBtn').addEventListener('click', function () { loadStyles(); });
-  loadStyles();
+  loadStyles().then(resumeBrandJob);
 })();
 </script>
 </body>
