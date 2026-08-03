@@ -156,6 +156,18 @@ def get_active_style_id() -> str | None:
     return get_active().get('style_id')
 
 
+_WEBFONT_IMPORT_RE = re.compile(
+    r"@import\s+url\(\s*['\"]?(https?://(?:fonts\.googleapis\.com|fonts\.bunny\.net)"
+    r"[^'\")]+)['\"]?\s*\)\s*;",
+    re.I,
+)
+_WEBFONT_LINK_RE = re.compile(
+    r'(<link\b[^>]*\bhref=["\'])(https?://(?:fonts\.googleapis\.com|fonts\.bunny\.net)'
+    r'[^"\']+)(["\'][^>]*>)',
+    re.I,
+)
+
+
 def apply_tokens_to_template(template_html: str, tokens: dict) -> str:
     """Re-bind token values into the template's CSS custom properties.
 
@@ -163,16 +175,40 @@ def apply_tokens_to_template(template_html: str, tokens: dict) -> str:
     clone edits tokens, the stored template still carries the source style's
     literal values — rewrite every `--<token>:` declaration so token edits
     actually change the rendered page. Safe on originals (no-op rewrite).
+
+    `font-import` is the exception and needs its own handling: it is not a CSS
+    custom property, it is the stylesheet that LOADS the faces. The templates
+    pull fonts with `@import url('https://fonts.googleapis.com/…')` at the top
+    of their <style> block, so rewriting `--font-display` alone set a family
+    the browser had never downloaded — the page silently fell through the stack
+    to Impact while reporting the correct token. Anyone cloning a preset and
+    changing its typography hit this, not just generated brand styles.
     """
     out = template_html
     for key, val in tokens.items():
         if not isinstance(val, str) or not val.strip():
             continue
+        if key == 'font-import':
+            continue  # handled below — it is a resource URL, not a declaration
         out = re.sub(
             r'(--' + re.escape(key) + r'\s*:\s*)[^;}]+',
             lambda m: m.group(1) + val.strip(),
             out,
         )
+
+    font_import = (tokens.get('font-import') or '').strip()
+    if font_import.startswith(('http://', 'https://')):
+        url = font_import.replace('&', '&amp;') if '&amp;' not in font_import else font_import
+        new_out, n = _WEBFONT_IMPORT_RE.subn(
+            lambda m: f"@import url('{font_import}');", out)
+        out = new_out
+        out = _WEBFONT_LINK_RE.sub(lambda m: m.group(1) + url + m.group(3), out)
+        if not n and '@import' not in out[:2000] and '<style' in out:
+            # Template loads no webfont of its own — inject the import at the top
+            # of its first <style> block so a custom family still resolves.
+            out = re.sub(r'(<style[^>]*>)',
+                         lambda m: m.group(1) + f"\n@import url('{font_import}');",
+                         out, count=1)
     return out
 
 
