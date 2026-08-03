@@ -61,7 +61,27 @@ STALE_RUNNING_SECS = int(os.getenv("TOOL_JOB_STALE_SECS", "1800"))  # 30 min
 
 
 def _ensure_dir() -> None:
+    """Create the spool so BOTH sides of the bind mount can write it.
+
+    This directory is the interface between two processes with different uids:
+    this container runs as appuser (1001) and the host worker runs as mike
+    (1000). Whichever side creates it first owns it, and the default 0o775 then
+    locks the other one out — a 500 on every job create when the host got there
+    first, and a silently unprocessable spool when the container did.
+
+    Neither side can chown to the other without root, so the directory is made
+    world-writable, matching the convention the rest of the tenant's
+    openvoiceui/ tree already uses (canvas-pages, uploads) for exactly this
+    reason. The path itself is inside the tenant's own private volume.
+    """
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        if (JOBS_DIR.stat().st_mode & 0o777) != 0o777:
+            JOBS_DIR.chmod(0o777)
+    except OSError as exc:
+        # Not ours to chmod (created by the other uid) — log rather than fail;
+        # writes may still work if the modes already happen to allow it.
+        logger.warning("tool_jobs: could not widen %s permissions: %s", JOBS_DIR, exc)
 
 
 def _path(job_id: str) -> Path:
@@ -77,6 +97,13 @@ def _write_atomic(path: Path, data: Dict[str, Any]) -> None:
 
     The worker polls this directory; a torn read would look like a malformed job
     and get skipped or, worse, re-run.
+
+    The explicit chmod is load-bearing, not tidiness. `tempfile.mkstemp` creates
+    with mode 0o600 by design, so a job written by this container (appuser, 1001)
+    was UNREADABLE to the host worker (mike, 1000) even with the spool directory
+    world-writable — every job sat queued forever while the worker logged
+    "unreadable job" once a minute. A spool shared across two uids has to be
+    readable by both, at the file level as well as the directory level.
     """
     _ensure_dir()
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=".json")
@@ -85,6 +112,7 @@ def _write_atomic(path: Path, data: Dict[str, Any]) -> None:
             json.dump(data, fh, indent=2, ensure_ascii=False)
             fh.flush()
             os.fsync(fh.fileno())
+        os.chmod(tmp, 0o666)  # see docstring — mkstemp's 0600 locks out the worker
         os.replace(tmp, path)
     except Exception:
         try:
