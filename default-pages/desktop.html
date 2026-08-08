@@ -1191,7 +1191,6 @@ const SYSTEM_ITEMS = [
   {id:'recycle-bin',name:'Recycle Bin',icon:'recycle',action:'recycle',macName:'Trash',ubuntuName:'Trash'},
   {id:'my-documents',name:'My Documents',icon:'folder',action:'docsfolder',ubuntuName:'Documents'},
   {id:'settings',name:'Display Properties',icon:'settings',action:'settings',macName:'System Preferences',w31Name:'Control Panel',ubuntuName:'Settings'},
-  {id:'game-library-shortcut',name:'Game Library',icon:'game',action:'gamefolder',macName:'Game Library',ubuntuName:'Games'},
 ];
 let DESKTOP_ITEMS = [];
 
@@ -1942,7 +1941,7 @@ function getIconContextItems(item) {
 
   // ── Loose page icons (check BEFORE system icon catch-all) ──
   if (item.action === 'openPage' && item.pageId) {
-    const isSystem = SYSTEM_ITEMS.some(s => s.id === item.id); // e.g. game-library-shortcut
+    const isSystem = SYSTEM_ITEMS.some(s => s.id === item.id); // e.g. my-computer, recycle-bin
     const moveToSub = buildMoveToSubmenu(item);
     const doDelete = () => showConfirmModal('Move "'+item.name+'" to the Recycle Bin?', (ok)=>{ if(ok) sendToRecycle(item); });
     const doRename = () => showPromptModal('Rename "'+item.name+'" to:', item.name, (n)=>{ if(n&&n.trim()&&PAGES[item.pageId]){PAGES[item.pageId].name=n.trim();item.name=n.trim();rebuildDesktopItems();buildDesktopIcons();} });
