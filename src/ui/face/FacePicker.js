@@ -58,8 +58,7 @@ async function loadManifest() {
         const builtIn = builtInRes?.ok ? await builtInRes.json() : {
             default: 'eyes',
             faces: [
-                { id: 'eyes', name: 'AI Eyes',   description: 'Classic animated eyes', preview: null, moods: [], features: [] },
-                { id: 'orb',  name: 'Sound Orb', description: 'Audio-reactive orb',   preview: null, moods: [], features: [] }
+                { id: 'eyes', name: 'AI Eyes', description: 'Classic animated eyes', preview: null, moods: [], features: [] }
             ]
         };
 
@@ -85,8 +84,7 @@ async function loadManifest() {
         return {
             default: 'eyes',
             faces: [
-                { id: 'eyes', name: 'AI Eyes',   description: 'Classic animated eyes', preview: null, moods: [], features: [] },
-                { id: 'orb',  name: 'Sound Orb', description: 'Audio-reactive orb',   preview: null, moods: [], features: [] }
+                { id: 'eyes', name: 'AI Eyes', description: 'Classic animated eyes', preview: null, moods: [], features: [] }
             ]
         };
     }

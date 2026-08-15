@@ -10,10 +10,12 @@
  */
 
 window.FaceRenderer = {
-    // Metadata for display (populated by registerFace or built-in)
+    // Metadata for display (populated by registerFace or built-in).
+    // 'orb' is deliberately UNLISTED (removed from menus 2026-08-15 — crude
+    // placeholder look). Its renderer below is kept so profiles already set
+    // to face_mode 'orb' keep working; it just can't be picked anymore.
     modes: {
-        'eyes': { name: 'AI Eyes', description: 'Classic animated eyes' },
-        'orb':  { name: 'Sound Orb', description: 'Audio-reactive particle orb' }
+        'eyes': { name: 'AI Eyes', description: 'Classic animated eyes' }
     },
 
     // Plugin registry: id → { start(container, config), stop(), setMood?, setThinking?, detectMood? }
