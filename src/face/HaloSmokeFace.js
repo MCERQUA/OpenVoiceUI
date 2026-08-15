@@ -48,7 +48,10 @@ window.HaloSmokeFace = (function () {
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────
-    const S = { quality: 'med', motion: 2.0, trails: 0.2, coreInt: 0.20, sensitivity: 2.10 };
+    // glowScale: offscreen glow layer resolution (0.5 = half-res; higher = tighter blur)
+    // glowAlpha: glow layer composite opacity (lower = less haze/brightness)
+    const S = { quality: 'med', motion: 2.0, trails: 0.2, coreInt: 0.20, sensitivity: 2.10,
+                glowScale: 0.5, glowAlpha: 0.5 };
 
     // ── Adaptive performance governor ────────────────────────────────────────
     // Steps quality/resolution/fps down when the draw itself is slow (phones,
@@ -66,10 +69,12 @@ window.HaloSmokeFace = (function () {
     function _govTick(drawMs, now) {
         _gov.drawEma = _gov.drawEma * 0.92 + drawMs * 0.08;
         if (now - _gov.lastChange < 2500) return;
-        if (_gov.drawEma > 12 && _gov.level < GOV_LEVELS.length - 1) {
+        // Step down only when draw time alone would blow the 60fps frame budget
+        // (16.7ms) — a fast desktop should never leave level 0.
+        if (_gov.drawEma > 20 && _gov.level < GOV_LEVELS.length - 1) {
             _gov.level++; _gov.lastChange = now;
             console.log(`[HaloSmoke] perf governor -> level ${_gov.level} (draw ~${_gov.drawEma.toFixed(1)}ms)`);
-        } else if (_gov.drawEma < 4.5 && _gov.level > 0 && now - _gov.lastChange > 6000) {
+        } else if (_gov.drawEma < 8 && _gov.level > 0 && now - _gov.lastChange > 6000) {
             _gov.level--; _gov.lastChange = now;
             console.log(`[HaloSmoke] perf governor -> level ${_gov.level} (headroom)`);
         }
@@ -228,7 +233,7 @@ window.HaloSmokeFace = (function () {
         // upscaled once at the end — the bilinear upscale provides the blur.
         // This replaces per-stroke ctx.filter/shadowBlur, which re-ran a
         // full software blur for EVERY stroke (the #1 cost on phones/Pi).
-        const GS = 0.25;
+        const GS = S.glowScale;
         const ow = Math.max(2, Math.round(w * GS)), oh = Math.max(2, Math.round(h * GS));
         if (!_off) { _off = document.createElement('canvas'); _offCtx = _off.getContext('2d'); }
         if (_off.width !== ow || _off.height !== oh) { _off.width = ow; _off.height = oh; }
@@ -309,9 +314,9 @@ window.HaloSmokeFace = (function () {
             ctx.strokeStyle = `hsla(${wHue},${wSat}%,${wLit}%,${clamp(wAlpha, 0, 0.6)})`;
             ctx.lineWidth   = wWidth;
             ctx.stroke(path);
-            // Glow: same path, wide + faint, on the low-res layer
-            octx.strokeStyle = `hsla(${wHue},90%,60%,${clamp(wAlpha * 0.7, 0, 0.4)})`;
-            octx.lineWidth   = wWidth + 10 + dist * 20 + dr * 12;
+            // Glow: same path, wide + faint, on the half-res layer
+            octx.strokeStyle = `hsla(${wHue},90%,60%,${clamp(wAlpha * 0.55, 0, 0.3)})`;
+            octx.lineWidth   = wWidth + 5 + dist * 12 + dr * 7;
             octx.stroke(path);
         }
 
@@ -420,7 +425,7 @@ window.HaloSmokeFace = (function () {
             const len = base * (0.12 + mg * 0.55 * (0.65 + f.treble * 0.5 + dr * 0.45));
             const hu  = (hue0 + (i / bars) * 150 + f.treble * 120) % 360;
             octx.strokeStyle = `hsla(${hu},100%,64%,${0.06 + mg * 0.25 + dr * 0.08})`;
-            octx.lineWidth   = 2.5 + mg * 4.2 + dr * 1.5 + bloom * 0.5;
+            octx.lineWidth   = 2.5 + mg * 4.2 + dr * 1.5 + bloom * 0.3;
             octx.beginPath();
             octx.moveTo(cx + Math.cos(a) * ringR, cy + Math.sin(a) * ringR);
             octx.lineTo(cx + Math.cos(a) * (ringR + len), cy + Math.sin(a) * (ringR + len));
@@ -461,9 +466,13 @@ window.HaloSmokeFace = (function () {
             octx.fill();
         }
 
-        // Composite the glow layer once, upscaled (bilinear smoothing = blur)
+        // Composite the glow layer once, upscaled (bilinear smoothing = blur).
+        // globalAlpha keeps the additive layer soft — the old blur spread the
+        // same energy over a wide radius, so full-strength here reads too hot.
         ctx.imageSmoothingEnabled = true;
+        ctx.globalAlpha = S.glowAlpha;
         ctx.drawImage(_off, 0, 0, w, h);
+        ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
     }
 
@@ -593,7 +602,10 @@ window.HaloSmokeFace = (function () {
         _thinking = (mood === 'thinking');
     }
 
-    return { start, stop, setThinking, setMood };
+    // `settings` exposed for live tuning from the console, e.g.:
+    //   HaloSmokeFace.settings.glowAlpha = 0.35   // less haze/brightness
+    //   HaloSmokeFace.settings.glowScale = 0.65   // tighter, crisper glow
+    return { start, stop, setThinking, setMood, settings: S };
 })();
 
 // Self-register with FaceRenderer plugin system
