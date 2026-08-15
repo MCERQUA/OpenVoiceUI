@@ -51,7 +51,7 @@ window.HaloSmokeFace = (function () {
     // glowScale: offscreen glow layer resolution (0.5 = half-res; higher = tighter blur)
     // glowAlpha: glow layer composite opacity (lower = less haze/brightness)
     const S = { quality: 'med', motion: 2.0, trails: 0.2, coreInt: 0.20, sensitivity: 2.10,
-                glowScale: 0.5, glowAlpha: 0.5 };
+                glowScale: 0.6, glowAlpha: 0.35 };
 
     // ── Adaptive performance governor ────────────────────────────────────────
     // Steps quality/resolution/fps down when the draw itself is slow (phones,
@@ -420,14 +420,16 @@ window.HaloSmokeFace = (function () {
         // the ~160 strokes and was the single heaviest cost of this face.
         // Bloom grows only mildly with voice drive — the old dr*16/ki*20 terms
         // made the whole halo balloon into soft mush whenever it spoke.
-        const bloom = 5 + dr * 4 + ki * 5;
+        const bloom = 4 + dr * 2 + ki * 3;
         for (let i = 0; i < bars; i++) {
             const a   = (i / bars) * TAU + _spin;
             const mg  = freq ? freq[i * step] / 255 : 0.04;
             const len = base * (0.12 + mg * 0.55 * (0.65 + f.treble * 0.5 + dr * 0.45));
             const hu  = (hue0 + (i / bars) * 150 + f.treble * 120) % 360;
-            octx.strokeStyle = `hsla(${hu},100%,64%,${0.06 + mg * 0.25 + dr * 0.08})`;
-            octx.lineWidth   = 2.5 + mg * 4.2 + dr * 1.5 + bloom * 0.3;
+            // Speech animates the CRISP bars; the glow stays nearly constant so
+            // reacting to sound doesn't turn into bright haze.
+            octx.strokeStyle = `hsla(${hu},100%,64%,${0.05 + mg * 0.14 + dr * 0.03})`;
+            octx.lineWidth   = 2.5 + mg * 3 + bloom * 0.3;
             octx.beginPath();
             octx.moveTo(cx + Math.cos(a) * ringR, cy + Math.sin(a) * ringR);
             octx.lineTo(cx + Math.cos(a) * (ringR + len), cy + Math.sin(a) * (ringR + len));
