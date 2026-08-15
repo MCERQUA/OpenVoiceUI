@@ -493,15 +493,14 @@ window.SettingsPanel = {
         benchBtn._benchWired = true;
         benchBtn.addEventListener('click', async () => {
             if (!window.FaceBench) return;
-            benchBtn.disabled = true;
-            benchBtn.textContent = 'Benchmarking… watch the overlay';
+            // Close the settings modal first — its full-screen overlay adds
+            // compositing load that drags EVERY face's numbers down equally
+            // (measured: floor fps halved with the modal open).
+            this.close();
             try {
                 await window.FaceBench.run();
             } catch (e) {
                 console.warn('[SettingsPanel] Face benchmark failed:', e);
-            } finally {
-                benchBtn.disabled = false;
-                benchBtn.textContent = 'Run Face Benchmark';
             }
         });
     },
