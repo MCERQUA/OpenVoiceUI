@@ -156,9 +156,23 @@ function renderCard(face, isActive) {
 
 function renderGallery(manifest, activeFaceId) {
     const cards = manifest.faces.map(f => renderCard(f, f.id === activeFaceId)).join('');
+    // Benchmark row only renders when FaceBench is loaded (index.html script tag)
+    const benchRow = window.FaceBench ? `
+        <div class="face-picker-bench" style="grid-column:1/-1;padding:8px 2px 2px;">
+            <button type="button" id="face-bench-btn"
+                style="width:100%;padding:10px 12px;min-height:44px;background:rgba(59,130,246,0.12);
+                       border:1px solid rgba(59,130,246,0.45);border-radius:8px;color:#3b82f6;
+                       font-size:13px;font-weight:600;cursor:pointer;">
+                Run Face Benchmark
+            </button>
+            <div style="margin-top:4px;font-size:11px;opacity:0.6;text-align:center;">
+                Measures each face's FPS on this device (~30s, keep tab in foreground)
+            </div>
+        </div>` : '';
     return `
         <div class="face-picker-gallery" role="radiogroup" aria-label="Face picker">
             ${cards}
+            ${benchRow}
         </div>
     `;
 }
@@ -196,6 +210,24 @@ function attachListeners(root) {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
         });
     });
+
+    // Benchmark button — runs FaceBench across all faces, results in its overlay
+    const benchBtn = root.querySelector('#face-bench-btn');
+    if (benchBtn) {
+        benchBtn.addEventListener('click', async () => {
+            if (!window.FaceBench) return;
+            benchBtn.disabled = true;
+            benchBtn.textContent = 'Benchmarking… watch the overlay';
+            try {
+                await window.FaceBench.run();
+            } catch (e) {
+                console.warn('[FacePicker] Benchmark failed:', e);
+            } finally {
+                benchBtn.disabled = false;
+                benchBtn.textContent = 'Run Face Benchmark';
+            }
+        });
+    }
 }
 
 // ── public API ─────────────────────────────────────────────────────────────
