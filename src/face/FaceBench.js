@@ -139,7 +139,9 @@ window.FaceBench = (function () {
 
         const seconds = opts.seconds || 6;
         const settle = opts.settleMs || 800; // let each face warm up before sampling
-        const requested = opts.modes || ['bench-dot', 'eyes', 'halo-smoke'];
+        // Default: the floor + every installed, user-selectable face
+        const requested = opts.modes ||
+            ['bench-dot', ...FR.getAvailableModes().filter(m => m.installed).map(m => m.id)];
         const modes = requested.filter(m => FR.hasFace(m));
         const skipped = requested.filter(m => !FR.hasFace(m));
         if (skipped.length) console.warn('[FaceBench] skipping uninstalled faces:', skipped);

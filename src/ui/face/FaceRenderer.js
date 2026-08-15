@@ -357,10 +357,12 @@ window.FaceRenderer = {
     },
 
     getAvailableModes() {
-        return Object.keys(this.modes).map(key => ({
-            id: key,
-            ...this.modes[key],
-            installed: this.hasFace(key)
-        }));
+        return Object.keys(this.modes)
+            .filter(key => key !== 'bench-dot')   // benchmark baseline, never user-selectable
+            .map(key => ({
+                id: key,
+                ...this.modes[key],
+                installed: this.hasFace(key)
+            }));
     }
 };
