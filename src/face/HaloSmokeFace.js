@@ -316,7 +316,7 @@ window.HaloSmokeFace = (function () {
             ctx.stroke(path);
             // Glow: same path, wide + faint, on the half-res layer
             octx.strokeStyle = `hsla(${wHue},90%,60%,${clamp(wAlpha * 0.55, 0, 0.3)})`;
-            octx.lineWidth   = wWidth + 5 + dist * 12 + dr * 7;
+            octx.lineWidth   = wWidth + 4 + dist * 6 + dr * 3;
             octx.stroke(path);
         }
 
@@ -335,7 +335,7 @@ window.HaloSmokeFace = (function () {
                 ctx.lineTo(cx + Math.cos(fa) * (fr + fl2), cy + Math.sin(fa) * (fr + fl2));
                 ctx.stroke();
                 octx.strokeStyle = `hsla(${fhue},100%,65%,${burst * 0.3})`;
-                octx.lineWidth   = 6 + burst * 12;
+                octx.lineWidth   = 4 + burst * 5;
                 octx.beginPath();
                 octx.moveTo(cx + Math.cos(fa) * fr,         cy + Math.sin(fa) * fr);
                 octx.lineTo(cx + Math.cos(fa) * (fr + fl2), cy + Math.sin(fa) * (fr + fl2));
@@ -355,27 +355,27 @@ window.HaloSmokeFace = (function () {
                 const dy = cy + Math.sin(baseAngle) * ringR;
                 const dotHue = (calmHue + i * 40) % 360;
 
-                // Comet trail
+                // Comet trail — crisp only; the low-res glow layer made these
+                // read as blobby rings, so thinking dots stay off it entirely.
                 ctx.beginPath();
                 ctx.arc(cx, cy, ringR, baseAngle - trailLen, baseAngle, false);
-                ctx.strokeStyle = `hsla(${dotHue},80%,65%,0.25)`;
+                ctx.strokeStyle = `hsla(${dotHue},80%,65%,0.3)`;
                 ctx.lineWidth = 3;
                 ctx.stroke();
-                octx.beginPath();
-                octx.arc(cx, cy, ringR, baseAngle - trailLen, baseAngle, false);
-                octx.strokeStyle = `hsla(${dotHue},90%,60%,0.3)`;
-                octx.lineWidth = 10;
-                octx.stroke();
 
-                // Bright dot (glow halo drawn on the low-res layer)
+                // Bright dot with a small crisp gradient halo (3 dots — cheap)
+                const halo = ctx.createRadialGradient(dx, dy, 0, dx, dy, dotRadius * 3);
+                halo.addColorStop(0,   `hsla(${dotHue},100%,75%,0.5)`);
+                halo.addColorStop(0.4, `hsla(${dotHue},90%,65%,0.18)`);
+                halo.addColorStop(1,   'rgba(0,0,0,0)');
+                ctx.beginPath();
+                ctx.arc(dx, dy, dotRadius * 3, 0, TAU);
+                ctx.fillStyle = halo;
+                ctx.fill();
                 ctx.beginPath();
                 ctx.arc(dx, dy, dotRadius, 0, TAU);
-                ctx.fillStyle = `hsla(${dotHue},85%,75%,0.9)`;
+                ctx.fillStyle = `hsla(${dotHue},85%,80%,0.95)`;
                 ctx.fill();
-                octx.beginPath();
-                octx.arc(dx, dy, dotRadius * 3.5, 0, TAU);
-                octx.fillStyle = `hsla(${dotHue},100%,70%,0.35)`;
-                octx.fill();
             }
         }
 
@@ -388,7 +388,7 @@ window.HaloSmokeFace = (function () {
         ctx.fillStyle   = dotGrad;
         ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, TAU); ctx.fill();
         octx.fillStyle = `hsla(${hue0},90%,70%,${0.2 + burst * 0.4})`;
-        octx.beginPath(); octx.arc(cx, cy, dotR * 2.5 + 10 + burst * 20, 0, TAU); octx.fill();
+        octx.beginPath(); octx.arc(cx, cy, dotR * 2 + 8 + burst * 8, 0, TAU); octx.fill();
         ctx.restore();
 
         // ── Halo ring: frequency bars ──
@@ -418,7 +418,9 @@ window.HaloSmokeFace = (function () {
         // Soft halo pass — drawn on the 1/4-res glow layer (upscale = free blur).
         // The old ctx.filter='blur(Npx)' here re-ran a software blur for each of
         // the ~160 strokes and was the single heaviest cost of this face.
-        const bloom = 6 + dr * 16 + ki * 20;
+        // Bloom grows only mildly with voice drive — the old dr*16/ki*20 terms
+        // made the whole halo balloon into soft mush whenever it spoke.
+        const bloom = 5 + dr * 4 + ki * 5;
         for (let i = 0; i < bars; i++) {
             const a   = (i / bars) * TAU + _spin;
             const mg  = freq ? freq[i * step] / 255 : 0.04;
