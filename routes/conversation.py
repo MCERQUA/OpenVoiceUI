@@ -137,6 +137,7 @@ _VOICE_INSTRUCTIONS = (
     "ONLY the [CANVAS:page-id] tag works to open pages. "
     "Repeating [CANVAS:same-page] on an already-open page forces a refresh. "
     "[CANVAS_MENU] — opens the page picker so the user can browse all pages. "
+    "[CANVAS_CLOSE] — closes/hides the canvas (use when the user asks to close, hide, or dismiss the canvas or a stuck page). "
     "[CANVAS_URL:https://example.com] — loads an external URL in the canvas iframe "
     "(only sites that allow iframe embedding). "
 
@@ -1050,6 +1051,7 @@ def clean_for_tts(text: str) -> str:
 
     # Remove canvas/task/music triggers (handled by frontend, not spoken)
     text = re.sub(r'\[CANVAS_MENU\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[CANVAS_CLOSE\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[CANVAS:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[CANVAS_URL:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[MUSIC_PLAY(?::[^\]]*)?\]', '', text, flags=re.IGNORECASE)
@@ -1383,6 +1385,66 @@ def _conversation_inner():
                     except Exception as _ie:
                         logger.debug('Could not read .image-intel cache: %s', _ie)
                 if _upload_desc is None:
+                    # SYNC GEMINI FIRST (Mike, 2026-08-18): an image attached to the chat
+                    # transcript is a "single" — the user is looking at it NOW and the agent
+                    # must read it in THIS turn, not tell them to wait 30s for the background
+                    # vision agent. Gemini reads it synchronously; the mesh queue below
+                    # survives only as the fallback when Gemini fails. Bulk uploads never
+                    # pass through here (no image_path on a chat turn) — they are swept by
+                    # the host-side auto-processor into .image-intel in the background.
+                    _gem_key = os.environ.get('GEMINI_API_KEY', '')
+                    if _gem_key:
+                        try:
+                            import requests as _rq
+                            _mime = {
+                                '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                                '.webp': 'image/webp', '.gif': 'image/gif',
+                            }.get(_img_file.suffix.lower(), 'image/jpeg')
+                            _b64 = base64.b64encode(_img_file.read_bytes()).decode()
+                            _gr = _rq.post(
+                                'https://generativelanguage.googleapis.com/v1beta/models/'
+                                f'gemini-2.5-flash:generateContent?key={_gem_key}',
+                                json={'contents': [{'parts': [
+                                    {'inline_data': {'mime_type': _mime, 'data': _b64}},
+                                    {'text': 'Describe this image concisely but completely: subjects, '
+                                             'objects, layout, any visible text (transcribe it), and '
+                                             'anything a user would likely ask about. Plain prose.'},
+                                ]}]},
+                                timeout=20,
+                            )
+                            _gr.raise_for_status()
+                            _gtxt = (_gr.json()['candidates'][0]['content']['parts'][0]['text'] or '').strip()
+                            if _gtxt:
+                                _upload_desc = (
+                                    f'{_gtxt} (Image file: uploads/{_img_file.name}; OpenClaw path '
+                                    f'/home/node/.openclaw/workspace/uploads/{_img_file.name} if the '
+                                    'image tool is ever needed — it rejects /app/runtime/uploads/.)'
+                                )
+                                logger.info('Chat image read synchronously via Gemini: %s', _img_file.name)
+                                # Write the .image-intel sidecar so later turns hit the cache
+                                # and the background sweeper knows this file is done.
+                                try:
+                                    import hashlib as _hl
+                                    import json as _json
+                                    _intel_path.parent.mkdir(exist_ok=True)
+                                    _intel_path.write_text(_json.dumps({
+                                        'schema': 1,
+                                        'file': _img_file.name,
+                                        'tenant': os.getenv('JAMBOT_TENANT', ''),
+                                        'sha256': _hl.sha256(_img_file.read_bytes()).hexdigest(),
+                                        'size': _img_file.stat().st_size,
+                                        'source': 'gemini-sync',
+                                        'original_name': _img_file.name,
+                                        'analyzed_at': datetime.utcnow().isoformat() + 'Z',
+                                        'analysis': {'description': _gtxt, 'keywords': [],
+                                                     'text_in_image': ''},
+                                    }, indent=1))
+                                except Exception as _we:
+                                    logger.debug('Could not write gemini-sync sidecar: %s', _we)
+                        except Exception as _ge:
+                            logger.warning('Sync Gemini vision failed (%s) — falling back to '
+                                           'vision@mesh queue for %s', _ge, _img_file.name)
+                if _upload_desc is None:
                     # No cache yet — route to vision@mesh via openclaw container (has mesh-send + mesh mount)
                     # Non-blocking: mesh task, vision agent writes .image-intel sidecar async
                     # OVU runs inside Docker; mesh-send isn't in this image but openclaw-<tenant> has it.
@@ -1433,13 +1495,31 @@ def _conversation_inner():
                         except Exception as _se:
                             logger.warning('Failed to queue vision task to vision@mesh: %s', _se)
                     # Do not promise an analysis that was never queued.
+                    # The path matters as much as the status: without it, agents guess
+                    # (/app/runtime/uploads/ is readable by exec/read but REJECTED by the
+                    # image tool, whose media roots are hardcoded to workspace paths) and
+                    # burn a minute copying files around narrating paths over TTS.
                     if _queued:
-                        _upload_desc = 'Image is being analyzed now. Ask me about it in about 30 seconds.'
+                        _upload_desc = (
+                            f'Image saved in your workspace uploads folder: uploads/{_img_file.name} '
+                            f'(OpenClaw: /home/node/.openclaw/workspace/uploads/{_img_file.name}; '
+                            f'Hermes: /workspace/uploads/{_img_file.name}). A background vision agent '
+                            'is analyzing it right now — the result arrives in about 30 seconds. Do '
+                            'NOT analyze the image yourself, do NOT run the image tool on it, and do '
+                            'NOT copy or move the file. Tell the user you are taking a look; the '
+                            'analysis will be in your context on their next message. If you ever do '
+                            'need the image tool on an upload, it only accepts workspace paths like '
+                            'the above — it rejects /app/runtime/uploads/.'
+                        )
                         logger.info('Image routed to vision@mesh: %s', _img_file.name)
                     else:
-                        _upload_desc = ('Image saved, but automatic analysis could not be started. '
-                                        'Tell the user the image is saved and that you cannot '
-                                        'describe it right now.')
+                        _upload_desc = (
+                            f'Image saved in your workspace uploads folder: uploads/{_img_file.name} '
+                            f'(OpenClaw: /home/node/.openclaw/workspace/uploads/{_img_file.name}; '
+                            f'Hermes: /workspace/uploads/{_img_file.name}), but automatic analysis '
+                            'could not be started. If the user asks about it, run the image tool on '
+                            'that exact workspace path — the image tool rejects /app/runtime/uploads/.'
+                        )
                 context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
