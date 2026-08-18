@@ -228,6 +228,8 @@ def create_app(config_override: dict = None):
             '/favicon.ico',     # Browser favicon request — before auth
             '/ws/clawdbot',     # WebSocket — browsers can't send Clerk token in WS headers;
                                 # handler secures itself via CLAWDBOT_AUTH_TOKEN to the gateway
+            '/ws/terminal',     # Terminal PTY WebSocket — handler self-authenticates via
+                                # the __session cookie or X-Agent-Key before spawning a shell
             '/openclaw-ui',     # WebSocket upgrade for OpenClaw Control UI proxy (no trailing slash)
             '/ws/browse-stream', # WebSocket — co-browsing screencast (#154); handler self-auths
                                  # via Clerk token + injects the service key server-side

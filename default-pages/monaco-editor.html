@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="page-icon" content="📝">
+<title>Code Editor</title>
+<style>
+  :root { --bg:#1e1e1e; --panel:#252526; --border:#333; --accent:#0e639c; --accent2:#1177bb; --text:#ccc; --muted:#888; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
+  /* position:fixed + inset:0 fills the viewport edge-to-edge, ignoring the
+     canvas system's injected body{padding:25px} so nothing overflows/clips. */
+  #app { position:fixed; inset:0; display:flex; overflow:hidden; }
+  #sidebar { width:240px; min-width:130px; max-width:45%; flex:none; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+  @media (max-width:640px){ #sidebar { width:150px; } }
+  #sbhead { padding:10px 12px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); }
+  #sbhead button { background:none; border:none; color:var(--muted); cursor:pointer; font-size:15px; line-height:1; padding:2px 5px; border-radius:4px; }
+  #sbhead button:hover { background:#333; color:#fff; }
+  #tree { flex:1; overflow:auto; padding:4px 0; }
+  .node { padding:3px 12px; font-size:13px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; user-select:none; }
+  .node:hover { background:#2a2d2e; }
+  .node.active { background:#37373d; color:#fff; }
+  .node.dir { color:#bdbdbd; font-weight:500; }
+  .node .ic { display:inline-block; width:16px; opacity:.8; }
+  .empty { padding:16px 12px; color:var(--muted); font-size:12px; line-height:1.5; }
+  #main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #toolbar { height:38px; flex:none; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; padding:0 10px; }
+  #path { flex:1; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #path .dirty { color:#e2c08d; }
+  .btn { background:var(--accent); color:#fff; border:none; border-radius:4px; padding:5px 12px; font-size:12px; cursor:pointer; }
+  .btn:hover { background:var(--accent2); }
+  .btn.ghost { background:#3a3d41; }
+  .btn.ghost:hover { background:#45494e; }
+  .btn:disabled { opacity:.4; cursor:default; }
+  #editor { flex:1; min-height:0; }
+  #welcome { flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; color:var(--muted); gap:10px; }
+  #welcome h2 { color:#bbb; font-weight:500; margin:0; }
+  #toast { position:fixed; bottom:16px; right:16px; background:#333; color:#fff; padding:8px 14px; border-radius:6px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; box-shadow:0 4px 14px rgba(0,0,0,.4); }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div id="sbhead">
+      <span>Workspace</span>
+      <span>
+        <button id="newBtn" title="New file">＋</button>
+        <button id="refreshBtn" title="Refresh">⟳</button>
+      </span>
+    </div>
+    <div id="tree"></div>
+  </div>
+  <div id="main">
+    <div id="toolbar">
+      <span id="path">No file open</span>
+      <button class="btn" id="saveBtn" disabled>Save</button>
+    </div>
+    <div id="editor"></div>
+    <div id="welcome">
+      <div style="font-size:40px">📝</div>
+      <h2>Code Editor</h2>
+      <div>Select a file on the left, or create one with ＋</div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+let editor = null, current = null, dirty = false, savedValue = '';
+
+const LANG = {js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',jsx:'javascript',tsx:'typescript',
+  py:'python',rb:'ruby',go:'go',rs:'rust',java:'java',c:'c',h:'c',cpp:'cpp',cc:'cpp',cs:'csharp',php:'php',
+  html:'html',htm:'html',css:'css',scss:'scss',json:'json',yaml:'yaml',yml:'yaml',toml:'ini',ini:'ini',
+  md:'markdown',markdown:'markdown',sh:'shell',bash:'shell',sql:'sql',xml:'xml',svg:'xml',dockerfile:'dockerfile'};
+function langFor(path){ const n=path.toLowerCase(); if(n.endsWith('dockerfile'))return 'dockerfile';
+  const ext=n.split('.').pop(); return LANG[ext]||'plaintext'; }
+
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
+
+function setDirty(d){ dirty=d; $('#saveBtn').disabled = !current || !d;
+  if(current){ $('#path').innerHTML = current + (d?' <span class="dirty">●</span>':''); } }
+
+async function loadTree(){
+  const tree=$('#tree');
+  try{
+    const r=await fetch('/api/workspace/tree',{credentials:'include'});
+    const j=await r.json();
+    const entries=(j.entries||[]).sort((a,b)=>{
+      if(a.type!==b.type) return a.type==='dir'?-1:1;
+      return a.path.localeCompare(b.path);
+    });
+    if(!entries.length){ tree.innerHTML='<div class="empty">Empty workspace.<br>Click ＋ to create your first file.</div>'; return; }
+    tree.innerHTML='';
+    for(const e of entries){
+      const depth=e.path.split('/').length-1;
+      const div=document.createElement('div');
+      div.className='node '+e.type;
+      div.style.paddingLeft=(12+depth*12)+'px';
+      div.innerHTML='<span class="ic">'+(e.type==='dir'?'📁':'📄')+'</span>'+e.name;
+      if(e.type==='file'){ div.onclick=()=>openFile(e.path,div); if(e.path===current) div.classList.add('active'); }
+      tree.appendChild(div);
+    }
+  }catch(err){ tree.innerHTML='<div class="empty">Failed to load workspace.</div>'; }
+}
+
+async function openFile(path,node){
+  if(dirty && !confirm('Discard unsaved changes?')) return;
+  try{
+    const r=await fetch('/api/workspace/file?path='+encodeURIComponent(path),{credentials:'include'});
+    const j=await r.json();
+    if(!r.ok){ toast(j.error||'Could not open'); return; }
+    current=path; savedValue=j.content;
+    $('#welcome').style.display='none'; $('#editor').style.display='block';
+    if(!editor) await initMonaco();
+    editor.setModel(monaco.editor.createModel(j.content, langFor(path)));
+    setDirty(false);
+    document.querySelectorAll('.node.active').forEach(n=>n.classList.remove('active'));
+    if(node) node.classList.add('active');
+  }catch(err){ toast('Error opening file'); }
+}
+
+async function save(){
+  if(!current) return;
+  const content=editor.getValue();
+  try{
+    const r=await fetch('/api/workspace/file',{method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({path:current,content})});
+    const j=await r.json();
+    if(!r.ok||!j.ok){ toast(j.error||'Save failed'); return; }
+    savedValue=content; setDirty(false); toast('Saved '+current);
+  }catch(err){ toast('Save failed'); }
+}
+
+async function newFile(){
+  const path=prompt('New file path (relative to workspace):','untitled.txt');
+  if(!path) return;
+  try{
+    const r=await fetch('/api/workspace/file',{method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path.trim(),content:''})});
+    const j=await r.json();
+    if(!r.ok||!j.ok){ toast(j.error||'Could not create'); return; }
+    await loadTree(); openFile(path.trim());
+  }catch(err){ toast('Could not create'); }
+}
+
+function initMonaco(){
+  return new Promise(resolve=>{
+    require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs'}});
+    require(['vs/editor/editor.main'],()=>{
+      editor=monaco.editor.create($('#editor'),{theme:'vs-dark',automaticLayout:true,fontSize:13,
+        minimap:{enabled:false},scrollBeyondLastLine:false,value:''});
+      editor.onDidChangeModelContent(()=>{ setDirty(editor.getValue()!==savedValue); });
+      editor.addCommand(monaco.KeyMod.CtrlCmd|monaco.KeyCode.KeyS,()=>save());
+      resolve();
+    });
+  });
+}
+
+$('#saveBtn').onclick=save;
+$('#newBtn').onclick=newFile;
+$('#refreshBtn').onclick=loadTree;
+window.addEventListener('beforeunload',e=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
+loadTree();
+</script>
+</body>
+</html>
