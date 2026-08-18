@@ -1030,12 +1030,15 @@ async function loadState() {
 /* ══════════════════════════════════════════════════════════════
    MANIFEST SYNC — fetch pages dynamically from server
    ══════════════════════════════════════════════════════════════ */
+let _manifestEtag = null; // last ETag seen — server 304s when content is unchanged
 async function fetchManifest(forceSync) {
   if (_stateDirty && !forceSync) return; // unsaved local changes — don't clobber
   try {
     const url = '/api/canvas/manifest' + (forceSync ? '?sync=1' : '');
-    const resp = await fetch(url);
+    const resp = await fetch(url, _manifestEtag ? { headers: { 'If-None-Match': _manifestEtag } } : undefined);
+    if (resp.status === 304) return; // manifest unchanged — skip re-parse/re-render
     if (!resp.ok) { console.warn('[desktop] manifest fetch failed:', resp.status); return; }
+    _manifestEtag = resp.headers.get('ETag');
     const data = await resp.json();
 
     // Categories to hide from desktop (system UI, empty, etc.)
