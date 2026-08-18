@@ -179,8 +179,6 @@ def create_app(config_override: dict = None):
                                     # are state-changing admin operations and require admin auth below.
             '/api/vault/oauth/callback/',  # OAuth callbacks — redirected from external providers
             '/plugins/',      # Plugin static assets — face scripts, CSS, previews
-            '/api/audio-clips/', # Audio clip creator (generate/list/email saved TTS clips)
-                                 # — chat/tts/stt peers already allowlisted below with SEC notes
             '/api/theme',     # theme config — loaded before Clerk init
             '/faces/custom/', # custom face HTML — loaded in iframe by face-box
             '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
