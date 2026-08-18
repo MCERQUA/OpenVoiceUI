@@ -530,7 +530,20 @@ def serve_upload(filename):
         resp.headers['Content-Disposition'] = (
             'attachment; filename="%s"' % Path(filename).name.replace('"', ''))
     resp.headers['X-Content-Type-Options'] = 'nosniff'
-    resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox; frame-ancestors 'none'"
+    # CSP by type (2026-08-02): the strict `sandbox; default-src 'none'` neutralizes stored
+    # XSS in html/svg/js, but `sandbox` with no allowlist ALSO stops the browser's built-in
+    # media/pdf viewer from loading — so direct links to an uploaded .mp4/.mp3/.pdf served 200
+    # but played nothing (koolfoam video, mac-claude directive). Inert media served inline with
+    # its real mime + nosniff has no script surface, so it gets a CSP that permits only
+    # self-origin media/images/pdf to render while still blocking all script + framing, and
+    # crucially drops `sandbox`. Non-safe types (already downgraded to a text/plain attachment
+    # above) keep the maximally-locked CSP.
+    if _ext in _SAFE_INLINE:
+        resp.headers['Content-Security-Policy'] = (
+            "default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; "
+            "object-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'")
+    else:
+        resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox; frame-ancestors 'none'"
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'

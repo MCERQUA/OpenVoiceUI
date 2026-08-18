@@ -29,13 +29,36 @@ from pathlib import Path
 
 from flask import Blueprint, request, jsonify
 
-from services.paths import RUNTIME_DIR
+from services.paths import RUNTIME_DIR, UPLOADS_DIR
 
 grid_gen_bp = Blueprint('grid_gen', __name__)
 
 # Under uploads/ (bind-mounted + world-writable) so the Mac's host-side markers are visible here.
 ORDERS_DIR = RUNTIME_DIR / 'uploads' / 'grid-orders'
 _VALID_TYPES = {'post', 'logo', 'character', 'mascot'}
+_IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif', '.avif', '.heic', '.heif'}
+_MAX_REFS = 6
+
+
+def _sanitize_refs(raw) -> list:
+    """Keep only real image files that actually live in this tenant's uploads/ dir.
+
+    Refs are basenames the user picked/uploaded (e.g. 'logo__a1b2c3d4.png'). We reject anything
+    with a path separator or that doesn't resolve to an existing image directly under uploads/,
+    so a ref can never point the Mac at a file outside the tenant's own uploads.
+    """
+    out = []
+    for r in (raw or [])[:24]:
+        name = (str(r) or '').strip().lstrip('/')
+        if not name or '/' in name or '\\' in name or '..' in name:
+            continue
+        p = UPLOADS_DIR / name
+        if p.suffix.lower() in _IMAGE_EXTS and p.is_file():
+            if name not in out:
+                out.append(name)
+        if len(out) >= _MAX_REFS:
+            break
+    return out
 
 
 def _orders_dir() -> Path:
@@ -64,11 +87,32 @@ def create_order():
         'count': max(1, min(24, int(d.get('count') or 9))),
         'aspect': d.get('aspect') or '1:1',
         'layout': 'composite' if d.get('layout') != 'separate' else 'separate',
+        # Reference images the user uploaded/picked from uploads/. The Mac reads these from this
+        # order record (authoritative) and passes them to the generator as --img inputs — the
+        # agent path never has to relay filenames. Basenames only; validated to exist in uploads/.
+        'refs': _sanitize_refs(d.get('refs')),
         'status': 'queued',
         'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
     (_orders_dir() / f'{rid}.json').write_text(json.dumps(order))
-    return jsonify({'ok': True, 'request_id': rid})
+    return jsonify({'ok': True, 'request_id': rid, 'refs': order['refs']})
+
+
+@grid_gen_bp.route('/api/grid-gen/uploads', methods=['GET'])
+def list_uploads():
+    """Image files in this tenant's uploads/ dir, for the reference-image picker.
+
+    Flat listing (excludes subdirs like grid-orders/, albums/) newest-first, images only.
+    """
+    out = []
+    try:
+        entries = [p for p in UPLOADS_DIR.iterdir()
+                   if p.is_file() and not p.name.startswith('.') and p.suffix.lower() in _IMAGE_EXTS]
+    except OSError:
+        entries = []
+    for p in sorted(entries, key=lambda p: p.stat().st_mtime, reverse=True)[:300]:
+        out.append({'name': p.name, 'url': f'/uploads/{p.name}', 'mtime': int(p.stat().st_mtime)})
+    return jsonify(out)
 
 
 @grid_gen_bp.route('/api/grid-gen/orders', methods=['GET'])

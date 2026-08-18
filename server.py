@@ -221,6 +221,11 @@ app.register_blueprint(story_bp)
 from routes.airadio_bridge import airadio_bp
 app.register_blueprint(airadio_bp)
 
+# Voice Agent Tool Bus — /api/tools/* (catalog, invoke, jobs, SSE events).
+# Spec: docs/jambot/voice-agent-tool-bus.md
+from routes.tools import tools_bp
+app.register_blueprint(tools_bp)
+
 try:
     from routes.song_tagger import song_tagger_bp
     app.register_blueprint(song_tagger_bp)
