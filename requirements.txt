@@ -6,7 +6,7 @@ flask-limiter==4.1.1
 flask-sock==0.7.0
 
 # WebSocket & HTTP
-websockets==16.1.1
+websockets==17.0.1
 requests==2.34.2
 PySocks==1.7.1                 # SOCKS5 proxy support for requests (residential IP routing)
 # httpx is imported directly by several providers (tts_providers/{hume,elevenlabs,resemble,
@@ -36,7 +36,7 @@ groq==1.6.0                 # Groq Orpheus TTS (required if using groq provider)
 
 # Auth (Clerk JWT — optional, only if CANVAS_REQUIRE_AUTH=true)
 PyJWT==2.13.0
-cryptography==49.0.0
+cryptography==50.0.0
 
 # Face recognition (optional — adds ~700MB for TensorFlow)
 # Installs on first use if not present. To pre-install:

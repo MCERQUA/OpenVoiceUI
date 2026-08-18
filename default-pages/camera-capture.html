@@ -551,16 +551,40 @@ let modalAlbumId = null; // null = create, string = edit
 let authReady = false;
 
 // ════════════════════════════════════════════════════════════════
+// AUTH BRIDGE — postMessage token from parent frame
+// ════════════════════════════════════════════════════════════════
+let _authToken = null;
+window.addEventListener('message', e => {
+  if (!e.data) return;
+  if (e.data.type === 'auth-token') {
+    _authToken = e.data.token;
+    window.authFetch = (url, opts = {}) => {
+      const headers = { ...(opts.headers || {}) };
+      if (_authToken) headers['Authorization'] = 'Bearer ' + _authToken;
+      return fetch(url, { ...opts, headers });
+    };
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════════════════════════
 async function init() {
   await awaitAuth();
   startGPS();
+  // Wire capture FAB circle to open camera overlay
+  const circle = document.getElementById('captureCircle');
+  if (circle) {
+    circle.addEventListener('click', openCameraOverlay);
+    circle.addEventListener('touchend', e => { e.preventDefault(); openCameraOverlay(); });
+  }
   renderAlbumList();
   setupSearch();
   setupAnnotator();
-  // Request camera from parent
-  window.parent.postMessage({ type: 'canvas-action', action: 'camera-acquire' }, '*');
+  // Request camera from parent (camera-arbitration bridge in app.js)
+  window.parent.postMessage({
+    type: 'camera-arbitration', action: 'request', owner: 'capture', reqId: 'cam-cap-init'
+  }, '*');
 }
 
 async function awaitAuth() {
@@ -570,7 +594,7 @@ async function awaitAuth() {
     if (typeof window.authFetch === 'function') { authReady = true; return; }
   }
   console.warn('authFetch not available after 6s, falling back to fetch');
-  window.authFetch = window.fetch;
+  window.authFetch = (url, opts = {}) => fetch(url, opts);
   authReady = true;
 }
 
@@ -1103,7 +1127,8 @@ function stopCamera() {
   const sv = document.getElementById('shutterVideo');
   if (vf) vf.srcObject = null;
   if (sv) sv.srcObject = null;
-  window.parent.postMessage({ type: 'canvas-action', action: 'camera-release' }, '*');
+  // Release camera arbitration lock in parent frame
+  window.parent.postMessage({ type: 'camera-arbitration', action: 'release', owner: 'capture' }, '*');
 }
 
 function flipCamera() {
@@ -1756,7 +1781,7 @@ async function saveAnnotation() {
       anCanvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/jpeg', 0.92);
     });
     const formData = new FormData();
-    formData.append('annotation', blob, `annot_${anPhotoId}.jpg`);
+    formData.append('file', blob, `annot_${anPhotoId}.jpg`);
     const r = await apiFetch(`${API}/albums/${anAlbumId}/photos/${anPhotoId}/annotate`, { method: 'POST', body: formData });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     // Update local state
