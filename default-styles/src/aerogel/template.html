@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aerogel Studio — Client Operations</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ================================================================
+   AEROGEL — Spatial-Computing Glass, Daylight
+   Every color flows through these tokens. Do not hardcode hex
+   values in component rules; extend the derived palette here.
+   ================================================================ */
+:root {
+  --bg: #eef1f5;
+  --surface: #ffffff;
+  --surface-2: #f3f6f9;
+  --border: #dbe2e9;
+  --text: #3c4756;
+  --text-secondary: #5f6c7d;
+  --text-muted: #8d99a9;
+  --heading: #16202c;
+  --brand: #16202c;
+  --brand-contrast: #ffffff;
+  --accent: #0bd9a2;
+  --success: #149e63;
+  --warning: #d9870b;
+  --danger: #dc4433;
+  --scrollbar: #c2ccd7;
+  --radius: 22px;
+  --radius-sm: 14px;
+  --shadow: 0 1px 2px rgba(22, 32, 44, 0.04), 0 12px 32px rgba(22, 32, 44, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --font-display: 'Inter Tight', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter Tight', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+  /* Derived glass + tint palette — all built from the tokens above */
+  --glass-1: rgba(255, 255, 255, 0.62);          /* tier 1: floating panels   */
+  --glass-2: rgba(255, 255, 255, 0.78);          /* tier 2: raised controls   */
+  --glass-3: rgba(255, 255, 255, 0.55);          /* tier 3: the dock          */
+  --glass-edge: rgba(255, 255, 255, 0.75);       /* crisp white hairline      */
+  --ink-hairline: rgba(22, 32, 44, 0.06);        /* crisp ink hairline ring   */
+  --ink-hairline-2: rgba(22, 32, 44, 0.10);
+  --well: rgba(243, 246, 249, 0.65);             /* inset translucent well    */
+  --specular: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --shadow-1: 0 1px 2px rgba(22, 32, 44, 0.04), 0 12px 32px rgba(22, 32, 44, 0.08);
+  --shadow-1-hover: 0 2px 4px rgba(22, 32, 44, 0.05), 0 20px 44px rgba(22, 32, 44, 0.12);
+  --shadow-2: 0 2px 8px rgba(22, 32, 44, 0.08);
+  --shadow-3: 0 20px 48px rgba(22, 32, 44, 0.16);
+  --mint-halo: 0 0 0 3px rgba(11, 217, 162, 0.20);
+  --mint-glow: 0 0 8px rgba(11, 217, 162, 0.5);
+  --mint-tint: rgba(11, 217, 162, 0.11);
+  --mint-wash: rgba(11, 217, 162, 0.05);
+  --success-tint: rgba(20, 158, 99, 0.11);
+  --warning-tint: rgba(217, 135, 11, 0.11);
+  --danger-tint: rgba(220, 68, 51, 0.10);
+  --ink-tint: rgba(22, 32, 44, 0.06);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+
+::selection { background: var(--mint-tint); color: var(--heading); }
+
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+h1, h2, h3, h4 { color: var(--heading); font-family: var(--font-display); }
+
+a { color: var(--heading); text-decoration: none; font-weight: 500; border-bottom: 1px solid var(--accent); }
+a:hover { color: var(--heading); border-bottom-width: 2px; }
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--mint-halo), 0 0 0 1.5px var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Ambient background wash ---------- */
+.ambient {
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.ambient::before,
+.ambient::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+}
+.ambient::before {
+  width: 70vw; height: 70vw;
+  top: -18vw; right: -14vw;
+  background: radial-gradient(circle at center, var(--mint-wash) 0%, rgba(11, 217, 162, 0.08) 30%, transparent 70%);
+}
+.ambient::after {
+  width: 60vw; height: 60vw;
+  bottom: -20vw; left: -12vw;
+  background: radial-gradient(circle at center, rgba(22, 32, 44, 0.05) 0%, transparent 70%);
+}
+.ambient-mid {
+  position: absolute;
+  width: 44vw; height: 44vw;
+  top: 34%; left: 26%;
+  border-radius: 50%;
+  filter: blur(80px);
+  background: radial-gradient(circle at center, rgba(11, 217, 162, 0.045) 0%, transparent 68%);
+}
+
+/* ---------- Layout shell ---------- */
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+section { display: flex; flex-direction: column; gap: 16px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.section-head h2 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.section-head .hint { font-size: 12.5px; color: var(--text-muted); }
+
+.micro {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- Glass tiers ---------- */
+.glass {
+  background: var(--glass-1);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--ink-hairline), var(--shadow-1), var(--specular);
+}
+
+.glass-lift { transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out); }
+.glass-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 1px var(--ink-hairline), var(--shadow-1-hover), var(--specular);
+}
+
+/* ---------- Header ---------- */
+.masthead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.masthead-id { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.masthead-brand { display: flex; align-items: center; gap: 10px; }
+.masthead-mark {
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  background: var(--brand);
+  color: var(--brand-contrast);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), var(--shadow-2);
+  flex: none;
+}
+.masthead h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--heading);
+}
+.masthead .sub { font-size: 14px; color: var(--text-secondary); max-width: 52ch; }
+.masthead-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-edge);
+  box-shadow: 0 0 0 1px var(--ink-hairline), var(--shadow-2), var(--specular);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--heading);
+}
+
+/* Live pulse dot */
+.pulse {
+  position: relative;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: var(--mint-glow);
+  flex: none;
+}
+.pulse::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  opacity: 0;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out), background 150ms var(--ease-out);
+}
+.btn svg { width: 15px; height: 15px; flex: none; }
+
+.btn-primary {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), var(--shadow-2);
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), var(--shadow-2), var(--mint-halo); }
+
+.btn-secondary {
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-color: var(--glass-edge);
+  color: var(--heading);
+  box-shadow: 0 0 0 1px var(--ink-hairline), var(--shadow-2), var(--specular);
+}
+.btn-secondary:hover { background: var(--surface); transform: translateY(-1px); }
+
+.btn-ghost { background: transparent; color: var(--text-secondary); }
+.btn-ghost:hover { background: var(--glass-2); color: var(--heading); }
+
+.btn-sm { padding: 7px 14px; font-size: 13px; }
+
+/* ---------- Segmented control ---------- */
+.segmented {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-edge);
+  box-shadow: 0 0 0 1px var(--ink-hairline), var(--shadow-2), var(--specular);
+  max-width: 100%;
+  overflow-x: auto;
+}
+.segmented button {
+  border: 0;
+  background: transparent;
+  padding: 7px 16px;
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: background 150ms var(--ease-out), color 150ms var(--ease-out);
+}
+.segmented button:hover { color: var(--heading); }
+.segmented button.active {
+  background: var(--surface);
+  color: var(--heading);
+  box-shadow: var(--shadow-2), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+.segmented button.active::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: var(--mint-glow);
+}
+
+/* ---------- KPI tiles ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+.kpi {
+  position: relative;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+.kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.kpi-live { display: inline-flex; align-items: center; gap: 8px; }
+.kpi-value {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--heading);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+  z-index: 1;
+}
+.kpi-value small { font-size: 18px; font-weight: 400; color: var(--text-muted); letter-spacing: 0; }
+.kpi-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.kpi-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.kpi-delta svg { width: 11px; height: 11px; }
+.delta-up { background: var(--success-tint); color: var(--success); }
+.delta-down { background: var(--danger-tint); color: var(--danger); }
+.delta-flat { background: var(--ink-tint); color: var(--text-secondary); }
+.kpi-caption { font-size: 11.5px; color: var(--text-muted); }
+.spark { color: var(--accent); flex: none; }
+.spark svg { display: block; }
+
+/* Hero KPI: soft mint glow behind the numeral */
+.kpi-hero::before {
+  content: "";
+  position: absolute;
+  width: 220px; height: 220px;
+  top: -40px; left: -30px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, var(--mint-tint) 0%, transparent 66%);
+  pointer-events: none;
+}
+
+/* ---------- Panels & grid ---------- */
+.panel { padding: 22px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.panel-head h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+
+.duo {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* ---------- Table ---------- */
+.table-scroll { overflow-x: auto; border-radius: var(--radius-sm); }
+table { width: 100%; border-collapse: collapse; min-width: 640px; }
+thead th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--well);
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+thead th:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+thead th:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+tbody td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--ink-hairline);
+  font-size: 13.5px;
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr { transition: background 150ms var(--ease-out); }
+tbody tr:hover { background: var(--mint-wash); }
+.cell-primary { color: var(--heading); font-weight: 500; }
+.cell-sub { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+.cell-num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--heading); white-space: nowrap; }
+th.cell-num { color: var(--text-muted); }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge-live { background: var(--mint-tint); color: var(--success); }
+.badge-success { background: var(--success-tint); color: var(--success); }
+.badge-warning { background: var(--warning-tint); color: var(--warning); }
+.badge-danger { background: var(--danger-tint); color: var(--danger); }
+.badge-neutral { background: var(--ink-tint); color: var(--text-secondary); }
+
+/* ---------- Progress ---------- */
+.progress-row { display: flex; flex-direction: column; gap: 7px; }
+.progress-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.progress-meta .name { font-size: 13px; font-weight: 500; color: var(--heading); }
+.progress-meta .frac { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); }
+.track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--well);
+  box-shadow: inset 0 1px 2px rgba(22, 32, 44, 0.06);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: var(--mint-glow);
+}
+.fill-warning { background: var(--warning); box-shadow: none; }
+
+/* ---------- Forms ---------- */
+.form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field label { font-size: 12px; font-weight: 600; color: var(--heading); }
+.field input,
+.field select {
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-edge);
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 0 1px var(--ink-hairline), var(--specular);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--heading);
+  transition: box-shadow 150ms var(--ease-out), border-color 150ms var(--ease-out);
+}
+.field input::placeholder { color: var(--text-muted); }
+.field input:hover, .field select:hover { border-color: var(--border); }
+.field input:focus, .field select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--mint-halo);
+}
+.field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 38px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235f6c7d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  cursor: pointer;
+}
+
+/* ---------- Timeline ---------- */
+.timeline { display: flex; flex-direction: column; }
+.tl-item {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--ink-hairline);
+}
+.tl-item:last-child { border-bottom: 0; }
+.tl-icon {
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--glass-2);
+  border: 1px solid var(--glass-edge);
+  box-shadow: 0 0 0 1px var(--ink-hairline), var(--specular);
+  color: var(--text-secondary);
+  flex: none;
+}
+.tl-icon svg { width: 14px; height: 14px; }
+.tl-icon-accent { color: var(--accent); box-shadow: 0 0 0 1px var(--ink-hairline), var(--mint-glow), var(--specular); }
+.tl-body p { font-size: 13.5px; color: var(--text); }
+.tl-body strong { color: var(--heading); font-weight: 600; }
+.tl-time { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 3px; display: block; }
+
+/* ---------- Card grid ---------- */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+.card { padding: 20px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card h4 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.card p { font-size: 13px; color: var(--text-secondary); }
+.card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ink-hairline);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.card-icon {
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  background: var(--well);
+  color: var(--heading);
+  flex: none;
+}
+.card-icon svg { width: 16px; height: 16px; }
+
+/* ---------- Dock ---------- */
+.dock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 22px;
+  border-radius: 999px;
+  background: var(--glass-3);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
+  border: 1px solid var(--glass-edge);
+  box-shadow: 0 0 0 1px var(--ink-hairline), var(--shadow-3), var(--specular);
+}
+.dock-status { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 500; color: var(--heading); }
+.dock-status .mono { font-size: 11.5px; color: var(--text-muted); }
+.dock-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Footer ---------- */
+.footnote {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 0 10px;
+}
+.footnote a { font-weight: 500; }
+
+/* ---------- Motion ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .rise { animation: rise 500ms var(--ease-out) both; }
+  .d1 { animation-delay: 60ms; }
+  .d2 { animation-delay: 120ms; }
+  .d3 { animation-delay: 180ms; }
+  .d4 { animation-delay: 240ms; }
+  .d5 { animation-delay: 300ms; }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .pulse::after { animation: ripple 2.4s var(--ease-out) infinite; }
+  @keyframes ripple {
+    0% { opacity: 0.8; transform: scale(0.6); }
+    70% { opacity: 0; transform: scale(1.9); }
+    100% { opacity: 0; transform: scale(1.9); }
+  }
+  .ambient::before { animation: drift-a 52s ease-in-out infinite alternate; }
+  .ambient::after { animation: drift-b 64s ease-in-out infinite alternate; }
+  .ambient-mid { animation: drift-c 48s ease-in-out infinite alternate; }
+  @keyframes drift-a { from { transform: translate(0, 0); } to { transform: translate(-5vw, 4vw); } }
+  @keyframes drift-b { from { transform: translate(0, 0); } to { transform: translate(4vw, -3vw); } }
+  @keyframes drift-c { from { transform: translate(0, 0) scale(1); } to { transform: translate(3vw, 3vw) scale(1.12); } }
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .duo { grid-template-columns: minmax(0, 1fr); }
+  .form-row { grid-template-columns: minmax(0, 1fr); }
+  .form-row .btn { justify-content: center; }
+}
+
+/* Mobile width law: the host's 25px body padding is the ONLY horizontal
+   inset. Wrappers get ZERO side padding; cards keep internal 16px. */
+@media (max-width: 640px) {
+  .page { gap: 24px; }
+  .masthead h1 { font-size: 24px; }
+  .kpi-value { font-size: 34px; }
+  .panel, .kpi, .card { padding: 16px; }
+  .dock { border-radius: var(--radius); padding: 14px 16px; }
+  .masthead-actions .btn-secondary { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="ambient" aria-hidden="true"><div class="ambient-mid"></div></div>
+
+<div class="page">
+
+  <!-- ============ Header ============ -->
+  <header class="masthead rise">
+    <div class="masthead-id">
+      <div class="masthead-brand">
+        <span class="masthead-mark" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>
+        </span>
+        <h1>Aerogel Studio</h1>
+      </div>
+      <p class="sub">Client operations · Six engagements in motion, two review gates open, render farm at 41% load.</p>
+    </div>
+    <div class="masthead-actions">
+      <span class="status-chip"><span class="pulse" aria-hidden="true"></span> All systems nominal</span>
+      <button class="btn btn-secondary btn-sm" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export
+      </button>
+      <button class="btn btn-primary btn-sm" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New engagement
+      </button>
+    </div>
+  </header>
+
+  <!-- ============ Filter segmented control ============ -->
+  <div class="rise d1">
+    <div class="segmented" role="tablist" aria-label="Engagement filter">
+      <button class="active" type="button" aria-pressed="true">Active</button>
+      <button type="button" aria-pressed="false">In review</button>
+      <button type="button" aria-pressed="false">Delivered</button>
+      <button type="button" aria-pressed="false">Archived</button>
+    </div>
+  </div>
+
+  <!-- ============ KPI tiles ============ -->
+  <section class="kpi-grid" aria-label="Key metrics">
+
+    <article class="glass glass-lift kpi kpi-hero rise d1">
+      <div class="kpi-top">
+        <span class="micro">Monthly recurring</span>
+        <span class="kpi-live"><span class="pulse" aria-hidden="true"></span><span class="micro">Live</span></span>
+      </div>
+      <div class="kpi-value">$48<small>,260</small></div>
+      <div class="kpi-foot">
+        <div>
+          <span class="kpi-delta delta-up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg>+6.2%</span>
+          <div class="kpi-caption">vs. last cycle</div>
+        </div>
+        <span class="spark" aria-hidden="true">
+          <svg width="72" height="26" viewBox="0 0 72 26" fill="none"><polyline points="1,20 10,17 19,18 28,13 37,14 46,9 55,11 64,5 71,6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>
+        </span>
+      </div>
+    </article>
+
+    <article class="glass glass-lift kpi rise d2">
+      <div class="kpi-top">
+        <span class="micro">Active engagements</span>
+        <span class="kpi-live"><span class="pulse" aria-hidden="true"></span><span class="micro">Live</span></span>
+      </div>
+      <div class="kpi-value">6</div>
+      <div class="kpi-foot">
+        <div>
+          <span class="kpi-delta delta-up">+2</span>
+          <div class="kpi-caption">two signed this cycle</div>
+        </div>
+        <span class="spark" aria-hidden="true">
+          <svg width="72" height="26" viewBox="0 0 72 26" fill="none"><polyline points="1,22 10,22 19,18 28,18 37,14 46,14 55,10 64,10 71,6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>
+        </span>
+      </div>
+    </article>
+
+    <article class="glass glass-lift kpi rise d3">
+      <div class="kpi-top">
+        <span class="micro">Avg. turnaround</span>
+      </div>
+      <div class="kpi-value">4.8<small> days</small></div>
+      <div class="kpi-foot">
+        <div>
+          <span class="kpi-delta delta-down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>-0.6d</span>
+          <div class="kpi-caption">faster is better</div>
+        </div>
+        <span class="spark" aria-hidden="true">
+          <svg width="72" height="26" viewBox="0 0 72 26" fill="none"><polyline points="1,6 10,9 19,8 28,12 37,11 46,15 55,14 64,18 71,19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>
+        </span>
+      </div>
+    </article>
+
+    <article class="glass glass-lift kpi rise d4">
+      <div class="kpi-top">
+        <span class="micro">Client satisfaction</span>
+      </div>
+      <div class="kpi-value">97<small>%</small></div>
+      <div class="kpi-foot">
+        <div>
+          <span class="kpi-delta delta-flat">±0.0</span>
+          <div class="kpi-caption">31 responses this cycle</div>
+        </div>
+        <span class="spark" aria-hidden="true">
+          <svg width="72" height="26" viewBox="0 0 72 26" fill="none"><polyline points="1,10 10,8 19,9 28,7 37,8 46,7 55,8 64,7 71,7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>
+        </span>
+      </div>
+    </article>
+
+  </section>
+
+  <!-- ============ Table + side column ============ -->
+  <div class="duo">
+
+    <!-- Engagements table -->
+    <section class="glass panel rise d2" aria-label="Engagements">
+      <div class="panel-head">
+        <h3>Engagement pipeline</h3>
+        <button class="btn btn-ghost btn-sm" type="button">
+          View all
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Deliverable</th>
+              <th>Status</th>
+              <th class="cell-num">Value</th>
+              <th class="cell-num">Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="cell-primary">Halvorsen &amp; Co.</div>
+                <div class="cell-sub">ENG-2104 · retainer</div>
+              </td>
+              <td>Spatial brand system v2</td>
+              <td><span class="badge badge-live">In production</span></td>
+              <td class="cell-num">$12,400</td>
+              <td class="cell-num">Jul 18</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-primary">Northlight Optics</div>
+                <div class="cell-sub">ENG-2101 · project</div>
+              </td>
+              <td>Lens configurator UI</td>
+              <td><span class="badge badge-warning">Review gate</span></td>
+              <td class="cell-num">$9,800</td>
+              <td class="cell-num">Jul 14</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-primary">Cedar Hollow Farms</div>
+                <div class="cell-sub">ENG-2098 · project</div>
+              </td>
+              <td>Harvest analytics dashboard</td>
+              <td><span class="badge badge-live">In production</span></td>
+              <td class="cell-num">$7,250</td>
+              <td class="cell-num">Jul 22</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-primary">Meridian Roofing Co.</div>
+                <div class="cell-sub">ENG-2095 · retainer</div>
+              </td>
+              <td>Field-ops mobile refresh</td>
+              <td><span class="badge badge-danger">Blocked · assets</span></td>
+              <td class="cell-num">$6,900</td>
+              <td class="cell-num">Jul 12</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-primary">Tidepool Labs</div>
+                <div class="cell-sub">ENG-2092 · project</div>
+              </td>
+              <td>Investor deck &amp; motion kit</td>
+              <td><span class="badge badge-success">Delivered</span></td>
+              <td class="cell-num">$5,400</td>
+              <td class="cell-num">Jul 08</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="cell-primary">Ashgrove Dental</div>
+                <div class="cell-sub">ENG-2090 · project</div>
+              </td>
+              <td>Patient portal onboarding flow</td>
+              <td><span class="badge badge-neutral">Queued</span></td>
+              <td class="cell-num">$4,150</td>
+              <td class="cell-num">Aug 01</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Side column: capacity + quick assign -->
+    <div style="display: flex; flex-direction: column; gap: 18px; min-width: 0;">
+
+      <section class="glass panel rise d3" aria-label="Studio capacity">
+        <div class="panel-head">
+          <h3>Studio capacity</h3>
+          <span class="micro">This cycle</span>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-meta">
+            <span class="name">Design systems</span>
+            <span class="frac">62 / 80 hrs</span>
+          </div>
+          <div class="track"><div class="fill" style="width: 78%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-meta">
+            <span class="name">Motion &amp; render</span>
+            <span class="frac">33 / 80 hrs</span>
+          </div>
+          <div class="track"><div class="fill" style="width: 41%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-meta">
+            <span class="name">Client review</span>
+            <span class="frac">74 / 80 hrs</span>
+          </div>
+          <div class="track"><div class="fill fill-warning" style="width: 92%"></div></div>
+        </div>
+
+        <div class="progress-row">
+          <div class="progress-meta">
+            <span class="name">Research &amp; discovery</span>
+            <span class="frac">18 / 80 hrs</span>
+          </div>
+          <div class="track"><div class="fill" style="width: 22%"></div></div>
+        </div>
+      </section>
+
+      <section class="glass panel rise d4" aria-label="Quick assign">
+        <div class="panel-head">
+          <h3>Quick assign</h3>
+        </div>
+        <form class="form-row" onsubmit="return false">
+          <div class="field">
+            <label for="qa-task">Task</label>
+            <input id="qa-task" type="text" placeholder="e.g. Northlight gate review" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="qa-owner">Owner</label>
+            <select id="qa-owner">
+              <option>Ines Halvorsen</option>
+              <option>Marcus Webb</option>
+              <option>Priya Natarajan</option>
+              <option>Render farm</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" type="submit">Assign</button>
+        </form>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- ============ Activity timeline ============ -->
+  <section class="glass panel rise d3" aria-label="Recent activity">
+    <div class="panel-head">
+      <h3>Activity</h3>
+      <span class="micro">Last 24 hours</span>
+    </div>
+    <div class="timeline">
+
+      <div class="tl-item">
+        <span class="tl-icon tl-icon-accent" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>
+        <div class="tl-body">
+          <p><strong>Priya Natarajan</strong> shipped the harvest dashboard beta to <strong>Cedar Hollow Farms</strong> — 14 screens, spatial layout pass complete.</p>
+          <span class="tl-time">09:42 · today</span>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <span class="tl-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </span>
+        <div class="tl-body">
+          <p><strong>Northlight Optics</strong> left 6 comments on the lens configurator — review gate opens once all are resolved.</p>
+          <span class="tl-time">08:15 · today</span>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <span class="tl-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </span>
+        <div class="tl-body">
+          <p><strong>Meridian Roofing Co.</strong> asset delivery is 2 days late — field-ops refresh moved to blocked; escalation drafted.</p>
+          <span class="tl-time">17:03 · yesterday</span>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <span class="tl-icon tl-icon-accent" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/></svg>
+        </span>
+        <div class="tl-body">
+          <p><strong>Render farm</strong> finished the Tidepool motion kit — 42 clips at 4K, delivered and archived to the client vault.</p>
+          <span class="tl-time">14:27 · yesterday</span>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <span class="tl-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+        </span>
+        <div class="tl-body">
+          <p><strong>Marcus Webb</strong> onboarded <strong>Ashgrove Dental</strong> — kickoff scheduled, discovery workspace provisioned.</p>
+          <span class="tl-time">11:50 · yesterday</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ Card grid ============ -->
+  <section aria-label="Focus areas">
+    <div class="section-head rise d3">
+      <h2>This cycle's focus</h2>
+      <span class="hint">Three tracks, reviewed every Friday</span>
+    </div>
+    <div class="card-grid">
+
+      <article class="glass glass-lift card rise d3">
+        <div class="card-top">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          </span>
+          <span class="badge badge-live">On track</span>
+        </div>
+        <h4>Spatial design system rollout</h4>
+        <p>Migrate the three retainer clients onto the shared glass component library — tokens first, then panel recipes.</p>
+        <div class="card-meta"><span>ENG-2104 · ENG-2095</span><span>68% complete</span></div>
+      </article>
+
+      <article class="glass glass-lift card rise d4">
+        <div class="card-top">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </span>
+          <span class="badge badge-warning">Needs input</span>
+        </div>
+        <h4>Render pipeline v3</h4>
+        <p>Cut motion-kit turnaround from 5 days to 2 by pre-baking client brand presets into the farm queue.</p>
+        <div class="card-meta"><span>Internal · infra</span><span>41% complete</span></div>
+      </article>
+
+      <article class="glass glass-lift card rise d5">
+        <div class="card-top">
+          <span class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </span>
+          <span class="badge badge-neutral">Discovery</span>
+        </div>
+        <h4>Client health telemetry</h4>
+        <p>Instrument every engagement with live satisfaction and velocity signals so gates open themselves.</p>
+        <div class="card-meta"><span>Internal · ops</span><span>12% complete</span></div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============ Floating dock ============ -->
+  <div class="dock rise d5" role="toolbar" aria-label="Session actions">
+    <div class="dock-status">
+      <span class="pulse" aria-hidden="true"></span>
+      <span>Session synced</span>
+      <span class="mono">last write 09:58:12</span>
+    </div>
+    <div class="dock-actions">
+      <button class="btn btn-ghost btn-sm" type="button">Snapshot</button>
+      <button class="btn btn-secondary btn-sm" type="button">Share view</button>
+      <button class="btn btn-primary btn-sm" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+        Publish
+      </button>
+    </div>
+  </div>
+
+  <p class="footnote">Aerogel Studio · Client Operations · Data refreshed continuously — <a href="#top">back to top</a></p>
+
+</div>
+
+</body>
+</html>
