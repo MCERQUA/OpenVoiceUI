@@ -3716,7 +3716,12 @@ const CustomFaces = {
     const select = $('faces-promote-select');
     select.innerHTML = '<option value="">Loading canvas pages...</option>';
     try {
-      const d = await (await fetch('/api/canvas/manifest')).json();
+      // Sync FIRST: agent-created pages exist as files but only enter the manifest
+      // on a sync — without this the dropdown shows a stale page list and freshly
+      // built pages (the exact promote use-case) are missing. Cache-buster because
+      // this endpoint is otherwise served from HTTP cache (2026-08-18, test-dev).
+      await fetch('/api/canvas/manifest/sync', { method: 'POST' }).catch(() => {});
+      const d = await (await fetch('/api/canvas/manifest?t=' + Date.now())).json();
       const pages = Object.keys(d.pages || {}).sort();
       if (!pages.length) { select.innerHTML = '<option value="">No canvas pages found</option>'; return; }
       select.innerHTML = pages.map(id =>
