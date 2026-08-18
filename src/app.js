@@ -101,6 +101,15 @@ connectAiradio();
                 const iframe = document.getElementById('canvas-iframe');
                 window.ActionConsole?.addEntry?.('system', `Canvas action: ${action}`);
                 window.AgentActivityChip?.handleTag?.('canvas_action', action);
+                // Shell-level verbs act on the SHELL, never the page. Posting these
+                // into the iframe was a structural no-op: the page has no handler,
+                // and the shell's own 'close' case only fires on messages FROM pages.
+                // (2026-08-18: phatty/Hart — agent emitted close, canvas stayed open.)
+                if (action === 'close') { CanvasControl.hide(); return; }
+                if (action === 'menu') { CanvasControl.showMenu(); return; }
+                if (action === 'navigate' && (payload?.page || payload?.pageId)) {
+                    CanvasControl.showPageById(payload.page || payload.pageId); return;
+                }
                 if (iframe && !flushHooked) {
                     flushHooked = true;
                     // one tick past `load` so the page's inline listener-registration ran
@@ -4266,6 +4275,9 @@ connectAiradio();
                         await window.CanvasMenu?.loadManifest();
                     } catch (e) { console.warn('[Canvas] manifest sync failed:', e); }
                     CanvasControl.showPage?.(pageName);
+                } else if (/\[CANVAS_CLOSE\]/i.test(rawText)) {
+                    AgentActivityChip.handleTag('canvas_close');
+                    CanvasControl.hide?.();
                 } else if (/\[CANVAS_MENU\]/i.test(rawText)) {
                     AgentActivityChip.handleTag('canvas_menu');
                     CanvasControl.showMenu?.() || document.getElementById('canvas-menu-button')?.click();
@@ -4504,7 +4516,7 @@ connectAiradio();
                             .replace(/```[\s\S]*?```/g, '')        // complete generic fences
                             .replace(/```html[\s\S]*/gi, '')       // unclosed html fence (streaming)
                             .replace(/```[\s\S]*/g, '')            // unclosed generic fence (streaming)
-                            .replace(/\[CANVAS_MENU\]/gi, '')
+                            .replace(/\[CANVAS_MENU\]/gi, '').replace(/\[CANVAS_CLOSE\]/gi, '')
                             .replace(/\[CANVAS:[^\]]*\]/gi, '')
                             .replace(/\[CANVAS_URL:[^\]]*\]/gi, '')
                             .replace(/\[BROWSE_ACTION:\{[\s\S]*?\}\]/gi, '')
@@ -4549,6 +4561,14 @@ connectAiradio();
                             catch (e) { console.error(`[tag:${label}] handler failed:`, e); }
                         };
                         text = normalizeActionTags(text);
+                        // Check for [CANVAS_CLOSE] — first-class agent close verb (2026-08-18)
+                        if (/\[CANVAS_CLOSE\]/i.test(text) && !canvasCommandsProcessed.has('CANVAS_CLOSE')) {
+                            canvasCommandsProcessed.add('CANVAS_CLOSE');
+                            console.log('[Canvas] CANVAS_CLOSE trigger detected');
+                            ActionConsole.addEntry('system', 'Canvas: closing');
+                            AgentActivityChip.handleTag('canvas_close');
+                            _tag('canvas_close', () => CanvasControl.hide?.());
+                        }
                         // Check for [CANVAS_MENU]
                         if (/\[CANVAS_MENU\]/i.test(text) && !canvasCommandsProcessed.has('CANVAS_MENU')) {
                             canvasCommandsProcessed.add('CANVAS_MENU');
