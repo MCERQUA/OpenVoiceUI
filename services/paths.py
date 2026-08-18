@@ -26,6 +26,10 @@ VOICE_CLONES_DIR = RUNTIME_DIR / "voice-clones"
 VOICE_SESSION_FILE = str(RUNTIME_DIR / ".voice-session-counter")
 ACTIVE_PROFILE_FILE = RUNTIME_DIR / "profiles" / ".active-profile"
 WORKSPACE_DIR = Path(os.getenv('WORKSPACE_DIR', str(RUNTIME_DIR / 'workspace')))
+# Dedicated, isolated sandbox for the Monaco editor + terminal canvas blocks.
+# Deliberately NOT the shared WORKSPACE_DIR (agent data tree) — kept separate so
+# the code blocks have a clean, reversible root. Widen to the agent workspace later.
+CODE_WORKSPACE_DIR = Path(os.getenv('CODE_WORKSPACE_DIR', str(RUNTIME_DIR / 'code-workspace')))
 
 # Camera Capture — server-authoritative photo/album storage
 CAPTURES_DIR = Path(os.getenv("CAPTURES_DIR", str(RUNTIME_DIR / "captures")))
