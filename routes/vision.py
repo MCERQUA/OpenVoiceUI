@@ -101,24 +101,83 @@ def _get_vision_model() -> tuple[str, str]:
     return DEFAULT_VISION_MODEL, DEFAULT_VISION_PROVIDER
 
 
-def _call_vision(image_b64: str, prompt: str, model: str | None = None) -> str:
+def _call_vision_via_claude(container_img_path: str, prompt: str) -> str:
+    """
+    Analyze an uploaded image file using headless Claude Code (subscription, no marginal cost).
+
+    Runs `docker run jambot/openclaw:latest` — the openclaw image has the claude binary
+    and sources CLAUDE_CODE_OAUTH_TOKEN from the mounted platform-keys env. Same
+    subscription path as the image-intel cron sweep; no Groq/Gemini/OpenAI.
+
+    container_img_path: path to image inside the OVU container (/app/runtime/uploads/<file>).
+    Converts to the host filesystem path for the docker-run -v bind.
+    """
+    import subprocess
+
+    tenant = (os.environ.get('CLIENT_NAME') or '').strip().lower()
+    if not tenant:
+        raise ValueError('CLIENT_NAME env not set — cannot derive host image path')
+
+    filename = Path(container_img_path).name
+    host_img_path = f'/mnt/clients/{tenant}/openvoiceui/uploads/{filename}'
+
+    vision_prompt = f'Read the image file at {host_img_path} and then: {prompt}'
+
+    # Source platform keys to get CLAUDE_CODE_OAUTH_TOKEN, then run claude with full path
+    bash_cmd = (
+        'set -a; source /mnt/system/base/.platform-keys.env 2>/dev/null; set +a; '
+        'PATH="/home/node/.local/bin:$PATH" '
+        'claude -p --model claude-sonnet-5 '
+        '--allowedTools Read --output-format text "$VISION_PROMPT"'
+    )
+
+    proc = subprocess.run(
+        ['docker', 'run', '--rm',
+         '-v', '/mnt:/mnt:ro',
+         '-e', f'VISION_PROMPT={vision_prompt}',
+         'jambot/openclaw:latest',
+         '/bin/bash', '-c', bash_cmd],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f'claude vision rc={proc.returncode}: {(proc.stderr or "")[:300]}'
+        )
+
+    result = proc.stdout.strip()
+    if not result:
+        raise RuntimeError('claude vision returned empty response')
+
+    return result
+
+
+def _call_vision(image_b64: str, prompt: str, model: str | None = None, file_path: str | None = None) -> str:
     """
     Send an image + prompt to the configured vision model and return the text response.
 
-    Uses Groq's Llama 4 Scout vision model — fast, free, and accurate.
-    Z.AI/GLM vision through api.z.ai is broken (returns hallucinated descriptions).
+    For uploaded image files (file_path provided): routes through headless Claude Code
+    subscription via docker run — no Groq/Gemini/OpenAI, no marginal cost.
+    For camera frames (no file_path): uses Groq qwen3.6-27b as before.
 
     image_b64 may be a raw base64 string or a data-URI (data:image/jpeg;base64,...).
     """
+    # Uploaded files: use Claude subscription (image-intel system pattern)
+    if file_path:
+        return _call_vision_via_claude(file_path, prompt)
+
+    # Camera frames: Groq path (in-memory frames have no on-disk path)
     # Strip data-URI prefix if present
     if image_b64.startswith('data:'):
         image_b64 = image_b64.split(',', 1)[1]
 
     api_key = os.environ.get('GROQ_API_KEY', '')
     if not api_key:
-        raise ValueError('GROQ_API_KEY is not set — cannot call vision model')
+        raise ValueError('GROQ_API_KEY is not set — cannot call vision model for camera frame')
 
-    vision_model = 'meta-llama/llama-4-scout-17b-16e-instruct'
+    vision_model = os.environ.get('GROQ_VISION_MODEL', 'qwen/qwen3.6-27b')
 
     payload = {
         'model': vision_model,
@@ -130,7 +189,10 @@ def _call_vision(image_b64: str, prompt: str, model: str | None = None) -> str:
                 {'type': 'text', 'text': prompt},
             ],
         }],
-        'max_tokens': 600,
+        'max_tokens': 1500,
+        # qwen3 is a reasoning model — without this its <think> tokens eat the
+        # budget and can leak into the returned description
+        'reasoning_format': 'hidden',
     }
 
     resp = requests.post(
@@ -143,7 +205,11 @@ def _call_vision(image_b64: str, prompt: str, model: str | None = None) -> str:
         timeout=30,
     )
     resp.raise_for_status()
-    return resp.json()['choices'][0]['message']['content'].strip()
+    text = (resp.json()['choices'][0]['message']['content'] or '').strip()
+    # Defense in depth: strip any <think> block if reasoning_format was ignored
+    if '</think>' in text:
+        text = text.rsplit('</think>', 1)[1].strip()
+    return text
 
 
 # ---------------------------------------------------------------------------

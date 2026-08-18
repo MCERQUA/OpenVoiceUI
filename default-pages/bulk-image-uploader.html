@@ -384,7 +384,7 @@ function upload(file,id,retries){
         setQI(id,100,'ok',null,r);
         const e=ext(r.original_name||file.name);
         files.unshift({name:r.original_name||file.name,url:r.url,size:file.size,ext:e,cat:cat(e),modified:Date.now()/1000});
-        render();updateStor();
+        renderThrottled();updateStorThrottled();
       }catch(e){setQI(id,0,'err','Parse error')}
     }else if(retries<2){
       setQI(id,-1,'up');
@@ -448,6 +448,22 @@ $('tabs').onclick=e=>{const t=e.target.closest('.tab');if(!t)return;filter=t.dat
 $('srch').oninput=()=>render();
 
 // ── Gallery ──
+// Throttled render: the upload path calls render() on EVERY completed file, and
+// render() rebuilds the ENTIRE grid innerHTML. With a large existing library
+// (100+ files) plus 3 concurrent uploads finishing rapidly, that is a full
+// 100+-card DOM teardown several times a second — it froze the tab on a bulk
+// upload to a tenant that already had 100+ images (koolfoam, 2026-07-23). Coalesce
+// the burst: at most one rebuild per ~150ms, and always render the final state.
+let _renderT=null;
+function renderThrottled(){
+  if(_renderT)return;
+  _renderT=setTimeout(()=>{_renderT=null;render();},150);
+}
+let _storT=null;
+function updateStorThrottled(){
+  if(_storT)clearTimeout(_storT);
+  _storT=setTimeout(()=>{_storT=null;updateStor();},600);
+}
 function render(){
   renderTabs();
   const s=$('srch').value.toLowerCase();
@@ -462,11 +478,13 @@ function render(){
     // can play right in the feed (muted+preload=metadata so 20+ clips don't all download at once),
     // audio renders a compact inline <audio> player. event.stopPropagation keeps play/scrub controls
     // from bubbling up to the card's lightbox onclick — clicking the card elsewhere still opens the lightbox.
+    // The #t=0.1 media fragment forces the browser to seek+paint the frame at 0.1s as the visible
+    // poster — WITHOUT it, preload=metadata only loads dimensions/duration and the card stays black.
     let thumb;
     if(isImg){
       thumb=`<img src="${f.url}" loading="lazy" alt="">`;
     }else if(f.cat==='vid'){
-      thumb=`<video src="${f.url}" muted playsinline preload="metadata" controls onclick="event.stopPropagation()" style="width:100%;height:100%;object-fit:cover;background:#000"></video>`;
+      thumb=`<video src="${f.url}#t=0.1" muted playsinline preload="metadata" controls onclick="event.stopPropagation()" style="width:100%;height:100%;object-fit:cover;background:#000"></video>`;
     }else if(f.cat==='aud'){
       thumb=`<div class="ct-ic" style="width:100%;padding:0 10px">${IC.aud.replace(/stroke-width="[^"]*"/,'stroke-width="1.4"').replace(/<svg/,`<svg style="stroke:${COLORS.aud}"`)}<audio src="${f.url}" controls preload="none" onclick="event.stopPropagation()" style="width:100%;max-width:130px"></audio></div>`;
     }else{

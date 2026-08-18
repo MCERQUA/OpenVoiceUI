@@ -25,4 +25,4 @@
 - [ ] I've tested this end-to-end (voice in → audio out)
 - [ ] No API keys or secrets in my changes
 - [ ] `.env.example` updated if I added new env vars
-- [ ] `backend/requirements.txt` updated if I added Python packages
+- [ ] `requirements.txt` updated if I added Python packages

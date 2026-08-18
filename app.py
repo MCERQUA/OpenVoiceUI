@@ -111,6 +111,9 @@ def create_app(config_override: dict = None):
         '/api/server-stats',
         '/api/plugins/',    # install/uninstall/restart/config (assets exempted below)
         '/api/plugins',     # bare list endpoint
+        '/api/services/',   # Service Catalog + per-service health (WO-1.2) — reads
+                            # gateway/LLM/TTS/STT descriptors + vault cred status;
+                            # admin-only, never public.
     )
 
     if not _auth_enabled:
@@ -122,18 +125,39 @@ def create_app(config_override: dict = None):
         # Local / self-hosted installs (no CANVAS_REQUIRE_AUTH) keep the documented
         # open-access behaviour.
         if os.getenv('CANVAS_REQUIRE_AUTH', '').strip().lower() == 'true':
-            logger.error('CANVAS_REQUIRE_AUTH=true but no Clerk key — admin surface fail-closed')
+            logger.error('CANVAS_REQUIRE_AUTH=true but no Clerk key — FAILING CLOSED (all non-public routes)')
+
+            # F-7 (2026-07-15): fail CLOSED for the WHOLE app, not just admin. When a
+            # hosted tenant requires auth (CANVAS_REQUIRE_AUTH=true) but Clerk is
+            # unconfigured (missing/blank key — e.g. a broken .platform-keys.env mount),
+            # `require_auth` below is never registered, so PREVIOUSLY only /admin was
+            # blocked and every other protected route (voice/canvas/session RPC/vault)
+            # was served unauthenticated. Nobody can log in in this state anyway, so we
+            # deny every non-public path (deny-by-default) and serve only the minimal
+            # shell needed to render the login/error page + health probes. This is an
+            # emergency degraded posture; the real fix is restoring the Clerk key.
+            _UNCONF_PUBLIC_EXACT = {
+                '/', '/pi', '/health', '/health/live', '/health/ready',
+                '/favicon.ico', '/sw.js', '/manifest.json',
+                '/api/config', '/api/version', '/api/auth/check',
+            }
+            _UNCONF_PUBLIC_PREFIXES = ('/src/', '/static/', '/images/', '/plugins/')
 
             @app.before_request
-            def block_admin_unconfigured():
+            def fail_closed_unconfigured():
                 path = request.path
-                if (path == '/admin' or path.startswith('/admin/')
-                        or path == '/src/admin.html'
-                        or any(path.startswith(p) for p in _ADMIN_ONLY_PREFIXES)):
+                if path in _UNCONF_PUBLIC_EXACT:
+                    return
+                # /src/admin.html is the admin shell — never public even here
+                if path != '/src/admin.html' and any(path.startswith(p) for p in _UNCONF_PUBLIC_PREFIXES):
+                    return
+                # everything else is denied: JSON 401 for APIs, redirect to the login shell for pages
+                if path.startswith('/api/') or request.headers.get('X-Requested-With'):
                     return jsonify({
-                        'error': 'Admin surface disabled: auth required but Clerk is not configured',
-                        'code': 'admin_auth_unconfigured',
+                        'error': 'Auth required but Clerk is not configured — service unavailable',
+                        'code': 'auth_unconfigured',
                     }), 503
+                return redirect('/')
     else:
         # Routes that never require authentication:
         _PUBLIC_PREFIXES = (
@@ -148,29 +172,48 @@ def create_app(config_override: dict = None):
             '/canvas-data/',  # processed-song media (audio stems) + fixtures for the Suno Studio editor — non-sensitive, served like /uploads/ (added 2026-06-25)
             '/static/',    # PWA icons, app icons
             '/pages/',     # canvas pages — served without auth (CANVAS_REQUIRE_AUTH opt-in)
-            '/api/canvas/',  # canvas API — creation, manifest, context (no per-user auth needed)
             '/api/upload',    # file upload — canvas pages lose Clerk JWT on long sessions; files are non-sensitive
             '/api/uploads',   # uploads list — files are already public at /uploads/, listing is fine
-            '/api/profiles',  # read-only profile config — loaded before Clerk init
             '/api/plugins/assets',  # Plugin face scripts/CSS — fetched by index.html before login.
                                     # All other /api/plugins routes (install/uninstall/restart/config)
                                     # are state-changing admin operations and require admin auth below.
             '/api/vault/oauth/callback/',  # OAuth callbacks — redirected from external providers
             '/plugins/',      # Plugin static assets — face scripts, CSS, previews
-            '/api/chat',      # LLM proxy (Groq) — used by canvas pages for inline AI
-            '/api/tts/',      # TTS provider list — loaded before Clerk init
-            '/api/stt/',      # STT endpoints (Deepgram token, Groq, local) — mic audio only, no secrets exposed
             '/api/theme',     # theme config — loaded before Clerk init
-            '/api/music',     # music track list — loaded before Clerk init
-            '/api/faces',     # face list — loaded before Clerk init
-            '/api/custom-faces', # custom face manifest + CRUD — loaded by face picker
             '/faces/custom/', # custom face HTML — loaded in iframe by face-box
-            '/api/icons/',    # icon library + generated icons — static images, no secrets
-            '/api/suno',      # Suno song generation — status polling + song list (no secrets)
             '/registry/',     # Pinokio registry check-in — accessed by Pinokio, not logged-in user
             '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
             '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
+            '/share/capture/', # Camera Capture share portal — token-gated public access for clients
         )
+        # Public for READS ONLY (GET/HEAD/OPTIONS). These prefixes serve config
+        # lists the UI loads before Clerk init, but their state-changing methods
+        # (POST/PUT/PATCH/DELETE) must NOT bypass auth — a prefix opened for a
+        # benign read previously exposed every write sibling under it
+        # (SEC-1/2/3/6/9). Write methods fall through to the normal auth path:
+        # the internal agent key already carves out its allowed non-admin paths
+        # (canvas/tts/suno/music writes the openclaw agent depends on), and
+        # everything else requires a Clerk session.
+        _PUBLIC_READ_PREFIXES = (
+            '/api/canvas/',   # GET manifest/context/pages — writes gated (SEC-2/3/8)
+            '/api/tts/',      # GET provider list — clone/default-writes gated (SEC-9)
+            '/api/chat',      # LLM proxy — POST gated so anon can't burn the LLM budget (SEC-6)
+            '/api/music',     # GET track list — upload/delete gated
+            '/api/faces',     # GET face list — enrollment writes gated
+            '/api/custom-faces',  # GET manifest — HTML-face writes gated (SEC-3 stored XSS)
+            '/api/icons/',    # GET icon library — generate/upload gated (SEC-9)
+            '/api/suno',      # GET status/song-list — generation POSTs gated (SEC-9)
+            '/api/profiles',  # GET profile config — activate/save writes gated (SEC-10)
+            '/api/maps/config',  # GET Google-Maps JS API key — canvas iframe pages can't
+                                 # authenticate (window.authFetch not injected there) and the
+                                 # JS key is browser-exposed BY DESIGN (Google Maps JS loads it
+                                 # client-side). Security boundary = HTTP-referrer restriction on
+                                 # the key in Google Cloud (must be *.jam-bot.com). /api/maps/
+                                 # directions (POST, billable server-side calls) stays gated.
+        )
+        # NOTE: /api/stt/ is intentionally NOT public — the Deepgram token
+        # endpoint returns a live secret (SEC-1). All /api/stt/* now requires a
+        # Clerk session or the agent key.
         _PUBLIC_EXACT = {
             '/',           # main page — hosts the Clerk login gate itself
             '/pi',         # Pi-optimized page — same login gate, different entry point
@@ -186,6 +229,8 @@ def create_app(config_override: dict = None):
             '/ws/clawdbot',     # WebSocket — browsers can't send Clerk token in WS headers;
                                 # handler secures itself via CLAWDBOT_AUTH_TOKEN to the gateway
             '/openclaw-ui',     # WebSocket upgrade for OpenClaw Control UI proxy (no trailing slash)
+            '/ws/browse-stream', # WebSocket — co-browsing screencast (#154); handler self-auths
+                                 # via Clerk token + injects the service key server-side
         }
 
         # Detect whether Clerk auth is configured at startup.
@@ -227,6 +272,13 @@ def create_app(config_override: dict = None):
             # /src/ is public (login-screen assets) EXCEPT the admin shell itself —
             # /src/admin.html must go through the same admin gate as /admin.
             if path != '/src/admin.html' and any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+                return
+            # Read-only public prefixes: GET/HEAD/OPTIONS bypass auth (config lists
+            # loaded before Clerk init); write methods fall through to the auth
+            # path below (agent key or Clerk session required).
+            if request.method in ('GET', 'HEAD', 'OPTIONS') and any(
+                path.startswith(p) for p in _PUBLIC_READ_PREFIXES
+            ):
                 return
             # Canvas pages and images have their own auth logic (public flag)
             # handled inside canvas_bp — let them through here
@@ -291,9 +343,9 @@ def create_app(config_override: dict = None):
         response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
         response.headers.setdefault('X-XSS-Protection', '1; mode=block')
         response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
-        # Allow microphone and camera for voice/vision app; block geolocation
+        # Allow microphone, camera, and geolocation (site capture GPS tagging)
         response.headers.setdefault(
-            'Permissions-Policy', 'camera=(self), microphone=*, geolocation=(), pointer-lock=*'
+            'Permissions-Policy', 'camera=(self), microphone=*, geolocation=(self), pointer-lock=*'
         )
         response.headers.setdefault(
             'Content-Security-Policy',
@@ -306,10 +358,22 @@ def create_app(config_override: dict = None):
             # CDN, which compiles CSS at runtime via eval()/new Function — without unsafe-eval the script
             # loads but generates NO styles → pages still render as raw text. (canvas.py CSP already had
             # these; the global one didn't — that was the real cause of the unstyled SEO dashboard.)
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.jam-bot.com; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            # maps.googleapis.com + maps.gstatic.com are REQUIRED for the `maps` skill's
+            # canvas pages (Google Maps JS API). Without them the JS is blocked and every
+            # map page renders an empty box — silently, since the only signal is a console
+            # CSP violation. Found 2026-07-24: the maps skill documented these as allowed
+            # but they were never actually in either CSP. Do NOT re-strip.
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://*.clerk.accounts.dev https://*.jam-bot.com https://maps.googleapis.com https://maps.gstatic.com; "
+            # jsdelivr serves stylesheets as well as scripts (Leaflet, etc). It was in
+            # script-src but NOT style-src, so a canvas page could load a library's JS
+            # and have its CSS silently blocked — which renders as "the widget is
+            # missing and everything overlaps", not as an obvious error. Found 2026-07-27
+            # on allstate's Leaflet map page.
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
             "font-src 'self' data: https://fonts.gstatic.com; "
-            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io; "
+            # Map tiles/markers come from maps.gstatic.com, *.googleapis.com (khms tile
+            # shards) and *.ggpht.com (Street View); googleusercontent serves place photos.
+            "img-src 'self' data: blob: https://img.clerk.com https://images.clerk.dev https://*.clerk.accounts.dev https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://bhaleyart.github.io https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.ggpht.com https://*.googleusercontent.com;  https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://*.basemaps.cartocdn.com"
             "media-src 'self' blob:; "
             "connect-src 'self' wss: https:; "
             "frame-src 'self' https://*.clerk.accounts.dev https://*.jam-bot.com https:; "

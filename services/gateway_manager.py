@@ -202,17 +202,51 @@ class GatewayManager:
     # Health / status                                                      #
     # ------------------------------------------------------------------ #
 
-    def list_gateways(self) -> list[dict]:
-        """Return status of all registered gateways (for health endpoint / admin UI)."""
-        return [
-            {
+    def list_gateways(self, rich: bool = False) -> list[dict]:
+        """Return status of all registered gateways (for health endpoint / admin UI).
+
+        rich=False (default) keeps the original cheap shape used by the existing
+        /api/server-stats consumer — no health I/O beyond is_healthy().
+        rich=True adds the WO-2.1 contract fields (capabilities, config_schema,
+        latency, restart_scope, credentials) for the Service Catalog + Agent
+        Framework tab. Rich mode calls check_health() which may do a cheap
+        socket/ping probe.
+        """
+        out = []
+        for gw in self._gateways.values():
+            entry = {
                 'id': gw.gateway_id,
                 'configured': gw.is_configured(),
                 'healthy': gw.is_healthy(),
                 'persistent': gw.persistent,
             }
-            for gw in self._gateways.values()
-        ]
+            if rich:
+                caps = getattr(gw, 'capabilities', frozenset())
+                try:
+                    healthy, latency = gw.check_health()
+                except Exception as exc:
+                    logger.warning("check_health failed for %s: %s", gw.gateway_id, exc)
+                    healthy, latency = gw.is_healthy(), None
+                try:
+                    schema = gw.get_config_schema()
+                except Exception:
+                    schema = {'fields': [], 'editable': False}
+                try:
+                    rscope = gw.restart_scope()
+                except Exception:
+                    rscope = 'none'
+                # Credential ids referenced by the schema (no secret values).
+                creds = [f['credential'] for f in schema.get('fields', [])
+                         if f.get('credential')]
+                entry.update({
+                    'capabilities': sorted(caps),
+                    'config_schema': schema,
+                    'credentials': creds,
+                    'restart_scope': rscope,
+                    'health': {'healthy': healthy, 'latency_ms': latency},
+                })
+            out.append(entry)
+        return out
 
     def is_configured(self) -> bool:
         """True if at least one gateway is configured (backwards compat for health check)."""

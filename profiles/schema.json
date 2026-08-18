@@ -43,7 +43,8 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["zai", "clawdbot", "gateway", "openai", "ollama", "anthropic", "hume", "elevenlabs"]
+          "minLength": 1,
+          "description": "LLM/agent provider id. Validation-only (any non-empty string) — the real option list comes from /api/services/catalog, not a fixed enum, so new providers (resemble, qwen3, plugins) never drift out of a hardcoded list. WO-3.3."
         },
         "model":     { "type": "string" },
         "config_id": { "type": "string" },
@@ -90,7 +91,8 @@
       "properties": {
         "tts_provider": {
           "type": "string",
-          "enum": ["supertonic", "groq", "elevenlabs", "hume", "qwen3"]
+          "minLength": 1,
+          "description": "TTS provider id. Validation-only (any non-empty string) — options come from the tts_providers registry via /api/services/catalog, so resemble/qwen3-local/custom providers never drift out of a fixed enum. WO-3.3."
         },
         "voice_id":  { "type": "string" },
         "speed":     { "type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0 },
@@ -125,7 +127,8 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": ["deepgram", "deepgram-streaming", "deepgram-batch", "groq", "webspeech", "whisper", "hume", "elevenlabs"]
+          "minLength": 1,
+          "description": "STT provider id. Validation-only (any non-empty string) — options come from /api/services/catalog (webspeech/deepgram/groq_whisper/whisper/external), so a new STT provider never drifts out of a fixed enum. WO-3.3."
         },
         "language": { "type": "string", "default": "en-US" },
         "notes":    { "type": "string" },

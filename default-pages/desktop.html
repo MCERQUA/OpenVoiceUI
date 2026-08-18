@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026.4.3 -->
+<!-- openvoiceui-version: 2026.8.9 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -19,9 +19,13 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   overflow:hidden;
   box-shadow:0 0 40px rgba(0,0,0,0.6);
 }
-@media(max-width:768px){
+/* Mobile keeps the DESKTOP VIEW: the 40px #os-container inset IS the global padding that
+   clears the OVU UI buttons — it must NOT be retightened on mobile. (Mike 2026-07-12:
+   "keep the desktop view for mobile, it doesn't need to be responsive.") The old rule
+   below dropped it to 4-8px, losing the padding on phones. Kept as a comment, not deleted. */
+/* @media(max-width:768px){
   #os-container{top:8px;left:4px;right:4px;bottom:4px;border-radius:8px;}
-}
+} */
 
 #app{width:100%;height:100%;position:relative}
 
@@ -149,8 +153,9 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
 .sm-item{
   padding:5px 12px;cursor:pointer;
   font-size:12px;display:flex;align-items:center;gap:8px;
-  white-space:nowrap;
+  white-space:nowrap;position:relative;
 }
+.sm-item.has-sub::after{content:'▶';position:absolute;right:8px;font-size:8px;opacity:.6}
 .sm-item .sm-icon{width:24px;height:24px;flex-shrink:0}
 .sm-item .sm-icon svg{width:100%;height:100%}
 .sm-separator{margin:2px 0;border:none}
@@ -334,8 +339,10 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   border-radius:6px;
 }
 
-/* ── Mobile / small container responsive ── */
-@media (max-width:600px) {
+/* ── Mobile / small container responsive ──
+   Thresholds must match JS getBreakpoint() (480=phone, 1024=tablet ceiling)
+   so icon sizing/grid math and CSS layout never disagree. */
+@media (max-width:0px) { /* DISABLED 2026-07-12 (Mike): keep desktop view on mobile — no icon/taskbar shrink */
   /* Desktop icons — smaller grid */
   .desktop-icon{width:56px!important}
   .desktop-icon .icon-img{width:32px!important;height:32px!important}
@@ -383,7 +390,7 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   #dock .dock-icon svg{width:28px!important;height:28px!important}
   #dock{padding:2px 4px!important;gap:1px!important;border-radius:10px!important}
 }
-@media (max-width:400px) {
+@media (max-width:0px) { /* DISABLED 2026-07-12 (Mike): keep desktop view on mobile — no phone shrink */
   .desktop-icon{width:48px!important}
   .desktop-icon .icon-img{width:26px!important;height:26px!important}
   .desktop-icon .icon-label{font-size:8px!important;max-width:46px!important}
@@ -719,7 +726,6 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   font-family:'Ubuntu','Segoe UI',sans-serif;
   font-size:13px;
 }
-.theme-ubuntu #mac-menubar .apple-logo{display:none}
 .theme-ubuntu #mac-menubar .menu-item:first-of-type{font-weight:bold}
 .theme-ubuntu #dock{
   display:flex;
@@ -833,6 +839,10 @@ const ICONS = {
   recycle:`<svg viewBox="0 0 48 48"><rect x="14" y="6" width="20" height="4" rx="2" fill="#7f8c8d"/><rect x="20" y="4" width="8" height="4" rx="1" fill="#95a5a6"/><rect x="10" y="10" width="28" height="3" rx="1" fill="#95a5a6"/><path d="M13 13h22l-2 31H15z" fill="#bdc3c7"/><path d="M13 13h22l-1 4H14z" fill="#aab4be"/><line x1="20" y1="20" x2="19" y2="40" stroke="#95a5a6" stroke-width="1.5"/><line x1="24" y1="20" x2="24" y2="40" stroke="#95a5a6" stroke-width="1.5"/><line x1="28" y1="20" x2="29" y2="40" stroke="#95a5a6" stroke-width="1.5"/></svg>`,
   'recycle-full':`<svg viewBox="0 0 48 48"><rect x="14" y="6" width="20" height="4" rx="2" fill="#7f8c8d"/><rect x="20" y="4" width="8" height="4" rx="1" fill="#95a5a6"/><rect x="10" y="10" width="28" height="3" rx="1" fill="#95a5a6"/><path d="M13 13h22l-2 31H15z" fill="#bdc3c7"/><path d="M13 13h22l-1 4H14z" fill="#aab4be"/><rect x="17" y="15" width="5" height="8" rx="1" fill="#e8e8e8" transform="rotate(-10 19 19)"/><rect x="25" y="14" width="5" height="9" rx="1" fill="#d0d0d0" transform="rotate(5 27 18)"/><rect x="20" y="17" width="4" height="7" rx="1" fill="#f0f0f0" transform="rotate(-3 22 20)"/></svg>`,
   document:`<svg viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><line x1="16" y1="22" x2="34" y2="22" stroke="#ddd" stroke-width="1.5"/><line x1="16" y1="28" x2="34" y2="28" stroke="#ddd" stroke-width="1.5"/><line x1="16" y1="34" x2="28" y2="34" stroke="#ddd" stroke-width="1.5"/></svg>`,
+  image:`<svg viewBox="0 0 48 48"><rect x="4" y="6" width="40" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><circle cx="16" cy="18" r="4.5" fill="#f5c842"/><path d="M8 36l11-13 8 9 5-6 12 10v2a2 2 0 01-2 2H10a2 2 0 01-2-2v-2z" fill="#5dade2"/></svg>`,
+  video:`<svg viewBox="0 0 48 48"><rect x="4" y="10" width="40" height="28" rx="3" fill="#1a1a2e"/><path d="M20 18l12 8-12 8z" fill="#fff"/><rect x="4" y="10" width="40" height="5" fill="#0d0d1a"/><circle cx="9" cy="12.5" r="1.2" fill="#e63030"/><circle cx="14" cy="12.5" r="1.2" fill="#f5c842"/><circle cx="19" cy="12.5" r="1.2" fill="#34d399"/></svg>`,
+  pdf:`<svg viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 01-2 2H12a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><rect x="9" y="26" width="24" height="14" rx="2" fill="#e63030"/><text x="21" y="36" text-anchor="middle" font-family="system-ui,sans-serif" font-size="9" font-weight="800" fill="#fff">PDF</text></svg>`,
+  archive:`<svg viewBox="0 0 48 48"><rect x="6" y="8" width="36" height="32" rx="2" fill="#e8b84b" stroke="#c99a35" stroke-width="1"/><rect x="20" y="8" width="8" height="32" fill="#c99a35" opacity="0.5"/><rect x="20" y="8" width="8" height="4" fill="#c99a35"/><rect x="20" y="16" width="8" height="4" fill="#c99a35"/><rect x="20" y="24" width="8" height="4" fill="#c99a35"/><circle cx="24" cy="33" r="3" fill="#7f8c8d"/></svg>`,
   internet:`<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="20" fill="#3498db"/><circle cx="24" cy="24" r="20" fill="none" stroke="#2980b9" stroke-width="1"/><ellipse cx="24" cy="24" rx="10" ry="20" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><line x1="4" y1="24" x2="44" y2="24" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/><ellipse cx="24" cy="15" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/><ellipse cx="24" cy="33" rx="17" ry="5" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1"/></svg>`,
   music:`<svg viewBox="0 0 48 48"><circle cx="14" cy="36" r="6" fill="#e74c3c"/><circle cx="14" cy="36" r="2" fill="#c0392b"/><circle cx="34" cy="32" r="6" fill="#e74c3c"/><circle cx="34" cy="32" r="2" fill="#c0392b"/><rect x="18" y="8" width="3" height="28" fill="#2c3e50" rx="1"/><rect x="38" y="4" width="3" height="28" fill="#2c3e50" rx="1"/><rect x="18" y="6" width="23" height="5" fill="#2c3e50" rx="1"/></svg>`,
   game:`<svg viewBox="0 0 48 48"><rect x="4" y="14" width="40" height="22" rx="11" fill="#2c3e50"/><rect x="4" y="14" width="40" height="11" rx="11" fill="#34495e"/><circle cx="14" cy="25" r="3.5" fill="#ecf0f1"/><rect x="11.5" y="23.5" width="5" height="1.5" rx=".5" fill="#bdc3c7"/><rect x="13.2" y="21.5" width="1.5" height="5" rx=".5" fill="#bdc3c7"/><circle cx="34" cy="22" r="2.5" fill="#e74c3c"/><circle cx="38" cy="26" r="2.5" fill="#3498db"/><circle cx="30" cy="26" r="2.5" fill="#2ecc71"/><circle cx="34" cy="30" r="2.5" fill="#f39c12"/></svg>`,
@@ -848,6 +858,43 @@ const ICONS = {
   terminal:`<svg viewBox="0 0 48 48"><rect x="2" y="6" width="44" height="36" rx="3" fill="#0d1117"/><rect x="2" y="6" width="44" height="8" rx="3" fill="#21262d"/><circle cx="9" cy="10" r="2" fill="#ff5f57"/><circle cx="16" cy="10" r="2" fill="#febc2e"/><circle cx="23" cy="10" r="2" fill="#28c840"/><path d="M8 27l8-5.5-8-5.5" fill="none" stroke="#4ade80" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/><rect x="18" y="28" width="20" height="2.5" rx="1" fill="#4ade80" opacity=".8"/><rect x="18" y="33" width="13" height="2" rx="1" fill="#475569"/></svg>`,
   upload:`<svg viewBox="0 0 48 48"><rect x="4" y="30" width="40" height="14" rx="2" fill="#2c3e50"/><rect x="4" y="38" width="40" height="6" rx="0" fill="#34495e"/><line x1="24" y1="28" x2="24" y2="6" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/><path d="M14 16l10-10 10 10" fill="none" stroke="#3b82f6" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
   chart:`<svg viewBox="0 0 48 48"><rect x="2" y="2" width="44" height="44" rx="6" fill="#0f172a"/><rect x="7" y="28" width="7" height="13" rx="1" fill="#3b82f6" opacity=".6"/><rect x="16" y="20" width="7" height="21" rx="1" fill="#3b82f6" opacity=".75"/><rect x="25" y="13" width="7" height="28" rx="1" fill="#3b82f6" opacity=".9"/><rect x="34" y="8" width="7" height="33" rx="1" fill="#60a5fa"/><line x1="4" y1="44" x2="44" y2="44" stroke="#334155" stroke-width="1"/><line x1="4" y1="44" x2="4" y2="4" stroke="#334155" stroke-width="1"/></svg>`,
+  calendar:`<svg viewBox="0 0 48 48"><rect x="4" y="8" width="40" height="36" rx="5" fill="#0f172a"/><rect x="4" y="8" width="40" height="10" rx="5" fill="#3b82f6"/><rect x="4" y="14" width="40" height="4" fill="#3b82f6"/><rect x="14" y="4" width="4" height="9" rx="2" fill="#93c5fd"/><rect x="30" y="4" width="4" height="9" rx="2" fill="#93c5fd"/><g fill="#334155"><rect x="10" y="22" width="5" height="5" rx="1"/><rect x="18" y="22" width="5" height="5" rx="1"/><rect x="26" y="22" width="5" height="5" rx="1"/><rect x="34" y="22" width="5" height="5" rx="1"/><rect x="10" y="30" width="5" height="5" rx="1"/><rect x="26" y="30" width="5" height="5" rx="1"/><rect x="34" y="30" width="5" height="5" rx="1"/></g><rect x="18" y="30" width="5" height="5" rx="1" fill="#4ade80"/></svg>`,
+  booking:`<svg viewBox="0 0 48 48"><rect x="4" y="8" width="40" height="36" rx="5" fill="#0f172a"/><rect x="4" y="8" width="40" height="10" rx="5" fill="#3b82f6"/><rect x="4" y="14" width="40" height="4" fill="#3b82f6"/><rect x="14" y="4" width="4" height="9" rx="2" fill="#93c5fd"/><rect x="30" y="4" width="4" height="9" rx="2" fill="#93c5fd"/><g fill="#334155"><rect x="10" y="22" width="5" height="5" rx="1"/><rect x="18" y="22" width="5" height="5" rx="1"/><rect x="26" y="22" width="5" height="5" rx="1"/><rect x="34" y="22" width="5" height="5" rx="1"/><rect x="10" y="30" width="5" height="5" rx="1"/><rect x="26" y="30" width="5" height="5" rx="1"/><rect x="34" y="30" width="5" height="5" rx="1"/></g><rect x="18" y="30" width="5" height="5" rx="1" fill="#4ade80"/></svg>`,
+  grid:`<svg viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="6" fill="#0f172a"/><rect x="9" y="9" width="8" height="8" rx="1.5" fill="#3b82f6"/><rect x="20" y="9" width="8" height="8" rx="1.5" fill="#60a5fa"/><rect x="31" y="9" width="8" height="8" rx="1.5" fill="#3b82f6"/><rect x="9" y="20" width="8" height="8" rx="1.5" fill="#60a5fa"/><rect x="20" y="20" width="8" height="8" rx="1.5" fill="#4ade80"/><rect x="31" y="20" width="8" height="8" rx="1.5" fill="#60a5fa"/><rect x="9" y="31" width="8" height="8" rx="1.5" fill="#3b82f6"/><rect x="20" y="31" width="8" height="8" rx="1.5" fill="#60a5fa"/><rect x="31" y="31" width="8" height="8" rx="1.5" fill="#3b82f6"/></svg>`,
+  split:`<svg viewBox="0 0 48 48"><rect x="4" y="4" width="40" height="40" rx="6" fill="#0f172a"/><rect x="9" y="9" width="13" height="13" rx="1.5" fill="#3b82f6"/><rect x="26" y="9" width="13" height="13" rx="1.5" fill="#60a5fa"/><rect x="9" y="26" width="13" height="13" rx="1.5" fill="#60a5fa"/><rect x="26" y="26" width="13" height="13" rx="1.5" fill="#3b82f6"/><line x1="24" y1="6" x2="24" y2="42" stroke="#f8fafc" stroke-width="1.5" stroke-dasharray="3 3"/><line x1="6" y1="24" x2="42" y2="24" stroke="#f8fafc" stroke-width="1.5" stroke-dasharray="3 3"/><g transform="translate(24,24)"><circle cx="-3.5" cy="3" r="2.3" fill="#0f172a" stroke="#ef4444" stroke-width="1.5"/><circle cx="3.5" cy="3" r="2.3" fill="#0f172a" stroke="#ef4444" stroke-width="1.5"/><path d="M-3.5,1 L4.5,-6 M3.5,1 L-4.5,-6" stroke="#ef4444" stroke-width="1.6" stroke-linecap="round"/></g></svg>`,
+  /* ── curated page icons added 2026-08-01 (Mike-approved flat set) ── */
+  'ai-image-creator':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="4" y="8" width="40" height="32" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><circle cx="15" cy="19" r="4" fill="#f5c842"/><path d="M8 34l10-11 7 8 5-5 12 10v2a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2z" fill="#5dade2"/><path d="M37 6l1.8 4.2L43 12l-4.2 1.8L37 18l-1.8-4.2L31 12l4.2-1.8z" fill="#e74c3c"/></svg>`,
+  'chart-builder':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="6" width="36" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><rect x="12" y="24" width="6" height="12" rx="1" fill="#3498db"/><rect x="21" y="16" width="6" height="20" rx="1" fill="#2ecc71"/><rect x="30" y="20" width="6" height="16" rx="1" fill="#f5c842"/></svg>`,
+  'voice-studio':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="19" y="8" width="10" height="20" rx="5" fill="#3498db"/><path d="M14 24a10 10 0 0 0 20 0" fill="none" stroke="#95a5a6" stroke-width="3" stroke-linecap="round"/><rect x="22.5" y="34" width="3" height="6" fill="#95a5a6"/><rect x="17" y="40" width="14" height="3" rx="1.5" fill="#95a5a6"/><circle cx="34" cy="12" r="5" fill="#e74c3c"/></svg>`,
+  'website-creator':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="5" y="8" width="38" height="30" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M5 15h38" stroke="#ccc" stroke-width="1"/><circle cx="10" cy="11.5" r="1.4" fill="#e74c3c"/><circle cx="15" cy="11.5" r="1.4" fill="#f5c842"/><circle cx="20" cy="11.5" r="1.4" fill="#2ecc71"/><rect x="10" y="21" width="20" height="4" rx="2" fill="#3498db"/><rect x="10" y="29" width="28" height="3" rx="1.5" fill="#dfe6ea"/></svg>`,
+  'design-templates':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="6" width="36" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><rect x="10" y="10" width="28" height="8" rx="1.5" fill="#3498db"/><rect x="10" y="21" width="13" height="17" rx="1.5" fill="#2ecc71"/><rect x="25" y="21" width="13" height="17" rx="1.5" fill="#f5c842"/></svg>`,
+  'interactive-map':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M6 12l12-4 12 4 12-4v28l-12 4-12-4-12 4z" fill="#a9d6a0"/><path d="M18 8v28M30 12v28" stroke="#7fb877" stroke-width="1.2"/><path d="M24 16a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z" fill="#e74c3c"/><circle cx="24" cy="23" r="2.6" fill="#fff"/></svg>`,
+  'camera-capture':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="4" y="14" width="40" height="26" rx="4" fill="#2c3e50"/><path d="M16 14l3-4h10l3 4z" fill="#34495e"/><circle cx="24" cy="27" r="8" fill="#3498db"/><circle cx="24" cy="27" r="4" fill="#5dade2"/><rect x="36" y="18" width="4" height="3" rx="1" fill="#f5c842"/></svg>`,
+  'daily-recap':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><rect x="16" y="20" width="16" height="2.5" rx="1.25" fill="#3498db"/><rect x="16" y="26" width="20" height="2.5" rx="1.25" fill="#dfe6ea"/><rect x="16" y="32" width="14" height="2.5" rx="1.25" fill="#dfe6ea"/><circle cx="34" cy="34" r="6" fill="#2ecc71"/><path d="M31.5 34l1.8 1.8 3.2-3.4" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  'bulk-image-uploader':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="8" y="16" width="28" height="22" rx="2" fill="#bdc3c7"/><rect x="12" y="12" width="28" height="22" rx="2" fill="#fff" stroke="#ccc" stroke-width="1"/><circle cx="20" cy="20" r="3" fill="#f5c842"/><path d="M15 30l6-6 5 5 4-4 6 5v3H15z" fill="#5dade2"/><circle cx="36" cy="36" r="8" fill="#2ecc71"/><path d="M36 32v8M32 36h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>`,
+  'chatgpt-import':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M8 8h32a3 3 0 0 1 3 3v18a3 3 0 0 1-3 3H20l-8 7v-7H8a3 3 0 0 1-3-3V11a3 3 0 0 1 3-3z" fill="#3498db"/><circle cx="17" cy="20" r="2.2" fill="#fff"/><circle cx="24" cy="20" r="2.2" fill="#fff"/><circle cx="31" cy="20" r="2.2" fill="#fff"/><path d="M24 36v8M20 40l4 4 4-4" stroke="#2ecc71" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`,
+  'browse-viewer':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="5" y="8" width="38" height="30" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M5 15h38" stroke="#ccc" stroke-width="1"/><circle cx="10" cy="11.5" r="1.3" fill="#bdc3c7"/><circle cx="14" cy="11.5" r="1.3" fill="#bdc3c7"/><circle cx="25" cy="27" r="7" fill="none" stroke="#3498db" stroke-width="3"/><path d="M30 32l5 5" stroke="#3498db" stroke-width="3" stroke-linecap="round"/></svg>`,
+  'nightly-reflections':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M30 6a16 16 0 1 0 12 26A13 13 0 0 1 30 6z" fill="#f5c842"/><circle cx="36" cy="12" r="1.6" fill="#fff"/><circle cx="41" cy="20" r="1.2" fill="#fff"/><circle cx="14" cy="14" r="1.3" fill="#bdc3c7"/></svg>`,
+  'sing-along':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><circle cx="14" cy="36" r="5" fill="#e74c3c"/><circle cx="33" cy="32" r="5" fill="#3498db"/><rect x="17" y="12" width="3" height="24" rx="1" fill="#2c3e50"/><rect x="35" y="8" width="3" height="24" rx="1" fill="#2c3e50"/><path d="M17 12l21-4v6l-21 4z" fill="#2c3e50"/><path d="M6 20q4-4 8 0" stroke="#2ecc71" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`,
+  'style-guide':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="6" width="22" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><text x="17" y="30" text-anchor="middle" font-family="Georgia,serif" font-size="20" font-weight="700" fill="#2c3e50">Aa</text><rect x="31" y="8" width="11" height="9" rx="2" fill="#3498db"/><rect x="31" y="19" width="11" height="9" rx="2" fill="#2ecc71"/><rect x="31" y="30" width="11" height="9" rx="2" fill="#f5c842"/></svg>`,
+  'file-explorer':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M4 12V10a2 2 0 0 1 2-2h13l4 4h17a2 2 0 0 1 2 2v2H4z" fill="#e8b84b"/><path d="M4 14h40l-2 26a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z" fill="#f5c842"/><rect x="14" y="18" width="20" height="14" rx="1.5" fill="#fff" stroke="#ddd" stroke-width="1"/><line x1="18" y1="23" x2="30" y2="23" stroke="#bdc3c7" stroke-width="1.5"/><line x1="18" y1="27" x2="26" y2="27" stroke="#bdc3c7" stroke-width="1.5"/></svg>`,
+  'icon-library':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="6" width="15" height="15" rx="3" fill="#3498db"/><rect x="27" y="6" width="15" height="15" rx="3" fill="#2ecc71"/><rect x="6" y="27" width="15" height="15" rx="3" fill="#f5c842"/><rect x="27" y="27" width="15" height="15" rx="3" fill="#e74c3c"/></svg>`,
+  'estimate-builder':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="9" y="5" width="30" height="38" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><rect x="13" y="9" width="22" height="7" rx="1.5" fill="#2c3e50"/><rect x="13" y="20" width="6" height="5" rx="1" fill="#3498db"/><rect x="21" y="20" width="6" height="5" rx="1" fill="#bdc3c7"/><rect x="29" y="20" width="6" height="5" rx="1" fill="#bdc3c7"/><rect x="13" y="28" width="6" height="5" rx="1" fill="#bdc3c7"/><rect x="21" y="28" width="6" height="5" rx="1" fill="#bdc3c7"/><rect x="29" y="28" width="6" height="10" rx="1" fill="#2ecc71"/><rect x="13" y="36" width="14" height="2" rx="1" fill="#dfe6ea"/></svg>`,
+  'site-capture':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="5" y="9" width="38" height="28" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M5 16h38" stroke="#ccc" stroke-width="1"/><circle cx="10" cy="12.5" r="1.3" fill="#bdc3c7"/><circle cx="14" cy="12.5" r="1.3" fill="#bdc3c7"/><path d="M14 24h6v-3l5 4-5 4v-3h-6z" fill="#3498db"/><rect x="27" y="22" width="9" height="9" rx="1.5" fill="none" stroke="#2ecc71" stroke-width="2" stroke-dasharray="3 2"/></svg>`,
+  'job-albums':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="9" y="10" width="30" height="30" rx="3" fill="#e74c3c"/><rect x="9" y="10" width="7" height="30" fill="#c0392b"/><rect x="18" y="15" width="17" height="20" rx="1.5" fill="#fff"/><circle cx="23" cy="22" r="2.5" fill="#f5c842"/><path d="M20 32l5-5 4 4 3-3 3 3v1H20z" fill="#5dade2"/></svg>`,
+  'call-log-dashboard':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="6" width="36" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M14 14c0 9 7 16 16 16 1.5 0 2-1 2-2v-3a1.5 1.5 0 0 0-1.5-1.5l-3 .5a1.5 1.5 0 0 1-1.4-.5 12 12 0 0 1-3.6-3.6 1.5 1.5 0 0 1-.5-1.4l.5-3A1.5 1.5 0 0 0 17.5 12h-3c-1 0-2 .5-2 2z" fill="#2ecc71"/><rect x="25" y="32" width="12" height="2.5" rx="1.25" fill="#3498db"/><rect x="25" y="37" width="9" height="2.5" rx="1.25" fill="#dfe6ea"/></svg>`,
+  'openclaw-dashboard':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M8 34a16 16 0 0 1 32 0z" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="1"/><path d="M8 34a16 16 0 0 1 6.5-12.9" fill="none" stroke="#2ecc71" stroke-width="3"/><path d="M33.5 21.1A16 16 0 0 1 40 34" fill="none" stroke="#e74c3c" stroke-width="3"/><line x1="24" y1="34" x2="32" y2="22" stroke="#2c3e50" stroke-width="2.5" stroke-linecap="round"/><circle cx="24" cy="34" r="3" fill="#2c3e50"/></svg>`,
+  conversations:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M6 10h26a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H16l-8 6v-6a3 3 0 0 1-3-3V13a3 3 0 0 1 3-3z" fill="#3498db"/><circle cx="14" cy="19" r="2" fill="#fff"/><circle cx="20" cy="19" r="2" fill="#fff"/><circle cx="26" cy="19" r="2" fill="#fff"/><path d="M40 20h2a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3v5l-6-5H24a3 3 0 0 1-2.4-1.2A6 6 0 0 0 24 34h11l5-4z" fill="#95a5a6"/></svg>`,
+  'brand-course':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="18" width="36" height="24" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><circle cx="24" cy="30" r="7" fill="#e74c3c"/><path d="M22 27l5 3-5 3z" fill="#fff"/><path d="M24 6L6 14l18 8 14-6.2V26h3V14z" fill="#2c3e50"/><path d="M32 18v5c0 2.5-3.6 4.5-8 4.5s-8-2-8-4.5v-5l8 3.5z" fill="#3498db"/></svg>`,
+  'mesh-dashboard':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><line x1="24" y1="24" x2="10" y2="12" stroke="#95a5a6" stroke-width="1.6"/><line x1="24" y1="24" x2="38" y2="12" stroke="#95a5a6" stroke-width="1.6"/><line x1="24" y1="24" x2="10" y2="38" stroke="#95a5a6" stroke-width="1.6"/><line x1="24" y1="24" x2="38" y2="38" stroke="#95a5a6" stroke-width="1.6"/><circle cx="10" cy="12" r="4.5" fill="#3498db"/><circle cx="38" cy="12" r="4.5" fill="#3498db"/><circle cx="10" cy="38" r="4.5" fill="#2ecc71"/><circle cx="38" cy="38" r="4.5" fill="#3498db"/><circle cx="24" cy="24" r="6" fill="#2c3e50"/><circle cx="24" cy="24" r="2.5" fill="#f5c842"/></svg>`,
+  'agents-meeting':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><ellipse cx="24" cy="30" rx="16" ry="6" fill="#3498db"/><circle cx="24" cy="14" r="5" fill="#f5c842"/><circle cx="10" cy="20" r="4" fill="#2ecc71"/><circle cx="38" cy="20" r="4" fill="#e74c3c"/><circle cx="24" cy="30" rx="16" ry="6" fill="none"/><path d="M20 30h8" stroke="#fff" stroke-width="1.5"/></svg>`,
+  'onboarding-flow':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="10" width="16" height="28" rx="3" fill="#2c3e50"/><path d="M6 13a3 3 0 0 1 3-3h10v28H9a3 3 0 0 1-3-3z" fill="#34495e"/><path d="M24 24h14M32 18l6 6-6 6" stroke="#2ecc71" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="14" cy="20" r="3" fill="#f5c842"/><path d="M9 30c0-2.8 2.2-5 5-5s5 2.2 5 5z" fill="#f5c842"/></svg>`,
+  'usage-costs':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="6" width="36" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><rect x="12" y="26" width="6" height="10" rx="1" fill="#3498db"/><rect x="21" y="20" width="6" height="16" rx="1" fill="#2ecc71"/><rect x="30" y="14" width="6" height="22" rx="1" fill="#f5c842"/><circle cx="34" cy="14" r="7" fill="#27ae60"/><text x="34" y="18" text-anchor="middle" font-family="system-ui,sans-serif" font-size="10" font-weight="800" fill="#fff">$</text></svg>`,
+  'live-monitor':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="4" y="8" width="40" height="28" rx="3" fill="#2c3e50"/><rect x="7" y="11" width="34" height="22" rx="1" fill="#0f172a"/><path d="M9 24h6l3-8 4 14 3-9 2 3h11" fill="none" stroke="#2ecc71" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="18" y="36" width="12" height="4" fill="#95a5a6"/><rect x="12" y="40" width="24" height="3" rx="1.5" fill="#bdc3c7"/><circle cx="38" cy="14" r="2.5" fill="#e74c3c"/></svg>`,
+  'sprayfoam-dashboard':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="18" y="12" width="12" height="26" rx="3" fill="#3498db"/><rect x="20" y="8" width="8" height="6" rx="2" fill="#2c3e50"/><rect x="28" y="9" width="6" height="3" rx="1.5" fill="#95a5a6"/><circle cx="38" cy="12" r="2" fill="#f5c842"/><circle cx="41" cy="16" r="1.5" fill="#f5c842"/><circle cx="38" cy="19" r="1.5" fill="#f5c842"/><rect x="20" y="20" width="8" height="14" rx="1" fill="#fff" opacity=".85"/><path d="M22 27h4M22 30h4" stroke="#3498db" stroke-width="1.4"/></svg>`,
+  'conversations-admin':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M6 10h26a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H16l-8 6v-6a3 3 0 0 1-3-3V13a3 3 0 0 1 3-3z" fill="#3498db"/><circle cx="14" cy="19" r="2" fill="#fff"/><circle cx="20" cy="19" r="2" fill="#fff"/><circle cx="26" cy="19" r="2" fill="#fff"/><circle cx="36" cy="34" r="8" fill="#95a5a6"/><path d="M36 30v8M32.5 32l7 4M39.5 32l-7 4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><circle cx="36" cy="34" r="2.4" fill="#2c3e50"/></svg>`,
+  'brand-report':`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M12 4h18l10 10v30a2 2 0 0 1-2 2H12a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="#fff" stroke="#ccc" stroke-width="1"/><path d="M30 4v10h10" fill="#eee" stroke="#ccc" stroke-width="1"/><rect x="16" y="22" width="4" height="10" rx="1" fill="#3498db"/><rect x="22" y="18" width="4" height="14" rx="1" fill="#2ecc71"/><rect x="28" y="25" width="4" height="7" rx="1" fill="#f5c842"/><path d="M24 8l1.5 3.2L29 11.6l-2.4 2.3.6 3.4L24 15.7l-3.2 1.6.6-3.4L19 11.6l3.5-.4z" fill="#e74c3c"/></svg>`,
+  dashboard:`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="6" width="36" height="36" rx="3" fill="#fff" stroke="#ccc" stroke-width="1"/><rect x="10" y="10" width="14" height="12" rx="2" fill="#3498db"/><rect x="27" y="10" width="11" height="12" rx="2" fill="#2ecc71"/><rect x="10" y="26" width="11" height="12" rx="2" fill="#f5c842"/><rect x="24" y="26" width="14" height="12" rx="2" fill="#e74c3c"/></svg>`,
 };
 
 function getIcon(type) { return ICONS[type] || ICONS.document; }
@@ -864,6 +911,7 @@ let iconPositions = {};         // desktop (>1024px)
 let iconPositionsTablet = {};   // tablet (481-1024px)
 let iconPositionsPhone = {};    // phone (≤480px)
 let currentBreakpoint = 'desktop'; // set in init after loadState
+let _lastDesktopH = 0; // last desktop height; resize handler only re-columns icons when this changes >48px (2026-07-12: stop every-resize reflow losing icon edge-padding)
 let dragState = null;
 let selectedIcons = new Set();
 let startMenuOpen = false;
@@ -875,12 +923,13 @@ let knownPages = [];       // all page IDs we've ever seen
 let _manifestTimer = null;
 let wallpaperUrl = null;   // server URL of custom desktop wallpaper
 let savedPageCategories = {}; // { pageId: catId } — persists drag-to-folder assignments across fetchManifest cycles
+let recentPages = []; // most-recently-opened page ids, newest first — Start Menu shows the last 2
 
 // Breakpoint helpers
 function getBreakpoint() {
-  const w = window.innerWidth;
-  if (w <= 480) return 'phone';
-  if (w <= 1024) return 'tablet';
+  // Mike 2026-07-12: keep the DESKTOP VIEW at ALL sizes — no phone/tablet re-layout.
+  // Nothing changes on mobile except straggler icons re-aligning (buildDesktopIcons
+  // auto-arrange); icon size, spacing, positions, and the 40px global padding stay desktop.
   return 'desktop';
 }
 function getActivePositions() {
@@ -889,8 +938,13 @@ function getActivePositions() {
   return iconPositions;
 }
 
-// Save state to server (debounced)
+// Save state to server (debounced). _stateDirty guards fetchManifest from
+// clobbering unsaved local changes (drag positions, etc.) — a 30s manifest
+// poll landing between a drag and its debounced save used to silently
+// discard the drag.
+let _stateDirty = false;
 function saveState() {
+  _stateDirty = true;
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(_doSaveState, 500);
 }
@@ -898,27 +952,30 @@ function _doSaveState() {
   // Always save full state to master desktop entry (iconPositions = desktop positions)
   const state = JSON.stringify({
     theme: currentTheme, iconPositions, recycleBin,
-    customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories,
+    customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories, recentPages,
   });
-  fetch('/api/canvas/manifest/page/desktop', {
-    method: 'PATCH',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({description: state}),
-  }).catch(() => {});
+  const saves = [
+    fetch('/api/canvas/manifest/page/desktop', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({description: state}),
+    }).catch(() => {}),
+  ];
   // Save breakpoint-specific positions to their own manifest entries
   if (currentBreakpoint === 'tablet') {
-    fetch('/api/canvas/manifest/page/desktop-tablet', {
+    saves.push(fetch('/api/canvas/manifest/page/desktop-tablet', {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsTablet})}),
-    }).catch(() => {});
+    }).catch(() => {}));
   } else if (currentBreakpoint === 'phone') {
-    fetch('/api/canvas/manifest/page/desktop-phone', {
+    saves.push(fetch('/api/canvas/manifest/page/desktop-phone', {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsPhone})}),
-    }).catch(() => {});
+    }).catch(() => {}));
   }
+  Promise.all(saves).finally(() => { _stateDirty = false; });
 }
 
 // Load state from server — fetch all three breakpoint entries in parallel
@@ -943,6 +1000,7 @@ async function loadState() {
           if (state.knownPages) knownPages = state.knownPages;
           if (state.wallpaperUrl) { wallpaperUrl = state.wallpaperUrl; applyWallpaper(wallpaperUrl); }
           if (state.savedPageCategories) savedPageCategories = state.savedPageCategories;
+          if (state.recentPages) recentPages = state.recentPages;
         }
       } catch(e) {}
     }
@@ -973,6 +1031,7 @@ async function loadState() {
    MANIFEST SYNC — fetch pages dynamically from server
    ══════════════════════════════════════════════════════════════ */
 async function fetchManifest(forceSync) {
+  if (_stateDirty && !forceSync) return; // unsaved local changes — don't clobber
   try {
     const url = '/api/canvas/manifest' + (forceSync ? '?sync=1' : '');
     const resp = await fetch(url);
@@ -1015,7 +1074,8 @@ async function fetchManifest(forceSync) {
         newPages[pageId] = {
           name: mp.display_name || pageId,
           cat: mp.category || 'uncategorized',
-          iconUrl: (mp.icon && /^(\/|https?:)/.test(mp.icon)) ? mp.icon : null,
+          // Locked-icon pages never carry a generated iconUrl — the named glyph always wins.
+          iconUrl: LOCKED_ICONS[pageId] ? null : ((mp.icon && /^(\/|https?:)/.test(mp.icon)) ? mp.icon : null),
         };
       });
     }
@@ -1070,6 +1130,13 @@ function setTheme(theme) {
   currentTheme = theme;
   saveState();
   document.getElementById('app').className = 'theme-' + theme;
+  // Ubuntu previously hid .apple-logo (the only click target that opens the
+  // Start Menu in the top-menubar themes) with no working substitute — the
+  // taskbar's #start-btn is ALSO hidden for mac/ubuntu, so there was no way
+  // to open Settings from Ubuntu at all. Relabel the first menu-item to
+  // something theme-appropriate and keep .apple-logo functional everywhere.
+  const firstMenuItem = document.querySelector('#mac-menubar .menu-item:first-of-type');
+  if (firstMenuItem) firstMenuItem.textContent = theme === 'ubuntu' ? 'Activities' : (theme === 'mac' ? 'Finder' : 'Files');
   updateClock();
   buildDesktopIcons();
   buildDock();
@@ -1191,15 +1258,30 @@ function getIconName(item) {
 
 function buildDesktopIcons() {
   const desktop = document.getElementById('desktop');
-  desktop.querySelectorAll('.desktop-icon').forEach(el => el.remove());
+  bindDesktopIconListeners();
+  // Reconcile against existing icon nodes keyed by data-id instead of
+  // destroy-all-recreate — at 200+ pages a full rebuild every 30s manifest
+  // poll was a ~500ms stutter. Nodes are reused (safe: listeners are
+  // delegated to #desktop, never per-icon); only new ids get created and
+  // only vanished ids get removed.
+  const existingIcons = new Map();
+  desktop.querySelectorAll('.desktop-icon').forEach(el => existingIcons.set(el.dataset.id, el));
+  const presentIds = new Set();
   const isRightToLeft = currentTheme === 'mac';
   const container = document.getElementById('os-container');
+  // ORIGINAL geometry, restored verbatim 2026-07-12 (Mike, 4th ask: NO resizing,
+  // NO readjusting, phone renders the SAME vertical-column grid as desktop —
+  // this is the exact pre-2026-07-11-overhaul math that behaves right everywhere).
+  // Do NOT add safe-area reserves or force desktop cells on phone here again.
   const isSmall = container && container.offsetWidth < 500;
   const startX = isRightToLeft ? desktop.offsetWidth - (isSmall ? 65 : 90) : 10;
   const startY = getDesktopTop() + 10;
   const colH = getDesktopHeight() - 20;
-  const cellW = isSmall ? 60 : (currentTheme === 'mac' ? 95 : 80);
-  const cellH = isSmall ? 60 : (currentTheme === 'mac' ? 95 : 80);
+  // Cell spacing +~10 each axis over original (Mike 2026-07-12, two asks):
+  // vertical clearance for two-line labels + "a little more spacing on all
+  // sides" — it cleared but was tight. Layout/order otherwise the original.
+  const cellW = isSmall ? 68 : (currentTheme === 'mac' ? 105 : 90);
+  const cellH = isSmall ? 82 : (currentTheme === 'mac' ? 114 : 102);
   const maxPerCol = Math.max(1, Math.floor(colH / cellH));
 
   DESKTOP_ITEMS.forEach((item, i) => {
@@ -1210,11 +1292,7 @@ function buildDesktopIcons() {
     const x = saved ? saved.x : (isRightToLeft ? startX - col * cellW : startX + col * cellW);
     const y = saved ? saved.y : startY + row * cellH;
 
-    const el = document.createElement('div');
-    el.className = 'desktop-icon';
-    el.dataset.id = item.id;
-    el.style.left = x + 'px';
-    el.style.top = y + 'px';
+    presentIds.add(item.id);
 
     const recycleIcon = item.id === 'recycle-bin'
       ? (recycleBin.length > 0 ? 'recycle-full' : 'recycle')
@@ -1223,18 +1301,68 @@ function buildDesktopIcons() {
     const iconHtml = item.iconUrl
       ? `<img src="${item.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
       : getIcon(recycleIcon);
-    el.innerHTML = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
-    el.addEventListener('mousedown', (e) => onIconMouseDown(e, item));
-    el.addEventListener('touchstart', (e) => onIconTouchStart(e, item), {passive:false});
-    el.addEventListener('dblclick', (e) => { e.stopPropagation(); onIconDblClick(item); });
-    desktop.appendChild(el);
+    const inner = `<div class="icon-img">${iconHtml}</div><div class="icon-label">${getIconName(item)}</div>`;
+
+    let el = existingIcons.get(item.id);
+    if (el) {
+      // Reuse the node in place. Compare innerHTML against the string we last
+      // set (cached expando) — reading el.innerHTML back can differ from the
+      // authored string after browser serialization, which would force a
+      // rewrite every poll.
+      if (el.style.left !== x + 'px') el.style.left = x + 'px';
+      if (el.style.top !== y + 'px') el.style.top = y + 'px';
+      if (el._ovuInner !== inner) { el.innerHTML = inner; el._ovuInner = inner; }
+    } else {
+      el = document.createElement('div');
+      el.className = 'desktop-icon';
+      el.dataset.id = item.id;
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.innerHTML = inner;
+      el._ovuInner = inner;
+      desktop.appendChild(el);
+    }
+  });
+  // Remove only icons whose id is no longer present (recycled/deleted pages)
+  existingIcons.forEach((el, id) => { if (!presentIds.has(id)) el.remove(); });
+  _lastDesktopH = getDesktopHeight(); // keep the resize-handler height baseline in sync after any rebuild
+}
+
+// Delegated icon listeners — attached once to #desktop, never re-attached on
+// rebuild. buildDesktopIcons() reuses icon nodes across manifest polls (and
+// may still create/remove individual nodes); delegation keeps that safe with
+// no per-icon listener bookkeeping.
+let _desktopIconListenersBound = false;
+function bindDesktopIconListeners() {
+  if (_desktopIconListenersBound) return;
+  _desktopIconListenersBound = true;
+  const desktop = document.getElementById('desktop');
+  desktop.addEventListener('mousedown', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) onIconMouseDown(e, item);
+  });
+  desktop.addEventListener('touchstart', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) onIconTouchStart(e, item);
+  }, {passive:false});
+  desktop.addEventListener('dblclick', (e) => {
+    const el = e.target.closest('.desktop-icon');
+    if (!el) return;
+    const item = DESKTOP_ITEMS.find(i => i.id === el.dataset.id);
+    if (item) { e.stopPropagation(); onIconDblClick(item); }
   });
 }
 
 function onIconTouchStart(e, item) {
   e.preventDefault();
   const touch = e.touches[0];
-  const el = e.currentTarget;
+  // e.currentTarget is #desktop (delegated listener) — find the actual icon.
+  const el = e.target.closest('.desktop-icon');
+  if (!el) return;
   const startX = touch.clientX, startY = touch.clientY;
   const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
   let moved = false;
@@ -1296,7 +1424,9 @@ function onIconMouseDown(e, item) {
   selectedIcons.add(item.id);
   updateIconSelection();
 
-  const el = e.currentTarget;
+  // e.currentTarget is #desktop (delegated listener) — find the actual icon.
+  const el = e.target.closest('.desktop-icon');
+  if (!el) return;
   const startX = e.clientX, startY = e.clientY;
   const origLeft = parseInt(el.style.left), origTop = parseInt(el.style.top);
   let moved = false;
@@ -1458,28 +1588,21 @@ function createWindow(opts) {
     ? {close:'', min:'', max:''}
     : {close:'\u00D7', min:'\u2013', max:'\u25A1'};
 
-  el.innerHTML = `
-    <div class="titlebar" onmousedown="startWindowDrag(event,${id})">
-      <div class="titlebar-btns">
+  const btnsHtml = `<div class="titlebar-btns">
         <button class="tb-btn close" onclick="closeWindow(${id})" title="Close">${btnSymbols.close}</button>
         <button class="tb-btn min" onclick="minimizeWindow(${id})" title="Minimize">${btnSymbols.min}</button>
         <button class="tb-btn max" onclick="maximizeWindow(${id})" title="Maximize">${btnSymbols.max}</button>
-      </div>
-      <div class="titlebar-title">${opts.title || 'Window'}</div>
-      ${!isMacLike ? '<div class="titlebar-btns"><button class="tb-btn min" onclick="minimizeWindow('+id+')" title="Minimize">\u2013</button><button class="tb-btn max" onclick="maximizeWindow('+id+')" title="Maximize">\u25A1</button><button class="tb-btn close" onclick="closeWindow('+id+')" title="Close">\u00D7</button></div>' : ''}
+      </div>`;
+  const titlebarInnerHtml = isMacLike
+    ? `${btnsHtml}<div class="titlebar-title">${opts.title || 'Window'}</div>`
+    : `<div class="titlebar-title">${opts.title || 'Window'}</div>${btnsHtml}`;
+
+  el.innerHTML = `
+    <div class="titlebar" onmousedown="startWindowDrag(event,${id})">
+      ${titlebarInnerHtml}
     </div>
     <div class="win-body">${opts.content || ''}</div>
   `;
-
-  // For non-mac-like themes, remove the first set of buttons (left-side ones)
-  if (!isMacLike) {
-    const firstBtns = el.querySelector('.titlebar-btns');
-    if (firstBtns) firstBtns.remove();
-  } else {
-    // For mac-like, remove the second set (right-side)
-    const allBtns = el.querySelectorAll('.titlebar-btns');
-    if (allBtns.length > 1) allBtns[1].remove();
-  }
 
   // Add resize handles
   ['n','s','e','w','nw','ne','sw','se'].forEach(dir => {
@@ -2132,6 +2255,7 @@ function closeAllMenus() {
   document.getElementById('start-menu').classList.remove('show');
   contextMenuOpen = false;
   startMenuOpen = false;
+  hideStartFlyoutNow();
 }
 
 function arrangeIcons() {
@@ -2153,6 +2277,78 @@ function toggleStartMenu() {
   buildStartMenu();
   menu.classList.add('show');
   startMenuOpen = true;
+}
+
+/* ── Start Menu category flyouts (real Windows-style nested submenus) ──
+   Reuses the existing .ctx-submenu hover-flyout look (see CONTEXT MENU
+   section) but appended to #app instead of nested in the row, because
+   #start-menu / .sm-left clip overflow (needed for their own scrollbars)
+   and would otherwise chop the flyout off. */
+let _smFlyoutEl = null;
+let _smFlyoutHideTimer = null;
+let _smFlyoutCatId = null;
+
+function showStartCategoryFlyout(anchorEl, catId) {
+  clearTimeout(_smFlyoutHideTimer);
+  if (_smFlyoutCatId === catId && _smFlyoutEl) return;
+  hideStartFlyoutNow();
+  _smFlyoutCatId = catId;
+
+  const pages = Object.entries(PAGES)
+    .filter(([id, p]) => p.cat === catId && !recycleBin.includes(id))
+    .sort((a, b) => a[1].name.localeCompare(b[1].name));
+
+  const el = document.createElement('div');
+  el.className = 'ctx-submenu sm-flyout';
+  el.style.display = 'block';
+  el.style.position = 'absolute';
+  // .ctx-submenu's base rule has no z-index of its own — it normally relies
+  // on being DOM-nested inside #context-menu (z-index:10000). This flyout is
+  // appended to #app as a SIBLING of #start-menu instead (see comment above),
+  // so it needs an explicit z-index above #start-menu's 9500 or it renders
+  // behind the menu it's supposed to expand out of.
+  el.style.zIndex = '9600';
+
+  let html = '';
+  if (!pages.length) {
+    html += '<div class="ctx-item" style="opacity:.5;cursor:default">(empty)</div>';
+  } else {
+    pages.slice(0, 30).forEach(([pid, p]) => {
+      html += `<div class="ctx-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><span style="display:inline-block;width:16px;height:16px;vertical-align:-3px;margin-right:6px">${getIcon(getPageIconType(catId, pid, p.name))}</span>${p.name}</div>`;
+    });
+  }
+  html += '<div class="ctx-separator"></div>';
+  html += `<div class="ctx-item" onclick="openExplorer('${catId}');closeAllMenus()"><em>Open Folder…</em></div>`;
+  el.innerHTML = html;
+
+  el.addEventListener('mouseenter', () => clearTimeout(_smFlyoutHideTimer));
+  el.addEventListener('mouseleave', scheduleHideStartFlyout);
+
+  const app = document.getElementById('app');
+  app.appendChild(el);
+
+  const appRect = app.getBoundingClientRect();
+  const anchorRect = anchorEl.getBoundingClientRect();
+  const flyoutW = el.offsetWidth || 180;
+  let left = anchorRect.right - appRect.left;
+  if (left + flyoutW > appRect.width) {
+    left = anchorRect.left - appRect.left - flyoutW; // flip left if it would overflow the right edge
+  }
+  el.style.left = Math.max(0, left) + 'px';
+  el.style.top = Math.max(0, Math.min(anchorRect.top - appRect.top, appRect.height - el.offsetHeight)) + 'px';
+
+  _smFlyoutEl = el;
+}
+
+function scheduleHideStartFlyout() {
+  clearTimeout(_smFlyoutHideTimer);
+  _smFlyoutHideTimer = setTimeout(hideStartFlyoutNow, 250);
+}
+
+function hideStartFlyoutNow() {
+  if (_smFlyoutEl) { _smFlyoutEl.remove(); _smFlyoutEl = null; }
+  _smFlyoutCatId = null;
+  clearTimeout(_smFlyoutHideTimer);
 }
 
 function buildStartMenu() {
@@ -2185,7 +2381,7 @@ function buildStartMenu() {
     html += '<div class="ctx-item" onclick="openThemeSettings();closeAllMenus()">'+(isMac?'System Preferences...':(isUbuntu?'Settings...':'Control Panel'))+'</div>';
     html += '<div class="ctx-separator"></div>';
     Object.keys(CATEGORIES).forEach(catId => {
-      html += `<div class="ctx-item" onclick="openExplorer('${catId}');closeAllMenus()">${CATEGORIES[catId].name}</div>`;
+      html += `<div class="ctx-item has-sub" onmouseenter="showStartCategoryFlyout(this,'${catId}')" onmouseleave="scheduleHideStartFlyout()" onclick="openExplorer('${catId}');closeAllMenus()">${CATEGORIES[catId].name}</div>`;
     });
     html += '<div class="ctx-separator"></div>';
     html += '<div class="ctx-item" onclick="openCanvasPage(\'file-explorer\');closeAllMenus()">'+(isMac?'Open Finder':(isUbuntu?'Files':'File Manager'))+'</div>';
@@ -2207,17 +2403,18 @@ function buildStartMenu() {
 
   html += '<div class="sm-body">';
   html += '<div class="sm-left">';
-  // Recent/pinned pages
-  const pinned = ['bored-arcade','civ-sim','music-library','wolf3d-engine','office-hub'];
-  pinned.forEach(pid => {
+  // Recently opened pages — real usage (see openCanvasPage), filtered against
+  // both PAGES (still exists) AND recycleBin (not trashed) so a recycled page
+  // can't keep showing up here just because the manifest hasn't purged it yet.
+  const recent = recentPages.filter(pid => PAGES[pid] && !recycleBin.includes(pid)).slice(0, 2);
+  recent.forEach(pid => {
     const p = PAGES[pid];
-    if (!p) return;
-    html += `<div class="sm-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><div class="sm-icon">${getIcon('document')}</div>${p.name}</div>`;
+    html += `<div class="sm-item" onclick="openCanvasPage('${pid}');closeAllMenus()"><div class="sm-icon">${getIcon(getPageIconType(p.cat, pid, p.name))}</div>${p.name}</div>`;
   });
   html += '<div class="sm-separator"></div>';
-  // All Programs submenu - show categories
+  // All Programs submenu - show categories, hover expands a flyout of pages in it
   Object.keys(CATEGORIES).forEach(catId => {
-    html += `<div class="sm-item" onclick="openExplorer('${catId}');closeAllMenus()"><div class="sm-icon">${getIcon('folder')}</div>${CATEGORIES[catId].name}</div>`;
+    html += `<div class="sm-item has-sub" onmouseenter="showStartCategoryFlyout(this,'${catId}')" onmouseleave="scheduleHideStartFlyout()" onclick="openExplorer('${catId}');closeAllMenus()"><div class="sm-icon">${getIcon('folder')}</div>${CATEGORIES[catId].name}</div>`;
   });
   html += '</div>';
 
@@ -2440,9 +2637,34 @@ function buildExplorerGrid(catId) {
   return html;
 }
 
+// ===== LOCKED ICONS — authoritative registry =====================================
+// "This icon, for this app, EVERYWHERE (every client, every desktop that renders it)."
+// A page id listed here ALWAYS uses the named ICONS[...] glyph and can never be overridden
+// by a generated iconUrl, a manifest guess, or the fuzzy name/category resolver below.
+// This is the single source of truth — to lock another app's icon, add one line here
+// (page-id stem -> ICONS key) and roll desktop.html. Keep this list curated + commented.
+const LOCKED_ICONS = {
+  'grid-creator':   'grid',    // Grid Creator — order grids of options (2026-07-30)
+  'image-splitter': 'split',   // Image Splitter — cut a grid into cells (2026-07-30)
+};
+
 function getPageIconType(cat, pageId, pageName) {
   const n = (pageName || pageId || '').toLowerCase();
   const pid = (pageId || '').toLowerCase();
+  // Locked icons win over EVERYTHING — file-type, pidMap, patterns, category.
+  if (LOCKED_ICONS[pid]) return LOCKED_ICONS[pid];
+  // File-type icons — a literal extension on the id/name (e.g. an uploaded
+  // image/video/audio/pdf surfaced as a desktop shortcut) is a stronger
+  // signal than name-keyword guessing, so it's checked first.
+  const extMatch = pid.match(/\.([a-z0-9]+)$/) || n.match(/\.([a-z0-9]+)$/);
+  if (extMatch) {
+    const ext = extMatch[1];
+    if (['png','jpg','jpeg','gif','webp','svg','bmp','avif'].includes(ext)) return 'image';
+    if (['mp4','mov','webm','avi','mkv'].includes(ext)) return 'video';
+    if (['mp3','wav','m4a','ogg','flac'].includes(ext)) return 'music';
+    if (ext === 'pdf') return 'pdf';
+    if (['zip','tar','gz','rar','7z'].includes(ext)) return 'archive';
+  }
   // Specific page ID overrides — precise icons for known pages
   const pidMap = {
     'voice-studio':'voice','music-library':'music','song-tagger':'music',
@@ -2464,7 +2686,7 @@ function getPageIconType(cat, pageId, pageName) {
   if (/voice.studio|voice.clone/.test(n)) return 'voice';
   if (/music|song|audio|tts|suno/.test(n)) return 'music';
   if (/game|arcade|wolf|doom|quake|duke|play|shooter|civ.sim|bored/.test(n)) return 'game';
-  if (/video|film|remotion/.test(n)) return 'folder';
+  if (/video|film|remotion/.test(n)) return 'video';
   if (/book|doc|ref|guide|manual/.test(n)) return 'book';
   if (/tool|build|code|dev|api|terminal/.test(n)) return 'tools';
   if (/crm|contact|lead/.test(n)) return 'crm';
@@ -2590,6 +2812,12 @@ function refreshExplorers() {
    OPEN CANVAS PAGE
    ══════════════════════════════════════════════════════════════ */
 function openCanvasPage(pageId, newWindow) {
+  // Track for the Start Menu's recent-pages row — real usage, not a
+  // hardcoded shortlist (that list used to keep showing pages long after
+  // they'd been recycled, since it only checked PAGES[pid] existence and
+  // never checked recycleBin membership).
+  recentPages = [pageId, ...recentPages.filter(id => id !== pageId)].slice(0, 2);
+  saveState();
   if (newWindow) {
     window.open('/pages/' + pageId + '.html', '_blank');
     return;
@@ -2604,7 +2832,7 @@ function openCanvasPage(pageId, newWindow) {
     type: 'canvas-action',
     action: 'navigate',
     page: pageId,
-  }, '*');
+  }, window.location.origin);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -2613,7 +2841,7 @@ function openCanvasPage(pageId, newWindow) {
 function openRecycleBin() {
   const title = currentTheme === 'mac' ? 'Trash' : 'Recycle Bin';
   let content = '<div class="recycle-toolbar">';
-  content += '<button onclick="emptyRecycleBin();this.closest(\'.win-body\').querySelector(\'.explorer-content\').innerHTML=buildRecycleContent()">Empty</button>';
+  content += '<button onclick="emptyRecycleBin()">Empty</button>';
   content += '<button onclick="restoreAll();this.closest(\'.win-body\').querySelector(\'.explorer-content\').innerHTML=buildRecycleContent()">Restore All</button>';
   content += '</div>';
   content += '<div class="explorer-content">' + buildRecycleContent() + '</div>';
@@ -2669,8 +2897,13 @@ function showRecycleItemMenu(e, id) {
     {label:'Restore', action:()=>restoreItem(id)},
     '---',
     {label:isMac?'Delete Immediately\u2026':'Delete Permanently\u2026', action:()=>{
-      showConfirmModal('Permanently delete "'+name+'"? This cannot be undone.', (ok)=>{
+      showConfirmModal('Permanently delete "'+name+'"? This cannot be undone.', async (ok)=>{
         if (!ok) return;
+        // Archive server-side (renames .html to .bak, removes manifest entry) \u2014
+        // see emptyRecycleBin() for why this is required, not optional.
+        if (PAGES[id]) {
+          await fetch(`/api/canvas/manifest/page/${id}`, {method: 'DELETE'}).catch(() => {});
+        }
         recycleBin = recycleBin.filter(i => i !== id);
         if (PAGES[id]) delete PAGES[id];
         knownPages = knownPages.filter(k => k !== id);
@@ -2717,10 +2950,20 @@ function restoreAll() {
   refreshRecycleBin();
 }
 
-function emptyRecycleBin() {
+async function emptyRecycleBin() {
   if (recycleBin.length === 0) return;
-  // Remove permanently from known pages so they don't resurface
-  recycleBin.forEach(id => {
+  // Archive real canvas pages server-side (DELETE renames the .html to .bak
+  // and removes the manifest entry — see routes/canvas.py handle_page_metadata).
+  // Without this, only local browser state was cleared: the next fetchManifest()
+  // poll would see the page is still known to the server, treat it as a "new"
+  // page (it's no longer in knownPages), and silently re-add it to the desktop —
+  // recycled items were resurrecting instead of actually going away.
+  const ids = recycleBin.slice();
+  await Promise.all(ids.map(id => {
+    if (!PAGES[id]) return Promise.resolve(); // not a real canvas page (folder/system pseudo-id)
+    return fetch(`/api/canvas/manifest/page/${id}`, {method: 'DELETE'}).catch(() => {});
+  }));
+  ids.forEach(id => {
     if (PAGES[id]) delete PAGES[id];
     knownPages = knownPages.filter(k => k !== id);
   });
@@ -2823,11 +3066,17 @@ let _resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(() => {
-    buildDesktopIcons();
     const container = document.getElementById('os-container');
     const cw = container.offsetWidth;
     const dh = getDesktopHeight();
     const dTop = getDesktopTop();
+    // Re-column icons ONLY when the desktop HEIGHT changed enough (>48px) to matter.
+    // The old code rebuilt on EVERY resize, so horizontal/tiny resizes reflowed the grid
+    // and lost the icon edge-padding (Mike 2026-07-12). This keeps icons stable within a
+    // size class, still re-columns on a real vertical shrink so bottom-row icons don't
+    // clip below the fold (host-clone caveat), and leaves breakpoint crosses to the
+    // dedicated breakpoint resize handler.
+    if (Math.abs(dh - _lastDesktopH) > 48) buildDesktopIcons();
     windows.forEach(w => {
       if (w.el.classList.contains('maximized')) {
         w.el.style.width = cw + 'px';
@@ -2926,17 +3175,58 @@ function applyWallpaper(url) {
   wallpaperUrl = url || null;
   const desktop = document.getElementById('desktop');
   if (url) {
-    // Include a dark fallback color so nothing shows through while the image loads
-    desktop.style.background = 'url(' + url + ') center/cover no-repeat #1a1a1a';
+    // Set each property explicitly rather than relying on the `center/cover`
+    // shorthand — background-size:cover + background-position:center is
+    // inherently resize-safe (the browser recomputes it on every reflow,
+    // no JS needed), this just removes any shorthand-parsing ambiguity.
+    desktop.style.backgroundImage = `url(${url})`;
+    desktop.style.backgroundSize = 'cover';
+    desktop.style.backgroundPosition = 'center center';
+    desktop.style.backgroundRepeat = 'no-repeat';
+    desktop.style.backgroundColor = '#1a1a1a'; // fallback while the image loads
   } else {
     desktop.style.background = '';
   }
 }
 
+// Cap any wallpaper upload to a sane display resolution and re-encode it —
+// the user should never be able to load a multi-MB/multi-thousand-pixel
+// source image straight onto the desktop background. Downsizing happens
+// client-side (canvas) BEFORE upload so the oversized original never even
+// gets sent — /api/upload is the shared generic upload endpoint used by
+// lots of other features and must not be made lossy for everyone else.
+const WALLPAPER_MAX_DIM = 2560; // no desktop resolution needs more for a cover background
+const WALLPAPER_JPEG_QUALITY = 0.85;
+
+function optimizeWallpaperImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const objUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl);
+      let { width: w, height: h } = img;
+      const scale = Math.min(1, WALLPAPER_MAX_DIM / Math.max(w, h));
+      w = Math.round(w * scale);
+      h = Math.round(h * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        resolve(blob ? new File([blob], 'wallpaper.jpg', {type: 'image/jpeg'}) : file);
+      }, 'image/jpeg', WALLPAPER_JPEG_QUALITY);
+    };
+    img.onerror = () => { URL.revokeObjectURL(objUrl); resolve(file); }; // fall back to original on any decode failure
+    img.src = objUrl;
+  });
+}
+
 async function uploadWallpaper(file) {
   if (!file) return;
+  const optimized = await optimizeWallpaperImage(file);
   const fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', optimized);
   try {
     const opts = { method: 'POST', body: fd };
     if(window._canvasAuthToken) opts.headers = { 'Authorization': 'Bearer ' + window._canvasAuthToken };

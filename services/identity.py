@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +37,14 @@ OFFICE_MATTERS_DIR = os.getenv(
     '/app/runtime/workspace/Agent/office/matters',
 )
 
+# FR-19: office files are only as fresh as the host-side extraction that
+# built them (see office-build.py). Stale entries (e.g. a "last_seen"
+# months old, or a commitment logged in March) should never be injected as
+# if they're live/open — that reads to the agent as a current promise it
+# needs to act on today. Anything older than this is summarized instead of
+# quoted verbatim.
+OFFICE_FOLLOWUP_MAX_AGE_DAYS = int(os.getenv('OFFICE_FOLLOWUP_MAX_AGE_DAYS', '30'))
+
 
 def _slugify(s: str) -> str:
     s = re.sub(r'[^\w\s-]', '', s.lower())
@@ -43,7 +52,56 @@ def _slugify(s: str) -> str:
     return s[:60] or 'unknown'
 
 
-def _load_office_briefing(name: str) -> Optional[str]:
+def _resolve_person_file(name: str, clerk_user_id: Optional[str] = None) -> Optional[Path]:
+    """Locate this person's office file.
+
+    Resolution order, strictest first:
+      1. Clerk ID against the file's `clerk_ids:` frontmatter — authoritative, and
+         the only key that survives a display-name change.
+      2. Exact slug of the FULL name, which is what the writer uses
+         (scripts/office/office-build.py: `out_dir / f"{slugify(name)}.md"`).
+
+    There is deliberately NO first-name fallback. Matching on `name.split()[0]`
+    made the reader disagree with the writer and produced two silent failures:
+
+      * WRONG FILE — src has both `rory.md` (clerk user_3AiTy0…/user_3D5jEJ…) and
+        `rory-knight.md` (clerk user_3AiTJc…, a different account). Rory Knight
+        resolved to "rory" and was briefed from the other account's file — its
+        open matters, commitments and history — with nothing to signal the swap.
+      * SILENT MISS — koolfoam's registry name is "Cory Boehs — 18 years
+        insulating Oklahoma, still does field work", written to
+        `cory-boehs-18-years-insulating-oklahoma-still-does-field-wor.md`. The
+        reader looked for `cory.md`, never found it, and the briefing has simply
+        never loaded for that tenant.
+
+    Returning None (no briefing) is the correct outcome when identity is
+    ambiguous — a missing briefing is recoverable, the wrong person's is not.
+    """
+    d = Path(OFFICE_PEOPLE_DIR)
+    if not d.is_dir():
+        return None
+
+    if clerk_user_id:
+        for f in sorted(d.glob('*.md')):
+            try:
+                head = f.read_text(errors='ignore')[:2048]
+            except OSError:
+                continue
+            # Scan the YAML frontmatter only: stop at its closing delimiter so a
+            # clerk id mentioned in prose below can never resolve a person.
+            for i, line in enumerate(head.splitlines()[:40]):
+                if i and line.rstrip() == '---':
+                    break
+                if line.startswith('clerk_ids:'):
+                    if clerk_user_id in line:
+                        return f
+                    break
+
+    exact = d / f'{_slugify(name)}.md'
+    return exact if exact.exists() else None
+
+
+def _load_office_briefing(name: str, clerk_user_id: Optional[str] = None) -> Optional[str]:
     """Return a short briefing summary for `name` from the office filing cabinet.
 
     Pulls the person file and the top 2-3 highest-severity open matters.
@@ -51,9 +109,8 @@ def _load_office_briefing(name: str) -> Optional[str]:
     Fail-open: any error → None (CURRENT_USER tag still goes out without briefing).
     """
     try:
-        slug = _slugify(name.split()[0])  # use first name only
-        person_file = Path(OFFICE_PEOPLE_DIR) / f'{slug}.md'
-        if not person_file.exists():
+        person_file = _resolve_person_file(name, clerk_user_id)
+        if person_file is None:
             return None
 
         text = person_file.read_text(errors='ignore')
@@ -68,9 +125,16 @@ def _load_office_briefing(name: str) -> Optional[str]:
             if last_seen and total_events:
                 break
 
-        # Pull commitments (first ~3 from the "Open follow-ups" section)
+        # Pull commitments (first ~3 from the "Open follow-ups" section).
+        # AGE-GUARD (FR-19): a follow-up older than
+        # OFFICE_FOLLOWUP_MAX_AGE_DAYS is NOT injected verbatim as if it's
+        # still open — it's summarized instead. Without this, a March
+        # "I'll get back to you" line reads to the agent as a live promise
+        # made this session, months after the fact.
         commitments = []
+        has_stale_followups = False
         in_block = False
+        now = datetime.now()
         for line in text.splitlines():
             if line.strip().startswith('## Open follow-ups'):
                 in_block = True
@@ -78,7 +142,18 @@ def _load_office_briefing(name: str) -> Optional[str]:
             if in_block and line.startswith('## '):
                 break
             if in_block and line.startswith('- ') and not line.startswith('- (none'):
-                commitments.append(line[2:].strip()[:120])
+                item = line[2:].strip()
+                age_days = None
+                m = re.match(r'^\[(\d{4}-\d{2}-\d{2})[ T]', item)
+                if m:
+                    try:
+                        age_days = (now - datetime.strptime(m.group(1), '%Y-%m-%d')).days
+                    except Exception:
+                        age_days = None
+                if age_days is not None and age_days > OFFICE_FOLLOWUP_MAX_AGE_DAYS:
+                    has_stale_followups = True
+                    continue
+                commitments.append(item[:120])
                 if len(commitments) >= 3:
                     break
 
@@ -116,6 +191,10 @@ def _load_office_briefing(name: str) -> Optional[str]:
         out = [f'Office file present ({meta}).']
         if commitments:
             out.append('Open with them: ' + ' | '.join(commitments))
+            if has_stale_followups:
+                out.append('(older history also on file, not shown — treat only the above as current).')
+        elif has_stale_followups:
+            out.append(f'No commitments in the last {OFFICE_FOLLOWUP_MAX_AGE_DAYS} days (older history available — do not treat as still open).')
         else:
             out.append('No outstanding commitments to them.')
         if matters_top:
@@ -203,7 +282,7 @@ def get_current_user_tag(clerk_user_id: Optional[str], tenant: Optional[str] = N
         # Append the office briefing for clients (the secretary's brief).
         # This is the difference between greeting them as "user" vs greeting
         # them with their open follow-ups + live matters at their company.
-        briefing = _load_office_briefing(name)
+        briefing = _load_office_briefing(name, clerk_user_id)
         if briefing:
             tag += f'\n[OFFICE_BRIEFING: {briefing}]'
         return tag

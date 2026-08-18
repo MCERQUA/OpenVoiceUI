@@ -396,6 +396,118 @@ def uninstall_plugin(plugin_id: str) -> bool:
     return True
 
 
+def _version_tuple(v) -> tuple:
+    """Best-effort semver -> comparable tuple. Non-numeric parts sort low."""
+    parts = []
+    for chunk in str(v or "0").lstrip("vV").split("."):
+        num = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(num) if num else 0)
+    return tuple(parts) or (0,)
+
+
+def get_plugin_updates() -> List[dict]:
+    """Version-diff each INSTALLED plugin against the catalog/registry (WO-5.1).
+
+    Reuses the same local-catalog scan + remote GitHub registry the
+    available-plugins view uses, but keyed on installed ids (which
+    get_available_plugins deliberately excludes). No mutation, network best-effort
+    (remote registry is 5-min cached). Returns one row per installed plugin:
+      {id, name, installed_version, available_version, update_available, source}
+    """
+    # Build id -> available version map from local catalog + remote registry.
+    avail_versions: Dict[str, dict] = {}
+    if PLUGIN_CATALOG_DIR.is_dir():
+        for d in sorted(PLUGIN_CATALOG_DIR.iterdir()):
+            mp = d / "plugin.json"
+            if mp.is_file():
+                try:
+                    m = json.loads(mp.read_text())
+                    pid = m.get("id", d.name)
+                    avail_versions[pid] = {"version": m.get("version", ""), "source": "local"}
+                except Exception:
+                    continue
+    try:
+        for entry in _fetch_remote_registry():
+            pid = entry.get("id", "")
+            if pid and pid not in avail_versions:
+                avail_versions[pid] = {"version": entry.get("version", ""), "source": "remote"}
+    except Exception as e:
+        logger.debug(f"plugin update check: remote registry unavailable: {e}")
+
+    rows = []
+    for p in get_installed_plugins():
+        pid = p.get("id")
+        installed_v = p.get("version", "")
+        av = avail_versions.get(pid)
+        available_v = av["version"] if av else ""
+        update_available = bool(
+            available_v and _version_tuple(available_v) > _version_tuple(installed_v)
+        )
+        rows.append({
+            "id": pid,
+            "name": p.get("name", pid),
+            "installed_version": installed_v,
+            "available_version": available_v,
+            "update_available": update_available,
+            "source": av["source"] if av else "installed",
+        })
+    return rows
+
+
+def update_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
+    """Update an installed plugin to the catalog/registry version (WO-5.1).
+
+    Soft, additive, NEVER-DELETE compliant: the existing plugin directory is
+    RENAMED to a timestamped '<id>.old-<ts>' sidecar (never rmtree'd), then the
+    normal install path runs to lay down the new version + re-run the post_install
+    lifecycle hook. On any failure the rename is restored so the plugin is never
+    left missing. Returns the new manifest, or {"_error": ...} on failure, or None
+    if the plugin isn't installed.
+    """
+    dest = PLUGIN_DIR / plugin_id
+    if not dest.exists():
+        return None  # not installed — caller should use install_plugin
+
+    from datetime import datetime as _dt
+    ts = _dt.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    sidecar = dest.with_name(f"{plugin_id}.old-{ts}")
+    try:
+        dest.rename(sidecar)
+    except Exception as e:
+        logger.error(f"Plugin update: could not archive current {plugin_id}: {e}")
+        return {"_error": f"could not archive current version: {e}"}
+
+    # Drop the runtime registry entry so install_plugin's dest.exists() gate opens.
+    prev_manifest = _registry.pop(plugin_id, None)
+    try:
+        result = install_plugin(plugin_id, config=config)
+    except Exception as e:
+        result = {"_error": str(e)}
+
+    if not result or (isinstance(result, dict) and result.get("_error")):
+        # Roll back — restore the archived version exactly as it was.
+        if dest.exists():
+            # partial install landed; move it aside so the restore is clean
+            try:
+                dest.rename(dest.with_name(f"{plugin_id}.failed-{ts}"))
+            except Exception:
+                pass
+        try:
+            sidecar.rename(dest)
+            if prev_manifest is not None:
+                _registry[plugin_id] = prev_manifest
+            logger.info(f"Plugin update rolled back: {plugin_id}")
+        except Exception as e:
+            logger.error(f"Plugin update: rollback FAILED for {plugin_id}: {e}")
+        err = (result or {}).get("_error", "plugin not found in catalog/registry") \
+            if isinstance(result, dict) else "update failed"
+        return {"_error": err}
+
+    logger.info(f"Plugin updated: {plugin_id} (previous archived at {sidecar.name})")
+    result["_updated_from"] = prev_manifest.get("version") if prev_manifest else None
+    return result
+
+
 def get_container_status(plugin_id: str) -> Optional[dict]:
     """Check container status for a plugin that requires infrastructure."""
     plugin = _registry.get(plugin_id)

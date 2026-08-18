@@ -27,6 +27,9 @@ VOICE_SESSION_FILE = str(RUNTIME_DIR / ".voice-session-counter")
 ACTIVE_PROFILE_FILE = RUNTIME_DIR / "profiles" / ".active-profile"
 WORKSPACE_DIR = Path(os.getenv('WORKSPACE_DIR', str(RUNTIME_DIR / 'workspace')))
 
+# Camera Capture — server-authoritative photo/album storage
+CAPTURES_DIR = Path(os.getenv("CAPTURES_DIR", str(RUNTIME_DIR / "captures")))
+
 # Bundled assets (git-tracked, stay at root)
 SOUNDS_DIR = APP_ROOT / "sounds"
 STATIC_DIR = APP_ROOT / "static"

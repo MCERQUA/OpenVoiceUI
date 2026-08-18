@@ -1,0 +1,163 @@
+--- /tmp/claude-1000/-home-mike-MIKE-AI/47617f0a-a5f5-41b1-b645-0e453631c4cf/scratchpad/hermes-gateway-orig.py	2026-07-11 16:52:53.236574287 +0000
++++ plugins/hermes-agent/gateway.py	2026-07-11 16:44:39.912934661 +0000
+@@ -135,6 +135,40 @@
+         )
+ 
+ 
++# ---------------------------------------------------------------------------
++# Cached reachability probe (WO-2.1)
++# ---------------------------------------------------------------------------
++# is_configured() must reflect REAL reachability (not unconditional True), but
++# it is called at register-time and on every list_gateways()/catalog call — so a
++# naked network call each time would be both slow and startup-blocking. We cache
++# the last probe for a short TTL and time the round-trip so check_health() can
++# report latency from the same probe.
++_REACH_CACHE = {"ok": None, "latency_ms": None, "ts": 0.0}
++_REACH_TTL_S = 30.0
++
++
++def _probe_hermes(timeout: float = 2.0, force: bool = False) -> tuple:
++    """Return (reachable: bool, latency_ms: float|None), cached for _REACH_TTL_S.
++
++    A single GET /health round-trip. On any failure returns (False, None).
++    """
++    now = time.time()
++    if not force and _REACH_CACHE["ok"] is not None and (now - _REACH_CACHE["ts"]) < _REACH_TTL_S:
++        return (_REACH_CACHE["ok"], _REACH_CACHE["latency_ms"])
++    t0 = time.time()
++    ok = False
++    latency = None
++    try:
++        resp = requests.get(f"{HERMES_BASE_URL}/health", headers=_hermes_headers(), timeout=timeout)
++        ok = bool(resp.ok)
++        latency = round((time.time() - t0) * 1000, 1)
++    except Exception:
++        ok = False
++        latency = None
++    _REACH_CACHE.update({"ok": ok, "latency_ms": latency, "ts": now})
++    return (ok, latency)
++
++
+ def _hermes_headers(session_id: str = "", session_key: str = "") -> dict:
+     """Build headers for every Hermes API call.
+ 
+@@ -510,6 +544,9 @@
+ 
+     gateway_id = "hermes"
+     persistent = False  # REST per-request, no persistent connection
++    capabilities = frozenset({
++        "streaming", "steer", "sessions", "tool-events", "reset",
++    })
+ 
+     def __init__(self):
+         self._session_history: dict[str, list] = {}
+@@ -531,22 +568,65 @@
+         self._active_runs_lock = threading.Lock()
+ 
+     def is_configured(self) -> bool:
+-        """Check if the Hermes container is reachable."""
+-        # Don't block startup with a health check — just verify env/config
+-        # The actual container may start after OpenVoiceUI
+-        return True
++        """Whether Hermes is actually reachable (WO-2.1).
++
++        Previously returned unconditional True, which made the panel and the
++        catalog claim Hermes was configured even when its container was down.
++        Now reflects a cached reachability probe (30s TTL) so is_configured is
++        honest. The cache means the register-time call and every list_gateways()
++        call is cheap; a container that comes up after OVU is picked up on the
++        next probe within the TTL. On a cold cache we probe once (short timeout).
++        """
++        ok, _lat = _probe_hermes()
++        return ok
+ 
+     def is_healthy(self) -> bool:
+-        """Live health check — ping the Hermes API."""
++        """Live health check — ping the Hermes API (cached)."""
++        ok, _lat = _probe_hermes()
++        return ok
++
++    def check_health(self) -> tuple:
++        """(reachable, latency_ms) from the cached /health probe (WO-2.1)."""
++        return _probe_hermes()
++
++    def get_config_schema(self) -> dict:
++        """Hermes connection + key schema (rendered generically by the panel)."""
++        return {
++            "fields": [
++                {"id": "HERMES_HOST", "type": "text", "label": "Hermes host",
++                 "required": True, "placeholder": "hermes"},
++                {"id": "HERMES_PORT", "type": "text", "label": "Hermes port",
++                 "required": False, "placeholder": "18790"},
++                {"id": "HERMES_API_KEY", "type": "password", "label": "Hermes API key",
++                 "required": False, "credential": "hermes_api_key"},
++            ],
++            "editable": True,
++            "transport": "provisioning-service",
++        }
++
++    def configure(self, partial: dict) -> dict:
++        """Apply a config change via the plugin provisioning service (WO-2.1).
++
++        Routes through services.plugins.update_plugin_config('hermes-agent', …),
++        which PUTs to the provisioning service and restarts the hermes container.
++        Imported lazily to keep the plugin importable outside the app process.
++        """
+         try:
+-            resp = requests.get(
+-                f"{HERMES_BASE_URL}/health",
+-                headers=_hermes_headers(),
+-                timeout=5
+-            )
+-            return resp.ok
+-        except Exception:
+-            return False
++            from services.plugins import update_plugin_config
++        except Exception as exc:
++            return {"status": "error", "detail": f"provisioning path unavailable: {exc}"}
++        result = update_plugin_config("hermes-agent", partial or {})
++        if result.get("ok"):
++            # Invalidate the reachability cache so the next health read is fresh.
++            _probe_hermes(force=True)
++            return {"status": "needs_restart",
++                    "detail": "applied via provisioning service (hermes container restarts)",
++                    "raw": result}
++        return {"status": "error", "detail": result.get("error", "provisioning failed")}
++
++    def restart_scope(self) -> str:
++        tenant = HERMES_TENANT_SESSION_KEY or ""
++        return f"container:hermes-{tenant}" if tenant else "container:hermes"
+ 
+     def stream_to_queue(
+         self,
+@@ -844,20 +924,20 @@
+ 
+     gateway_id = "hermes-bridge"
+     persistent = False
++    capabilities = frozenset({"streaming", "tool-events", "delegation"})
+ 
+     def is_configured(self) -> bool:
+-        return True
++        # Bridge mode: OpenClaw stays primary; the bridge only needs Hermes
++        # reachable to accept a delegated task. Reflect real reachability.
++        ok, _lat = _probe_hermes()
++        return ok
+ 
+     def is_healthy(self) -> bool:
+-        try:
+-            resp = requests.get(
+-                f"{HERMES_BASE_URL}/health",
+-                headers=_hermes_headers(),
+-                timeout=5,
+-            )
+-            return resp.ok
+-        except Exception:
+-            return False
++        ok, _lat = _probe_hermes()
++        return ok
++
++    def check_health(self) -> tuple:
++        return _probe_hermes()
+ 
+     def stream_to_queue(
+         self,

@@ -1,0 +1,48 @@
+# OpenVoiceUI
+
+> The open-source voice + canvas shell for agents that do work. You speak; the agent plans, builds, and shows the result as live HTML pages, tools, music, and an animated face — self-hosted on hardware you control. A Flask backend plus a vanilla-JavaScript ES-module frontend (no build step), with swappable gateway, TTS, STT, face, and plugin layers. MIT licensed.
+
+OpenVoiceUI is the shell, not the agent brain: the reasoning runs behind a gateway (OpenClaw by default, or any plugin gateway), so the LLM choice is not made in this repository. Repo: https://github.com/MCERQUA/OpenVoiceUI
+
+## Start here
+
+- [README](https://github.com/MCERQUA/OpenVoiceUI/blob/main/README.md): What OpenVoiceUI is, feature list, and the Pinokio / npm / Docker install paths.
+- [Vision](https://github.com/MCERQUA/OpenVoiceUI/blob/main/VISION.md): Positioning, first principles, explicit non-goals, and how to tell if a contribution fits.
+- [Architecture](https://github.com/MCERQUA/OpenVoiceUI/blob/main/ARCHITECTURE.md): Full technical map — backend blueprints, service layer, frontend modules, gateway layer, provider registry, plugins, canvas system, config.
+- [AGENTS.md](https://github.com/MCERQUA/OpenVoiceUI/blob/main/AGENTS.md): Orientation for AI coding agents — repo map, run/test commands, extension points, conventions, and hard constraints.
+- [Setup guide](https://github.com/MCERQUA/OpenVoiceUI/blob/main/SETUP.md): Detailed installation and first-run configuration.
+
+## Extending it
+
+- [Adding a provider](https://github.com/MCERQUA/OpenVoiceUI/blob/main/ARCHITECTURE.md#how-to-add-a-new-provider): Step-by-step recipes for a new TTS provider, STT provider, or LLM backend.
+- [Gateway plugin guide](https://github.com/MCERQUA/OpenVoiceUI/blob/main/plugins/README.md): Author a plugin that connects OpenVoiceUI to any agent or LLM backend via GatewayBase.
+- [Plugin system](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/extending/plugin-system.md): How plugin.json manifests declare pages, routes, faces, and profiles.
+- [Building canvas pages](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/extending/building-canvas-pages.md): Writing HTML pages the agent can render and drive.
+- [Building face plugins](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/extending/building-face-plugins.md): Creating an animated face by extending BaseFace.
+- [TTS providers](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/customization/tts-providers.md): The TTS provider catalog, configuration, and fallback behaviour.
+- [Agent profiles](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/customization/profiles.md): JSON personas defining prompt, voice, STT behaviour, adapter, and gateway.
+
+## Reference
+
+- [Architecture reference](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/reference/architecture.md): Request flow, agent tag system, display pipeline, and security model.
+- [Agent tags](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/reference/agent-tags.md): The bracket tags an agent emits to drive the canvas, music, face, and sounds.
+- [HTTP API](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/reference/api.md): Endpoint reference.
+- [Voice and STT flow](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/features/voice-stt-flow.md): Wake word, push-to-talk, recognition lifecycle, and call handling.
+- [Canvas system](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/features/canvas-system.md): How canvas pages are stored, indexed, versioned, and displayed.
+- [Configuration](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/getting-started/configuration.md): YAML defaults, feature flags, and environment variable overrides.
+
+## Contributing
+
+- [Contributing guide](https://github.com/MCERQUA/OpenVoiceUI/blob/main/CONTRIBUTING.md): Branch workflow (PRs target `dev`), dev setup, code style, and review process.
+- [PR review checklist](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/contributing/pr-checklist.md): What reviewers check before merging.
+- [Security policy](https://github.com/MCERQUA/OpenVoiceUI/blob/main/SECURITY.md): Vulnerability reporting process.
+
+## Optional
+
+- [Admin dashboard](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/features/admin-dashboard.md): Live configuration of profiles, providers, plugins, and health.
+- [Desktop interface](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/features/desktop-interface.md): Themed desktop environment with window management.
+- [Music system](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/features/music-system.md): Library, playlists, and voice-driven generation.
+- [Image generation](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/features/image-generation.md): Server-side proxied image generation.
+- [Faces](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/features/faces.md): Built-in and community face modules.
+- [Themes](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/customization/themes.md): Theming the shell.
+- [License](https://github.com/MCERQUA/OpenVoiceUI/blob/main/LICENSE): MIT.

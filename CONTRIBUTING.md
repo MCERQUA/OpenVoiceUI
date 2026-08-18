@@ -33,7 +33,7 @@ Maintainers periodically merge `dev → main` to cut a release.
 git clone https://github.com/MCERQUA/OpenVoiceUI
 cd OpenVoiceUI
 python3 -m venv venv
-venv/bin/pip install -r backend/requirements.txt
+venv/bin/pip install -r requirements.txt
 cp .env.example .env
 # Edit .env — set CLAWDBOT_AUTH_TOKEN and GROQ_API_KEY at minimum
 venv/bin/python3 server.py

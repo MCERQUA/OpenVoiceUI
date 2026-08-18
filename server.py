@@ -57,19 +57,52 @@ _whisper_model = None
 
 
 def get_whisper_model():
+    """LEGACY in-process Whisper. Only used if the shared STT service is absent.
+
+    Prefer the shared jambot-parakeet service (see local_stt below): the model is
+    ~680MB and baking it into every one of 24+ OVU containers would be wasteful
+    on a memory-constrained box. faster-whisper is also NOT installed by default
+    (commented out in requirements.txt), so this path normally raises.
+    """
     global _whisper_model
     if _whisper_model is None:
         try:
             from faster_whisper import WhisperModel
         except ImportError:
             raise ImportError(
-                "Local STT requires faster-whisper. Install it with: "
-                "pip install faster-whisper"
+                "Local STT requires either the shared jambot-parakeet service "
+                "(preferred — set PARAKEET_STT_URL) or faster-whisper installed "
+                "in this container."
             )
         logger.info("Loading Faster-Whisper model (first STT request)...")
         _whisper_model = WhisperModel("tiny", device="cpu", compute_type="float32")
         logger.info("Faster-Whisper model ready.")
     return _whisper_model
+
+
+# Shared on-box STT (NVIDIA Parakeet TDT 0.6B v3) on the jambot-shared network.
+# Free, keyless, audio never leaves the server. See deploy/parakeet-stt/.
+PARAKEET_STT_URL = os.getenv("PARAKEET_STT_URL", "http://jambot-parakeet:8770")
+
+
+def _parakeet_transcribe(audio_bytes, filename="audio.webm", timeout=180):
+    """POST to the shared STT service. Returns transcript str, or None if the
+    service is unreachable so the caller can fall back rather than fail."""
+    import requests
+    try:
+        r = requests.post(
+            f"{PARAKEET_STT_URL}/transcribe",
+            files={"audio": (filename, audio_bytes)},
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            logger.warning("parakeet STT http %s: %s", r.status_code, r.text[:200])
+            return None
+        return (r.json() or {}).get("text", "")
+    except Exception as e:
+        # Unreachable is a fallback condition, not an error to surface upward.
+        logger.info("parakeet STT unavailable (%s) — falling back", e)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +182,9 @@ if DEFAULT_PAGES_DIR.is_dir():
 from routes.static_files import static_files_bp, DJ_SOUNDS, SOUNDS_DIR
 app.register_blueprint(static_files_bp)
 
+from routes.albums import albums_bp
+app.register_blueprint(albums_bp)
+
 from routes.admin import admin_bp
 app.register_blueprint(admin_bp)
 
@@ -185,6 +221,11 @@ app.register_blueprint(story_bp)
 from routes.airadio_bridge import airadio_bp
 app.register_blueprint(airadio_bp)
 
+# Voice Agent Tool Bus — /api/tools/* (catalog, invoke, jobs, SSE events).
+# Spec: docs/jambot/voice-agent-tool-bus.md
+from routes.tools import tools_bp
+app.register_blueprint(tools_bp)
+
 try:
     from routes.song_tagger import song_tagger_bp
     app.register_blueprint(song_tagger_bp)
@@ -205,6 +246,11 @@ app.register_blueprint(onboarding_bp)
 
 from routes.image_gen import image_gen_bp
 app.register_blueprint(image_gen_bp)
+from routes.grid_gen import grid_gen_bp
+app.register_blueprint(grid_gen_bp)
+
+from routes.meshy import meshy_bp
+app.register_blueprint(meshy_bp)
 
 from routes.chat import chat_bp
 app.register_blueprint(chat_bp)
@@ -235,6 +281,34 @@ app.register_blueprint(vault_bp)
 
 from routes.identity import identity_bp
 app.register_blueprint(identity_bp)
+
+from routes.browse import browse_bp  # co-browsing bridge (#154)
+app.register_blueprint(browse_bp)
+
+from routes.services import services_bp
+app.register_blueprint(services_bp)
+
+# Google Maps — /api/maps/config (JS API key for canvas pages) + /api/maps/directions
+from routes.maps import maps_bp
+app.register_blueprint(maps_bp)
+
+# Camera Capture — flagship photo/album system (CompanyCam competitor)
+from routes.capture import capture_bp
+app.register_blueprint(capture_bp, url_prefix='/api/capture')
+
+# WO-1.3 — wire the STT provider registry. autodiscover() loads
+# config/providers.yaml and imports the STT provider modules so their
+# registry.register() calls fire; the Service Catalog then reads STT ids from
+# the SAME registry consumed by /api/stt/*. LLM entries in the yaml are
+# DEPRECATED (see providers/llm/DEPRECATED.md) — importing them registers
+# classes with zero call sites, harmless. Failure is non-fatal: the STT catalog
+# falls back to the static handler-derived list.
+try:
+    from providers.registry import registry as _provider_registry
+    _provider_registry.autodiscover()
+    logger.info("Provider registry autodiscover complete (STT wired).")
+except Exception as _e:
+    logger.warning(f"Provider registry autodiscover failed (non-critical): {_e}")
 
 from services.plugins import load_plugins
 load_plugins(app)
@@ -1016,11 +1090,32 @@ def deepgram_stt_token():
     live transcription API.  The key is passed via the WebSocket sub-protocol
     header so it never appears in URLs or logs.
 
-    NOTE: Deepgram supports scoped / short-lived project keys — if you want
-    tighter security, create a key with only 'usage:write' permission and
-    rotate it.  For now we hand out the configured key since the UI is
-    already authenticated.
+    TODO(scoped-key): Deepgram supports scoped / short-lived project keys via
+    its /v1/projects/{id}/keys grant API. We should mint a temporary key with
+    only 'usage:write' scope + a short TTL per session instead of handing out
+    the long-lived project key. Until that helper exists we return the
+    configured key ONLY to authenticated callers (Clerk session or agent key).
+
+    SECURITY: the raw key must never be returned unauthenticated. The public
+    allowlist no longer exposes /api/stt/* (require_auth gates it), and this
+    in-handler check is defense-in-depth so the key can't leak even if the
+    gate is ever loosened.
     """
+    # Defense-in-depth auth check (only enforced when Clerk auth is configured;
+    # local/self-hosted mode with no Clerk key runs fully open per app.py).
+    _clerk_configured = bool(
+        (os.getenv("CLERK_PUBLISHABLE_KEY") or os.getenv("VITE_CLERK_PUBLISHABLE_KEY", "")).strip()
+    )
+    if _clerk_configured:
+        _agent_key = os.environ.get("AGENT_API_KEY", "").strip()
+        _is_agent = bool(_agent_key) and request.headers.get("X-Agent-Key") == _agent_key
+        if not _is_agent:
+            from services.auth import get_token_from_request, verify_clerk_token
+            _token = get_token_from_request()
+            _user = verify_clerk_token(_token) if _token else None
+            if not _user:
+                return jsonify({"error": "Unauthorized", "code": "auth_required"}), 401
+
     api_key = os.environ.get("DEEPGRAM_API_KEY", "")
     if not api_key:
         return jsonify({"error": "DEEPGRAM_API_KEY not configured"}), 500
@@ -1137,6 +1232,16 @@ def local_stt():
     audio_file = request.files["audio"]
     audio_bytes = audio_file.read()
 
+    # PREFERRED PATH: the shared jambot-parakeet service. One ~680MB model for
+    # the whole fleet instead of a copy per OVU container, and it does its own
+    # ffmpeg normalisation. Falls through to the in-process path below only if
+    # the service is unreachable — a missing shared service degrades, it does
+    # not break voice.
+    _text = _parakeet_transcribe(audio_bytes, audio_file.filename or "audio.webm")
+    if _text is not None:
+        logger.info("Local STT (parakeet): %r", _text)
+        return jsonify({"transcript": _text, "success": True, "engine": "parakeet-tdt-0.6b-v3"})
+
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
         tmp.write(audio_bytes)
         tmp_path = tmp.name
@@ -1245,8 +1350,7 @@ def brave_search():
 
 @app.route("/api/search", methods=["GET", "POST"])
 def web_search():
-    """Web search via DuckDuckGo (no API key required)."""
-    import urllib.request
+    """Web search via DuckDuckGo routed through residential SOCKS5 proxy."""
     import urllib.parse
     from html.parser import HTMLParser
 
@@ -1290,14 +1394,20 @@ def web_search():
             if self._capture:
                 self._text += data
 
+    # Route through residential proxy (avoids datacenter IP blocks)
+    proxy_server = os.getenv("BROWSE_PROXY_SERVER", "")
+    session_proxies = {"http": proxy_server, "https": proxy_server} if proxy_server else None
+
     try:
         encoded = urllib.parse.quote_plus(query)
-        req = urllib.request.Request(
+        resp = requests.get(
             f"https://html.duckduckgo.com/html/?q={encoded}",
             headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
+            proxies=session_proxies,
+            timeout=15,
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            html = resp.read().decode("utf-8")
+        resp.raise_for_status()
+        html = resp.text
         parser = _DDGParser()
         parser.feed(html)
         results = parser.results[:5]
@@ -1584,27 +1694,65 @@ def _tts_bytes(text: str) -> bytes:
 # and calls push_proactive_message() — closing the "I'll let you know when
 # it's done" loop that previously never fired.
 
+# ws -> outbound queue.Queue. flask_sock's ws.send() is NOT thread-safe, so
+# proactive pushes (generated on the gateway daemon thread) must NOT call
+# ws.send() directly while the socket's own bridge loop is also writing
+# (keepalives, TTS) — interleaved frames corrupt the push channel (WS-2).
+# Instead every producer ENQUEUES here; each /ws/clawdbot connection's own
+# writer coroutine is the ONLY thread that touches its ws.send().
 _push_clients_lock = threading.Lock()
-_push_clients: set = set()
+_push_clients: dict = {}          # ws -> queue.Queue
+_push_client_session: dict = {}   # ws -> last sessionKey the browser declared (WS-9)
+_push_receipt_lock = threading.Lock()  # serialize JSONL appends (WS-10)
 
 
 def _register_push_client(ws):
+    """Register a browser socket and return its outbound queue."""
+    q = queue.Queue()
     with _push_clients_lock:
-        _push_clients.add(ws)
-    logger.info(f"Proactive push: client registered ({len(_push_clients)} connected)")
+        _push_clients[ws] = q
+        n = len(_push_clients)
+    logger.info(f"Proactive push: client registered ({n} connected)")
+    return q
 
 
 def _unregister_push_client(ws):
     with _push_clients_lock:
-        _push_clients.discard(ws)
+        q = _push_clients.pop(ws, None)
+        _push_client_session.pop(ws, None)
+    if q is not None:
+        # Wake the socket's writer so it can observe the shutdown and exit.
+        try:
+            q.put_nowait(None)
+        except Exception:
+            pass
+
+
+def _push_queue_for(ws):
+    with _push_clients_lock:
+        return _push_clients.get(ws)
+
+
+def _note_push_client_session(ws, session_key):
+    """Record the sessionKey a browser is working under so proactive pushes
+    can be scoped to the right tab (WS-9)."""
+    if not session_key:
+        return
+    with _push_clients_lock:
+        if ws in _push_clients:
+            _push_client_session[ws] = session_key
 
 
 def push_proactive_message(text: str, session_key: str = None):
-    """Broadcast an agent-initiated message to all connected browsers.
+    """Broadcast an agent-initiated message to connected browsers.
 
     Called from a daemon thread (gateway loop side) — no Flask context.
     The raw text (with [CANVAS:...] etc. action tags intact) is sent so the
     client can dispatch the tags; TTS is generated from the tag-stripped text.
+
+    Delivery is scoped (WS-9): if this frame carries a sessionKey AND a client
+    has declared one, it is delivered only on a match; a client that never
+    declared a sessionKey receives everything (backward compatible).
     """
     spoken = re.sub(r'\[[A-Z_]+(?::[^\]]*)?\]', '', text).strip()
     audio_b64 = None
@@ -1621,35 +1769,44 @@ def push_proactive_message(text: str, session_key: str = None):
         "ts": time.time(),
     })
     with _push_clients_lock:
-        clients = list(_push_clients)
-    if not clients:
+        targets = list(_push_clients.items())
+        sessions = dict(_push_client_session)
+    if not targets:
         logger.warning("Proactive push: no connected browsers — message not delivered "
                        f"(text: {text[:100]})")
         return
     delivered = 0
-    for client in clients:
+    for ws, q in targets:
+        reg_key = sessions.get(ws)
+        if session_key and reg_key and reg_key != session_key:
+            continue  # WS-9: this push belongs to a different session/tab
         try:
-            client.send(frame)
+            q.put_nowait(frame)
             delivered += 1
         except Exception:
-            _unregister_push_client(client)
-    logger.info(f"Proactive push: delivered to {delivered}/{len(clients)} clients")
-    _write_push_receipt(text, session_key, delivered, len(clients))
+            _unregister_push_client(ws)
+    logger.info(f"Proactive push: enqueued to {delivered}/{len(targets)} clients")
+    _write_push_receipt(text, session_key, delivered, len(targets))
 
 
 def _write_push_receipt(text, session_key, delivered, clients):
     """Durable, host-visible receipt of every proactive push (bind-mounted
-    transcripts dir) — drives the JamFlow board signal and survives restarts."""
+    transcripts dir) — drives the JamFlow board signal and survives restarts.
+    Multiple proactive-push threads can append concurrently, so serialize the
+    write under a module lock — interleaved partial lines corrupt the JSONL
+    the JamFlow board reads (WS-10)."""
     try:
         receipt_path = Path("/app/runtime/transcripts/.proactive-push.jsonl")
-        with open(receipt_path, "a") as f:
-            f.write(json.dumps({
-                "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "session_key": session_key,
-                "delivered": delivered,
-                "clients": clients,
-                "text": text[:300],
-            }) + "\n")
+        line = json.dumps({
+            "ts": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "session_key": session_key,
+            "delivered": delivered,
+            "clients": clients,
+            "text": text[:300],
+        }) + "\n"
+        with _push_receipt_lock:
+            with open(receipt_path, "a") as f:
+                f.write(line)
     except Exception as e:
         logger.debug(f"Proactive push receipt write failed: {e}")
 
@@ -1718,12 +1875,27 @@ def clawdbot_websocket(ws):
     # this socket — delivery is independent of the gateway bridge below.
     _register_push_client(ws)
 
+    # Outbound queue for THIS socket. Every frame written to the browser —
+    # gateway relays, keepalives, and proactive pushes — goes through here and
+    # is drained by the single _writer() coroutine below, which is the only
+    # thread that ever calls ws.send() (WS-2).
+    out_q = _push_queue_for(ws)
+
     async def _run():
+        loop = asyncio.get_running_loop()
+
+        def _enqueue(frame):
+            try:
+                out_q.put_nowait(frame)
+            except Exception:
+                pass
+
         try:
             async with websockets.connect(gateway_url) as gw:
                 logger.info(f"WebSocket connected to Gateway at {gateway_url}")
 
-                # Handshake
+                # Handshake — these pre-writer sends are safe: no other thread
+                # writes ws until _writer() starts (push only ENQUEUES).
                 challenge = json.loads(await asyncio.wait_for(gw.recv(), timeout=10.0))
                 logger.debug(f"Gateway challenge: {challenge.get('event')}")
 
@@ -1751,15 +1923,31 @@ def clawdbot_websocket(ws):
                     return
 
                 logger.info("Gateway handshake OK")
-                ws.send(json.dumps({"type": "connected", "message": "Connected to OpenClaw Gateway"}))
+                _enqueue(json.dumps({"type": "connected", "message": "Connected to OpenClaw Gateway"}))
+
+                async def _writer():
+                    """The ONLY writer to ws. Drains the per-client outbound
+                    queue so flask_sock's non-thread-safe send() is never
+                    called from two threads (WS-2)."""
+                    while True:
+                        frame = await loop.run_in_executor(None, out_q.get)
+                        if frame is None:  # shutdown sentinel
+                            break
+                        try:
+                            ws.send(frame)
+                        except Exception:
+                            break
 
                 async def _from_client():
                     while True:
-                        msg = ws.receive()
+                        # run_in_executor so blocking ws.receive() doesn't
+                        # starve _from_gateway() while the socket is idle (WS-3).
+                        msg = await loop.run_in_executor(None, ws.receive)
                         if not msg:
                             break
                         data = json.loads(msg)
                         if data.get("type") == "chat.send":
+                            _note_push_client_session(ws, data.get("sessionKey"))
                             await gw.send(json.dumps({
                                 "type": "req",
                                 "id": f"chat-{uuid.uuid4()}",
@@ -1778,10 +1966,7 @@ def clawdbot_websocket(ws):
                             # Idle is normal — keep both legs alive. The browser
                             # socket doubles as the proactive-push channel, so it
                             # must survive long silences (nginx idle timeouts too).
-                            try:
-                                ws.send(json.dumps({"type": "keepalive", "ts": time.time()}))
-                            except Exception:
-                                return  # browser gone — end the bridge
+                            _enqueue(json.dumps({"type": "keepalive", "ts": time.time()}))
                             continue
                         if data.get("type") != "event":
                             continue
@@ -1792,35 +1977,61 @@ def clawdbot_websocket(ws):
                             content = payload.get("content", "")
                             if content:
                                 try:
-                                    audio_b64 = base64.b64encode(_tts_bytes(content)).decode()
-                                    ws.send(json.dumps({
+                                    # Offload blocking TTS so it doesn't stall
+                                    # keepalives/frames on this loop (WS-5).
+                                    raw = await loop.run_in_executor(None, _tts_bytes, content)
+                                    audio_b64 = base64.b64encode(raw).decode()
+                                    _enqueue(json.dumps({
                                         "type": "assistant_message",
                                         "text": content,
                                         "audio": audio_b64,
                                     }))
                                 except Exception as e:
                                     logger.error(f"TTS failed in WebSocket handler: {e}")
-                                    ws.send(json.dumps({"type": "assistant_message", "text": content}))
+                                    _enqueue(json.dumps({"type": "assistant_message", "text": content}))
 
                         elif event == "agent.stream.delta":
-                            ws.send(json.dumps({
+                            _enqueue(json.dumps({
                                 "type": "text_delta",
                                 "delta": payload.get("delta", ""),
                             }))
 
                         elif event == "agent.stream.end":
-                            ws.send(json.dumps({"type": "stream_end"}))
+                            _enqueue(json.dumps({"type": "stream_end"}))
 
-                await asyncio.gather(_from_client(), _from_gateway())
+                # WS-8: stop as soon as ANY leg ends; cancel the survivors.
+                # An executor-blocked ws.receive()/out_q.get() can't be
+                # cancelled directly — the None sentinel unblocks the writer and
+                # exiting the `async with` (closing gw) + ws.close() unblocks the
+                # rest, so the upstream connection can't leak.
+                tasks = {asyncio.ensure_future(_writer()),
+                         asyncio.ensure_future(_from_client()),
+                         asyncio.ensure_future(_from_gateway())}
+                try:
+                    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    _enqueue(None)  # release the writer's blocking get
+                    for t in tasks:
+                        t.cancel()
+                    try:
+                        ws.close()
+                    except Exception:
+                        pass
 
         except (ConnectionRefusedError, OSError) as e:
             logger.error(f"Cannot reach Gateway at {gateway_url}: {e}")
-            ws.send(json.dumps({"type": "error", "message": "Cannot connect to Gateway"}))
-            ws.close()
+            try:
+                ws.send(json.dumps({"type": "error", "message": "Cannot connect to Gateway"}))
+                ws.close()
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"WebSocket error: {e}")
-            ws.send(json.dumps({"type": "error", "message": "Connection error"}))
-            ws.close()
+            try:
+                ws.send(json.dumps({"type": "error", "message": "Connection error"}))
+                ws.close()
+            except Exception:
+                pass
 
     try:
         asyncio.run(_run())
@@ -1840,8 +2051,8 @@ def clawdbot_websocket(ws):
 
 @sock.route("/openclaw-ui")
 def openclaw_ui_websocket(ws):
-    """WebSocket proxy for OpenClaw Control UI behind Clerk auth."""
-    from services.auth import verify_clerk_token, get_token_from_request
+    """WebSocket proxy for OpenClaw Control UI behind Clerk ADMIN auth."""
+    from services.auth import verify_clerk_token, get_token_from_request, is_admin_user
     token = get_token_from_request()
     user_id = verify_clerk_token(token) if token else None
     if not user_id:
@@ -1849,7 +2060,22 @@ def openclaw_ui_websocket(ws):
         ws.send(json.dumps({"type": "error", "message": "Unauthorized"}))
         ws.close()
         return
-    logger.info(f"OpenClaw UI WebSocket authenticated: user_id={user_id}")
+    # This proxy injects the OPERATOR-scope gateway token into the handshake, so
+    # it must be admin-only — an allowlisted voice user must NOT get operator RPC
+    # (SEC-5/WS-4). Being in ALLOWED_USER_IDS gates the voice app, not admin ops.
+    if not is_admin_user(user_id):
+        logger.warning(f"OpenClaw UI WebSocket rejected — non-admin user_id={user_id}")
+        ws.send(json.dumps({"type": "error", "message": "Admin access required"}))
+        ws.close()
+        return
+    logger.info(f"OpenClaw UI WebSocket authenticated (admin): user_id={user_id}")
+
+    # Same RPC method allowlist the hardened HTTP admin proxy enforces
+    # (routes/admin.py ALLOWED_RPC_METHODS) — the proxy relays operator-scope
+    # frames, so arbitrary methods (config.patch / chat.send / sessions.*) must
+    # not be reachable here. `connect` is permitted (handshake).
+    from routes.admin import ALLOWED_RPC_METHODS
+    _allowed_ws_methods = set(ALLOWED_RPC_METHODS) | {"connect"}
 
     gateway_url = os.getenv("CLAWDBOT_GATEWAY_URL", "ws://127.0.0.1:18791")
     auth_token = os.getenv("CLAWDBOT_AUTH_TOKEN")
@@ -1861,6 +2087,7 @@ def openclaw_ui_websocket(ws):
         return
 
     async def _run():
+        loop = asyncio.get_running_loop()
         try:
             async with websockets.connect(gateway_url, origin="http://localhost:18789") as gw:
                 logger.info(f"OpenClaw UI: connected to Gateway at {gateway_url}")
@@ -1868,22 +2095,41 @@ def openclaw_ui_websocket(ws):
                 async def _from_client():
                     """Relay browser → openclaw, injecting auth token on connect."""
                     while True:
-                        msg = ws.receive()
+                        # run_in_executor so blocking ws.receive() doesn't
+                        # starve _from_gateway() while idle (WS-3).
+                        msg = await loop.run_in_executor(None, ws.receive)
                         if not msg:
                             break
                         try:
                             data = json.loads(msg)
-                            if data.get("type") == "req" and data.get("method") == "connect":
-                                if "params" not in data:
-                                    data["params"] = {}
-                                data["params"]["auth"] = {"token": auth_token}
-                                msg = json.dumps(data)
+                            if data.get("type") == "req":
+                                _method = data.get("method")
+                                # Enforce the RPC method allowlist — reject any
+                                # method the HTTP admin proxy also refuses.
+                                if _method and _method not in _allowed_ws_methods:
+                                    logger.warning(
+                                        f"OpenClaw UI: blocked disallowed RPC method {_method!r}"
+                                    )
+                                    ws.send(json.dumps({
+                                        "type": "res",
+                                        "id": data.get("id"),
+                                        "error": {"message": f"Method not allowed: {_method}"},
+                                    }))
+                                    continue
+                                if _method == "connect":
+                                    if "params" not in data:
+                                        data["params"] = {}
+                                    data["params"]["auth"] = {"token": auth_token}
+                                    msg = json.dumps(data)
                         except (json.JSONDecodeError, TypeError):
                             pass  # Non-JSON frame — relay as-is
                         await gw.send(msg)
 
                 async def _from_gateway():
-                    """Relay openclaw → browser (raw, no transformation)."""
+                    """Relay openclaw → browser (raw, no transformation).
+                    This is the ONLY writer to ws in this bridge (the client
+                    leg only relays to the gateway), so no per-client queue is
+                    needed here."""
                     while True:
                         try:
                             msg = await asyncio.wait_for(gw.recv(), timeout=300.0)
@@ -1893,7 +2139,21 @@ def openclaw_ui_websocket(ws):
                             ws.send(json.dumps({"type": "error", "message": "Gateway timeout"}))
                             return
 
-                await asyncio.gather(_from_client(), _from_gateway())
+                # WS-8: end as soon as either leg finishes; cancel the survivor.
+                # The executor-blocked ws.receive() can't be cancelled, but
+                # exiting the `async with` (closing gw) + ws.close() unblocks it,
+                # so the upstream gateway connection can't leak.
+                tasks = {asyncio.ensure_future(_from_client()),
+                         asyncio.ensure_future(_from_gateway())}
+                try:
+                    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    for t in tasks:
+                        t.cancel()
+                    try:
+                        ws.close()
+                    except Exception:
+                        pass
 
         except (ConnectionRefusedError, OSError) as e:
             logger.error(f"OpenClaw UI: cannot reach Gateway at {gateway_url}: {e}")
@@ -2001,6 +2261,84 @@ def xai_realtime_websocket(ws):
         logger.error(f"xAI Realtime: fatal error: {e}")
     finally:
         logger.info(f"xAI Realtime: session ended for user_id={user_id}")
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — Co-browsing screencast proxy (/ws/browse-stream)  [#154 Phase 2]
+# ---------------------------------------------------------------------------
+# Bridges the browser's viewer canvas to the shared jambot-browse service's
+# CDP screencast WS. Browser side is flask-sock; upstream is the aiohttp WS on
+# the browse service. Frames flow down (base64 JPEG), user/viewer events flow
+# up (Phase 3 consumes them; Phase 2 relays them through untouched). The
+# service key + this tenant are injected server-side — never exposed to the
+# browser. Tenant is fixed by this OVU instance's env, so a browser can only
+# ever watch ITS OWN tenant's session.
+@sock.route("/ws/browse-stream")
+def browse_stream_websocket(ws):
+    from services.auth import verify_clerk_token, get_token_from_request
+    # Clerk gate unless auth disabled (single-user self-host), matching the app.
+    # The real browser auto-sends the __session cookie (same origin). The internal
+    # agent key is also accepted (via ?agent_key= or X-Agent-Key) for parity with
+    # the /api/browse/* HTTP proxy, which lets internal tooling attach a viewer.
+    if os.getenv("CLERK_PUBLISHABLE_KEY") or os.getenv("CLERK_SECRET_KEY"):
+        _agent_key = os.getenv("AGENT_API_KEY", "").strip()
+        _presented = request.args.get("agent_key", "") or request.headers.get("X-Agent-Key", "")
+        _agent_ok = bool(_agent_key) and _presented == _agent_key
+        token = get_token_from_request()
+        if not _agent_ok and not (token and verify_clerk_token(token)):
+            try:
+                ws.send(json.dumps({"type": "error", "message": "Unauthorized"}))
+            finally:
+                ws.close()
+            return
+
+    svc_url = os.getenv("BROWSE_SERVICE_URL", "http://jambot-browse:8712").rstrip("/")
+    svc_key = os.getenv("BROWSE_SERVICE_KEY", "").strip()
+    tenant = (os.getenv("JAMBOT_TENANT") or os.getenv("TENANT_NAME") or "default").strip()
+    ws_url = svc_url.replace("http://", "ws://").replace("https://", "wss://")
+    stream_url = f"{ws_url}/session/stream?tenant={tenant}"
+    if svc_key:
+        stream_url += f"&key={svc_key}"
+
+    async def _run():
+        try:
+            async with websockets.connect(stream_url, max_size=8 * 1024 * 1024) as up:
+                logger.info("browse-stream connected upstream tenant=%s", tenant)
+
+                async def _down():
+                    """Upstream frames → browser."""
+                    async for frame in up:
+                        ws.send(frame)
+
+                async def _up():
+                    """Browser viewer events → upstream (Phase 3 acts on them)."""
+                    loop = asyncio.get_running_loop()
+                    while True:
+                        msg = await loop.run_in_executor(None, ws.receive)
+                        if msg is None:
+                            break
+                        await up.send(msg)
+
+                done, pending = await asyncio.wait(
+                    [asyncio.create_task(_down()), asyncio.create_task(_up())],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+        except Exception as e:
+            logger.info("browse-stream closed tenant=%s: %s", tenant, e)
+            try:
+                ws.send(json.dumps({"type": "error", "message": "browse stream ended"}))
+            except Exception:
+                pass
+
+    try:
+        asyncio.run(_run())
+    finally:
+        try:
+            ws.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ import mimetypes
 from pathlib import Path
 
 import requests as http_requests
-from flask import Blueprint, Response, jsonify, redirect, request, send_file
+from flask import Blueprint, Response, g, jsonify, redirect, request, send_file
 
 # 3D asset MIME types — without these, send_file falls back to
 # application/octet-stream which (combined with X-Content-Type-Options:nosniff)
@@ -362,7 +362,115 @@ def generate_voice_aliases(title: str) -> list[str]:
 def sync_canvas_manifest() -> dict:
     """Full sync with pages directory."""
     with _manifest_lock:
-        return _sync_canvas_manifest_locked()
+        manifest = _sync_canvas_manifest_locked()
+    _kick_off_pending_icon_generation(manifest)
+    return manifest
+
+
+# Pages still missing a custom icon after HTML-meta extraction get a real
+# generated one automatically — the icon-generation skill tells agents to do
+# this themselves, but nothing enforced it (grep found no call site besides
+# the route), so pages silently fell back to the generic document icon
+# whenever an agent skipped the step. This is the enforcement layer.
+_ICON_GEN_RETRY_COOLDOWN = 6 * 3600  # seconds — backoff after a failed attempt
+_icon_gen_lock = threading.Lock()  # single-flight guard — see _kick_off_pending_icon_generation
+
+
+def _kick_off_pending_icon_generation(manifest: dict) -> None:
+    """Fire-and-forget: spawn a background thread to generate icons for any
+    page still missing one. Must never run inline here — this function is
+    called on every /api/canvas/manifest sync (throttled to 60s, but still a
+    request path polled by every open desktop), and Gemini calls take
+    seconds.
+
+    Single-flight: _kick_off_pending_icon_generation is called on every sync,
+    and a large backlog takes many sync cycles (2s stagger per page) to work
+    through. Without this lock, each cycle spawned its OWN thread over the
+    SAME still-pending list — multiple overlapping threads generating the
+    same pages concurrently. That burst blew through Gemini's rate limit
+    (confirmed live: 429s across 139 pages) and none of them recovered until
+    their independent 6h cooldowns expired. Only one batch may run at a time,
+    fleet-wide within this process."""
+    # GATED OFF by default (2026-07-29): auto-icon gen on Gemini was 100% 429-failing
+    # (josh 588/0, danielle 286/0 — zero icons produced, permanent retry storm because
+    # failed pages stay pending and re-fire every sync). Mike confirmed pages show only
+    # default icons. Re-enable ONLY once icon-gen is repointed off Gemini to the Mac's
+    # ComfyUI (env AUTO_ICON_GEN=on). Root fix = the Mac creative node, not this path.
+    import os
+    if os.getenv('AUTO_ICON_GEN', '').strip().lower() not in ('1', 'true', 'yes', 'on'):
+        return
+
+    if not _icon_gen_lock.acquire(blocking=False):
+        return  # a batch is already in flight — this sync cycle's backlog will be picked up next time
+    now = time.time()
+    pending = []
+    for page_id, page_data in manifest.get('pages', {}).items():
+        if page_id == 'desktop' or page_data.get('icon'):
+            continue
+        failed_at = page_data.get('icon_gen_failed_at')
+        if failed_at and now - failed_at < _ICON_GEN_RETRY_COOLDOWN:
+            continue
+        pending.append(page_id)
+    if not pending:
+        _icon_gen_lock.release()
+        return
+    threading.Thread(target=_generate_pending_icons, args=(pending,), daemon=True).start()
+
+
+def _generate_pending_icons(page_ids) -> None:
+    """Background-thread worker — see _kick_off_pending_icon_generation()."""
+    try:
+        _generate_pending_icons_inner(page_ids)
+    finally:
+        _icon_gen_lock.release()
+
+
+def _generate_pending_icons_inner(page_ids) -> None:
+    from routes.icons import generate_icon_image, IconGenerationError
+    logger = logging.getLogger(__name__)
+    extra_backoff = 0  # seconds — grows on a 429, so the batch self-throttles instead of hammering a rate-limited API
+    for i, page_id in enumerate(page_ids):
+        if i > 0:
+            time.sleep(2 + extra_backoff)  # stagger Gemini calls
+        try:
+            with _manifest_lock:
+                manifest = load_canvas_manifest()
+                page_data = manifest['pages'].get(page_id)
+                if not page_data or page_data.get('icon'):
+                    continue  # something else set an icon meanwhile
+                title = page_data.get('display_name') or page_id.replace('-', ' ').title()
+                category = page_data.get('category', 'uncategorized')
+                description = page_data.get('description', '')
+
+            prompt = f'A {category} icon for: {title}.' + (f' {description}' if description else '')
+            try:
+                result = generate_icon_image(prompt, name=f'{page_id}-icon')
+                extra_backoff = 0  # reset once a call actually succeeds
+            except IconGenerationError as e:
+                logger.warning(f'Auto icon-gen failed for {page_id}: {e}')
+                is_rate_limited = '429' in str(e)
+                if is_rate_limited:
+                    # Rate-limited, not actually broken — don't stamp the long
+                    # cooldown (that would strand it for 6h over a transient
+                    # limit). Back off harder for the rest of THIS batch instead.
+                    extra_backoff = min(extra_backoff + 4, 20)
+                else:
+                    with _manifest_lock:
+                        manifest = load_canvas_manifest()
+                        if page_id in manifest['pages']:
+                            manifest['pages'][page_id]['icon_gen_failed_at'] = time.time()
+                            save_canvas_manifest(manifest)
+                continue
+
+            with _manifest_lock:
+                manifest = load_canvas_manifest()
+                if page_id in manifest['pages'] and not manifest['pages'][page_id].get('icon'):
+                    manifest['pages'][page_id]['icon'] = result['url']
+                    manifest['pages'][page_id].pop('icon_gen_failed_at', None)
+                    save_canvas_manifest(manifest)
+                    logger.info(f"Auto-generated icon for {page_id}: {result['url']}")
+        except Exception as e:
+            logger.warning(f'Auto icon-gen error for {page_id}: {e}')
 
 
 def _sync_canvas_manifest_locked() -> dict:
@@ -872,7 +980,10 @@ def canvas_pages_proxy(path):
                 # directly from the browser with user's own API keys.
                 resp.headers['Content-Security-Policy'] = (
                     "default-src 'none'; "
-                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://games.jam-bot.com blob:; "
+                    # maps.googleapis.com + maps.gstatic.com: required by the `maps` skill's
+                    # Google Maps JS canvas pages. Omitting them silently blanks every map
+                    # (console-only CSP violation). Found 2026-07-24. Do NOT re-strip.
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://games.jam-bot.com https://maps.googleapis.com https://maps.gstatic.com blob:; "
                     "style-src 'unsafe-inline' https://games.jam-bot.com https://fonts.googleapis.com; "
                     "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob: https:; "
@@ -883,7 +994,8 @@ def canvas_pages_proxy(path):
                         "https://api.x.ai https://api.groq.com "
                         "https://api.together.xyz https://openrouter.ai "
                         "https://api.anthropic.com https://api.cohere.ai "
-                        "https://api.dataforseo.com https://sandbox.dataforseo.com; "
+                        "https://api.dataforseo.com https://sandbox.dataforseo.com "
+                        "https://maps.googleapis.com; "
                     "worker-src blob:; "
                     "frame-src 'self' https://*.jam-bot.com https://*.netlify.app https://midiviz.com "
                         "https://w.soundcloud.com https://bandcamp.com https://*.bandcamp.com"
@@ -1195,16 +1307,23 @@ def handle_page_metadata(page_id):
         _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
         is_agent_request = bool(_agent_api_key and request.headers.get('X-Agent-Key') == _agent_api_key)
 
-        # Guard: locked pages — agent cannot change is_public on locked pages.
-        # Admin (Clerk-authenticated) can still change anything, including unlocking.
-        if 'is_public' in data and page.get('is_locked', False) and is_agent_request:
+        # Admin identity — only a Clerk-authenticated admin may lock/unlock pages
+        # or flip visibility on a locked page. Resolve from g.clerk_user_id (set
+        # by require_auth) — never trust the agent key for these mutations.
+        from services.auth import is_admin_user
+        is_admin = is_admin_user(getattr(g, 'clerk_user_id', None))
+
+        # Guard: locked pages — visibility can only be changed by an admin.
+        # The unauthenticated path is already 401'd by require_auth (SEC-2 fix in
+        # app.py); this guard is defense-in-depth and blocks the agent key too.
+        if 'is_public' in data and page.get('is_locked', False) and not is_admin:
             return jsonify({
                 'error': 'This page is locked. Visibility can only be changed from the admin dashboard.',
                 'is_locked': True,
             }), 403
 
-        # Guard: agent cannot lock/unlock pages — only admin can.
-        if 'is_locked' in data and is_agent_request:
+        # Guard: only an admin may lock/unlock pages (never the agent).
+        if 'is_locked' in data and not is_admin:
             return jsonify({
                 'error': 'Page lock status can only be changed from the admin dashboard.',
             }), 403

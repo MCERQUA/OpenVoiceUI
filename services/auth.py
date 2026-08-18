@@ -44,10 +44,20 @@ _JWKS_CACHE_TTL = 3600  # refresh keys every 60 minutes
 
 # Allowlist of Clerk user IDs permitted to access this deployment.
 # Set ALLOWED_USER_IDS=user_abc123,user_xyz789 in .env
-# If the env var is empty or unset, the check is SKIPPED (open to any valid Clerk user).
-# Always set this in production — agents have full access.
+# FAIL-CLOSED (SEC-11): when Clerk auth is configured but this allowlist is
+# empty, NO users are permitted (previously it failed OPEN — any Clerk account
+# on the instance was allowed). The fleet .env template always populates
+# ALLOWED_USER_IDS (jambot-create-user.sh sets it to the client + admin, or
+# admin-only), so fail-closed is safe here; a tenant with an empty value is
+# misconfigured and must be locked, not opened.
 _raw_allowed = os.getenv('ALLOWED_USER_IDS', '')
 _ALLOWED_USER_IDS: set[str] = {uid.strip() for uid in _raw_allowed.split(',') if uid.strip()}
+_CLERK_CONFIGURED = bool(_raw_clerk_key)
+if _CLERK_CONFIGURED and not _ALLOWED_USER_IDS:
+    logger.error(
+        'SECURITY: ALLOWED_USER_IDS is EMPTY while Clerk auth is configured — '
+        'FAILING CLOSED: no users will be permitted. Set ALLOWED_USER_IDS in .env.'
+    )
 
 # Admin users — server-side authorization for the admin dashboard and privileged
 # APIs (/admin, /api/admin/*, /api/vault/*, /api/workspace/*, /api/plugins/*, ...).
@@ -121,7 +131,14 @@ def verify_clerk_token(token: str) -> Optional[str]:
                 return None
             # Log user_id on every successful auth so it can be captured for ALLOWED_USER_IDS
             logger.info('Clerk auth: user_id=%s', user_id)
-            # Enforce allowlist if configured
+            # Enforce allowlist. FAIL-CLOSED: an empty allowlist while Clerk is
+            # configured permits NO ONE (SEC-11) — a valid token is not enough.
+            if _CLERK_CONFIGURED and not _ALLOWED_USER_IDS:
+                logger.warning(
+                    'Clerk auth: user_id=%s denied — ALLOWED_USER_IDS is empty (fail-closed)',
+                    user_id,
+                )
+                return None
             if _ALLOWED_USER_IDS and user_id not in _ALLOWED_USER_IDS:
                 logger.warning('Clerk auth: user_id=%s not in ALLOWED_USER_IDS — access denied', user_id)
                 return None

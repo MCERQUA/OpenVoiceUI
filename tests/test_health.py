@@ -58,12 +58,35 @@ class TestReadiness:
         assert result.details is not None
         assert "tts" in result.details
 
-    def test_readiness_healthy_when_gateway_configured(self, health_checker, monkeypatch):
-        """When Gateway env vars are set and TTS loads, probe should be healthy."""
+    def test_readiness_healthy_when_gateway_reachable(self, health_checker, monkeypatch):
+        """WO-0.3: readiness now probes REACHABILITY (a live socket), not just
+        env-var presence. With a real listener bound at the gateway URL the
+        gateway sub-check is healthy."""
+        import socket as _socket
+        listener = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
         monkeypatch.setenv("CLAWDBOT_AUTH_TOKEN", "test-token")
-        monkeypatch.setenv("CLAWDBOT_GATEWAY_URL", "ws://127.0.0.1:18791")
-
-        result = health_checker.readiness()
-        # Gateway check should pass; TTS may or may not load in CI — only
-        # assert the gateway sub-check is healthy.
+        monkeypatch.setenv("CLAWDBOT_GATEWAY_URL", f"ws://127.0.0.1:{port}")
+        try:
+            result = health_checker.readiness()
+        finally:
+            listener.close()
+        # Gateway sub-check should pass because the socket is reachable; TTS may
+        # or may not load in CI — only assert the gateway sub-check.
         assert result.details["gateway"]["healthy"] is True
+
+    def test_readiness_unhealthy_when_gateway_unreachable(self, health_checker, monkeypatch):
+        """WO-0.3: env vars set but nothing listening → gateway is NOT ready
+        (previously this returned healthy on env-var presence alone)."""
+        import socket as _socket
+        # Bind then immediately close to get a definitely-closed port.
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", 0))
+        dead_port = s.getsockname()[1]
+        s.close()
+        monkeypatch.setenv("CLAWDBOT_AUTH_TOKEN", "test-token")
+        monkeypatch.setenv("CLAWDBOT_GATEWAY_URL", f"ws://127.0.0.1:{dead_port}")
+        result = health_checker.readiness()
+        assert result.details["gateway"]["healthy"] is False

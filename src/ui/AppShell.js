@@ -75,7 +75,7 @@ return `
             data-canvas-src=""
             sandbox="${CANVAS_SANDBOX_PERMISSIONS}"
             style="width: 100vw; height: 100vh; border: none; display: block; touch-action: manipulation;"
-            allow="autoplay; fullscreen; microphone; camera; pointer-lock">
+            allow="autoplay; fullscreen; microphone; camera; pointer-lock; geolocation">
         </iframe>
     </div>
 

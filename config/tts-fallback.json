@@ -1,0 +1,26 @@
+{
+  "_comment": "TTS fallback policy for the admin panel + runtime (WO-3.1). Moved out of the hardcoded services/tts.py:_FALLBACK_CHAIN / _VOICE_GENDER dicts so the chain + voice-gender map can be edited from the admin 'Voice: TTS' tab without a code change. services/tts_fallback.py loads this file (mtime-cached) and falls back to the inline default (services.tts_fallback._DEFAULT_FALLBACK) if it is missing or unparseable. Runtime reads through the loader so a UI edit takes effect on the NEXT utterance, no restart. 'chain' maps a provider_id -> its single next-hop fallback provider_id (followed transitively, cycle-protected). 'voice_gender' maps a voice_id -> 'M'|'F' so a fallback keeps the same gender voice.",
+  "chain": {
+    "groq": "supertonic",
+    "qwen3": "groq",
+    "qwen3-local": "groq",
+    "resemble": "groq",
+    "elevenlabs": "groq"
+  },
+  "voice_gender": {
+    "autumn": "F", "diana": "F", "hannah": "F",
+    "austin": "M", "daniel": "M", "troy": "M",
+
+    "rachel": "F", "drew": "M", "clyde": "M", "paul": "M",
+    "domi": "F", "bella": "F", "antoni": "M", "elli": "F",
+    "josh": "M", "arnold": "M", "adam": "M", "sam": "M",
+
+    "M1": "M", "M2": "M", "M3": "M", "M4": "M", "M5": "M",
+    "F1": "F", "F2": "F", "F3": "F", "F4": "F", "F5": "F",
+
+    "kyle": "M", "valhalla": "M", "bhb": "M",
+
+    "ethan": "M", "chelsie": "F", "cherry": "F", "serena": "F",
+    "dylan": "M", "jada": "F", "sunny": "F"
+  }
+}

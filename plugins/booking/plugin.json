@@ -1,0 +1,56 @@
+{
+  "id": "booking",
+  "name": "Booking",
+  "version": "1.0.0",
+  "description": "Appointment booking for client websites and the voice agent, backed by a shared Cal.diy instance at cal.jam-bot.com. Includes a booking management canvas page, a setup wizard with embed-snippet generator, and a signed webhook bridge that fans out to InkBox SMS and Twenty CRM.",
+  "author": "jambot",
+  "type": "page",
+  "license": "MIT",
+  "requires": "openvoiceui >= 1.0",
+  "pages": [
+    {
+      "file": "pages/cal-setup.html",
+      "name": "Booking",
+      "title": "Booking",
+      "icon": "calendar"
+    },
+    {
+      "file": "pages/booking.html",
+      "name": "Booking",
+      "title": "Booking",
+      "icon": "calendar"
+    },
+    {
+      "file": "pages/booking-setup.html",
+      "name": "Booking Setup",
+      "title": "Booking Setup",
+      "icon": "settings"
+    }
+  ],
+  "routes": [
+    {
+      "module": "routes/booking.py",
+      "blueprint": "booking_bp",
+      "prefix": "/api/booking"
+    }
+  ],
+  "requires_env": [
+    "CAL_API_KEY"
+  ],
+  "credentials": [
+    {
+      "id": "cal_diy",
+      "name": "Cal.diy API Key",
+      "description": "Per-tenant API key for the shared Cal.diy booking instance (cal.jam-bot.com).",
+      "type": "api_key",
+      "group": "Services",
+      "env_var": "CAL_API_KEY",
+      "docs_url": "https://cal.com/docs/api-reference/v2/introduction",
+      "consumers": {
+        "openclaw": {
+          "type": "env_var"
+        }
+      }
+    }
+  ]
+}

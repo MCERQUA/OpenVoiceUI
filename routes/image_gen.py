@@ -21,6 +21,7 @@ import time
 import requests as http
 from flask import Blueprint, jsonify, request
 from services.paths import UPLOADS_DIR
+from services.metered_spend import log_spend
 
 logger = logging.getLogger(__name__)
 image_gen_bp = Blueprint('image_gen', __name__)
@@ -30,7 +31,10 @@ GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 HF_TOKEN = os.getenv('HF_TOKEN', '')
 HF_INFERENCE_BASE = 'https://router.huggingface.co/hf-inference/models'
 
-DEFAULT_MODEL = 'nano-banana-pro-preview'
+# Cheap-by-default (Mike 2026-07-28): last month's ~$100 Gemini bill was driven by
+# generation defaulting to Nano Banana PRO (~$0.13-0.24/img). Flash image is ~4-6x
+# cheaper and fine for drafts. Pro is still available — callers must ASK for it.
+DEFAULT_MODEL = 'gemini-3.1-flash-image-preview'
 
 # HuggingFace model IDs — prefix with 'hf:' in the frontend
 HF_MODELS = {
@@ -301,6 +305,9 @@ def generate_image():
                 return jsonify({'error': 'GEMINI_API_KEY not configured on server'}), 503
             imgs_out, text_out = _generate_gemini(model, prompt, images)
 
+        # Spend tally — the call was made (and billed) whether or not an image came back.
+        log_spend('image-gen', model, cost_key='hf-inference' if is_hf else None)
+
         if not imgs_out:
             return jsonify({'error': 'Model returned no image', 'text': text_out}), 502
 
@@ -340,6 +347,7 @@ def enhance_prompt_route():
 
     try:
         enhanced = _enhance_prompt(idea, quality, style)
+        log_spend('image-gen/enhance', 'enhance-prompt')
         if not enhanced:
             return jsonify({'error': 'LLM returned empty response'}), 502
         logger.info('enhance_prompt: idea_len=%d → prompt_len=%d quality=%s', len(idea), len(enhanced), quality)

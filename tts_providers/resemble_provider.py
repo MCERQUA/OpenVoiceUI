@@ -43,10 +43,12 @@ MODELS = {
 DEFAULT_MODEL = "chatterbox-turbo"
 
 # Timeouts
-STREAM_TIMEOUT = 120.0   # Max wait for full streaming response. Resemble's custom-clone
-                         # base model is slow (~53ms/char → a long ~1500-char chunk needs
-                         # ~80s); 30s used to cut long replies off mid-stream → silence.
-                         # 120s lets a full reply finish so the clone voice always speaks. (2026-06-07)
+STREAM_TIMEOUT = 30.0    # Max wait for one streaming request (TTS-2). Was 120s, which
+                         # — combined with up to 6 retries — let a hung Resemble cluster
+                         # head-of-line-block the ordered audio flush for MINUTES. tts.py
+                         # chunks Resemble at 400 chars (~21s at ~53ms/char), so a single
+                         # request finishes well under 30s; a request that doesn't is hung,
+                         # and bailing fast to retry/fallback beats blocking the whole reply.
 CONNECT_TIMEOUT = 10.0   # TCP connect timeout
 API_TIMEOUT = 15.0       # For voice listing / non-synthesis calls
 
@@ -423,6 +425,7 @@ class ResembleProvider(TTSProvider):
         sample_rate = kwargs.get('sample_rate', 24000)
         precision = kwargs.get('precision', 'PCM_16')
         exaggeration = kwargs.get('exaggeration')
+        temperature = kwargs.get('temperature')
 
         # Per-voice style presets — apply character-specific direction
         # when no explicit exaggeration/model is provided via kwargs.
@@ -430,26 +433,35 @@ class ResembleProvider(TTSProvider):
         style = voice_styles.get(voice_uuid, {})
         if exaggeration is None and 'exaggeration' in style:
             exaggeration = style['exaggeration']
+        if temperature is None and 'temperature' in style:
+            temperature = style['temperature']
         if not model and 'model' in style:
             model = style['model']
         prompt = style.get('prompt', '')
+        # Delivery wrapping tags applied around the whole reply, innermost-last
+        # (e.g. ["slow", "lower-pitch"] → <slow><lower-pitch>text</lower-pitch></slow>).
+        # tts-v4 (2026-07) dropped the prompt acting-direction attr; pacing/register now
+        # comes from these documented wrapping tags: slow/fast, lower-pitch/higher-pitch,
+        # soft/loud/whisper, sing-song. Verified: <slow> +16% duration on the Kyle clone.
+        wrap_tags = style.get('wrap', [])
 
-        # Documented correct format: exaggeration + prompt go as <speak> SSML attributes
-        # inside `data`. They are NOT top-level JSON fields.
-        # model: omit to auto-select chatterbox (base) for cloned voices — this gives
-        # richer emotion than chatterbox-turbo. sample_rate=24000 was working pre-June-3.
-        # NOTE 2026-06-04: Resemble cluster outage is causing 500s on SSML + no-model
-        # requests. When cluster recovers this format restores full Kyle character.
-        # Fast-fail (tts.py) means 500s now fall back to Groq in <1s, not 47s.
+        # exaggeration/temperature/prompt go as <speak> SSML attributes inside `data`.
+        # They are NOT top-level JSON fields (silently ignored there).
+        # model: omit to auto-select chatterbox (tts-v4) for cloned voices.
+        # prompt is inert on tts-v4 (kept for back-compat only — harmless).
         if not text.strip().startswith('<speak'):
+            for tag in reversed(wrap_tags):
+                text = f'<{tag}>{text}</{tag}>'
             attrs = []
             if exaggeration is not None:
                 attrs.append(f'exaggeration="{exaggeration}"')
+            if temperature is not None:
+                attrs.append(f'temperature="{temperature}"')
             if prompt:
                 escaped_prompt = prompt.replace('"', '&quot;')
                 attrs.append(f'prompt="{escaped_prompt}"')
-            if attrs:
-                text = f'<speak {" ".join(attrs)}>{text}</speak>'
+            if attrs or wrap_tags:
+                text = f'<speak {" ".join(attrs)}>{text}</speak>' if attrs else f'<speak>{text}</speak>'
 
         payload = {
             'voice_uuid': voice_uuid,

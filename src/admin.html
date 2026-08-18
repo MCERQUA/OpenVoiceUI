@@ -373,13 +373,20 @@ select{cursor:pointer}
   </div>
   <div class="nav-section">
     <div class="nav-label">Config</div>
+    <div class="nav-item" id="nav-framework" onclick="show('framework')"><span class="nav-icon">&#x1F9E0;</span><span class="nav-text">Agent Framework</span></div>
     <div class="nav-item" id="nav-providers" onclick="show('providers')"><span class="nav-icon">&#x26A1;</span><span class="nav-text">Provider Config</span></div>
+    <div class="nav-item" id="nav-tts" onclick="show('tts')"><span class="nav-icon">&#x1F5E3;</span><span class="nav-text">Voice: TTS</span></div>
+    <div class="nav-item" id="nav-stt" onclick="show('stt')"><span class="nav-icon">&#x1F3A4;</span><span class="nav-text">Voice: STT &amp; Wake</span></div>
     <div class="nav-item" id="nav-connections" onclick="show('connections')"><span class="nav-icon">&#x1F517;</span><span class="nav-text">Connections</span></div>
     <div class="nav-item" id="nav-platform-setup" onclick="show('platform-setup')"><span class="nav-icon">&#x2699;</span><span class="nav-text">Platform Setup</span></div>
   </div>
   <div class="nav-section">
     <div class="nav-label">System</div>
     <div class="nav-item" id="nav-system" onclick="show('system')"><span class="nav-icon">&#x2699;</span><span class="nav-text">Health &amp; Stats</span></div>
+    <div class="nav-item" id="nav-health" onclick="show('health')"><span class="nav-icon">&#x1F4CA;</span><span class="nav-text">Service Health</span></div>
+    <div class="nav-item" id="nav-sessions" onclick="show('sessions')"><span class="nav-icon">&#x1F5C2;</span><span class="nav-text">Sessions</span></div>
+    <div class="nav-item" id="nav-updates" onclick="show('updates')"><span class="nav-icon">&#x2B06;</span><span class="nav-text">Updates</span></div>
+    <div class="nav-item" id="nav-tools" onclick="show('tools')"><span class="nav-icon">&#x1F9F0;</span><span class="nav-text">Tools &amp; Logs</span></div>
     <div class="nav-item" id="nav-tests" onclick="show('tests')"><span class="nav-icon">&#x2713;</span><span class="nav-text">Connector Tests</span></div>
   </div>
   <div class="sidebar-footer">
@@ -516,6 +523,15 @@ select{cursor:pointer}
     </div>
   </div>
 
+  <!-- AGENT FRAMEWORK (WO-2.2) -->
+  <div class="panel" id="panel-framework">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Agent Framework</div><div class="ph-sub">The backend agent brain per profile. Each card is a registered gateway &mdash; health, capabilities, live config, and which profiles use it.</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="Framework.load()">&#8634; Refresh</button><span id="fw-active" style="font-size:12px;color:var(--dim);align-self:center;margin-left:8px"></span></div>
+      <div class="g2" id="fw-grid" style="align-items:start;gap:16px"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
+
   <!-- PROVIDERS -->
   <div class="panel" id="panel-providers">
     <div class="panel-inner">
@@ -526,6 +542,24 @@ select{cursor:pointer}
     </div>
   </div>
 
+
+  <!-- VOICE: TTS (WO-3.1) -->
+  <div class="panel" id="panel-tts">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Voice &mdash; Text to Speech</div><div class="ph-sub">Provider &amp; voice for the active agent, the cross-provider fallback chain, and a per-provider test-speak. Providers are sourced live from the TTS registry &mdash; adding one never needs a panel edit.</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="TTS.load()">&#8634; Refresh</button><span id="tts-active" style="font-size:12px;color:var(--dim);align-self:center;margin-left:8px"></span></div>
+      <div id="tts-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- VOICE: STT & WAKE (WO-3.2) -->
+  <div class="panel" id="panel-stt">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Voice &mdash; Speech to Text &amp; Wake</div><div class="ph-sub">STT provider for the active agent, wake-word phrases, and a live per-provider connection test. Providers are sourced from the Service Catalog.</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="STT.load()">&#8634; Refresh</button><span id="stt-active" style="font-size:12px;color:var(--dim);align-self:center;margin-left:8px"></span></div>
+      <div id="stt-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
 
   <!-- CONNECTIONS (replaces AI CONFIG) -->
   <div class="panel" id="panel-connections">
@@ -566,6 +600,52 @@ select{cursor:pointer}
     </div>
   </div>
 
+
+  <!-- SERVICE HEALTH MATRIX (WO-5.3) -->
+  <div class="panel" id="panel-health">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Service Health</div><div class="ph-sub">Every gateway, LLM, TTS, and STT service as one live matrix &mdash; health ring, latency, last error, and what a config change restarts. Auto-refreshes every 30s while this tab is open.</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="Health.load()">&#8634; Refresh</button><span id="health-summary" style="font-size:12px;color:var(--dim);align-self:center;margin-left:8px"></span></div>
+      <div class="box" style="padding:0;overflow:hidden">
+        <table class="tbl">
+          <thead><tr><th>Service</th><th>ID</th><th>Type</th><th>Health</th><th>Latency</th><th>Detail / last error</th><th>Restart scope</th></tr></thead>
+          <tbody id="health-tbody"><tr><td colspan="7"><div class="loading" style="padding:14px"><div class="spin"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- SESSIONS VIEWER/KILLER (WO-4.1) -->
+  <div class="panel" id="panel-sessions">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Gateway Sessions</div><div class="ph-sub">Live sessions on the active agent gateway &mdash; view history and abort. Uses the allowlisted admin RPC proxy (sessions.list / history / abort).</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="Sessions.load()">&#8634; Refresh</button><span id="sessions-note" style="font-size:12px;color:var(--dim);align-self:center;margin-left:8px"></span></div>
+      <div id="sessions-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- UPDATE MANAGER (WO-4.2) -->
+  <div class="panel" id="panel-updates">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Updates</div><div class="ph-sub">Current version, what an update would change, apply, verify, and roll back. Preview and verify are read-only; Apply is guarded by an explicit confirm.</div></div>
+      <div class="ph-row"><button class="btn btn-o" onclick="Updates.load()">&#8634; Refresh</button></div>
+      <div id="updates-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- TOOLS & LOGS (WO-4.3 read-only viewers + greetings) -->
+  <div class="panel" id="panel-tools">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Tools &amp; Logs</div><div class="ph-sub">Operator read-only views &mdash; transcripts, usage, reported issues &mdash; plus the greetings editor.</div></div>
+      <div class="ph-row" style="flex-wrap:wrap;gap:6px">
+        <button class="btn btn-o btn-sm" onclick="Tools.tab('transcripts')" id="tools-tab-transcripts">Transcripts</button>
+        <button class="btn btn-o btn-sm" onclick="Tools.tab('usage')" id="tools-tab-usage">Usage</button>
+        <button class="btn btn-o btn-sm" onclick="Tools.tab('issues')" id="tools-tab-issues">Reported Issues</button>
+        <button class="btn btn-o btn-sm" onclick="Tools.tab('greetings')" id="tools-tab-greetings">Greetings</button>
+      </div>
+      <div id="tools-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
 
   <!-- CANVAS PAGES -->
   <div class="panel" id="panel-canvas">
@@ -686,14 +766,25 @@ const loaders = {
   workspace:()=>Workspace.load(),
   music:()=>Music.load(),
   clients:()=>Clients.load(),
+  framework:()=>Framework.load(),
   providers:()=>Providers.load(),
+  tts:()=>TTS.load(),
+  stt:()=>STT.load(),
   connections:()=>Connections.load(),
   'platform-setup':()=>PlatformSetup.load(),
   system:()=>System.load(),
+  health:()=>Health.load(),
+  sessions:()=>Sessions.load(),
+  updates:()=>Updates.load(),
+  tools:()=>Tools.load(),
   tests:()=>Tests.initSel(),
 };
 
 function show(name){
+  // Stop any tab-scoped timers before leaving (WO-5.3 — no leaked intervals).
+  // Health is a top-level const in this same classic script (not on window),
+  // and show() only runs after parse, so a direct reference is safe.
+  if(name!=='health'&&typeof Health!=='undefined'&&Health.stop)Health.stop();
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   $('panel-'+name)?.classList.add('active');
@@ -763,6 +854,7 @@ const Builder = {
   profiles:[], currentId:null, activeId:null, _voice:null, activeTab:'general',
 
   async load(){
+    await Catalog.get();  // WO-3.3 — preload the Service Catalog for the editor dropdowns
     const r=await fetch('/api/profiles').catch(()=>null);
     if(!r){$('builder-agent-list').innerHTML='<div style="padding:14px;color:var(--red)">Error loading profiles</div>';return}
     const d=await r.json();
@@ -850,6 +942,21 @@ const Builder = {
     sel.innerHTML=filtered.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');
   },
 
+  // WO-3.3 — build <option>s from the Service Catalog with a static fallback.
+  // leadOpts = pseudo-providers (e.g. the OpenClaw 'gateway') pinned on top that
+  // the catalog doesn't list. If the catalog is unavailable, staticHtml is used
+  // verbatim so the editor never loses its provider list.
+  _catOpts(type,sel,staticHtml,leadOpts){
+    const list=Catalog.list(type);
+    if(!list.length)return staticHtml;
+    const ids=(leadOpts||[]).map(o=>o.id).concat(list.map(s=>s.id));
+    let html=(leadOpts||[]).map(o=>'<option value="'+esc(o.id)+'"'+(o.id===sel?' selected':'')+'>'+esc(o.label)+'</option>').join('');
+    html+=list.map(s=>'<option value="'+esc(s.id)+'"'+(s.id===sel?' selected':'')+'>'+esc(s.name||s.id)+'</option>').join('');
+    // Preserve a saved value the catalog doesn't know about (e.g. 'zai/glm-5.1').
+    if(sel&&ids.indexOf(sel)===-1)html='<option value="'+esc(sel)+'" selected>'+esc(sel)+' (current)</option>'+html;
+    return html;
+  },
+
   renderEditor(id,p){
     const defaultVoices=['M1','M2','M3','M4','M5','F1','F2','F3','F4','F5'];
     const selVoice=this._voice||p.voice?.voice_id||'M1';
@@ -882,24 +989,26 @@ const Builder = {
       '</div>'+
       '<div class="g2" style="margin-bottom:14px">'+
         '<div class="fg"><label class="fl">LLM / Agent System</label><select id="be-llm">'+
-          '<option value="gateway"'+(llmProv==='gateway'?' selected':'')+'>OpenClaw Gateway (default)</option>'+
-          '<option value="zai"'+(llmProv==='zai'?' selected':'')+'>Z.AI GLM-5-turbo</option>'+
-          '<option value="zai/glm-5.1"'+((llmProv==='zai/glm-5.1')?' selected':'')+'>Z.AI GLM-5.1</option>'+
-          '<option value="zai/glm-5-turbo"'+((llmProv==='zai/glm-5-turbo')?' selected':'')+'>Z.AI GLM-5-turbo (direct)</option>'+
-          '<option value="groq"'+(llmProv==='groq'?' selected':'')+'>Groq (Llama / Qwen)</option>'+
-
-          '<option value="gemini"'+(llmProv==='gemini'?' selected':'')+'>Google Gemini</option>'+
-          '<option value="hume_evi"'+(llmProv==='hume_evi'?' selected':'')+'>Hume EVI</option>'+
-          '<option value="elevenlabs"'+(llmProv==='elevenlabs'?' selected':'')+'>ElevenLabs AI</option>'+
-          '<option value="openai"'+(llmProv==='openai'?' selected':'')+'>OpenAI</option>'+
+          this._catOpts('llm',llmProv,
+            '<option value="gateway"'+(llmProv==='gateway'?' selected':'')+'>OpenClaw Gateway (default)</option>'+
+            '<option value="zai"'+(llmProv==='zai'?' selected':'')+'>Z.AI GLM-5-turbo</option>'+
+            '<option value="zai/glm-5.1"'+((llmProv==='zai/glm-5.1')?' selected':'')+'>Z.AI GLM-5.1</option>'+
+            '<option value="zai/glm-5-turbo"'+((llmProv==='zai/glm-5-turbo')?' selected':'')+'>Z.AI GLM-5-turbo (direct)</option>'+
+            '<option value="groq"'+(llmProv==='groq'?' selected':'')+'>Groq (Llama / Qwen)</option>'+
+            '<option value="gemini"'+(llmProv==='gemini'?' selected':'')+'>Google Gemini</option>'+
+            '<option value="hume_evi"'+(llmProv==='hume_evi'?' selected':'')+'>Hume EVI</option>'+
+            '<option value="elevenlabs"'+(llmProv==='elevenlabs'?' selected':'')+'>ElevenLabs AI</option>'+
+            '<option value="openai"'+(llmProv==='openai'?' selected':'')+'>OpenAI</option>',
+            [{id:'gateway',label:'OpenClaw Gateway (default)'}])+
         '</select></div>'+
         '<div class="fg"><label class="fl">TTS Provider</label><select id="be-tts" onchange="Builder._renderVoiceGrid(this.value,null)">'+
-          '<option value="supertonic"'+(ttsProv==='supertonic'?' selected':'')+'>Supertonic (Free &middot; Local)</option>'+
-          '<option value="groq"'+(ttsProv==='groq'?' selected':'')+'>Groq Orpheus (Fast &middot; Cloud)</option>'+
-          '<option value="resemble"'+(ttsProv==='resemble'?' selected':'')+'>Resemble AI (Premium &middot; Cloud)</option>'+
-          '<option value="qwen3"'+(ttsProv==='qwen3'?' selected':'')+'>Qwen3 Voice Clone (Cloud)</option>'+
-          '<option value="hume"'+(ttsProv==='hume'?' selected':'')+'>Hume EVI</option>'+
-          '<option value="elevenlabs"'+(ttsProv==='elevenlabs'?' selected':'')+'>ElevenLabs</option>'+
+          this._catOpts('tts',ttsProv,
+            '<option value="supertonic"'+(ttsProv==='supertonic'?' selected':'')+'>Supertonic (Free &middot; Local)</option>'+
+            '<option value="groq"'+(ttsProv==='groq'?' selected':'')+'>Groq Orpheus (Fast &middot; Cloud)</option>'+
+            '<option value="resemble"'+(ttsProv==='resemble'?' selected':'')+'>Resemble AI (Premium &middot; Cloud)</option>'+
+            '<option value="qwen3"'+(ttsProv==='qwen3'?' selected':'')+'>Qwen3 Voice Clone (Cloud)</option>'+
+            '<option value="hume"'+(ttsProv==='hume'?' selected':'')+'>Hume EVI</option>'+
+            '<option value="elevenlabs"'+(ttsProv==='elevenlabs'?' selected':'')+'>ElevenLabs</option>')+
         '</select></div>'+
       '</div>'+
       '<div class="fg"><label class="fl">Voice</label>'+
@@ -1216,8 +1325,16 @@ const Plugins={
   _hasPending:false,
   _availableCache:[],
   _installedCache:[],
+  _updates:{}, _availFilter:'',
   async load(){
-    const [ir,ar]=await Promise.all([fetch('/api/plugins').catch(()=>null),fetch('/api/plugins/available').catch(()=>null)]);
+    const [ir,ar,ur]=await Promise.all([
+      fetch('/api/plugins').catch(()=>null),
+      fetch('/api/plugins/available').catch(()=>null),
+      fetch('/api/admin/plugins/updates').catch(()=>null)
+    ]);
+    // WO-5.1 — version-diff map: plugin id -> {update_available, available_version, installed_version}
+    this._updates={};
+    if(ur&&ur.ok){try{const ud=await ur.json();(ud.plugins||[]).forEach(u=>{this._updates[u.id]=u})}catch(e){}}
     // Installed
     const installed=ir?await ir.json():{plugins:[]};
     this._installedCache=installed.plugins||[];
@@ -1231,12 +1348,17 @@ const Plugins={
       const statusLabel=p.status==='installed_pending_restart'?'pending restart':p.status||'?';
       const settingsBtn=p.install_config&&p.has_container
         ?'<button class="btn btn-o btn-sm" onclick="Plugins.toggleInstalledConfig(\''+esc(p.id)+'\')">Settings</button>':'';
+      const upd=this._updates[p.id]||{};
+      const updBadge=upd.update_available?'<span class="badge b-yellow" style="font-size:10px" title="Registry has v'+esc(upd.available_version||'?')+'">update available &rarr; v'+esc(upd.available_version||'?')+'</span>':'';
+      const updBtn=upd.update_available?'<button class="btn btn-p btn-sm" onclick="Plugins.update(\''+esc(p.id)+'\')">Update</button>':'';
       return '<div style="padding:10px 0;border-bottom:1px solid var(--border2)">'+
         '<div style="display:flex;align-items:center;justify-content:space-between">'+
           '<div><div style="font-weight:600;color:var(--bright)">'+esc(p.name)+'</div>'+
           '<div style="font-size:11px;color:var(--dim);margin-top:2px">'+esc(p.id)+' v'+esc(p.version||'?')+' &middot; '+esc(p.type||'extension')+'</div></div>'+
-          '<div style="display:flex;gap:6px;align-items:center">'+
+          '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">'+
+            updBadge+
             '<span class="badge '+statusClass+'">'+esc(statusLabel)+'</span>'+
+            updBtn+
             settingsBtn+
             '<button class="btn btn-d btn-sm" onclick="Plugins.uninstall(\''+esc(p.id)+'\')">Remove</button>'+
           '</div>'+
@@ -1244,6 +1366,7 @@ const Plugins={
         '<div style="font-size:12px;color:var(--dim);margin-top:4px">'+esc(p.description||'')+'</div>'+
         (p.faces?.length?'<div style="font-size:11px;color:var(--cyan);margin-top:4px">Faces: '+p.faces.map(f=>esc(f)).join(', ')+'</div>':'')+
         (p.pages?.length?'<div style="font-size:11px;color:var(--blue);margin-top:2px">Pages: '+p.pages.map(f=>esc(f)).join(', ')+'</div>':'')+
+        (p.has_container?'<div style="margin-top:6px">'+restartScopeBadge('container:'+esc(p.id))+'</div>':'')+
         (p.install_config&&p.has_container?'<div id="plugin-iconfig-'+esc(p.id)+'" style="display:none;margin-top:12px;border-top:1px solid var(--border2);padding-top:12px"></div>':'')+
       '</div>'}).join('')}
     // Available
@@ -1252,8 +1375,22 @@ const Plugins={
     const available=await ar.json();
     const avail=(available.plugins||[]).filter(p=>!installed.plugins?.find(i=>i.id===p.id));
     this._availableCache=avail;
-    if(!avail.length){ael.innerHTML='<div style="padding:16px;font-size:13px;color:var(--dim)">All available plugins are installed</div>'}
-    else{ael.innerHTML=avail.map(p=>{
+    this._renderAvailable();
+  },
+  _pluginCat(p){return p.category||(Array.isArray(p.categories)&&p.categories[0])||(Array.isArray(p.tags)&&p.tags[0])||''},
+  _renderAvailable(){
+    const ael=$('plugins-available');if(!ael)return;
+    const avail=this._availableCache||[];
+    if(!avail.length){ael.innerHTML='<div style="padding:16px;font-size:13px;color:var(--dim)">All available plugins are installed</div>';return}
+    // WO-5.1 — category/filter row (only if any plugin declares a category/tag)
+    const cats=[...new Set(avail.map(p=>this._pluginCat(p)).filter(Boolean))];
+    let filterRow='';
+    if(cats.length){
+      const chip=(val,label)=>'<button class="btn btn-sm '+(this._availFilter===val?'btn-p':'btn-o')+'" style="font-size:11px;padding:3px 9px" onclick="Plugins.filterAvail(\''+esc(val)+'\')">'+esc(label)+'</button>';
+      filterRow='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chip('','All')+cats.map(c=>chip(c,c)).join('')+'</div>';
+    }
+    const filtered=this._availFilter?avail.filter(p=>this._pluginCat(p)===this._availFilter):avail;
+    const rows=filtered.map(p=>{
       const hasConfig=p.install_config&&p.install_config.sections;
       const btn=hasConfig
         ?'<button class="btn btn-p btn-sm" onclick="Plugins.toggleConfig(\''+esc(p.id)+'\')">Configure</button>'
@@ -1266,7 +1403,19 @@ const Plugins={
         '</div>'+
         '<div style="font-size:12px;color:var(--dim);margin-top:4px">'+esc(p.description||'')+'</div>'+
         (hasConfig?'<div id="plugin-config-'+esc(p.id)+'" style="display:none;margin-top:12px;border-top:1px solid var(--border2);padding-top:12px"></div>':'')+
-      '</div>'}).join('')}
+      '</div>'}).join('');
+    ael.innerHTML=filterRow+(rows||'<div style="padding:16px;font-size:13px;color:var(--dim)">No plugins in this category</div>');
+  },
+  filterAvail(cat){this._availFilter=cat;this._renderAvailable();},
+  async update(id){
+    if(!confirm('Update plugin "'+id+'" to the latest catalog/registry version? The current version is archived (not deleted) and can be restored.'))return;
+    toast('Updating '+id+'…','blue');
+    try{
+      const r=await fetch('/api/admin/plugins/'+encodeURIComponent(id)+'/update',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      const d=await r.json();
+      if(d.ok){toast('Updated '+id+' → v'+(d.version||'?')+' — '+(d.note||'restart to activate'),'green');this.load();}
+      else toast('Update failed: '+(d.error||'unknown'),'red');
+    }catch(e){toast(e.message,'red');}
   },
   // Toggle config panel for available (pre-install) plugins
   toggleConfig(id){
@@ -1364,8 +1513,10 @@ const Plugins={
     const btnAction=isPostInstall
       ?'Plugins.saveConfig(\''+esc(id)+'\')'
       :'Plugins.installWithConfig(\''+esc(id)+'\')';
-    html+='<div style="display:flex;gap:8px;align-items:center;margin-top:12px">'+
+    const pRestart=plugin.has_container?restartScopeBadge('container:'+esc(id)):restartScopeBadge('ovui');
+    html+='<div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">'+
       '<button class="btn btn-g" onclick="'+btnAction+'">'+btnLabel+'</button>'+
+      pRestart+
       '<span id="pcfg-status-'+esc(id)+'" style="font-size:12px;color:var(--dim)"></span>'+
     '</div>';
     container.innerHTML=html;
@@ -1747,6 +1898,147 @@ const Tests={
 };
 
 // Providers
+// Service Catalog helper (WO-3.3) — single fetch, cached, graceful fallback.
+// The admin panel becomes a renderer over /api/services/catalog instead of
+// hardcoding provider lists. Callers pass a static fallback so a failed fetch
+// (or an old backend without the endpoint) still shows sensible options.
+const Catalog={
+  _data:null,
+  async get(force){
+    if(this._data&&!force)return this._data;
+    try{const r=await fetch('/api/services/catalog');if(r.ok){this._data=await r.json();return this._data}}catch(e){}
+    return this._data||{services:[],credential_status:{}};
+  },
+  // Return [{id,name,...descriptor}] for a service type, or [] if unavailable.
+  list(type,data){return ((data||this._data||{}).services||[]).filter(s=>s.service===type)},
+  cred(id,data){return ((data||this._data||{}).credential_status||{})[id]||null}
+};
+
+// Agent Framework — cards per registered gateway (WO-2.2)
+const Framework={
+  gateways:[], active:null, health:{}, profiles:[],
+  async load(){
+    const g=$('fw-grid');
+    g.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      const[gwR,hR,pR]=await Promise.all([
+        fetch('/api/admin/gateways'),
+        fetch('/api/services/health').catch(()=>null),
+        fetch('/api/profiles').catch(()=>null)
+      ]);
+      const gwd=await gwR.json();
+      this.gateways=gwd.gateways||[];
+      this.active=gwd.active_gateway;
+      this.health={};
+      if(hR&&hR.ok){const hd=await hR.json();(hd.services||[]).filter(s=>s.service==='gateway').forEach(s=>{this.health[s.id]=s})}
+      if(pR&&pR.ok){const pd=await pR.json();this.profiles=pd.profiles||[]}
+      $('fw-active').innerHTML=this.active?'Active gateway (current profile): <span style="color:var(--green)">'+esc(this.active)+'</span>':'';
+      this.render();
+    }catch(e){g.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;&#xFE0F;</div>'+esc(e.message)+'</div>'}
+  },
+  render(){
+    const g=$('fw-grid');
+    if(!this.gateways.length){g.innerHTML='<div class="empty">No gateways registered</div>';return}
+    g.innerHTML=this.gateways.map(gw=>{
+      const h=this.health[gw.id]||{healthy:gw.healthy,latency_ms:(gw.health||{}).latency_ms};
+      const healthy=h.healthy;
+      const ring='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(healthy?'var(--green)':gw.configured?'var(--yellow,#e3b341)':'var(--red)')+';box-shadow:0 0 6px '+(healthy?'var(--green)':'transparent')+'"></span>';
+      const lat=(h.latency_ms!=null)?' <span style="color:var(--dim);font-size:11px">'+h.latency_ms+'ms</span>':'';
+      const caps=(gw.capabilities||[]).map(c=>'<span class="badge b-blue" style="font-size:10px">'+esc(c)+'</span>').join(' ');
+      const src=gw.source==='builtin'?'<span class="badge b-gray">builtin</span>':'<span class="badge b-gray">'+esc(gw.source)+'</span>';
+      const schema=gw.config_schema||{fields:[]};
+      const canConfig=schema.editable&&(schema.fields||[]).length;
+      const cfgBtn=canConfig?'<button class="btn btn-o btn-sm" onclick="Framework.toggleConfig(\''+esc(gw.id)+'\')">Configure</button>':'';
+      const usedBy=(gw.profiles||[]).length?'<div style="font-size:11px;color:var(--dim);margin-top:6px">Used by: '+gw.profiles.map(p=>esc(p)).join(', ')+'</div>':'';
+      const rscope=gw.restart_scope&&gw.restart_scope!=='none'?'<span class="badge b-yellow" style="font-size:10px" title="A config change restarts this">restarts: '+esc(gw.restart_scope)+'</span>':'';
+      // Per-profile "use for profile X" selector
+      const profOpts=this.profiles.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name||p.id)+'</option>').join('');
+      const useSel=this.profiles.length?
+        '<div style="display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap">'+
+          '<span style="font-size:11px;color:var(--dim)">Set as gateway for:</span>'+
+          '<select id="fw-prof-'+esc(gw.id)+'" style="background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:5px 9px;color:var(--text);font-size:12px">'+profOpts+'</select>'+
+          '<button class="btn btn-p btn-sm" onclick="Framework.assign(\''+esc(gw.id)+'\')">Apply</button>'+
+        '</div>':'';
+      return '<div class="box" style="padding:14px">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'+
+          '<div style="display:flex;align-items:center;gap:8px">'+ring+'<span style="font-weight:600;color:var(--bright)">'+esc(gw.name||gw.id)+'</span>'+lat+'</div>'+
+          '<div style="display:flex;gap:6px;align-items:center">'+src+cfgBtn+'</div>'+
+        '</div>'+
+        '<div style="font-size:11px;color:var(--dim);margin-top:3px">'+esc(gw.id)+(gw.persistent?' &middot; persistent':' &middot; on-demand')+(gw.configured?'':' &middot; <span style="color:var(--red)">not configured</span>')+'</div>'+
+        '<div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap">'+caps+' '+rscope+'</div>'+
+        usedBy+useSel+
+        '<div id="fw-config-'+esc(gw.id)+'" style="display:none;margin-top:12px;border-top:1px solid var(--border2);padding-top:12px"></div>'+
+      '</div>';
+    }).join('');
+  },
+  toggleConfig(id){
+    const panel=$('fw-config-'+id);
+    if(!panel)return;
+    if(panel.style.display!=='none'){panel.style.display='none';return}
+    panel.style.display='';
+    const gw=this.gateways.find(g=>g.id===id);
+    if(!gw){panel.innerHTML='';return}
+    const fields=(gw.config_schema||{}).fields||[];
+    const renderField=(f)=>{
+      const fid='fwc-'+id+'-'+f.id;
+      if(f.type==='password'){
+        return '<div style="margin-bottom:10px">'+
+          '<label style="display:block;font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px">'+esc(f.label||f.id)+(f.required?' *':'')+'</label>'+
+          '<input type="password" id="'+fid+'" placeholder="'+esc(f.placeholder||'')+'" autocomplete="off" style="width:100%;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-family:var(--mono);font-size:13px">'+
+        '</div>';
+      }
+      if(f.type==='toggle'){
+        return '<div style="margin-bottom:10px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="'+fid+'"'+(f.default?' checked':'')+' style="width:16px;height:16px;accent-color:var(--blue)"><span style="font-size:12px;color:var(--text)">'+esc(f.label||f.id)+'</span></label></div>';
+      }
+      // text / number / default
+      return '<div style="margin-bottom:10px">'+
+        '<label style="display:block;font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px">'+esc(f.label||f.id)+(f.required?' *':'')+'</label>'+
+        '<input type="text" id="'+fid+'" placeholder="'+esc(f.placeholder||'')+'" style="width:100%;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-size:13px">'+
+      '</div>';
+    };
+    panel.innerHTML=fields.map(renderField).join('')+
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">'+
+        '<button class="btn btn-g btn-sm" onclick="Framework.saveConfig(\''+esc(id)+'\')">Apply Config</button>'+
+        '<span id="fwc-status-'+esc(id)+'" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div>'+
+      '<div style="font-size:10px;color:var(--dim);margin-top:6px">Empty fields are ignored. Keys route through the vault; model refs use the framework config API.</div>';
+  },
+  async saveConfig(id){
+    const gw=this.gateways.find(g=>g.id===id);if(!gw)return;
+    const fields=(gw.config_schema||{}).fields||[];
+    const payload={};const keys={};
+    fields.forEach(f=>{
+      const el=$('fwc-'+id+'-'+f.id);if(!el)return;
+      let v=el.type==='checkbox'?el.checked:el.value.trim();
+      if(el.type!=='checkbox'&&!v)return;
+      // Model refs (primary/fallback) go top-level; credential fields go under keys{provider}
+      if(f.credential){ keys[f.provider||f.id]=v; }
+      else { payload[f.id]=v; }
+    });
+    if(Object.keys(keys).length)payload.keys=keys;
+    if(!Object.keys(payload).length){toast('Nothing to apply','yellow');return}
+    const st=$('fwc-status-'+id);if(st)st.textContent='Applying...';
+    try{
+      const r=await fetch('/api/admin/gateways/'+encodeURIComponent(id)+'/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d=await r.json();
+      if(d.ok){
+        const msg=(d.status==='needs_restart'?'Applied (needs restart)':'Applied')+(d.message?' — '+d.message:'');
+        if(st)st.textContent=msg;toast(msg,'green');
+      }else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Configure failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async assign(gatewayId){
+    const sel=$('fw-prof-'+gatewayId);if(!sel)return;
+    const profileId=sel.value;if(!profileId)return;
+    try{
+      const r=await fetch('/api/profiles/'+encodeURIComponent(profileId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({adapter_config:{gateway_id:gatewayId}})});
+      const d=await r.json();
+      if(d.id||d.name){toast(profileId+' → '+gatewayId+' (refresh voice app to apply)','green');this.load();}
+      else toast(d.error||'Assign failed','red');
+    }catch(e){toast(e.message,'red')}
+  }
+};
+
 const Providers={
   sel:{llm:null,tts:null,stt:null},
   profileId:null,
@@ -1787,7 +2079,42 @@ const Providers={
         stt:d.stt?.provider||'webspeech'
       };
     }catch(e){this.sel={llm:'gateway',tts:'supertonic',stt:'webspeech'}}
+    // WO-3.3 — source provider options from the Service Catalog (with the
+    // hardcoded lists as a graceful fallback if the catalog is unavailable).
+    await this._buildFromCatalog();
     this.render();
+  },
+  // Merge catalog descriptors over the static lists: keep the nice static
+  // detail text where an id matches, add any provider the catalog reports that
+  // the static list is missing (so resemble/qwen3/plugins never drift out).
+  async _buildFromCatalog(){
+    // Capture the hardcoded lists ONCE so re-loads always fall back cleanly
+    // (this.PROV gets reassigned from the catalog below).
+    if(!this._static)this._static={llm:this.PROV.llm,tts:this.PROV.tts,stt:this.PROV.stt};
+    const STATIC=this._static;
+    try{
+      const c=await Catalog.get();
+      const merge=(type,extraKeep)=>{
+        const desc=Catalog.list(type,c);
+        if(!desc.length)return STATIC[type];
+        const byId={};STATIC[type].forEach(p=>byId[p.id]=p);
+        return desc.map(s=>{
+          const st=byId[s.id];
+          let detail=st?st.detail:'';
+          if(!detail){const m=s.meta||{};detail=(m.latency?m.latency+' latency. ':'')+(m.note||m.api||s.source||'');}
+          return {id:s.id,name:s.name||(st&&st.name)||s.id,detail:detail||'—'};
+        });
+      };
+      // LLM options in the profile also include the gateway pseudo-provider,
+      // which the catalog doesn't list — keep it pinned at the top.
+      const llm=merge('llm');
+      const hasGateway=llm.some(p=>p.id==='gateway');
+      this.PROV={
+        llm:hasGateway?llm:[STATIC.llm.find(p=>p.id==='gateway')].concat(llm),
+        tts:merge('tts'),
+        stt:merge('stt')
+      };
+    }catch(e){/* keep static PROV */}
   },
   render(){
     const mkCol=(type,label,items)=>
@@ -1836,9 +2163,420 @@ const Providers={
     const results=[];
     try{const d=await(await fetch('/api/admin/gateway/status')).json();results.push('LLM: '+(d.ok||d.healthy||d.connected?'OK':'FAIL'))}catch{results.push('LLM: error')}
     try{const d=await(await fetch('/health/ready')).json();results.push('TTS: '+(d.details?.tts?.healthy?'OK':'FAIL'))}catch{results.push('TTS: error')}
-    results.push('STT: OK (browser)');
+    // ADMIN-BUG-4 — honest STT check. WebSpeech is a browser API (nothing to
+    // probe server-side); cloud providers are checked by real key presence
+    // (labeled as such — not a live vendor ping).
+    const stt=this.sel.stt;
+    if(stt==='webspeech'){results.push('STT: browser API (can’t test server-side)')}
+    else if(stt==='whisper'){results.push('STT(whisper): local, no key')}
+    else{
+      try{
+        const c=await Catalog.get(true);
+        const d=Catalog.list('stt',c).find(s=>s.id===stt);
+        const hasKey=d&&d.health&&d.health.has_key;
+        results.push('STT('+stt+'): '+(hasKey?'key present':'no key')+' (key check only)');
+      }catch{results.push('STT('+stt+'): error')}
+    }
     $('prov-status').textContent=results.join(' | ');
     toast(results.join(' | '),'blue');
+  }
+};
+
+
+// Voice: TTS (WO-3.1) — provider/voice override, fallback-chain editor, test-speak
+const TTS={
+  profileId:null, providers:[], voicesByProv:{}, sel:{provider:'supertonic',voice:''},
+  fallback:{chain:{},voice_gender:{},provider_ids:[]}, credStatus:{},
+  defaultProvider:'', clones:[],
+  async load(){
+    const el=$('tts-content');
+    el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      const[cat,provR,profR,fbR,voicesR]=await Promise.all([
+        Catalog.get(true),
+        fetch('/api/tts/providers').then(r=>r.ok?r.json():{providers:[]}).catch(()=>({providers:[]})),
+        fetch('/api/profiles/active').then(r=>r.ok?r.json():null).catch(()=>null),
+        fetch('/api/admin/tts-fallback').then(r=>r.ok?r.json():null).catch(()=>null),
+        fetch('/api/tts/voices').then(r=>r.ok?r.json():null).catch(()=>null)
+      ]);
+      this.credStatus=(cat&&cat.credential_status)||{};
+      this.defaultProvider=(provR&&provR.default_provider)||'';
+      // Collect cloned voices across providers for the clone manager.
+      this.clones=[];
+      if(voicesR&&voicesR.voices){
+        Object.entries(voicesR.voices).forEach(([pid,v])=>{
+          (v.cloned||[]).forEach(c=>{
+            const cid=(typeof c==='string')?c:(c.id||c.voice_id||c.name||'');
+            const label=(typeof c==='string')?c:(c.name||c.id||c.voice_id||'');
+            if(cid)this.clones.push({provider:pid,id:cid,label:label});
+          });
+        });
+      }
+      // Prefer the live registry (voices, status); fall back to catalog tts ids.
+      let provs=(provR&&provR.providers)||[];
+      if(!provs.length){provs=Catalog.list('tts',cat).map(s=>({provider_id:s.id,name:s.name,voices:[],status:s.health&&s.health.healthy?'active':'inactive'}))}
+      this.providers=provs;
+      this.voicesByProv={};
+      provs.forEach(p=>{
+        const id=p.provider_id||p.id;
+        const vs=(p.voices||[]).map(v=>{
+          if(typeof v==='string')return {id:v,label:v};
+          return {id:v.id||v.voice_id||v.name||'',label:v.name||v.id||v.voice_id||''};
+        }).filter(v=>v.id);
+        this.voicesByProv[id]=vs;
+      });
+      if(profR){
+        this.profileId=profR.id;
+        this.sel.provider=profR.voice?.tts_provider||provR.default_provider||'supertonic';
+        this.sel.voice=profR.voice?.voice_id||'';
+        $('tts-active').innerHTML='Active profile: <span style="color:var(--green)">'+esc(profR.id)+'</span>';
+      }
+      if(fbR){this.fallback={chain:fbR.chain||{},voice_gender:fbR.voice_gender||{},provider_ids:fbR.provider_ids||[]}}
+      this.render();
+    }catch(e){el.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;&#xFE0F;</div>'+esc(e.message)+'</div>'}
+  },
+  _voiceOpts(pid,selected){
+    const vs=this.voicesByProv[pid]||[];
+    if(!vs.length)return '<option value="">(provider default)</option>';
+    return '<option value="">(provider default)</option>'+vs.map(v=>'<option value="'+esc(v.id)+'"'+(v.id===selected?' selected':'')+'>'+esc(v.label)+'</option>').join('');
+  },
+  render(){
+    const provOpts=this.providers.map(p=>{const id=p.provider_id||p.id;return '<option value="'+esc(id)+'"'+(id===this.sel.provider?' selected':'')+'>'+esc(p.name||id)+'</option>'}).join('');
+    // ── Active-profile override ──
+    let html='<div class="box" style="padding:16px;margin-bottom:16px">'+
+      '<div class="sect-label" style="margin-top:0">Active Profile Voice</div>'+
+      '<div class="g2" style="margin-bottom:10px">'+
+        '<div class="fg"><label class="fl">TTS Provider</label><select id="tts-prov" onchange="TTS.onProv(this.value)">'+provOpts+'</select></div>'+
+        '<div class="fg"><label class="fl">Voice</label><select id="tts-voice">'+this._voiceOpts(this.sel.provider,this.sel.voice)+'</select></div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;align-items:center">'+
+        '<button class="btn btn-g" onclick="TTS.saveOverride()">Save to Active Profile</button>'+
+        '<span id="tts-ov-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div>'+
+      (this.profileId?'':'<div style="font-size:11px;color:var(--yellow);margin-top:6px">No active profile loaded — save disabled.</div>')+
+    '</div>';
+    // ── Provider cards: key status + test-speak ──
+    html+='<div class="sect-label">Providers &mdash; status &amp; test</div><div class="g2" style="align-items:start;gap:12px">';
+    html+=this.providers.map(p=>{
+      const id=p.provider_id||p.id;
+      const active=(p.status||'active')==='active';
+      const ring='<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+(active?'var(--green)':'var(--red)')+'"></span>';
+      const needsKey=p.requires_api_key;
+      const keyChip=needsKey?('<span class="badge '+(p.has_key===false?'b-gray':'b-blue')+'" style="font-size:10px">'+(p.has_key===false?'no key':'key set')+'</span>'):'<span class="badge b-gray" style="font-size:10px">no key needed</span>';
+      const vopts=this._voiceOpts(id,'');
+      return '<div class="box" style="padding:12px">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+ring+'<span style="font-weight:600;color:var(--bright)">'+esc(p.name||id)+'</span>'+keyChip+'</div>'+
+        '<div style="font-size:11px;color:var(--dim);margin-top:3px">'+esc(id)+(p.latency?' &middot; '+esc(p.latency):'')+(p.cost_per_minute!=null?' &middot; $'+esc(String(p.cost_per_minute))+'/min':'')+'</div>'+
+        '<div style="display:flex;gap:6px;align-items:center;margin-top:10px;flex-wrap:wrap">'+
+          '<select id="tts-test-voice-'+esc(id)+'" style="background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text);font-size:12px;max-width:150px">'+vopts+'</select>'+
+          '<button class="btn btn-o btn-sm" onclick="TTS.testSpeak(\''+esc(id)+'\')">&#x25B6; Test speak</button>'+
+          '<span id="tts-test-status-'+esc(id)+'" style="font-size:11px;color:var(--dim)"></span>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+    html+='</div>';
+    // ── Server defaults (WO-4.3) ──
+    html+=this._serverDefaults();
+    // ── Cloned-voice manager (WO-4.3) ──
+    html+=this._cloneManager();
+    // ── Fallback chain editor ──
+    html+=this._fallbackEditor();
+    $('tts-content').innerHTML=html;
+  },
+  _serverDefaults(){
+    const provOpts=this.providers.map(p=>{const id=p.provider_id||p.id;return '<option value="'+esc(id)+'"'+(id===this.defaultProvider?' selected':'')+'>'+esc(p.name||id)+'</option>'}).join('');
+    return '<div class="box" style="padding:16px;margin-top:16px">'+
+      '<div class="sect-label" style="margin-top:0">Server Defaults</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:10px">The instance-wide default provider + voice used when a request/profile does not specify one. Written to providers_config.json (survives restart).</div>'+
+      '<div class="g2" style="margin-bottom:10px">'+
+        '<div class="fg"><label class="fl">Default Provider</label><select id="tts-def-prov" onchange="TTS.onDefProv(this.value)">'+provOpts+'</select></div>'+
+        '<div class="fg"><label class="fl">Default Voice</label><select id="tts-def-voice">'+this._voiceOpts(this.defaultProvider,'')+'</select></div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+        '<button class="btn btn-g btn-sm" onclick="TTS.saveDefaultProvider()">Save Default Provider</button>'+
+        '<button class="btn btn-o btn-sm" onclick="TTS.saveDefaultVoice()">Save Default Voice</button>'+
+        restartScopeBadge('none')+
+        '<span id="tts-def-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div></div>';
+  },
+  onDefProv(pid){this.defaultProvider=pid;const v=$('tts-def-voice');if(v)v.innerHTML=this._voiceOpts(pid,'')},
+  async saveDefaultProvider(){
+    const provider=$('tts-def-prov')?.value;const st=$('tts-def-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/tts/default-provider',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider})});
+      const d=await r.json();
+      if(d.ok){if(st)st.textContent='Default provider saved';toast('Default provider → '+provider,'green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async saveDefaultVoice(){
+    const provider=$('tts-def-prov')?.value;const voice=$('tts-def-voice')?.value;
+    if(!voice){toast('Pick a voice','yellow');return}
+    const st=$('tts-def-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/tts/default-voice',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider,voice})});
+      const d=await r.json();
+      if(d.ok){if(st)st.textContent='Default voice saved';toast('Default voice saved','green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  _cloneManager(){
+    let h='<div class="box" style="padding:16px;margin-top:16px">'+
+      '<div class="sect-label" style="margin-top:0">Cloned Voices</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:10px">Upload a WAV/MP3 sample to clone a voice. Retiring a clone renames it (never deletes) &mdash; it can be restored on disk.</div>';
+    h+=this.clones.length?this.clones.map(c=>
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap">'+
+        '<span style="min-width:160px;font-size:13px;color:var(--text)">'+esc(c.label||c.id)+'</span>'+
+        '<span class="badge b-gray" style="font-size:10px">'+esc(c.provider)+'</span>'+
+        '<span style="font-family:var(--mono);font-size:11px;color:var(--dim)">'+esc(c.id)+'</span>'+
+        (c.id.indexOf('clone_')===0?'<button class="btn btn-d btn-sm" onclick="TTS.retireClone(\''+esc(c.id)+'\')">Retire</button>':'')+
+      '</div>').join(''):'<div style="font-size:12px;color:var(--dim);margin-bottom:8px">No cloned voices yet.</div>';
+    h+='<div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;border-top:1px solid var(--border2);padding-top:12px">'+
+      '<input type="text" id="tts-clone-name" placeholder="voice name" style="min-width:140px;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:12px">'+
+      '<input type="file" id="tts-clone-file" accept="audio/*" style="font-size:12px;color:var(--dim)">'+
+      '<button class="btn btn-p btn-sm" onclick="TTS.uploadClone()">Clone Voice</button>'+
+      '<span id="tts-clone-status" style="font-size:12px;color:var(--dim)"></span>'+
+    '</div></div>';
+    return h;
+  },
+  async uploadClone(){
+    const name=($('tts-clone-name')?.value||'').trim();
+    const f=$('tts-clone-file')?.files?.[0];
+    if(!name){toast('Enter a voice name','yellow');return}
+    if(!f){toast('Choose an audio file','yellow');return}
+    const st=$('tts-clone-status');if(st)st.textContent='Uploading + cloning…';
+    try{
+      const fd=new FormData();fd.append('name',name);fd.append('audio',f);fd.append('file',f);
+      const r=await fetch('/api/tts/clone',{method:'POST',body:fd});
+      const d=await r.json();
+      if(r.ok&&!d.error){if(st)st.textContent='Cloned';toast('Voice cloned: '+(d.voice_id||name),'green');this.load()}
+      else{if(st)st.textContent=d.error||('HTTP '+r.status);toast(d.error||'Clone failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async retireClone(id){
+    if(!confirm('Retire cloned voice "'+id+'"? It is renamed (not deleted) and can be restored.'))return;
+    try{
+      const r=await fetch('/api/tts/voices/'+encodeURIComponent(id),{method:'DELETE'});
+      const d=await r.json();
+      if(d.status==='ok'||d.action==='retired'){toast('Retired '+id,'green');this.load()}
+      else toast(d.error||'Failed','red');
+    }catch(e){toast(e.message,'red')}
+  },
+  onProv(pid){
+    this.sel.provider=pid;
+    const v=$('tts-voice');if(v)v.innerHTML=this._voiceOpts(pid,'');
+  },
+  async saveOverride(){
+    if(!this.profileId){toast('No active profile','red');return}
+    const provider=$('tts-prov')?.value; const voice=$('tts-voice')?.value||undefined;
+    const st=$('tts-ov-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/profiles/'+encodeURIComponent(this.profileId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:{tts_provider:provider,voice_id:voice}})});
+      const d=await r.json();
+      if(d.id||d.name){if(st)st.textContent='Saved (refresh voice app to apply)';toast('TTS saved to '+this.profileId,'green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async testSpeak(pid){
+    const voice=$('tts-test-voice-'+pid)?.value||undefined;
+    const st=$('tts-test-status-'+pid);if(st)st.textContent='Generating...';
+    try{
+      const body={text:'This is a test of the '+pid+' voice.',provider:pid};
+      if(voice)body.voice=voice;
+      const r=await fetch('/api/tts/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(!r.ok){const e=await r.json().catch(()=>({}));if(st)st.textContent=e.error||('HTTP '+r.status);toast(e.error||'TTS failed','red');return}
+      const blob=await r.blob();
+      const url=URL.createObjectURL(blob);
+      const a=new Audio(url);
+      a.onended=()=>URL.revokeObjectURL(url);
+      a.onerror=()=>{if(st)st.textContent='playback error';URL.revokeObjectURL(url)};
+      await a.play();
+      if(st)st.textContent='Playing '+(r.headers.get('X-TTS-Provider')||pid);
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  _fallbackEditor(){
+    const ids=this.fallback.provider_ids.length?this.fallback.provider_ids:this.providers.map(p=>p.provider_id||p.id);
+    const chain=this.fallback.chain||{};
+    let h='<div class="box" style="padding:16px;margin-top:16px">'+
+      '<div class="sect-label" style="margin-top:0">Fallback Chain</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:10px">When a provider fails, the next hop is tried (followed transitively, cycle-checked on save). Takes effect on the next utterance &mdash; no restart.</div>';
+    h+=ids.map(id=>{
+      const cur=chain[id]||'';
+      const opts='<option value="">(no fallback)</option>'+ids.filter(o=>o!==id).map(o=>'<option value="'+esc(o)+'"'+(o===cur?' selected':'')+'>'+esc(o)+'</option>').join('');
+      return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">'+
+        '<span style="min-width:120px;font-size:12px;color:var(--text)">'+esc(id)+'</span>'+
+        '<span style="color:var(--dim)">&rarr;</span>'+
+        '<select id="tts-fb-'+esc(id)+'" style="background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:5px 9px;color:var(--text);font-size:12px">'+opts+'</select>'+
+      '</div>';
+    }).join('');
+    h+='<div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">'+
+        '<button class="btn btn-g btn-sm" onclick="TTS.saveFallback()">Save Chain</button>'+
+        restartScopeBadge('none')+
+        '<span id="tts-fb-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div></div>';
+    return h;
+  },
+  async saveFallback(){
+    const ids=this.fallback.provider_ids.length?this.fallback.provider_ids:this.providers.map(p=>p.provider_id||p.id);
+    const chain={};
+    ids.forEach(id=>{const v=$('tts-fb-'+id)?.value;if(v)chain[id]=v});
+    const st=$('tts-fb-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/admin/tts-fallback',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({chain:chain,voice_gender:this.fallback.voice_gender})});
+      const d=await r.json();
+      if(d.ok){this.fallback.chain=d.chain||chain;if(st)st.textContent='Saved';toast('Fallback chain saved','green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  }
+};
+
+
+// Voice: STT & Wake (WO-3.2) — provider per profile, wake phrases, honest tests
+const STT={
+  profileId:null, sel:'webspeech', wake:[], descriptors:[], credStatus:{},
+  // STT provider id -> vault credential id (where the key is managed via vault).
+  VAULT_CRED:{deepgram:'deepgram',groq_whisper:'groq_tts'},
+  async load(){
+    const el=$('stt-content');
+    el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      const[cat,profR]=await Promise.all([
+        Catalog.get(true),
+        fetch('/api/profiles/active').then(r=>r.ok?r.json():null).catch(()=>null)
+      ]);
+      this.descriptors=Catalog.list('stt',cat);
+      this.credStatus=(cat&&cat.credential_status)||{};
+      if(!this.descriptors.length){
+        this.descriptors=[{id:'webspeech',name:'Web Speech API'},{id:'deepgram',name:'Deepgram'},{id:'groq_whisper',name:'Groq Whisper'},{id:'external',name:'External STT'}];
+      }
+      if(profR){
+        this.profileId=profR.id;
+        this.sel=profR.stt?.provider||'webspeech';
+        this.wake=Array.isArray(profR.stt?.wake_words)?profR.stt.wake_words:[];
+        $('stt-active').innerHTML='Active profile: <span style="color:var(--green)">'+esc(profR.id)+'</span>';
+      }
+      this.render();
+    }catch(e){el.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;&#xFE0F;</div>'+esc(e.message)+'</div>'}
+  },
+  _keyState(id){
+    // Returns {managed:bool, hasKey:bool, credId:string|null, label:string}
+    const cid=this.VAULT_CRED[id];
+    if(cid){const c=this.credStatus[cid];return {managed:true,hasKey:!!(c&&c.has_value),credId:cid,label:(c&&c.name)||cid}}
+    const d=this.descriptors.find(s=>s.id===id);
+    const h=d&&d.health||{};
+    if(id==='external')return {managed:false,hasKey:!!h.has_key,credId:null,label:'STT_API_URL / STT_API_KEY (env)'};
+    return {managed:false,hasKey:true,credId:null,label:''};
+  },
+  render(){
+    // ── Provider radio list ──
+    let html='<div class="box" style="padding:16px;margin-bottom:16px">'+
+      '<div class="sect-label" style="margin-top:0">STT Provider (active profile)</div>'+
+      '<div class="prov-list">';
+    html+=this.descriptors.map(s=>{
+      const id=s.id;
+      const ks=this._keyState(id);
+      let chip='';
+      if(ks.managed)chip='<span class="badge '+(ks.hasKey?'b-blue':'b-gray')+'" style="font-size:10px">'+(ks.hasKey?'key set':'no key')+'</span>';
+      else if(id==='external')chip='<span class="badge '+(ks.hasKey?'b-blue':'b-gray')+'" style="font-size:10px">'+(ks.hasKey?'env set':'env unset')+'</span>';
+      else if(id==='webspeech'||id==='whisper')chip='<span class="badge b-gray" style="font-size:10px">no key needed</span>';
+      const note=(s.meta&&s.meta.note)?s.meta.note:'';
+      return '<div class="prov-item'+(this.sel===id?' sel':'')+'" id="si-'+esc(id)+'" onclick="STT.select(\''+esc(id)+'\')">'+
+        '<div class="prov-radio"></div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div class="prov-info-name">'+esc(s.name||id)+' '+chip+'</div>'+
+          '<div class="prov-info-detail">'+esc(note||id)+'</div>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+    html+='</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:12px">'+
+        '<button class="btn btn-g" onclick="STT.save()">Save to Active Profile</button>'+
+        '<button class="btn btn-o" onclick="STT.testSel()">Test Selected</button>'+
+        '<span id="stt-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div>'+
+      (this.profileId?'':'<div style="font-size:11px;color:var(--yellow);margin-top:6px">No active profile loaded — save disabled.</div>')+
+    '</div>';
+    // ── Key management (vault-backed providers only) ──
+    html+='<div class="box" style="padding:16px;margin-bottom:16px">'+
+      '<div class="sect-label" style="margin-top:0">API Keys</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:10px">Cloud STT keys are stored in the vault (same store as the Connections tab). External STT uses env vars (<code>STT_API_URL</code> / <code>STT_API_KEY</code>) and is shown read-only here.</div>';
+    const keyed=this.descriptors.filter(s=>this.VAULT_CRED[s.id]||s.id==='external');
+    html+=keyed.map(s=>{
+      const id=s.id;const ks=this._keyState(id);
+      if(!ks.managed){
+        return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">'+
+          '<span style="min-width:130px;font-size:12px">'+esc(s.name||id)+'</span>'+
+          '<span class="badge '+(ks.hasKey?'b-blue':'b-gray')+'" style="font-size:10px">'+(ks.hasKey?'env set':'env unset')+'</span>'+
+          '<span style="font-size:11px;color:var(--dim)">'+esc(ks.label)+' — read-only</span>'+
+        '</div>';
+      }
+      return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">'+
+        '<span style="min-width:130px;font-size:12px">'+esc(s.name||id)+'</span>'+
+        '<span class="badge '+(ks.hasKey?'b-blue':'b-gray')+'" style="font-size:10px">'+(ks.hasKey?'key set':'no key')+'</span>'+
+        '<input type="password" id="stt-key-'+esc(id)+'" placeholder="'+(ks.hasKey?'replace key…':'set key…')+'" autocomplete="off" style="flex:1;min-width:150px;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-family:var(--mono);font-size:12px">'+
+        '<button class="btn btn-o btn-sm" onclick="STT.saveKey(\''+esc(id)+'\')">Save Key</button>'+
+        '<span id="stt-key-status-'+esc(id)+'" style="font-size:11px;color:var(--dim)"></span>'+
+      '</div>';
+    }).join('')||'<div style="font-size:12px;color:var(--dim)">No keyed STT providers.</div>';
+    html+='</div>';
+    // ── Wake phrases ──
+    html+='<div class="box" style="padding:16px">'+
+      '<div class="sect-label" style="margin-top:0">Wake Words</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:8px">Comma-separated phrases that activate this agent. Empty = platform default.</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+        '<input type="text" id="stt-wake" value="'+esc(this.wake.join(', '))+'" placeholder="wake up, hey jarvis" style="flex:1;min-width:200px;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-size:13px">'+
+        '<button class="btn btn-g" onclick="STT.saveWake()">Save Wake Words</button>'+
+        '<span id="stt-wake-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div></div>';
+    $('stt-content').innerHTML=html;
+  },
+  select(id){
+    this.sel=id;
+    document.querySelectorAll('[id^="si-"]').forEach(el=>el.classList.remove('sel'));
+    $('si-'+id)?.classList.add('sel');
+  },
+  async save(){
+    if(!this.profileId){toast('No active profile','red');return}
+    const st=$('stt-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/profiles/'+encodeURIComponent(this.profileId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({stt:{provider:this.sel}})});
+      const d=await r.json();
+      if(d.id||d.name){if(st)st.textContent='Saved (refresh voice app to apply)';toast('STT provider saved','green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async saveKey(id){
+    const cid=this.VAULT_CRED[id];if(!cid){toast('Key managed via env (read-only)','yellow');return}
+    const val=$('stt-key-'+id)?.value.trim();
+    if(!val){toast('Enter a key','yellow');return}
+    const st=$('stt-key-status-'+id);if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/vault/credentials/'+encodeURIComponent(cid),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:val})});
+      const d=await r.json();
+      if(d.ok){if(st)st.textContent=d.message||'Saved';toast('Key saved for '+id,'green');const inp=$('stt-key-'+id);if(inp)inp.value='';this.load()}
+      else{if(st)st.textContent=d.message||d.error||'Failed';toast(d.message||d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async saveWake(){
+    if(!this.profileId){toast('No active profile','red');return}
+    const raw=($('stt-wake')?.value||'').trim();
+    const words=raw?raw.split(',').map(w=>w.trim()).filter(Boolean):[];
+    const st=$('stt-wake-status');if(st)st.textContent='Saving...';
+    try{
+      const r=await fetch('/api/profiles/'+encodeURIComponent(this.profileId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({stt:{wake_words:words.length?words:null}})});
+      const d=await r.json();
+      if(d.id||d.name){this.wake=words;if(st)st.textContent='Saved';toast('Wake words saved','green')}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Save failed','red')}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red')}
+  },
+  async testSel(){
+    const id=this.sel;const st=$('stt-status');
+    // ADMIN-BUG-4 — honest STT test (no hardcoded pass).
+    if(id==='webspeech'){if(st)st.textContent='Web Speech is a browser API — can’t test server-side';toast('WebSpeech: browser API (client-side)','blue');return}
+    if(id==='whisper'){if(st)st.textContent='Local whisper — no key required';toast('whisper: local, no key','blue');return}
+    const ks=this._keyState(id);
+    const msg=id+': '+(ks.hasKey?(ks.managed?'key present':'env set'):'not configured')+' (key check only)';
+    if(st)st.textContent=msg;toast(msg,ks.hasKey?'green':'yellow');
   }
 };
 
@@ -1884,7 +2622,8 @@ const Connections={
         '</select>'+
         '<div style="margin-top:6px;font-size:11px;color:var(--dim)">Used when primary model fails or is rate-limited</div>'+
       '</div></div>'+
-    '</div>';
+    '</div>'+
+    '<div style="margin:-12px 0 20px;display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--dim)">Model changes route through the gateway config API:</span>'+restartScopeBadge('none')+'</div>';
 
     // Credential groups
     for(const group of d.groups){
@@ -2078,13 +2817,28 @@ const Connections={
     const primary=$('vault-primary')?.value||'';
     const fallback=$('vault-fallback')?.value||'';
     try{
-      const r=await fetch('/api/vault/credentials/_model_selection',{
+      // WO-0.1: write through the hardened gateway config.patch path
+      // (PUT /api/admin/ai-config), NOT /api/vault/credentials/_model_selection.
+      // The old vault path did a direct openclaw.json write that silently
+      // returned success on a PermissionError (ADMIN-BUG-1) — "saved" but no
+      // change. This path is schema-validated and hot-applied by openclaw.
+      const r=await fetch('/api/admin/ai-config',{
         method:'PUT',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({primary,fallback})
       });
       const d=await r.json();
-      if(d.ok) toast('Model selection saved','green');
-      else toast(d.error||'Failed','red');
+      if(!r.ok||!d.ok){ toast(d.error||d.message||('Failed ('+r.status+')'),'red'); return; }
+      // Confirm the applied value via a follow-up read rather than trusting the
+      // write response — surfaces any silent divergence honestly.
+      try{
+        const c=await fetch('/api/admin/ai-config');
+        const cd=await c.json();
+        if(cd&&cd.primary===primary){
+          toast('Model saved: '+cd.primary+(cd.fallback?' → '+cd.fallback:''),'green');
+        }else{
+          toast('Saved, but applied primary is '+((cd&&cd.primary)||'unknown')+' — verify','red');
+        }
+      }catch(_){ toast('Model selection saved','green'); }
     }catch(e){toast(e.message,'red')}
   },
   async test(id){
@@ -2354,8 +3108,372 @@ const System={
   },
   async resetSession(){
     if(!confirm('Reset voice session? Next message will be slower (cold start).'))return;
-    try{const d=await(await fetch('/api/session/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json();toast(d.ok?'Session reset':d.error||'Failed',d.ok?'green':'red')}
-    catch(e){toast(e.message,'red')}
+    // ADMIN-BUG-2 — /api/session/reset is now the canonical soft/hard handler
+    // (server.py), which returns {old,new,mode} on success (no `ok` field).
+    try{
+      const r=await fetch('/api/session/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'soft'})});
+      const d=await r.json();
+      if(r.ok&&(d.new||d.old))toast('Session reset ('+(d.mode||'soft')+'): '+esc(d.old||'?')+' → '+esc(d.new||'?'),'green');
+      else toast(d.error||'Failed','red');
+    }catch(e){toast(e.message,'red')}
+  }
+};
+
+// ── Restart-scope badge (WO-5.2) — one helper, used by every config surface ──
+// Renders the descriptor's restart_scope next to a Save button so the operator
+// knows what a change will restart before they click.
+function restartScopeBadge(scope){
+  if(!scope||scope==='none')return '<span class="badge b-gray" style="font-size:10px" title="Takes effect live — no restart">applies live</span>';
+  if(scope==='ovui')return '<span class="badge b-yellow" style="font-size:10px" title="Restarts the OpenVoiceUI app">restarts openvoiceui</span>';
+  if(scope.indexOf('container:')===0)return '<span class="badge b-yellow" style="font-size:10px" title="Restarts a container">restarts '+esc(scope.slice(10))+'</span>';
+  return '<span class="badge b-yellow" style="font-size:10px">restarts: '+esc(scope)+'</span>';
+}
+
+// Service Health matrix (WO-5.3) — one ring per gateway/llm/tts/stt service.
+const Health={
+  _timer:null,
+  async load(){await this.refresh();this.start();},
+  start(){this.stop();this._timer=setInterval(()=>{if($('panel-health')&&$('panel-health').classList.contains('active'))this.refresh();else this.stop();},30000);},
+  stop(){if(this._timer){clearInterval(this._timer);this._timer=null;}},
+  async refresh(){
+    const tb=$('health-tbody');
+    try{
+      const[hR,cR]=await Promise.all([
+        fetch('/api/services/health'),
+        Catalog.get(true)
+      ]);
+      const hd=hR.ok?await hR.json():{services:[],summary:{}};
+      // restart_scope lives on the catalog descriptor, not the health row — join by id.
+      const scopeById={};(cR.services||[]).forEach(s=>{scopeById[s.service+':'+s.id]=s.restart_scope||'none'});
+      const rows=hd.services||[];
+      const s=hd.summary||{};
+      $('health-summary').innerHTML=rows.length?('<span style="color:var(--green)">'+(s.healthy||0)+'</span> / '+(s.total||rows.length)+' healthy &middot; updated '+new Date().toLocaleTimeString()):'';
+      if(!rows.length){tb.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:14px">No services reported</div></td></tr>';return;}
+      const typeColor={gateway:'b-blue',llm:'b-green',tts:'b-yellow',stt:'b-gray'};
+      tb.innerHTML=rows.map(r=>{
+        const ring='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(r.healthy?'var(--green)':'var(--red)')+';box-shadow:0 0 6px '+(r.healthy?'var(--green)':'transparent')+'"></span>';
+        const det=r.detail||{};
+        const lastErr=det.status&&det.status!=='active'?det.status:(det.error||det.message||'');
+        const detailBits=[];
+        if(det.has_key===false)detailBits.push('no key');
+        else if(det.has_key===true&&(r.service==='llm'||r.service==='stt'||r.service==='tts'))detailBits.push('key set');
+        if(det.configured===false)detailBits.push('not configured');
+        if(det.in_registry===false&&r.service==='stt')detailBits.push('not in registry');
+        if(lastErr)detailBits.push(esc(String(lastErr)));
+        const scope=scopeById[r.service+':'+r.id]||'none';
+        return '<tr>'+
+          '<td style="padding:9px 12px">'+ring+' '+esc(r.name||r.id)+'</td>'+
+          '<td style="padding:9px 12px;font-family:var(--mono);font-size:11px;color:var(--dim)">'+esc(r.id)+'</td>'+
+          '<td style="padding:9px 12px"><span class="badge '+(typeColor[r.service]||'b-gray')+'" style="font-size:10px">'+esc(r.service)+'</span></td>'+
+          '<td style="padding:9px 12px"><span class="badge '+(r.healthy?'b-green':'b-red')+'" style="font-size:10px">'+(r.healthy?'healthy':'unhealthy')+'</span></td>'+
+          '<td style="padding:9px 12px;color:var(--dim);font-size:12px">'+(r.latency_ms!=null?r.latency_ms+'ms':'&mdash;')+'</td>'+
+          '<td style="padding:9px 12px;color:var(--dim);font-size:12px">'+(detailBits.join(' &middot; ')||'&mdash;')+'</td>'+
+          '<td style="padding:9px 12px">'+restartScopeBadge(scope)+'</td>'+
+        '</tr>';
+      }).join('');
+    }catch(e){tb.innerHTML='<tr><td colspan="7"><div class="empty" style="padding:14px">'+esc(e.message)+'</div></td></tr>';}
+  }
+};
+
+// Gateway Sessions viewer/killer (WO-4.1) — via the allowlisted RPC proxy.
+const Sessions={
+  sessions:[], supported:true, gatewayId:null,
+  async _rpc(method,params){
+    const r=await fetch('/api/admin/gateway/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({method,params:params||{}})});
+    const d=await r.json();
+    return {ok:r.ok&&d.ok,result:d.result,error:d.error,code:r.status};
+  },
+  async load(){
+    const el=$('sessions-content');
+    el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    // Gate on the catalog 'sessions' capability of the active gateway.
+    try{
+      const cat=await Catalog.get(true);
+      const gw=Catalog.list('gateway',cat).find(g=>(g.capabilities||[]).indexOf('sessions')>=0);
+      // Prefer the active gateway if it supports sessions; else any gateway that does.
+      let active=null;
+      try{const gd=await(await fetch('/api/admin/gateways')).json();active=gd.active_gateway;
+        const ag=Catalog.list('gateway',cat).find(g=>g.id===active);
+        if(ag&&(ag.capabilities||[]).indexOf('sessions')<0){
+          $('sessions-note').innerHTML='Active gateway <b>'+esc(active||'?')+'</b> does not expose sessions.';
+          el.innerHTML='<div class="empty"><div class="empty-icon">&#x1F5C2;</div>The active agent gateway does not support session listing. Switch to a gateway with the <code>sessions</code> capability (e.g. openclaw).</div>';
+          return;
+        }
+      }catch(e){}
+      if(!gw){this.supported=false;el.innerHTML='<div class="empty"><div class="empty-icon">&#x1F5C2;</div>No registered gateway exposes the <code>sessions</code> capability.</div>';return;}
+      this.gatewayId=active||gw.id;
+    }catch(e){}
+    const res=await this._rpc('sessions.list',{});
+    if(!res.ok){
+      el.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;&#xFE0F;</div>Could not list sessions: '+esc(res.error||('HTTP '+res.code))+
+        '<br><br><span style="color:var(--dim);font-size:12px">The gateway may be down, or the active framework has no session API.</span></div>';
+      return;
+    }
+    const r=res.result||{};
+    this.sessions=r.sessions||r.list||(Array.isArray(r)?r:[]);
+    this.render();
+  },
+  _age(ts){
+    if(!ts)return '&mdash;';
+    const t=typeof ts==='number'?(ts<1e12?ts*1000:ts):Date.parse(ts);
+    if(isNaN(t))return esc(String(ts));
+    const s=Math.max(0,Math.floor((Date.now()-t)/1000));
+    if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d';
+  },
+  render(){
+    const el=$('sessions-content');
+    if(!this.sessions.length){el.innerHTML='<div class="empty"><div class="empty-icon">&#x1F5C2;</div>No active sessions on '+esc(this.gatewayId||'gateway')+'.</div>';return;}
+    let html='<div class="box" style="padding:0;overflow:hidden"><table class="tbl">'+
+      '<thead><tr><th>Session</th><th>Agent</th><th>State</th><th>Age</th><th></th></tr></thead><tbody>';
+    html+=this.sessions.map((s,i)=>{
+      const id=s.sessionKey||s.key||s.id||s.sessionId||('#'+i);
+      const agent=s.agent||s.agentId||s.agent_uri||'&mdash;';
+      const state=s.state||s.status||'&mdash;';
+      const age=this._age(s.startedAt||s.started_at||s.createdAt||s.created_at||s.ts||s.updatedAt);
+      const idAttr=esc(String(id));
+      return '<tr id="sess-row-'+esc(String(i))+'">'+
+        '<td style="padding:9px 12px;font-family:var(--mono);font-size:11px">'+esc(String(id))+'</td>'+
+        '<td style="padding:9px 12px;font-size:12px">'+esc(String(agent))+'</td>'+
+        '<td style="padding:9px 12px"><span class="badge b-gray" style="font-size:10px">'+esc(String(state))+'</span></td>'+
+        '<td style="padding:9px 12px;color:var(--dim);font-size:12px">'+age+'</td>'+
+        '<td style="padding:9px 12px;text-align:right;white-space:nowrap">'+
+          '<button class="btn btn-o btn-sm" onclick="Sessions.history(\''+idAttr+'\','+i+')">History</button> '+
+          '<button class="btn btn-d btn-sm" onclick="Sessions.abort(\''+idAttr+'\')">Abort</button>'+
+        '</td></tr>'+
+        '<tr id="sess-hist-'+esc(String(i))+'" style="display:none"><td colspan="5" style="padding:0 12px 12px"><pre id="sess-hist-pre-'+esc(String(i))+'" style="max-height:320px;overflow:auto;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;word-break:break-word;color:var(--text)"></pre></td></tr>';
+    }).join('');
+    html+='</tbody></table></div>';
+    el.innerHTML=html;
+  },
+  async history(id,i){
+    const row=$('sess-hist-'+i);const pre=$('sess-hist-pre-'+i);
+    if(!row||!pre)return;
+    if(row.style.display!=='none'){row.style.display='none';return;}
+    row.style.display='';pre.textContent='Loading history…';
+    const res=await this._rpc('sessions.history',{sessionKey:id,sessionId:id,key:id});
+    if(!res.ok){pre.textContent='Could not load history: '+(res.error||('HTTP '+res.code));return;}
+    try{pre.textContent=JSON.stringify(res.result,null,2);}catch(e){pre.textContent=String(res.result);}
+  },
+  async abort(id){
+    if(!confirm('Abort session "'+id+'"? Any in-flight run is cancelled.'))return;
+    const res=await this._rpc('sessions.abort',{sessionKey:id,sessionId:id,key:id});
+    if(res.ok){toast('Aborted '+id,'green');this.load();}
+    else toast('Abort failed: '+(res.error||('HTTP '+res.code)),'red');
+  }
+};
+
+// Update manager panel (WO-4.2) — preview / apply / verify / rollback.
+const Updates={
+  status:null, preview:null,
+  async load(){
+    const el=$('updates-content');
+    el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      this.status=await(await fetch('/api/admin/update/status')).json();
+      this.render();
+    }catch(e){el.innerHTML='<div class="empty"><div class="empty-icon">&#x26A0;&#xFE0F;</div>'+esc(e.message)+'</div>';}
+  },
+  render(){
+    const s=this.status||{};
+    let html='<div class="box" style="padding:16px;margin-bottom:16px">'+
+      '<div class="sect-label" style="margin-top:0">Current Build</div>'+
+      '<div class="stat-r"><span class="stat-l">Version</span><span class="stat-v">'+esc(s.version||'unknown')+'</span></div>'+
+      '<div class="stat-r"><span class="stat-l">Commit</span><span class="stat-v" style="font-family:var(--mono)">'+esc(s.commit||'unknown')+'</span></div>'+
+      '<div class="stat-r"><span class="stat-l">Branch</span><span class="stat-v">'+esc(s.branch||'unknown')+'</span></div>'+
+      '<div class="stat-r"><span class="stat-l">Deployment</span><span class="stat-v">'+esc(s.deployment_type||'?')+'</span></div>'+
+      '<div class="stat-r"><span class="stat-l">Git repo</span><span class="stat-v">'+(s.is_git_repo?'yes':'no (managed/image build)')+'</span></div>'+
+    '</div>';
+    html+='<div class="box" style="padding:16px;margin-bottom:16px">'+
+      '<div class="sect-label" style="margin-top:0">Actions</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+        '<button class="btn btn-o" onclick="Updates.checkPreview()">Check for update (preview)</button>'+
+        '<button class="btn btn-o" onclick="Updates.verify()">Verify checkout</button>'+
+        '<span id="upd-action-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-top:8px">Preview and verify are read-only. Apply is guarded by an explicit confirmation. '+restartScopeBadge('ovui')+' after a successful apply.</div>'+
+    '</div>';
+    html+='<div id="upd-preview"></div>';
+    // Rollback
+    html+='<div class="box" style="padding:16px;margin-top:16px">'+
+      '<div class="sect-label" style="margin-top:0">Rollback</div>'+
+      '<div style="font-size:11px;color:var(--dim);margin-bottom:8px">Reset the checkout to a prior commit (git reset --hard + restore .pre-update backups). Use the commit you were on before an update.</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+        '<input type="text" id="upd-rollback-sha" placeholder="target commit SHA" value="'+esc(s.commit||'')+'" style="min-width:220px;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-family:var(--mono);font-size:12px">'+
+        '<button class="btn btn-d btn-sm" onclick="Updates.rollback()">Roll back</button>'+
+        '<span id="upd-rollback-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div>'+
+    '</div>';
+    $('updates-content').innerHTML=html;
+  },
+  async checkPreview(){
+    const st=$('upd-action-status');if(st)st.textContent='Analysing upstream…';
+    try{
+      const d=await(await fetch('/api/admin/update/preview')).json();
+      this.preview=d;
+      if(st)st.textContent='';
+      const el=$('upd-preview');
+      if(d.error){el.innerHTML='<div class="box" style="padding:16px"><span style="color:var(--red)">'+esc(d.error)+'</span></div>';return;}
+      if(d.can_update===false){el.innerHTML='<div class="box" style="padding:16px">'+esc(d.error||'Cannot update')+'</div>';return;}
+      const changed=d.changed_file_count||0;
+      if(!changed){el.innerHTML='<div class="box" style="padding:16px"><span style="color:var(--green)">Already up to date.</span></div>';return;}
+      const riskCls=d.risk==='high'?'b-red':d.risk==='medium'?'b-yellow':'b-green';
+      let h='<div class="box" style="padding:16px"><div class="sect-label" style="margin-top:0">Update Preview</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+
+          '<span class="badge '+riskCls+'">risk: '+esc(d.risk||'?')+'</span>'+
+          '<span class="badge b-gray">'+changed+' files</span>'+
+          '<span class="badge b-gray">'+esc(d.update_method||'')+'</span>'+
+          (d.conflicts&&d.conflicts.length?'<span class="badge b-yellow">'+d.conflicts.length+' conflicts</span>':'')+
+        '</div>';
+      if(d.incoming_commits)h+='<div style="font-size:11px;color:var(--dim);margin-bottom:6px">Incoming commits:</div><pre style="max-height:160px;overflow:auto;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap;color:var(--text)">'+esc(d.incoming_commits)+'</pre>';
+      if(d.changed_files&&d.changed_files.length)h+='<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--blue)">Changed files ('+d.changed_files.length+')</summary><div style="font-size:11px;color:var(--dim);margin-top:6px;font-family:var(--mono)">'+d.changed_files.map(f=>esc(f)).join('<br>')+'</div></details>';
+      h+='<div style="display:flex;gap:8px;align-items:center;margin-top:12px">'+
+        '<button class="btn btn-d" onclick="Updates.apply()">Apply update</button>'+
+        restartScopeBadge('ovui')+
+        '<span id="upd-apply-status" style="font-size:12px;color:var(--dim)"></span>'+
+      '</div></div>';
+      el.innerHTML=h;
+    }catch(e){if(st)st.textContent='';toast(e.message,'red');}
+  },
+  async verify(){
+    const st=$('upd-action-status');if(st)st.textContent='Verifying…';
+    try{
+      const d=await(await fetch('/api/admin/update/verify',{method:'POST'})).json();
+      if(st)st.textContent='';
+      if(d.healthy)toast('Checkout healthy ✓','green');
+      else toast('Verify found issues: '+((d.errors||[]).join('; ')||'unknown'),'red');
+    }catch(e){if(st)st.textContent='';toast(e.message,'red');}
+  },
+  async apply(){
+    if(!confirm('Apply the update now? The app will attempt the update and restart. This runs against the live checkout.'))return;
+    const st=$('upd-apply-status');if(st)st.textContent='Applying — do not navigate away…';
+    try{
+      const r=await fetch('/api/admin/update/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});
+      const d=await r.json();
+      if(d.ok){if(st)st.textContent=(d.status||'done')+' via '+(d.method||'?')+' — restarting…';toast('Update '+(d.status||'applied'),'green');}
+      else{if(st)st.textContent=d.error||d.reason||'failed';toast('Update failed: '+(d.error||d.reason||d.status||'?'),'red');}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red');}
+  },
+  async rollback(){
+    const sha=($('upd-rollback-sha')?.value||'').trim();
+    if(!sha){toast('Enter a target commit SHA','yellow');return;}
+    if(!confirm('Roll back the checkout to '+sha+'? Restart afterwards to load the reverted code.'))return;
+    const st=$('upd-rollback-status');if(st)st.textContent='Rolling back…';
+    try{
+      const r=await fetch('/api/admin/update/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_commit:sha})});
+      const d=await r.json();
+      if(d.ok){if(st)st.textContent=d.message||'Rolled back';toast('Rolled back to '+sha,'green');}
+      else{if(st)st.textContent=d.error||'Failed';toast(d.error||'Rollback failed','red');}
+    }catch(e){if(st)st.textContent=e.message;toast(e.message,'red');}
+  }
+};
+
+// Tools & Logs (WO-4.3) — transcripts / usage / issues viewers + greetings editor.
+const Tools={
+  _tab:'transcripts', _user:null, _greetings:null,
+  async load(){this.tab(this._tab);},
+  tab(name){
+    this._tab=name;
+    ['transcripts','usage','issues','greetings'].forEach(t=>{
+      const b=$('tools-tab-'+t);if(b)b.className='btn btn-sm '+(t===name?'btn-p':'btn-o');
+    });
+    if(name==='transcripts')this.transcripts();
+    else if(name==='usage')this.usage();
+    else if(name==='issues')this.issues();
+    else if(name==='greetings')this.greetings();
+  },
+  async transcripts(){
+    const el=$('tools-content');el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      const list=await(await fetch('/api/transcripts')).json();
+      if(!Array.isArray(list)||!list.length){el.innerHTML='<div class="empty"><div class="empty-icon">&#x1F4C4;</div>No transcripts</div>';return;}
+      el.innerHTML='<div class="box" style="padding:0;overflow:hidden"><table class="tbl"><thead><tr><th>Title</th><th>Date</th><th>Words</th><th></th></tr></thead><tbody>'+
+        list.map(t=>'<tr><td style="padding:8px 12px">'+esc(t.title||t.filename)+'</td><td style="padding:8px 12px;color:var(--dim);font-size:12px">'+esc(t.date||'')+'</td><td style="padding:8px 12px;color:var(--dim)">'+esc(String(t.words||0))+'</td>'+
+          '<td style="padding:8px 12px;text-align:right"><button class="btn btn-o btn-sm" onclick="Tools.readTranscript(\''+esc(t.date||'')+'\',\''+esc(t.filename||'')+'\')">View</button></td></tr>').join('')+
+        '</tbody></table></div><div id="tools-transcript-view" style="margin-top:12px"></div>';
+    }catch(e){el.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
+  },
+  async readTranscript(date,file){
+    const v=$('tools-transcript-view');if(!v)return;
+    v.innerHTML='<div class="loading"><div class="spin"></div></div>';
+    try{
+      const r=await fetch('/api/transcripts/'+encodeURIComponent(date)+'/'+encodeURIComponent(file));
+      const txt=await r.text();
+      v.innerHTML='<div class="box" style="padding:12px"><pre style="max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:12px;color:var(--text)">'+esc(txt)+'</pre></div>';
+    }catch(e){v.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
+  },
+  async usage(){
+    const el=$('tools-content');el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      if(!this._user){try{const me=await(await fetch('/api/auth/me')).json();this._user=me.username||'default';}catch(e){this._user='default';}}
+      const[uR,dR]=await Promise.all([
+        fetch('/api/usage/'+encodeURIComponent(this._user)).then(r=>r.ok?r.json():null).catch(()=>null),
+        fetch('/api/diagnostics').then(r=>r.ok?r.json():null).catch(()=>null)
+      ]);
+      let html='<div class="box" style="padding:16px;margin-bottom:16px"><div class="sect-label" style="margin-top:0">Usage &mdash; '+esc(this._user)+'</div>';
+      if(uR){
+        html+='<div class="stat-r"><span class="stat-l">Used this month</span><span class="stat-v">'+esc(String(uR.used))+'</span></div>'+
+          '<div class="stat-r"><span class="stat-l">Limit</span><span class="stat-v">'+(uR.limit===-1?'unlimited':esc(String(uR.limit)))+'</span></div>'+
+          '<div class="stat-r"><span class="stat-l">Remaining</span><span class="stat-v">'+(uR.remaining===-1?'∞':esc(String(uR.remaining)))+'</span></div>'+
+          '<div class="stat-r"><span class="stat-l">Allowed</span><span class="stat-v '+(uR.allowed?'g':'r')+'">'+(uR.allowed?'yes':'no')+'</span></div>';
+      }else html+='<div style="color:var(--dim);font-size:12px">Usage unavailable for this user.</div>';
+      html+='</div>';
+      if(dR){
+        html+='<div class="box" style="padding:16px"><div class="sect-label" style="margin-top:0">Diagnostics</div><pre style="max-height:360px;overflow:auto;white-space:pre-wrap;font-size:11px;color:var(--text)">'+esc(JSON.stringify(dR,null,2))+'</pre></div>';
+      }
+      el.innerHTML=html;
+    }catch(e){el.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
+  },
+  async issues(){
+    const el=$('tools-content');el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      const list=await(await fetch('/api/report-issues')).json();
+      if(!Array.isArray(list)||!list.length){el.innerHTML='<div class="empty"><div class="empty-icon">&#x1F41E;</div>No reported issues</div>';return;}
+      el.innerHTML='<div class="box" style="padding:0;overflow:hidden"><table class="tbl"><thead><tr><th>When</th><th>Category</th><th>Message</th></tr></thead><tbody>'+
+        list.map(r=>'<tr><td style="padding:8px 12px;color:var(--dim);font-size:12px;white-space:nowrap">'+esc(r.timestamp||r.ts||r.created_at||'')+'</td><td style="padding:8px 12px">'+esc(r.category||r.type||'&mdash;')+'</td><td style="padding:8px 12px;font-size:12px">'+esc(r.message||r.description||r.text||JSON.stringify(r).slice(0,200))+'</td></tr>').join('')+
+        '</tbody></table></div>';
+    }catch(e){el.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
+  },
+  async greetings(){
+    const el=$('tools-content');el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    try{
+      this._greetings=await(await fetch('/api/greetings')).json();
+      const g=(this._greetings&&this._greetings.greetings)||{};
+      const contextual=g.contextual||[];
+      const next=this._greetings.next_greeting||'';
+      let html='<div class="box" style="padding:16px;margin-bottom:16px"><div class="sect-label" style="margin-top:0">Queue next greeting</div>'+
+        '<div style="font-size:11px;color:var(--dim);margin-bottom:8px">One-shot &mdash; used at the very next session start, then cleared.'+(next?' Currently queued: <b>'+esc(next)+'</b>':'')+'</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+          '<input type="text" id="tools-greet-next" placeholder="Welcome back, Mike." maxlength="300" style="flex:1;min-width:220px;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-size:13px">'+
+          '<button class="btn btn-g btn-sm" onclick="Tools.queueGreeting()">Queue</button>'+
+        '</div></div>';
+      html+='<div class="box" style="padding:16px;margin-bottom:16px"><div class="sect-label" style="margin-top:0">Add contextual greeting</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+          '<input type="text" id="tools-greet-add" placeholder="Good to see you again." maxlength="300" style="flex:1;min-width:220px;background:var(--panel3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-size:13px">'+
+          '<button class="btn btn-p btn-sm" onclick="Tools.addGreeting()">Add</button>'+
+        '</div></div>';
+      html+='<div class="box" style="padding:16px"><div class="sect-label" style="margin-top:0">Contextual greetings ('+contextual.length+')</div>';
+      html+=contextual.length?contextual.map(t=>'<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><span style="flex:1;font-size:13px;color:var(--text)">'+esc(t)+'</span><button class="btn btn-d btn-sm" onclick="Tools.removeGreeting(this.getAttribute(\'data-g\'))" data-g="'+esc(t)+'">Remove</button></div>').join(''):'<div style="color:var(--dim);font-size:12px">None</div>';
+      html+='</div>';
+      // Generic / user pools (read-only overview)
+      const cats=[];Object.entries(g.generic||{}).forEach(([k,v])=>cats.push([k,(v||[]).length]));
+      if(cats.length)html+='<div class="box" style="padding:16px;margin-top:16px"><div class="sect-label" style="margin-top:0">Generic pools (read-only)</div>'+cats.map(([k,n])=>'<div class="stat-r"><span class="stat-l">'+esc(k)+'</span><span class="stat-v">'+n+'</span></div>').join('')+'</div>';
+      el.innerHTML=html;
+    }catch(e){el.innerHTML='<div class="empty">'+esc(e.message)+'</div>';}
+  },
+  async queueGreeting(){
+    const v=($('tools-greet-next')?.value||'').trim();if(!v){toast('Enter a greeting','yellow');return;}
+    try{const d=await(await fetch('/api/admin/greetings/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({greeting:v})})).json();
+      if(d.ok){toast('Queued','green');this.greetings();}else toast(d.error||'Failed','red');}catch(e){toast(e.message,'red');}
+  },
+  async addGreeting(){
+    const v=($('tools-greet-add')?.value||'').trim();if(!v){toast('Enter a greeting','yellow');return;}
+    try{const d=await(await fetch('/api/greetings/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({greeting:v})})).json();
+      if(d.ok){toast('Added','green');this.greetings();}else toast(d.error||'Failed','red');}catch(e){toast(e.message,'red');}
+  },
+  async removeGreeting(text){
+    if(!confirm('Remove this contextual greeting?'))return;
+    try{const d=await(await fetch('/api/admin/greetings/remove-contextual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({greeting:text})})).json();
+      if(d.ok){toast('Removed','green');this.greetings();}else toast(d.error||'Failed','red');}catch(e){toast(e.message,'red');}
   }
 };
 
@@ -2790,7 +3908,7 @@ addEventListener('DOMContentLoaded', async function(){
     if(d.clients?.length)$('nav-section-platform').style.display=''
   }).catch(()=>{});
   const hash=location.hash.slice(1);
-  const valid=['agents','builder','tests','providers','system','canvas','plugins','workspace','music','clients','faces','connections','platform-setup'];
+  const valid=['agents','builder','tests','providers','system','canvas','plugins','workspace','music','clients','faces','connections','platform-setup','framework','tts','stt','health','sessions','updates','tools'];
   show(valid.includes(hash)?hash:'agents');
 });
 </script>

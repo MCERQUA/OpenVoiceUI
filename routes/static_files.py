@@ -298,11 +298,55 @@ def upload_file():
     import uuid
 
     if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
+        import io as _io
+        import time as _time
+        ct = request.content_type or ''
+        # iOS/Cloudflare sometimes sends camera photo as raw binary body (no multipart).
+        # Detect: Content-Type is an image MIME, body has data, no other fields.
+        if (ct.startswith('image/') or ct == 'application/octet-stream') and request.content_length and request.content_length > 0:
+            raw = request.get_data()
+            if raw:
+                ext_guess = mimetypes.guess_extension(ct) or '.jpg'
+                if ext_guess in ('.jpe', '.jpeg'):
+                    ext_guess = '.jpg'
+                fname_raw = f'capture_{int(_time.time())}{ext_guess}'
+                logger.info('upload: raw-body fallback — ct=%s len=%s fname=%s', ct, len(raw), fname_raw)
+                from werkzeug.datastructures import FileStorage
+                f_raw = FileStorage(stream=_io.BytesIO(raw), filename=fname_raw, content_type=ct)
+                # Jump straight to save logic via a local alias
+                _raw_file = f_raw
+            else:
+                _raw_file = None
+        else:
+            _raw_file = None
 
-    f = request.files['file']
+        if _raw_file is None:
+            logger.warning(
+                'upload: no file field — content_type=%r content_length=%r '
+                'files_keys=%r form_keys=%r user_agent=%r',
+                ct,
+                request.content_length,
+                list(request.files.keys()),
+                list(request.form.keys()),
+                request.headers.get('User-Agent', '')[:120],
+            )
+            return jsonify({'error': 'No file provided'}), 400
+
+        # Use the raw-body file as `f` for the rest of the route
+        f = _raw_file
+    else:
+        f = request.files['file']
+
     if not f.filename:
-        return jsonify({'error': 'Empty filename'}), 400
+        # iOS camera blobs arrive with no filename — generate one from content-type
+        import time as _time
+        ct = f.content_type or 'image/jpeg'
+        ext_guess = mimetypes.guess_extension(ct) or '.jpg'
+        # mimetypes sometimes returns .jpe or .jpeg — normalize to .jpg
+        if ext_guess in ('.jpe', '.jpeg'):
+            ext_guess = '.jpg'
+        f.filename = f'capture_{int(_time.time())}{ext_guess}'
+        logger.info('upload: empty filename from client; generated fallback %s (content_type=%s)', f.filename, ct)
 
     # --- Sanitize filename, validate extension ---
     original_name = Path(f.filename).name
@@ -470,6 +514,36 @@ def serve_upload(filename):
     if not upload_path.exists():
         return jsonify({"error": "File not found"}), 404
     resp = send_file(upload_path)
+    # F-5 (2026-07-15): neutralize STORED XSS. Uploads are user/agent-supplied; an
+    # .html or .svg served with a rendering content-type executes in OUR origin and can
+    # steal the Clerk session. Serve only known-safe media types inline with their real
+    # mime; serve EVERYTHING else (html, svg, xml, js, ...) as a non-rendering
+    # text/plain attachment. Agent code-file uploads still store + download fine — they
+    # just never execute in-browser. nosniff + a locked-down CSP are belt-and-suspenders.
+    _ext = upload_path.suffix.lower()
+    _SAFE_INLINE = {
+        '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.avif',
+        '.mp4', '.webm', '.ogg', '.mov', '.mp3', '.wav', '.m4a', '.pdf',
+    }
+    if _ext not in _SAFE_INLINE:
+        resp.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        resp.headers['Content-Disposition'] = (
+            'attachment; filename="%s"' % Path(filename).name.replace('"', ''))
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    # CSP by type (2026-08-02): the strict `sandbox; default-src 'none'` neutralizes stored
+    # XSS in html/svg/js, but `sandbox` with no allowlist ALSO stops the browser's built-in
+    # media/pdf viewer from loading — so direct links to an uploaded .mp4/.mp3/.pdf served 200
+    # but played nothing (koolfoam video, mac-claude directive). Inert media served inline with
+    # its real mime + nosniff has no script surface, so it gets a CSP that permits only
+    # self-origin media/images/pdf to render while still blocking all script + framing, and
+    # crucially drops `sandbox`. Non-safe types (already downgraded to a text/plain attachment
+    # above) keep the maximally-locked CSP.
+    if _ext in _SAFE_INLINE:
+        resp.headers['Content-Security-Policy'] = (
+            "default-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; "
+            "object-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'")
+    else:
+        resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox; frame-ancestors 'none'"
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'

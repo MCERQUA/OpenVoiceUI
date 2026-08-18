@@ -85,11 +85,18 @@ def update_credential(cred_id):
 
     # Handle model selection update
     if cred_id == '_model_selection':
-        set_model_selection(
+        result = set_model_selection(
             username,
             primary=data.get('primary'),
             fallback=data.get('fallback'),
         )
+        # set_model_selection now returns {'ok': bool, 'error': str} — honor a
+        # real write failure instead of always reporting success (ADMIN-BUG-1).
+        if isinstance(result, dict) and not result.get('ok'):
+            return jsonify({
+                'ok': False,
+                'message': result.get('error', 'Model selection update failed'),
+            }), 500
         return jsonify({'ok': True, 'message': 'Model selection updated'})
 
     value = data.get('value')
@@ -204,7 +211,7 @@ def oauth_callback(provider):
     This endpoint is hit by the OAuth provider after user consent.
     Returns HTML that closes the popup and notifies the parent window.
     """
-    from services.vault import exchange_oauth_code
+    from services.vault import exchange_oauth_code, verify_oauth_nonce
 
     code = request.args.get('code', '')
     state_raw = request.args.get('state', '{}')
@@ -226,6 +233,12 @@ def oauth_callback(provider):
 
     if not username:
         return _oauth_callback_html(False, 'Missing username in state')
+
+    # F-6 (2026-07-15): verify the single-use CSRF state nonce BEFORE exchanging the code.
+    # Without this an attacker could forge this callback and connect their own account
+    # into the victim's vault (OAuth login/connection CSRF).
+    if not verify_oauth_nonce(username, cred_id, state.get('nonce', '')):
+        return _oauth_callback_html(False, 'Invalid or expired OAuth state (CSRF check failed) — please retry the connection.')
 
     result = exchange_oauth_code(cred_id, code, username)
 

@@ -291,7 +291,13 @@ class ElevenLabsProvider(TTSProvider):
         return bool(self.api_key)
 
     def get_info(self) -> dict:
-        voices = self._fetch_voices() if self.api_key else []
+        # LAZY (TTS-4): NEVER fetch voices over the network on the info/readiness
+        # path — get_info() is called by list_providers()/health and, historically,
+        # once per sentence. A synchronous _fetch_voices() (15s timeout) here was
+        # the live 401-spam source and stalled the stream. Use only the already
+        # populated cache; callers that truly need a fresh voice list use
+        # list_voices() (which fetches with its own 5-min TTL cache).
+        voices = self._voices_cache or []
         cloned = [v for v in voices if v.get('category') == 'cloned']
         builtin = [v for v in voices if v.get('category') != 'cloned']
         return {

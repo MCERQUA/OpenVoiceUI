@@ -38,7 +38,7 @@ from routes.music import current_music_state as _music_state
 from services.gateway_manager import gateway_manager
 from services.gateways.compat import is_system_response
 from services.tts import generate_tts_b64 as _tts_generate_b64
-from tts_providers import get_provider, list_providers
+from tts_providers import get_provider, list_providers, invalidate as _tts_invalidate
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,21 @@ _VOICE_INSTRUCTIONS = (
     "BAD: [MUSIC_PLAY]  GOOD: Playing something for you now. [MUSIC_PLAY] "
     "Tags are invisible to the user — they only hear your words. "
 
+    # --- UI state file (#94) ---
+    "UI STATE FILE: a full always-current copy of these instructions plus live UI state "
+    "(canvas page list, track lists, current user, open page, music state) is auto-written "
+    "to uploads/UI_STATE.md in your workspace before every turn. If a page-id or track title "
+    "is not in the current message, or you no longer remember these instructions, READ "
+    "uploads/UI_STATE.md — never guess a page-id or track name. "
+
+    # --- Co-browsing (#154) ---
+    "CO-BROWSING: [BROWSE:https://site.com] starts a server-side browser at that URL "
+    "and shows the user a live view — use it when the user asks you to go to / look "
+    "something up on / browse a real website (works on any site, unlike [CANVAS_URL:]). "
+    "You then see the page via a [BROWSE_STATE: ...] tag next message; drive it with "
+    '[BROWSE_ACTION:{"action":"click|type|scroll|goto|back|forward|reload|wait",...}] '
+    "tags (say what you're doing in words too). Only browse when asked. "
+
     # --- Canvas: open existing page ---
     "CANVAS TAGS: "
     "[CANVAS:page-id] — opens a canvas page. Use exact page-id from the [Canvas pages:] list above. "
@@ -122,6 +137,7 @@ _VOICE_INSTRUCTIONS = (
     "ONLY the [CANVAS:page-id] tag works to open pages. "
     "Repeating [CANVAS:same-page] on an already-open page forces a refresh. "
     "[CANVAS_MENU] — opens the page picker so the user can browse all pages. "
+    "[CANVAS_CLOSE] — closes/hides the canvas (use when the user asks to close, hide, or dismiss the canvas or a stuck page). "
     "[CANVAS_URL:https://example.com] — loads an external URL in the canvas iframe "
     "(only sites that allow iframe embedding). "
 
@@ -389,6 +405,32 @@ _double_empty_window_start: float = 0
 _DOUBLE_EMPTY_MAX_RESTARTS: int = 2       # max restart flags per window
 _DOUBLE_EMPTY_WINDOW_SECONDS: float = 300  # 5-minute sliding window
 
+#: ── Context-bloat guard (2026-07-13, bhb session overflow; #94 2026-07-19) ─
+#: The STATIC instruction blocks (voice action-tag instructions, canvas page
+#: list, track list, DJ sounds, profile instructions, canvas style,
+#: CURRENT_USER/office briefing, latest generated song) used to be re-sent
+#: verbatim on EVERY turn (~17KB/turn). The gateway session keeps full
+#: history, so after a day of voice chat the duplicated blocks alone overflowed
+#: GLM-5's context window (bhb 2026-07-13: 199-message session, repeated
+#: 'Context overflow' + a wedged ReplyRunAlreadyActive run → UI stuck in
+#: 'Connection lost — retrying'). The full static block is sent only when
+#: its CONTENT CHANGES (hash), on __session_start__, or as a periodic refresh;
+#: otherwise a one-line pointer is sent.
+#:
+#: Issue #94 (2026-07-19): the same static block is now ALSO mirrored to
+#: uploads/UI_STATE.md in the agent workspace on every turn (atomic,
+#: hash-skipped — see services/ui_state.py). That durable on-disk copy is why
+#: the periodic resend cadence below is 3x longer than the original 10-turn/
+#: 15-min guard: if openclaw auto-compaction strips the block from history,
+#: the per-turn pointer names the file and the agent can recover the full
+#: instructions with one read instead of waiting for the next resend.
+#: Truly per-turn parts (face recognition, camera vision, canvas open/closed,
+#: music now-playing, Suno event announcements) stay inline every turn.
+_ctx_static_cache: dict = {}        # "<session_id>:<voice_key>" -> {hash, ts, skips}
+_CTX_STATIC_RESEND_TURNS = 30       # resend full block at least every N turns
+_CTX_STATIC_RESEND_SECS = 2700      # ...or after 45 minutes, whichever first
+_CTX_STATIC_CACHE_MAX = 300         # prune guard for the in-process cache
+
 # ---------------------------------------------------------------------------
 # Voice session management
 # (moved here from server.py so the blueprint owns the session counter)
@@ -450,6 +492,11 @@ def bump_voice_session() -> str:
     # at all), so the Reset button left the app pinned to a recovery-<epoch>
     # session forever.
     _exit_session_recovery()
+    # Context-bloat guard: a reset means the gateway session history is (or is
+    # about to be) gone — the next turn MUST carry the full static instruction
+    # block again, never the dedup pointer. The stable session key would
+    # otherwise keep the cache entry alive across the reset.
+    _ctx_static_cache.clear()
     try:
         with open(VOICE_SESSION_FILE, 'r') as f:
             counter = int(f.read().strip())
@@ -1004,6 +1051,7 @@ def clean_for_tts(text: str) -> str:
 
     # Remove canvas/task/music triggers (handled by frontend, not spoken)
     text = re.sub(r'\[CANVAS_MENU\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[CANVAS_CLOSE\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[CANVAS:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[CANVAS_URL:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[MUSIC_PLAY(?::[^\]]*)?\]', '', text, flags=re.IGNORECASE)
@@ -1112,9 +1160,11 @@ def clean_for_tts(text: str) -> str:
 
     # Clean up whitespace
     text = re.sub(r'\n+', '. ', text)
-    text = re.sub(r'\.{2,}', '.', text)
+    # Preserve "..." — TTS models render ellipses as a natural trailing pause
+    # (character voices like Kyle depend on them). Only collapse runs of 4+.
+    text = re.sub(r'\.{4,}', '...', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    text = re.sub(r'\.\s*\.', '.', text)
+    text = re.sub(r'(?<!\.)\.\s*\.(?!\.)', '.', text)
     # Strip leading punctuation/spaces (e.g. from [MUSIC_STOP]\n\n → ". text")
     text = re.sub(r'^[.,;:\s]+', '', text)
 
@@ -1272,7 +1322,11 @@ def _conversation_inner():
     # Build context prefix from UI state
     t_context_start = time.time()
     context_prefix = ''
-    context_parts = []
+    context_parts = []   # dynamic — changes turn to turn, always sent
+    static_parts = []    # static — identical between turns; deduped by the
+                         # context-bloat guard below (sent on change/periodic)
+    _ui_state_lines = []  # plain-text state summary mirrored to UI_STATE.md
+                          # (issue #94) — canvas/music state only, no ephemera
 
     # Inject face recognition identity
     if identified_person and identified_person.get('name') and identified_person.get('name') != 'unknown':
@@ -1311,14 +1365,162 @@ def _conversation_inner():
             if 'uploads' not in _img_file.parts:
                 raise ValueError(f'Path traversal blocked: {image_path}')
             if _img_file.is_file() and _img_file.stat().st_size < 20_000_000:  # 20MB safety cap
-                from routes.vision import _call_vision
-                _img_b64 = base64.b64encode(_img_file.read_bytes()).decode('ascii')
-                _upload_desc = _call_vision(
-                    _img_b64,
-                    'Describe what you see in this image in detail. Include colors, objects, text, people, layout, and any notable features.',
-                )
+                # Check .image-intel cache first — avoids live API call when image was pre-analyzed
+                _intel_path = _img_file.parent / '.image-intel' / (_img_file.name + '.json')
+                _upload_desc = None
+                if _intel_path.is_file():
+                    try:
+                        import json as _json
+                        _intel = _json.loads(_intel_path.read_text())
+                        _cached = _intel.get('analysis', {}).get('description', '').strip()
+                        if _cached:
+                            _kw = _intel.get('analysis', {}).get('keywords', [])
+                            _txt = _intel.get('analysis', {}).get('text_in_image', '').strip()
+                            _upload_desc = _cached
+                            if _txt:
+                                _upload_desc += f' Text visible in image: {_txt}'
+                            if _kw:
+                                _upload_desc += f' Keywords: {", ".join(_kw[:10])}'
+                            logger.info('Loaded image analysis from .image-intel cache: %s', _img_file.name)
+                    except Exception as _ie:
+                        logger.debug('Could not read .image-intel cache: %s', _ie)
+                if _upload_desc is None:
+                    # SYNC GEMINI FIRST (Mike, 2026-08-18): an image attached to the chat
+                    # transcript is a "single" — the user is looking at it NOW and the agent
+                    # must read it in THIS turn, not tell them to wait 30s for the background
+                    # vision agent. Gemini reads it synchronously; the mesh queue below
+                    # survives only as the fallback when Gemini fails. Bulk uploads never
+                    # pass through here (no image_path on a chat turn) — they are swept by
+                    # the host-side auto-processor into .image-intel in the background.
+                    _gem_key = os.environ.get('GEMINI_API_KEY', '')
+                    if _gem_key:
+                        try:
+                            import requests as _rq
+                            _mime = {
+                                '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                                '.webp': 'image/webp', '.gif': 'image/gif',
+                            }.get(_img_file.suffix.lower(), 'image/jpeg')
+                            _b64 = base64.b64encode(_img_file.read_bytes()).decode()
+                            _gr = _rq.post(
+                                'https://generativelanguage.googleapis.com/v1beta/models/'
+                                f'gemini-2.5-flash:generateContent?key={_gem_key}',
+                                json={'contents': [{'parts': [
+                                    {'inline_data': {'mime_type': _mime, 'data': _b64}},
+                                    {'text': 'Describe this image concisely but completely: subjects, '
+                                             'objects, layout, any visible text (transcribe it), and '
+                                             'anything a user would likely ask about. Plain prose.'},
+                                ]}]},
+                                timeout=20,
+                            )
+                            _gr.raise_for_status()
+                            _gtxt = (_gr.json()['candidates'][0]['content']['parts'][0]['text'] or '').strip()
+                            if _gtxt:
+                                _upload_desc = (
+                                    f'{_gtxt} (Image file: uploads/{_img_file.name}; OpenClaw path '
+                                    f'/home/node/.openclaw/workspace/uploads/{_img_file.name} if the '
+                                    'image tool is ever needed — it rejects /app/runtime/uploads/.)'
+                                )
+                                logger.info('Chat image read synchronously via Gemini: %s', _img_file.name)
+                                # Write the .image-intel sidecar so later turns hit the cache
+                                # and the background sweeper knows this file is done.
+                                try:
+                                    import hashlib as _hl
+                                    import json as _json
+                                    _intel_path.parent.mkdir(exist_ok=True)
+                                    _intel_path.write_text(_json.dumps({
+                                        'schema': 1,
+                                        'file': _img_file.name,
+                                        'tenant': os.getenv('JAMBOT_TENANT', ''),
+                                        'sha256': _hl.sha256(_img_file.read_bytes()).hexdigest(),
+                                        'size': _img_file.stat().st_size,
+                                        'source': 'gemini-sync',
+                                        'original_name': _img_file.name,
+                                        'analyzed_at': datetime.utcnow().isoformat() + 'Z',
+                                        'analysis': {'description': _gtxt, 'keywords': [],
+                                                     'text_in_image': ''},
+                                    }, indent=1))
+                                except Exception as _we:
+                                    logger.debug('Could not write gemini-sync sidecar: %s', _we)
+                        except Exception as _ge:
+                            logger.warning('Sync Gemini vision failed (%s) — falling back to '
+                                           'vision@mesh queue for %s', _ge, _img_file.name)
+                if _upload_desc is None:
+                    # No cache yet — route to vision@mesh via openclaw container (has mesh-send + mesh mount)
+                    # Non-blocking: mesh task, vision agent writes .image-intel sidecar async
+                    # OVU runs inside Docker; mesh-send isn't in this image but openclaw-<tenant> has it.
+                    import subprocess as _sp
+                    # Initialised BEFORE the `if _tenant` guard on purpose: it is read after that
+                    # block, so a tenant-less request would otherwise raise NameError. Defaulting
+                    # to False also makes the no-tenant path honest — nothing was queued there
+                    # either, so the user must not be told an analysis is coming.
+                    _queued = False
+                    _tenant = os.getenv('JAMBOT_TENANT', '')
+                    if _tenant:
+                        # Build the HOST path (vision agent runs on host, needs /mnt/clients/ path)
+                        _host_img_path = f'/mnt/clients/{_tenant}/openvoiceui/uploads/{_img_file.name}'
+                        _msg_body = (
+                            f'image_path: {_host_img_path}\n'
+                            f'tenant: {_tenant}\n'
+                            f'filename: {_img_file.name}'
+                        )
+                        _mesh_cmd = (
+                            f'AGENT_URI=openvoiceui@mesh '
+                            f'/mnt/shared-skills/agent-mesh/bin/mesh-send '
+                            f'--to vision@mesh --kind task '
+                            f'--subject analyze-{_img_file.stem[:40]}'
+                        )
+                        # CHECK THE RETURN CODE. This previously ran with capture_output=True, no
+                        # check=, and no inspection of returncode — then logged "Image analysis
+                        # queued" unconditionally. A mesh-send that exited non-zero (unknown kind,
+                        # missing mailbox, rate limit) was reported as SUCCESS BY THE SENDER while
+                        # nothing was ever queued, and the user was told "being analyzed now" for
+                        # an image nothing would ever look at. Success must come from the receiver,
+                        # or at minimum from the exit code — never from having reached the call.
+                        _queued = False
+                        try:
+                            _r = _sp.run(
+                                ['docker', 'exec', '-i', f'openclaw-{_tenant}',
+                                 'bash', '-c', _mesh_cmd],
+                                input=_msg_body.encode(),
+                                timeout=8, capture_output=True,
+                            )
+                            if _r.returncode == 0:
+                                _queued = True
+                                logger.info('Image analysis queued to vision@mesh via openclaw-%s: %s',
+                                            _tenant, _img_file.name)
+                            else:
+                                logger.error('vision@mesh queue FAILED rc=%s tenant=%s file=%s stderr=%s',
+                                             _r.returncode, _tenant, _img_file.name,
+                                             (_r.stderr or b'').decode('utf-8', 'replace')[:300])
+                        except Exception as _se:
+                            logger.warning('Failed to queue vision task to vision@mesh: %s', _se)
+                    # Do not promise an analysis that was never queued.
+                    # The path matters as much as the status: without it, agents guess
+                    # (/app/runtime/uploads/ is readable by exec/read but REJECTED by the
+                    # image tool, whose media roots are hardcoded to workspace paths) and
+                    # burn a minute copying files around narrating paths over TTS.
+                    if _queued:
+                        _upload_desc = (
+                            f'Image saved in your workspace uploads folder: uploads/{_img_file.name} '
+                            f'(OpenClaw: /home/node/.openclaw/workspace/uploads/{_img_file.name}; '
+                            f'Hermes: /workspace/uploads/{_img_file.name}). A background vision agent '
+                            'is analyzing it right now — the result arrives in about 30 seconds. Do '
+                            'NOT analyze the image yourself, do NOT run the image tool on it, and do '
+                            'NOT copy or move the file. Tell the user you are taking a look; the '
+                            'analysis will be in your context on their next message. If you ever do '
+                            'need the image tool on an upload, it only accepts workspace paths like '
+                            'the above — it rejects /app/runtime/uploads/.'
+                        )
+                        logger.info('Image routed to vision@mesh: %s', _img_file.name)
+                    else:
+                        _upload_desc = (
+                            f'Image saved in your workspace uploads folder: uploads/{_img_file.name} '
+                            f'(OpenClaw: /home/node/.openclaw/workspace/uploads/{_img_file.name}; '
+                            f'Hermes: /workspace/uploads/{_img_file.name}), but automatic analysis '
+                            'could not be started. If the user asks about it, run the image tool on '
+                            'that exact workspace path — the image tool rejects /app/runtime/uploads/.'
+                        )
                 context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
-                logger.info('Vision analysis of uploaded image succeeded (%d bytes)', _img_file.stat().st_size)
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
                 context_parts.append('[UPLOADED IMAGE: File could not be analyzed — may be too large or missing.]')
@@ -1444,8 +1646,10 @@ def _conversation_inner():
                          .replace('.html', '')
                          .replace('-', ' '))
             context_parts.append(f'[Canvas OPEN: {page_name}]')
+            _ui_state_lines.append(f'Canvas OPEN: {page_name}')
         elif not ui_context.get('canvasVisible'):
             context_parts.append('[Canvas CLOSED]')
+            _ui_state_lines.append('Canvas CLOSED')
         if ui_context.get('canvasMenuOpen'):
             context_parts.append('[Canvas menu visible to user]')
         # Canvas JS errors — auto-injected from browser error buffer
@@ -1460,12 +1664,15 @@ def _conversation_inner():
         if _srv_playing and _srv_track:
             _track_name = _srv_track.get('title') or _srv_track.get('name', 'unknown')
             context_parts.append(f'[Music PLAYING: {_track_name}]')
+            _ui_state_lines.append(f'Music PLAYING: {_track_name}')
         elif _srv_track:
             _track_name = _srv_track.get('title') or _srv_track.get('name', 'unknown')
             context_parts.append(f'[Music PAUSED/STOPPED — last track: {_track_name}]')
+            _ui_state_lines.append(f'Music PAUSED/STOPPED — last track: {_track_name}')
         elif ui_context.get('musicPlaying'):
             track = ui_context.get('musicTrack', 'unknown')
             context_parts.append(f'[Music PLAYING: {track}]')
+            _ui_state_lines.append(f'Music PLAYING: {track}')
 
         # Available music tracks (so agent can use [MUSIC_PLAY:exact name])
         # Names come from a 10s TTL cache (_cached_music_names) so a full
@@ -1479,7 +1686,7 @@ def _conversation_inner():
             if _gen_names:
                 _parts.append(f'Generated ({len(_gen_names)}): {_cap_list(_gen_names, max_chars=2000)}')
             if _parts:
-                context_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
+                static_parts.append(f'[Available tracks — {" | ".join(_parts)}]')
         except Exception:
             pass
 
@@ -1487,17 +1694,55 @@ def _conversation_inner():
         # mtime (created_date metadata is date-only and useless for recency).
         # Gives the agent the exact filename + a ready-to-send download link so
         # it never guesses or hands out a broken /music/ URL.
+        # STATIC (#94): only changes when a new song lands — the hash-change
+        # resend in the context-bloat guard delivers it then, instead of
+        # repeating ~150 chars on every turn of the session.
         try:
             from routes.music import get_latest_generated_track
             _latest = get_latest_generated_track()
             if _latest:
-                context_parts.append(
+                static_parts.append(
                     f"[Latest generated song: {_latest['title']!r} "
                     f"(file: {_latest['filename']}) — "
                     f"download link: /generated_music/{_latest['filename']}?download=1]"
                 )
         except Exception:
             pass
+
+        # Co-browsing text-sight (#154 Phase 2): when a server-side browse session
+        # is active for this tenant, give the agent the current page's url/title +
+        # a DOM digest (visible text, links, buttons) so it can navigate without a
+        # full screenshot round-trip. Dynamic (changes every action) → per-turn.
+        try:
+            from routes.browse import get_browse_state
+            _bstate = get_browse_state()
+            if _bstate:
+                _links = ' | '.join(l for l in _bstate.get('links', []) if l)[:600]
+                _btns = ' | '.join(b for b in _bstate.get('buttons', []) if b)[:400]
+                _bparts = [
+                    f"url={_bstate.get('url','')!r}",
+                    f"title={_bstate.get('title','')!r}",
+                ]
+                if _bstate.get('text'):
+                    _bparts.append(f"visible text: {_bstate['text'][:800]}")
+                if _links:
+                    _bparts.append(f"links: {_links}")
+                if _btns:
+                    _bparts.append(f"buttons: {_btns}")
+                if _bstate.get("tab_count", 1) > 1:
+                    _bparts.append(f"tabs open: {_bstate['tab_count']} "
+                                   f"(active #{_bstate.get('active_tab', 0)})")
+                if _bstate.get("last_download"):
+                    _bparts.append(f"download captured: {_bstate['last_download']} "
+                                   f"(saved to the user's uploads)")
+                context_parts.append(
+                    '[BROWSE_STATE (live server-side browser you are driving — the user '
+                    'sees this too): ' + ' · '.join(_bparts) + '. Drive it by emitting '
+                    '[BROWSE_ACTION:{"action":"click|type|scroll|goto|back|forward|reload|wait",...}] '
+                    'tags; say what you are doing in words too.]'
+                )
+        except Exception as _be:
+            logger.debug(f'BROWSE_STATE injection skipped: {_be}')
 
         # Recently completed Suno generations — agent gets notified on next turn
         try:
@@ -1531,28 +1776,43 @@ def _conversation_inner():
             _page_list = _cap_list(_page_ids, max_chars=5000)
         except Exception:
             _page_list = 'unknown'
-        context_parts.append(f'[Canvas pages: {_page_list}]')
+        static_parts.append(f'[Canvas pages: {_page_list}]')
 
         # Available DJ sounds (for [SOUND:name] in DJ mode)
-        context_parts.append(
+        static_parts.append(
             '[DJ sounds: air_horn, scratch_long, rewind, record_stop, '
             'crowd_cheer, crowd_hype, yeah, lets_go, gunshot, bruh, sad_trombone]'
         )
     # Inject active profile's custom system_prompt (admin editor → runtime)
     # Also read min_sentence_chars for TTS sentence extraction.
     _min_sentence_chars = 40  # default — prevents choppy short TTS fragments
+    # First-audio latency cap (2026-07-16): the reply's FIRST spoken chunk is
+    # extracted at min(_min_sentence_chars, this) so audio starts fast even on
+    # profiles with large character-pacing minimums (kyle's 200-char min made
+    # the first Resemble chunk 200-310 chars = 6-10s of synthesis while the
+    # text was already on screen). Later chunks keep the profile minimum.
+    _first_chunk_min_chars = 60
     _parallel_sentences = True  # default — fire all TTS in parallel threads
     _inter_sentence_gap_ms = 0  # default — no gap between audio chunks
     _prof = None  # default — referenced again in __session_start__ greeting branch below
     _profile_greeting = ''  # default — set in the __session_start__ branch; read by the
                             # empty-greeting fallback in stream_response (closure capture)
+    # Persona greeting rotation defaults — MUST be initialized at function level:
+    # the text_done capture hook in stream_response evaluates _grot_active on
+    # EVERY turn (closure), and the assignments below only run in the
+    # __session_start__ branch. Without these defaults every non-greeting turn
+    # raised NameError mid-stream → 'Connection lost — retrying' (bhb 2026-07-13).
+    _grot_active = False
+    _grot_state_path = ''
+    _persona_greeting_prompt = ''
+    _persona_fallbacks = []
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
         _mgr = get_profile_manager()
         _prof = _mgr.get_profile(_active_profile_id)
         if _prof and _prof.system_prompt and _prof.system_prompt.strip():
-            context_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
+            static_parts.append(f'[PROFILE INSTRUCTIONS: {_prof.system_prompt.strip()}]')
         if _prof and hasattr(_prof, 'voice') and _prof.voice:
             _vc = _prof.voice
             if _vc.min_sentence_chars:
@@ -1575,6 +1835,10 @@ def _conversation_inner():
     # right now (regardless of which tenant account they're using). When Mike
     # the developer pops into a client tenant to debug, the agent should treat
     # him as a peer collaborator, not a client. See services/identity.py.
+    # STATIC (#94): the tag + office briefing are stable within a session for
+    # a given Clerk user — they used to repeat ~300-800 chars on EVERY turn
+    # (the exact accumulation PR #297 was called out for in issue #94). A user
+    # switch or briefing change flips the static-blob hash → full resend.
     try:
         from flask import g as _flask_g
         from services.identity import get_current_user_tag as _get_current_user_tag
@@ -1582,7 +1846,7 @@ def _conversation_inner():
         _tenant = os.getenv('JAMBOT_TENANT') or os.getenv('TENANT_NAME') or None
         _user_tag = _get_current_user_tag(_clerk_uid, _tenant)
         if _user_tag:
-            context_parts.append(_user_tag)
+            static_parts.append(_user_tag)
             logger.info(f'### CURRENT_USER injected: clerk_uid={_clerk_uid} tenant={_tenant}')
 
         # Mesh-access gate — refresh the .mesh-admin-session marker on every
@@ -1612,10 +1876,12 @@ def _conversation_inner():
         from services.canvas_styles import get_active_style_id as _get_style_id
         _style_id = _get_style_id()
         if _style_id:
-            context_parts.append(
+            static_parts.append(
                 f'[CANVAS_STYLE: The user chose the "{_style_id}" design system for all '
                 f'canvas pages. BEFORE creating or restyling ANY canvas page you MUST '
-                f'read /app/runtime/canvas-pages/canvas-styles/ACTIVE-STYLE.md and start '
+                f'read canvas-styles/ACTIVE-STYLE.md inside your canvas-pages directory '
+                f'(OpenClaw: /app/runtime/canvas-pages/canvas-styles/ACTIVE-STYLE.md; '
+                f'Hermes: /workspace/canvas-pages/canvas-styles/ACTIVE-STYLE.md) and start '
                 f'by cp-ing canvas-styles/active-template.html to the new page file, then '
                 f'edit the copy (keep its full <style> block — never retype the template). '
                 f'Never use the old dark default. '
@@ -1626,7 +1892,62 @@ def _conversation_inner():
 
     # Inject voice assistant instructions so the agent knows about action tags.
     # This must be in-app (not workspace files) so it works out of the box.
-    context_parts.append(_load_voice_system_prompt())
+    static_parts.append(_load_voice_system_prompt())
+
+    # ── Context-bloat guard: dedup the static block (see module docstring at
+    # _ctx_static_cache). Full block goes out when its content changes, on
+    # __session_start__, or as a periodic refresh; otherwise a 1-line pointer.
+    if static_parts:
+        _static_blob = ' '.join(static_parts)
+
+        # #94: mirror the full static block + current canvas/music state to
+        # uploads/UI_STATE.md in the agent workspace (atomic, hash-skipped).
+        # This durable copy is what makes the pointer below recoverable after
+        # openclaw auto-compaction strips old history — see services/ui_state.py.
+        # Gated on ui_context: turns without browser UI state (API/proactive)
+        # build a listless static blob and must not clobber the good file.
+        if ui_context:
+            try:
+                from services.paths import UPLOADS_DIR as _ui_uploads_dir
+                from services.ui_state import write_ui_state as _write_ui_state
+                _write_ui_state(_ui_uploads_dir, _static_blob, _ui_state_lines)
+            except Exception as _us_e:
+                logger.warning(f'UI_STATE.md mirror failed (non-fatal): {_us_e}')
+        try:
+            import hashlib as _hl
+            _ctx_key = f'{session_id}:{get_voice_session_key()}'
+            _static_hash = _hl.sha1(_static_blob.encode('utf-8', 'replace')).hexdigest()
+            _now_ctx = time.time()
+            _rec = _ctx_static_cache.get(_ctx_key)
+            _resend_full = (
+                user_message == '__session_start__'
+                or _rec is None
+                or _rec.get('hash') != _static_hash
+                or _rec.get('skips', 0) + 1 >= _CTX_STATIC_RESEND_TURNS
+                or _now_ctx - _rec.get('ts', 0) > _CTX_STATIC_RESEND_SECS
+            )
+            if _resend_full:
+                context_parts.append(_static_blob)
+                _ctx_static_cache[_ctx_key] = {'hash': _static_hash, 'ts': _now_ctx, 'skips': 0}
+                if len(_ctx_static_cache) > _CTX_STATIC_CACHE_MAX:
+                    for _old_k in sorted(_ctx_static_cache,
+                                         key=lambda k: _ctx_static_cache[k].get('ts', 0))[:50]:
+                        _ctx_static_cache.pop(_old_k, None)
+            else:
+                _rec['skips'] = _rec.get('skips', 0) + 1
+                context_parts.append(
+                    '[Standing instructions (voice action tags, canvas page list, track list, '
+                    'profile instructions, canvas style, current user) were already provided '
+                    'earlier this session, are UNCHANGED, and still apply. A full always-current '
+                    'copy lives at uploads/UI_STATE.md in your workspace — re-read it if you no '
+                    'longer remember them.]'
+                )
+                logger.info(f'### CONTEXT DEDUP: skipped {len(_static_blob)} static chars '
+                            f'(skip {_rec["skips"]}/{_CTX_STATIC_RESEND_TURNS})')
+        except Exception as _ctx_e:
+            # Fail open — never let the guard cost a turn its instructions.
+            logger.warning(f'### CONTEXT DEDUP failed (sending full block): {_ctx_e}')
+            context_parts.append(_static_blob)
 
     if context_parts:
         context_prefix = ' '.join(context_parts) + ' '
@@ -1656,6 +1977,83 @@ def _conversation_inner():
                 _profile_greeting = (getattr(_prof.conversation, 'greeting', '') or '').strip()
         except Exception:
             _profile_greeting = ''
+        # ENTERTAINMENT-PERSONA greeting (opt-in per profile, e.g. Kyle/BHB).
+        # A profile that defines conversation.greeting_angles wants a FRESH, in-character
+        # greeting every single wake-up — never one canned line, and never the same TOPIC
+        # twice in a row. We ROTATE through the profile's angles (a persisted index that
+        # advances each session) and ask the agent to riff a brand-new bit in that angle,
+        # in its OWN real character (greeting_persona anchors the voice), while avoiding the
+        # last few openers. The greeting is produced by the gateway agent that loads the
+        # real persona — so the humour comes from the character, not a thin caricature here.
+        # Gated entirely on greeting_angles → any tenant without it is completely unaffected.
+        # (BHB/Kyle 2026-07-13 — replaces the wrong 'King of Entrepreneurship' caricature.)
+        _grot_active = False
+        _grot_state_path = ''
+        _persona_greeting_prompt = ''
+        _persona_fallbacks = []
+        try:
+            import json as _json_gp, os as _os_gp
+            _pf_gp = f"/app/runtime/profiles/{_active_profile_id}.json"
+            _pconf = {}
+            if _os_gp.path.exists(_pf_gp):
+                _pconf = (_json_gp.load(open(_pf_gp)).get('conversation') or {})
+            _persona = (_pconf.get('greeting_persona') or '').strip()
+            _angles = [a for a in (_pconf.get('greeting_angles') or [])
+                       if isinstance(a, str) and a.strip()]
+            _persona_fallbacks = [g for g in (_pconf.get('fallback_greetings') or [])
+                                  if isinstance(g, str) and g.strip()]
+            if _angles:
+                _grot_state_path = f"/app/runtime/profiles/.greeting-state-{_active_profile_id}.json"
+                _st = {}
+                try:
+                    if _os_gp.path.exists(_grot_state_path):
+                        _st = _json_gp.load(open(_grot_state_path)) or {}
+                except Exception:
+                    _st = {}
+                _idx = int(_st.get('i', 0)) % len(_angles)
+                _angle = _angles[_idx].strip()
+                _recent = [r for r in (_st.get('recent') or [])
+                           if isinstance(r, str) and r.strip()][-4:]
+                # advance + persist the index NOW so rotation moves forward even if the
+                # later text-capture never runs (empty turn, error, etc.)
+                try:
+                    _st['i'] = (_idx + 1) % len(_angles)
+                    _st['recent'] = _recent
+                    _tmp_gp = _grot_state_path + '.tmp'
+                    with open(_tmp_gp, 'w') as _fh_gp:
+                        _json_gp.dump(_st, _fh_gp)
+                    _os_gp.replace(_tmp_gp, _grot_state_path)
+                except Exception:
+                    pass
+                _avoid = ''
+                if _recent:
+                    _joined = ' | '.join(r[:120] for r in _recent)
+                    _avoid = f" Do NOT reuse or closely echo any of these recent openers: {_joined}."
+                _face_clause = ''
+                if _face_name:
+                    _face_clause = (f" The person is {_face_name} — you can work their name in "
+                                    f"naturally, or not.")
+                # Per-profile bit style: a profile can define conversation.greeting_bit_style
+                # to control the SHAPE of the opener (length, pacing, sound tags). Without it,
+                # the default stays the short punchy 40-word greeting. (Kyle/BHB wants the
+                # full episode-style cold-open ramble — 2026-07-14.)
+                _bit_style = (_pconf.get('greeting_bit_style') or '').strip()
+                if not _bit_style:
+                    _bit_style = (
+                        "Give a genuinely funny, in-character wake-up greeting — 2 to 3 "
+                        "sentences, about 40 words MAX (it's spoken aloud, so keep it punchy — "
+                        "no long monologue). Ramble a little into ONE quick tangent, then greet "
+                        "them. Spoken only, no markdown, no stage directions."
+                    )
+                _persona_greeting_prompt = (
+                    f"{_persona}\n\n"
+                    f"A new voice session just started — someone woke you up. {_bit_style} "
+                    f"{_angle}{_avoid} Make it a completely FRESH bit in your real voice — not a repeat, "
+                    f"not a generic AI joke.{_face_clause} Output ONLY the greeting."
+                )
+                _grot_active = True
+        except Exception:
+            _grot_active = False
         if _profile_greeting:
             if _face_name:
                 _gateway_message = (
@@ -1670,6 +2068,8 @@ def _conversation_inner():
                     f'entire response — do not add or remove anything, do not rephrase, do not '
                     f'append qualifiers: "{_profile_greeting}"'
                 )
+        elif _grot_active and _persona_greeting_prompt:
+            _gateway_message = _persona_greeting_prompt
         elif _face_name:
             _gateway_message = (
                 f'A new voice session has just started. The person in front of the camera '
@@ -1786,6 +2186,27 @@ def _conversation_inner():
                         _audio_fmt = _prov.get_info().get('audio_format', 'wav')
                     except Exception:
                         _audio_fmt = 'wav'
+
+                    def _detect_audio_fmt(audio_b64):
+                        """Sniff the real container from the audio header (TTS-11).
+
+                        After a sticky/transitive fallback the actual provider can
+                        switch mp3↔wav mid-response; labeling every chunk with the
+                        PRIMARY provider's format then lies and breaks decoding. Read
+                        the magic bytes so each chunk is labeled with what it actually
+                        is. Falls back to the primary provider's format on any doubt.
+                        """
+                        try:
+                            head = base64.b64decode(audio_b64[:32])
+                        except Exception:
+                            return _audio_fmt
+                        if head[:4] == b'RIFF' and head[8:12] == b'WAVE':
+                            return 'wav'
+                        if head[:3] == b'ID3' or (len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0):
+                            return 'mp3'
+                        if head[:4] == b'OggS':
+                            return 'ogg'
+                        return _audio_fmt
 
                     def _tts_error_event(err_str):
                         # CLIENT-FACING RULE (Mike 2026-06-28): never serialize raw provider
@@ -1907,12 +2328,12 @@ def _conversation_inner():
                             _run()  # sequential — block until this sentence is done
                         return done, result
 
-                    def _audio_event(audio_b64, chunk_idx, tts_ms=0):
+                    def _audio_event(audio_b64, chunk_idx, tts_ms=0, fmt=None):
                         """Build an audio SSE event dict with gap config."""
                         evt = {
                             'type': 'audio',
                             'audio': audio_b64,
-                            'audio_format': _audio_fmt,
+                            'audio_format': fmt or _detect_audio_fmt(audio_b64),
                             'chunk': chunk_idx,
                             'total_chunks': None,
                             'timing': {
@@ -2040,7 +2461,12 @@ def _conversation_inner():
                             )
                             # Fire TTS for complete sentences as they arrive
                             if not _is_system_text and not _has_open_tag(_tts_buf):
-                                sentence, _tts_buf = _extract_sentence(_tts_buf, min_len=_min_sentence_chars)
+                                _eff_min = (
+                                    min(_min_sentence_chars, _first_chunk_min_chars)
+                                    if (_chunks_sent == 0 and not _tts_pending)
+                                    else _min_sentence_chars
+                                )
+                                sentence, _tts_buf = _extract_sentence(_tts_buf, min_len=_eff_min)
                                 if sentence:
                                     logger.info(f"### TTS sentence (streaming): {sentence[:80]}")
                                     _tts_pending.append(_fire_tts(sentence))
@@ -2111,9 +2537,12 @@ def _conversation_inner():
                                 if tts_text_interim and tts_text_interim.strip():
                                     _tts_pending.append(_fire_tts(tts_text_interim))
 
-                            # Flush all pending TTS audio immediately
+                            # Flush all pending TTS audio immediately. Bounded per-chunk
+                            # wait (TTS-2) so a hung provider can't stall the interim
+                            # flush; a failed chunk is skipped, not fatal (already if/elif).
+                            _interim_timeout = int(os.getenv('TTS_SENTENCE_TIMEOUT', '20'))
                             for _done_i, _res_i in _tts_pending:
-                                _done_i.wait(timeout=30)
+                                _done_i.wait(timeout=_interim_timeout)
                                 if _res_i.get('error'):
                                     yield _tts_error_event(_res_i['error'])
                                 elif _res_i.get('audio'):
@@ -2622,19 +3051,25 @@ def _conversation_inner():
                                     except Exception as _fbe:
                                         logger.error(f'### Slow-empty Z.AI fallback failed: {_fbe}')
 
-                                # Z.AI direct didn't return text either — graceful apology
+                                # Z.AI direct didn't return text either — graceful apology.
+                                # For __session_start__ do NOT hardcode a greeting here: the
+                                # __session_start__ block below substitutes the profile-defined
+                                # greeting (or intentional silence, feedback_no_hardcoded_responses).
+                                # Setting one here left full_response non-empty, so that block's
+                                # `if not _gs...` skipped — the canned "give me a moment" filler
+                                # then won over the tenant's persona greeting (BHB/Kyle, 2026-07-13).
                                 if not full_response or not full_response.strip():
-                                    if user_message == '__session_start__':
-                                        full_response = "Hey, give me just a moment — I'm getting started."
-                                    else:
+                                    if user_message != '__session_start__':
                                         full_response = (
                                             "That took a bit longer than expected on my end. "
                                             "I'm still here — try again and I'll get right to it."
                                         )
-                                    metrics['fallback_used'] = 1
+                                        metrics['fallback_used'] = 1
                                     logger.warning(
                                         f"### SLOW EMPTY ({metrics['llm_inference_ms']}ms) — "
-                                        f"Z.AI direct also failed, using apology"
+                                        f"Z.AI direct also failed"
+                                        + ("" if user_message == '__session_start__'
+                                           else ", using apology")
                                     )
 
                             # ── __session_start__ must ALWAYS produce a spoken greeting ──
@@ -2658,11 +3093,49 @@ def _conversation_inner():
                                 _gs_norm = _gs.upper().rstrip('.!?')
                                 _gs_tag_only = bool(_gs) and re.match(r'^\s*(\[[^\]]+\]\s*)+$', _gs)
                                 if (not _gs) or _gs_norm in ('NO', 'YES') or _gs_tag_only:
-                                    # ONLY use a profile-defined greeting (tenant config, not hardcoded).
-                                    # If no profile greeting, leave empty — the silence is the diagnostic
-                                    # signal that the LLM failed on __session_start__.
-                                    # (feedback_no_hardcoded_responses — 2026-05-23 removal of canned list)
-                                    _fb_greeting = (_profile_greeting or '').strip()
+                                    # Empty/degenerate wake-up turn — substitute a greeting.
+                                    # ENTERTAINMENT-PERSONA path (opt-in per profile, e.g. Kyle/BHB):
+                                    # the gateway emptied, so take ONE more shot using the SAME rotated
+                                    # persona prompt we built for the gateway turn above
+                                    # (_persona_greeting_prompt — faithful voice + fresh angle + avoid-recent).
+                                    # That keeps even this standalone shot on-character and varied. If it
+                                    # also empties, rotate a VARIED real-voice line from fallback_greetings.
+                                    # Gated on the persona config, so tenants without it are unaffected —
+                                    # they keep the plain profile-greeting-or-silence behaviour below.
+                                    # (BHB/Kyle 2026-07-13; feedback_no_hardcoded_responses honoured — all
+                                    # copy lives in the tenant's own profile, nothing hardcoded here.)
+                                    _fb_greeting = ''
+                                    try:
+                                        import random as _rnd_g
+                                        _zk = os.environ.get('ZAI_API_KEY', '')
+                                        if _persona_greeting_prompt and _zk:
+                                            import requests as _req_g
+                                            try:
+                                                _rr = _req_g.post(
+                                                    'https://api.z.ai/api/anthropic/v1/messages',
+                                                    headers={'x-api-key': _zk,
+                                                             'anthropic-version': '2023-06-01',
+                                                             'content-type': 'application/json'},
+                                                    json={'model': 'glm-5-turbo', 'max_tokens': 400,
+                                                          'system': 'Output ONLY the spoken greeting text — '
+                                                                    'no tags, no preamble, fully in character.',
+                                                          'messages': [{'role': 'user', 'content': _persona_greeting_prompt}]},
+                                                    timeout=15)
+                                                if _rr.status_code == 200:
+                                                    _fb_greeting = (_rr.json().get('content', [{}])[0]
+                                                                    .get('text', '') or '').strip()
+                                                    if _fb_greeting:
+                                                        metrics['profile'] = 'persona-greeting-retry'
+                                            except Exception:
+                                                pass
+                                        if not _fb_greeting and _persona_fallbacks:
+                                            _fb_greeting = _rnd_g.choice(_persona_fallbacks).strip()
+                                    except Exception:
+                                        _fb_greeting = ''
+                                    # Tenants without the entertainment-persona config: profile greeting
+                                    # or intentional silence (feedback_no_hardcoded_responses).
+                                    if not _fb_greeting:
+                                        _fb_greeting = (_profile_greeting or '').strip()
                                     logger.warning(
                                         f"### SESSION_START produced no usable greeting "
                                         f"(was {full_response!r}, {metrics.get('llm_inference_ms')}ms) "
@@ -2695,6 +3168,29 @@ def _conversation_inner():
                                 # Wipe TTS buffer so the bare token isn't spoken
                                 _tts_buf = ''
                                 _tts_pending.clear()
+
+                            # Persona greeting rotation (Kyle/BHB): remember what he ACTUALLY
+                            # opened with, so the next wake-up's prompt can avoid echoing it.
+                            # Best-effort — the rotation index already advanced at prompt-build
+                            # time, so a miss here never repeats an angle. Persona path only.
+                            if _grot_active and user_message == '__session_start__' and (full_response or '').strip():
+                                try:
+                                    import json as _json_cap
+                                    _stc = {}
+                                    if _grot_state_path and os.path.exists(_grot_state_path):
+                                        _stc = _json_cap.load(open(_grot_state_path)) or {}
+                                    _rec = [r for r in (_stc.get('recent') or [])
+                                            if isinstance(r, str) and r.strip()]
+                                    _g_cap = full_response.strip()
+                                    if not _rec or _rec[-1] != _g_cap:
+                                        _rec.append(_g_cap)
+                                    _stc['recent'] = _rec[-6:]
+                                    _tmp_cap = _grot_state_path + '.tmp'
+                                    with open(_tmp_cap, 'w') as _fh_cap:
+                                        _json_cap.dump(_stc, _fh_cap)
+                                    os.replace(_tmp_cap, _grot_state_path)
+                                except Exception:
+                                    pass
 
                             yield json.dumps({
                                 'type': 'text_done',
@@ -2771,8 +3267,15 @@ def _conversation_inner():
                                 _tts_pending.append(_fire_tts(_remaining))
                                 _tts_buf = ''
 
-                            # Fallback: no sentences extracted (very short response)
-                            if not _tts_pending and full_response:
+                            # Fallback: no sentences extracted (very short response).
+                            # Guard on _chunks_sent, NOT just _tts_pending: the delta
+                            # path pops sentences from _tts_pending as their audio is
+                            # yielded, so on short fast replies the list is already
+                            # empty at text_done and this fallback re-spoke the WHOLE
+                            # reply a second time (double audio, 2026-07-12).
+                            # _chunks_sent counts audio actually delivered — if any
+                            # went out, streaming TTS already covered the text.
+                            if not _tts_pending and _chunks_sent == 0 and full_response:
                                 tts_text = clean_for_tts(full_response)
                                 if tts_text and tts_text.strip():
                                     _tts_pending.append(_fire_tts(tts_text))
@@ -2799,22 +3302,52 @@ def _conversation_inner():
                                         actions=captured_actions,
                                         identified_person=identified_person,
                                         clerk_user_id=_clerk_user_id,
+                                        gateway=gateway_id or 'openclaw',
                                     )
                                 break
 
                             t_tts_start = time.time()
                             total_chunks = _chunks_sent + len(_tts_pending)
-                            tts_ok = True
+                            # TTS-2 / TTS-8: a hung provider must NOT head-of-line-block
+                            # the ordered flush, and one chunk's error/timeout must NOT
+                            # discard the already-generated (paid) chunks behind it.
+                            # First pass: wait a bounded per-chunk timeout; deliver ready
+                            # audio, skip errors, and defer any chunk whose provider is
+                            # still hung. Second pass: give the deferred chunks a short
+                            # grace and deliver any that landed (out of order beats
+                            # silence). Never silently drop paid audio — log the rest.
+                            _tts_sentence_timeout = int(os.getenv('TTS_SENTENCE_TIMEOUT', '20'))
+                            _tts_deferred_grace = int(os.getenv('TTS_DEFERRED_GRACE', '10'))
+                            _deferred = []
                             for i, (done_evt, res) in enumerate(_tts_pending):
-                                done_evt.wait(timeout=30)
-                                if res['error']:
+                                if done_evt.wait(timeout=_tts_sentence_timeout):
+                                    if res['error']:
+                                        metrics['tts_success'] = 0
+                                        metrics['tts_error'] = res['error']
+                                        yield _tts_error_event(res['error'])
+                                        continue  # skip only the failed chunk, keep flushing
+                                    if res['audio']:
+                                        yield _audio_event(res['audio'], _chunks_sent + i, tts_ms=int((time.time() - t_tts_start) * 1000))
+                                else:
+                                    logger.warning(
+                                        f"### TTS chunk {i} not ready after "
+                                        f"{_tts_sentence_timeout}s — skipping ahead (provider hung)"
+                                    )
+                                    _deferred.append((i, done_evt, res))
+                            # Second pass — deliver late-completing chunks if they land.
+                            for i, done_evt, res in _deferred:
+                                if done_evt.wait(timeout=_tts_deferred_grace):
+                                    if res['error']:
+                                        yield _tts_error_event(res['error'])
+                                    elif res['audio']:
+                                        logger.info(f"### TTS chunk {i} completed late — delivering")
+                                        yield _audio_event(res['audio'], _chunks_sent + i, tts_ms=int((time.time() - t_tts_start) * 1000))
+                                else:
                                     metrics['tts_success'] = 0
-                                    metrics['tts_error'] = res['error']
-                                    yield _tts_error_event(res['error'])
-                                    tts_ok = False
-                                    break
-                                if res['audio']:
-                                    yield _audio_event(res['audio'], _chunks_sent + i, tts_ms=int((time.time() - t_tts_start) * 1000))
+                                    logger.error(
+                                        f"### TTS chunk {i} never completed within grace — "
+                                        f"audio not delivered (provider hung); paid generation logged, not discarded"
+                                    )
 
                             metrics['tts_generation_ms'] = int((time.time() - t_tts_start) * 1000)
                             metrics['tts_text_len'] = metrics['response_len']
@@ -2835,6 +3368,7 @@ def _conversation_inner():
                                     actions=captured_actions,
                                     identified_person=identified_person,
                                     clerk_user_id=_clerk_user_id,
+                                    gateway=gateway_id or 'openclaw',
                                 )
                             break
 
@@ -2966,6 +3500,7 @@ def _conversation_inner():
             actions=captured_actions,
             identified_person=identified_person,
             clerk_user_id=_clerk_user_id,
+            gateway=gateway_id or 'openclaw',
         )
 
     response_data = {'response': ai_response, 'user_said': user_message}
@@ -3227,15 +3762,31 @@ def conversation_reset():
 
 
 # ---------------------------------------------------------------------------
-# POST /api/session/reset  — manual session reset from UI actions panel
+# POST /api/session/reset-openclaw  — deep reset that also clears the openclaw
+# session JSONL (ADMIN-BUG-2, 2026-07-11)
 # ---------------------------------------------------------------------------
-
-@conversation_bp.route('/api/session/reset', methods=['POST'])
+# HISTORY / ADMIN-BUG-2: this handler was originally registered on
+# '/api/session/reset', the SAME path as server.py's soft/hard reset handler
+# (server.py `session_reset`). Because conversation_bp is registered before the
+# server.py @app.route is defined, Werkzeug matched THIS blueprint rule first —
+# silently shadowing server.py's mode-aware (soft/hard + pre-warm) handler that
+# SessionControl.js / the admin Health panel actually drive (they POST
+# {"mode": "soft"|"hard"} and read back `mode`). Worse, the openclaw-session-file
+# path below (`/home/node/.openclaw/...`) lives inside the OPENCLAW container, so
+# from the openvoiceui container it never exists — the try/except swallowed the
+# miss and this handler degraded to "bump the key" while blocking the richer one.
+#
+# FIX (additive, no deletion): this route is moved to the explicit, distinct
+# '/api/session/reset-openclaw' path. `/api/session/reset` is now unambiguously
+# served by server.py's canonical soft/hard handler. Both remain reachable; the
+# deep openclaw-file clear is opt-in via the new path.
+@conversation_bp.route('/api/session/reset-openclaw', methods=['POST'])
 def session_reset():
     """Clear the corrupted openclaw session state and return a fresh session key.
-    Called by the Reset button in the UI actions panel.
-    Clears the openclaw session JSONL file so orphaned messages don't cascade,
-    then bumps the voice session key so the next request starts completely fresh."""
+    Deep reset (opt-in): clears the openclaw session JSONL file so orphaned
+    messages don't cascade, then bumps the voice session key so the next request
+    starts completely fresh. The default /api/session/reset (server.py) handles
+    the common soft/hard reset."""
     old_key = get_voice_session_key()
     # Find and clear the openclaw session file for the current session key
     try:
@@ -3269,7 +3820,7 @@ def session_reset():
 def tts_providers_list():
     """List all available TTS providers with metadata."""
     try:
-        providers = list_providers(include_inactive=True)
+        providers = list_providers(include_inactive=True, probe=True)
         config_path = (Path(__file__).parent.parent
                        / 'tts_providers' / 'providers_config.json')
         default_provider = 'supertonic'
@@ -3352,6 +3903,10 @@ def tts_set_default_provider():
         except Exception as e:
             return jsonify({'ok': False, 'error': f'failed to write config: {e}'}), 500
 
+        # Drop the cached config + provider singletons so the next generate
+        # picks up the new default without a restart.
+        _tts_invalidate()
+
         logger.info(
             f'TTS default provider changed: {old_default} → {provider_id}'
         )
@@ -3420,6 +3975,9 @@ def tts_set_default_voice():
             os.replace(tmp_path, config_path)
         except Exception as e:
             return jsonify({'ok': False, 'error': f'failed to write config: {e}'}), 500
+
+        # Drop the cached config so the next read reflects the new voice order.
+        _tts_invalidate()
 
         logger.info(f'TTS default voice for {provider_id} → {voice}')
         return jsonify({
@@ -3693,7 +4251,10 @@ def tts_voices_list():
     """List all available voices across all providers, including cloned voices."""
     try:
         all_voices = {}
-        for provider_info in list_providers(include_inactive=False):
+        # probe=True: this is an explicit UI voice-list request, so instantiate
+        # cached singletons to surface live cloned_voices (a get_info() field the
+        # config catalog doesn't carry).
+        for provider_info in list_providers(include_inactive=False, probe=True):
             pid = provider_info.get('provider_id', provider_info.get('name', 'unknown'))
             voices = provider_info.get('voices', [])
             cloned = provider_info.get('cloned_voices', [])
