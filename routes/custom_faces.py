@@ -15,6 +15,7 @@ Endpoints:
   GET    /faces/custom/<filename>       — serve face HTML for iframe loading
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -335,6 +336,103 @@ def get_face_template():
     return template_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html"}
 
 
+# ── Performance attestation gate (Mike, 2026-08-18) ─────────────────────────
+# A face runs PERMANENTLY beside voice/STT/TTS. "Done" is not done until it is
+# measured running efficiently AT FULL LOAD on a real browser. The probe (see
+# /mnt/shared-skills/custom-faces/SKILL.md) forces the speaking state, samples
+# per-second fps for >=30s in the viewer's browser, and POSTs the result here.
+# promote_canvas_to_face() then REFUSES (HTTP 428) unless a report exists that:
+#   - matches the CURRENT page content (sha256 — edit the page, re-test),
+#   - is fresh (<7 days),
+#   - has fps_low (5th-percentile of per-second samples) >= FACE_MIN_FPS (50).
+# {"force": true} overrides with a logged warning — deliberate, never silent.
+FACE_MIN_FPS = int(os.environ.get("FACE_MIN_FPS", "50"))
+PERF_DIR_NAME = ".perf"
+
+
+def _perf_dir():
+    d = FACES_DIR / PERF_DIR_NAME
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _page_sha(path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+@custom_faces_bp.route("/api/custom-faces/perf-report", methods=["POST"])
+def perf_report():
+    """Store a full-load fps attestation for a canvas page or face.
+
+    Body: { "page_id": "...", "samples": [fps,...>=20], "user_agent": optional }
+    fps_low = 5th percentile of samples — robust against one clean second.
+    """
+    data = request.get_json(silent=True) or {}
+    page_id = re.sub(r"[^a-zA-Z0-9_\-]", "", str(data.get("page_id", "")))
+    samples = data.get("samples")
+    if not page_id or not isinstance(samples, list) or len(samples) < 20:
+        return jsonify({"error": "Need page_id + >=20 per-second fps samples "
+                                 "(measure >=30s at FULL LOAD — forced speaking state)"}), 400
+    try:
+        vals = sorted(float(x) for x in samples)
+    except (TypeError, ValueError):
+        return jsonify({"error": "samples must be numbers"}), 400
+    fps_low = vals[max(0, int(len(vals) * 0.05) - 1)] if len(vals) else 0.0
+    src = CANVAS_PAGES_DIR / (page_id + ".html")
+    if not src.exists():
+        src = FACES_DIR / (page_id + ".html")
+    sha = _page_sha(src)
+    report = {
+        "page_id": page_id,
+        "fps_low": round(fps_low, 1),
+        "fps_median": round(vals[len(vals) // 2], 1),
+        "samples": len(vals),
+        "content_sha256": sha,
+        "user_agent": str(data.get("user_agent", request.headers.get("User-Agent", "")))[:200],
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    (_perf_dir() / (page_id + ".json")).write_text(json.dumps(report, indent=1))
+    passed = fps_low >= FACE_MIN_FPS
+    return jsonify({"ok": True, "passed": passed, "fps_low": report["fps_low"],
+                    "threshold": FACE_MIN_FPS,
+                    "verdict": "PASS — promotable" if passed else
+                               f"FAIL — fps_low {report['fps_low']} < {FACE_MIN_FPS}; optimize and re-test"})
+
+
+def _check_perf_attestation(page_id, src_path):
+    """Return (ok, http_status, payload) for the promote gate."""
+    rp = _perf_dir() / (page_id + ".json")
+    how = ("Run the full-load probe from /mnt/shared-skills/custom-faces/SKILL.md while the page "
+           "is open in the user's browser (it POSTs to /api/custom-faces/perf-report), then retry.")
+    if not rp.exists():
+        return False, 428, {"error": "perf attestation required — this face has never been measured",
+                            "threshold_fps": FACE_MIN_FPS, "how": how}
+    try:
+        rep = json.loads(rp.read_text())
+    except (OSError, ValueError):
+        return False, 428, {"error": "perf attestation unreadable — re-run the probe", "how": how}
+    if rep.get("content_sha256") != _page_sha(src_path):
+        return False, 428, {"error": "perf attestation is for an OLDER version of this page — "
+                                     "the content changed since it was measured; re-test",
+                            "measured_at": rep.get("recorded_at"), "how": how}
+    try:
+        age_d = (datetime.now(timezone.utc)
+                 - datetime.fromisoformat(rep["recorded_at"])).days
+    except (KeyError, ValueError):
+        age_d = 999
+    if age_d > 7:
+        return False, 428, {"error": f"perf attestation is {age_d} days old — re-test", "how": how}
+    if float(rep.get("fps_low", 0)) < FACE_MIN_FPS:
+        return False, 428, {"error": f"face FAILED the perf bar: fps_low {rep.get('fps_low')} < "
+                                     f"{FACE_MIN_FPS} at full load — optimize (lower particle "
+                                     "counts / cap DPR / pause-when-hidden), re-test, retry",
+                            "report": rep}
+    return True, 200, {"perf": {"fps_low": rep.get("fps_low"), "measured_at": rep.get("recorded_at")}}
+
+
 @custom_faces_bp.route("/api/custom-faces/promote", methods=["POST"])
 def promote_canvas_to_face():
     """Promote a canvas page to a custom face by copying it.
@@ -349,6 +447,14 @@ def promote_canvas_to_face():
     src = CANVAS_PAGES_DIR / (page_id + ".html")
     if not src.exists():
         return jsonify({"error": f"Canvas page '{page_id}' not found"}), 404
+
+    # NOT DONE UNTIL MEASURED: refuse promotion without a fresh full-load perf pass.
+    if not data.get("force"):
+        ok, status, payload = _check_perf_attestation(page_id, src)
+        if not ok:
+            return jsonify(payload), status
+    else:
+        logger.warning("custom-faces: promote FORCED without perf attestation: %s", page_id)
 
     # Copy to faces dir
     FACES_DIR.mkdir(parents=True, exist_ok=True)
