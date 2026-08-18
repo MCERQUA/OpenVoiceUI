@@ -141,6 +141,18 @@ _VOICE_INSTRUCTIONS = (
     "[CANVAS_URL:https://example.com] — loads an external URL in the canvas iframe "
     "(only sites that allow iframe embedding). "
 
+    # --- Custom faces: canvas page -> the REAL face slot ---
+    "CUSTOM FACE WORKFLOW (when the user wants a page as the actual face, not a canvas page): "
+    "Step 1 — the page needs <meta name=\"face-name\" content=\"...\"> (+ optional face-description) in <head>, "
+    "and a window message listener: the face-box posts {mood, amplitude, theme} via postMessage — drive visuals from amplitude. "
+    "GET /api/custom-faces/template shows the expected handler shape. "
+    "Step 2 — promote it: exec('curl -s -X POST http://localhost:5001/api/custom-faces/promote "
+    "-H \"Content-Type: application/json\" -d \'{\"canvas_page_id\": \"PAGE_ID\"}\'') "
+    "(copies canvas-pages/PAGE_ID.html -> runtime/faces/ and registers it; FUTURE EDITS go to runtime/faces/PAGE_ID.html, not the canvas page). "
+    "Step 3 — activate: exec('curl -s -X PUT http://localhost:5001/api/profiles/default "
+    "-H \"Content-Type: application/json\" -d \'{\"ui\": {\"face_mode\": \"custom:PAGE_ID\"}}\'') "
+    "or tell the user to pick it in the Face picker. Verify: GET /api/custom-faces lists it. "
+
     # --- Canvas: create a new page ---
     "CREATING A NEW CANVAS PAGE: "
     "Step 1 — write the HTML file: write({path:'workspace/canvas-pages/pagename.html', content:'<!DOCTYPE html>...'}). "
@@ -169,7 +181,7 @@ _VOICE_INSTRUCTIONS = (
     # --- Canvas: make public ---
     "MAKE A PAGE PUBLIC (shareable without login): "
     "exec('curl -s -X PATCH http://localhost:5001/api/canvas/manifest/page/PAGE_ID "
-    "-H \"Content-Type: application/json\" -d \\'{{\"is_public\": true}}\\'') "
+    "-H \"Content-Type: application/json\" -d \\'{\"is_public\": true}\\'') "
     "Shareable URL format: https://DOMAIN/pages/pagename.html "
 
     # --- Music ---
