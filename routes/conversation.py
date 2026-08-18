@@ -137,6 +137,7 @@ _VOICE_INSTRUCTIONS = (
     "ONLY the [CANVAS:page-id] tag works to open pages. "
     "Repeating [CANVAS:same-page] on an already-open page forces a refresh. "
     "[CANVAS_MENU] — opens the page picker so the user can browse all pages. "
+    "[CANVAS_CLOSE] — closes/hides the canvas (use when the user asks to close, hide, or dismiss the canvas or a stuck page). "
     "[CANVAS_URL:https://example.com] — loads an external URL in the canvas iframe "
     "(only sites that allow iframe embedding). "
 
@@ -1050,6 +1051,7 @@ def clean_for_tts(text: str) -> str:
 
     # Remove canvas/task/music triggers (handled by frontend, not spoken)
     text = re.sub(r'\[CANVAS_MENU\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[CANVAS_CLOSE\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[CANVAS:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[CANVAS_URL:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[MUSIC_PLAY(?::[^\]]*)?\]', '', text, flags=re.IGNORECASE)
@@ -1433,13 +1435,31 @@ def _conversation_inner():
                         except Exception as _se:
                             logger.warning('Failed to queue vision task to vision@mesh: %s', _se)
                     # Do not promise an analysis that was never queued.
+                    # The path matters as much as the status: without it, agents guess
+                    # (/app/runtime/uploads/ is readable by exec/read but REJECTED by the
+                    # image tool, whose media roots are hardcoded to workspace paths) and
+                    # burn a minute copying files around narrating paths over TTS.
                     if _queued:
-                        _upload_desc = 'Image is being analyzed now. Ask me about it in about 30 seconds.'
+                        _upload_desc = (
+                            f'Image saved in your workspace uploads folder: uploads/{_img_file.name} '
+                            f'(OpenClaw: /home/node/.openclaw/workspace/uploads/{_img_file.name}; '
+                            f'Hermes: /workspace/uploads/{_img_file.name}). A background vision agent '
+                            'is analyzing it right now — the result arrives in about 30 seconds. Do '
+                            'NOT analyze the image yourself, do NOT run the image tool on it, and do '
+                            'NOT copy or move the file. Tell the user you are taking a look; the '
+                            'analysis will be in your context on their next message. If you ever do '
+                            'need the image tool on an upload, it only accepts workspace paths like '
+                            'the above — it rejects /app/runtime/uploads/.'
+                        )
                         logger.info('Image routed to vision@mesh: %s', _img_file.name)
                     else:
-                        _upload_desc = ('Image saved, but automatic analysis could not be started. '
-                                        'Tell the user the image is saved and that you cannot '
-                                        'describe it right now.')
+                        _upload_desc = (
+                            f'Image saved in your workspace uploads folder: uploads/{_img_file.name} '
+                            f'(OpenClaw: /home/node/.openclaw/workspace/uploads/{_img_file.name}; '
+                            f'Hermes: /workspace/uploads/{_img_file.name}), but automatic analysis '
+                            'could not be started. If the user asks about it, run the image tool on '
+                            'that exact workspace path — the image tool rejects /app/runtime/uploads/.'
+                        )
                 context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
