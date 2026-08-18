@@ -48,7 +48,38 @@ window.HaloSmokeFace = (function () {
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────
-    const S = { quality: 'med', motion: 2.0, trails: 0.2, coreInt: 0.20, sensitivity: 2.10 };
+    // glowScale: offscreen glow layer resolution (0.5 = half-res; higher = tighter blur)
+    // glowAlpha: glow layer composite opacity (lower = less haze/brightness)
+    const S = { quality: 'med', motion: 2.0, trails: 0.2, coreInt: 0.20, sensitivity: 2.10,
+                glowScale: 0.6, glowAlpha: 0.35 };
+
+    // ── Adaptive performance governor ────────────────────────────────────────
+    // Steps quality/resolution/fps down when the draw itself is slow (phones,
+    // Pi5), back up when there is headroom. Driven by draw-execution time, not
+    // rAF cadence, so it works under fps caps too.
+    // L0: med quality, dpr<=2 · L1: low, dpr<=1.5 · L2: low, dpr<=1, 45fps · L3: low, dpr<=1, 30fps
+    const GOV_LEVELS = [
+        { quality: 'med', dpr: 2,   fpsCap: 0  },
+        { quality: 'low', dpr: 1.5, fpsCap: 0  },
+        { quality: 'low', dpr: 1,   fpsCap: 45 },
+        { quality: 'low', dpr: 1,   fpsCap: 30 }
+    ];
+    let _gov = null;
+    function _resetGov() { _gov = { level: 0, drawEma: 8, lastChange: 0 }; S.quality = GOV_LEVELS[0].quality; }
+    function _govTick(drawMs, now) {
+        _gov.drawEma = _gov.drawEma * 0.92 + drawMs * 0.08;
+        if (now - _gov.lastChange < 2500) return;
+        // Step down only when draw time alone would blow the 60fps frame budget
+        // (16.7ms) — a fast desktop should never leave level 0.
+        if (_gov.drawEma > 20 && _gov.level < GOV_LEVELS.length - 1) {
+            _gov.level++; _gov.lastChange = now;
+            console.log(`[HaloSmoke] perf governor -> level ${_gov.level} (draw ~${_gov.drawEma.toFixed(1)}ms)`);
+        } else if (_gov.drawEma < 8 && _gov.level > 0 && now - _gov.lastChange > 6000) {
+            _gov.level--; _gov.lastChange = now;
+            console.log(`[HaloSmoke] perf governor -> level ${_gov.level} (headroom)`);
+        }
+        S.quality = GOV_LEVELS[_gov.level].quality;
+    }
 
     // ── Audio feature smoothing state ─────────────────────────────────────────
     let _sm = null;
@@ -82,8 +113,10 @@ window.HaloSmokeFace = (function () {
         }
         an.getByteFrequencyData(_fd);
 
-        // Time-domain RMS
-        const td = new Uint8Array(an.fftSize || 2048);
+        // Time-domain RMS (buffer reused across frames — no per-frame allocation)
+        const n = an.fftSize || 2048;
+        if (!_tdBuf || _tdBuf.length !== n) _tdBuf = new Uint8Array(n);
+        const td = _tdBuf;
         try { an.getByteTimeDomainData(td); } catch (_) {}
 
         let sum = 0, peak = 0;
@@ -151,6 +184,8 @@ window.HaloSmokeFace = (function () {
     }
 
     // ── Visual state (reset on each start) ───────────────────────────────────
+    let _tdBuf = null;                    // reused time-domain audio buffer
+    let _off = null, _offCtx = null;      // low-res offscreen glow layer
     let _sparks = [];
     let _wisps  = [];
     let _wispInited = false;
@@ -193,6 +228,22 @@ window.HaloSmokeFace = (function () {
         ctx.fillStyle = `rgba(6,8,14,${S.trails})`;
         ctx.fillRect(0, 0, w, h);
 
+        // Low-res offscreen glow layer. Everything soft (wisp glow, blurred
+        // halo bars, spark halos) is drawn here at 1/4 resolution and
+        // upscaled once at the end — the bilinear upscale provides the blur.
+        // This replaces per-stroke ctx.filter/shadowBlur, which re-ran a
+        // full software blur for EVERY stroke (the #1 cost on phones/Pi).
+        const GS = S.glowScale;
+        const ow = Math.max(2, Math.round(w * GS)), oh = Math.max(2, Math.round(h * GS));
+        if (!_off) { _off = document.createElement('canvas'); _offCtx = _off.getContext('2d'); }
+        if (_off.width !== ow || _off.height !== oh) { _off.width = ow; _off.height = oh; }
+        const octx = _offCtx;
+        octx.setTransform(1, 0, 0, 1, 0, 0);
+        octx.clearRect(0, 0, ow, oh);
+        octx.setTransform(GS, 0, 0, GS, 0, 0);
+        octx.globalCompositeOperation = 'lighter';
+        octx.lineCap = 'round';
+
         // Distortion envelope
         const distTarget = clamp(burst * 2.2 + ki * 1.8, 0, 1);
         _distortion = distTarget > _distortion
@@ -232,14 +283,16 @@ window.HaloSmokeFace = (function () {
             ws.angle += dt * ws.speed * (0.3 + thinkBoost + dr * 1.5 + burst * 3.0) * mo;
             const layerDepth = 0.4 + ws.layer * 0.25;
 
-            ctx.beginPath();
+            // Path built once (Path2D), stroked crisp on main + soft on glow layer.
+            // fbm octaves 3→2: visually indistinguishable for smoke, ~33% less noise math.
+            const path = new Path2D();
             for (let i = 0; i <= segments; i++) {
                 const frac  = i / segments;
                 const theta = ws.angle + frac * TAU * 0.6;
                 let r = coreR * ws.radius * layerDepth;
 
-                const nx = fbm(theta * 0.8 + ws.noiseOff + t * 0.15 * (1 + dist * 4), frac * 3 + t * 0.1, 3);
-                const ny = fbm(theta * 1.2 + ws.noiseOff * 0.7 + t * 0.12, frac * 2.5 - t * 0.08, 3);
+                const nx = fbm(theta * 0.8 + ws.noiseOff + t * 0.15 * (1 + dist * 4), frac * 3 + t * 0.1, 2);
+                const ny = fbm(theta * 1.2 + ws.noiseOff * 0.7 + t * 0.12, frac * 2.5 - t * 0.08, 2);
 
                 r += nx * coreR * 0.22 * (0.5 + dist * 1.8) * ci;
                 if (dist > 0.05) {
@@ -250,18 +303,21 @@ window.HaloSmokeFace = (function () {
                 const swirl = theta + ny * 0.6 * (1 + dist * 2.5);
                 const x = cx + Math.cos(swirl) * r;
                 const y = cy + Math.sin(swirl) * r;
-                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
             }
 
             const wHue   = (calmHue + ws.hueOff + _colorShock * 200 + dist * 160) % 360;
             const wSat   = 60 + dist * 35;
             const wLit   = 50 + dist * 18 + burst * 12;
             const wAlpha = ws.opacity * (0.5 + dr * 1.2 + burst * 1.5) * ci;
-            ctx.strokeStyle  = `hsla(${wHue},${wSat}%,${wLit}%,${clamp(wAlpha, 0, 0.6)})`;
-            ctx.lineWidth    = ws.width * (1 + dist * 2.5 + dr * 1.2);
-            ctx.shadowColor  = `hsla(${wHue},90%,60%,${clamp(wAlpha * 0.7, 0, 0.4)})`;
-            ctx.shadowBlur   = 12 + dist * 25 + dr * 15;
-            ctx.stroke();
+            const wWidth = ws.width * (1 + dist * 2.5 + dr * 1.2);
+            ctx.strokeStyle = `hsla(${wHue},${wSat}%,${wLit}%,${clamp(wAlpha, 0, 0.6)})`;
+            ctx.lineWidth   = wWidth;
+            ctx.stroke(path);
+            // Glow: same path, wide + faint, on the half-res layer
+            octx.strokeStyle = `hsla(${wHue},90%,60%,${clamp(wAlpha * 0.55, 0, 0.3)})`;
+            octx.lineWidth   = wWidth + 4 + dist * 6 + dr * 3;
+            octx.stroke(path);
         }
 
         // ── Burst flares (speech transients) ──
@@ -274,12 +330,16 @@ window.HaloSmokeFace = (function () {
                 const fhue = (hue0 + rand(-60, 60)) % 360;
                 ctx.strokeStyle  = `hsla(${fhue},100%,70%,${burst * 0.35})`;
                 ctx.lineWidth    = 0.8 + burst * 2;
-                ctx.shadowBlur   = 8 + burst * 18;
-                ctx.shadowColor  = `hsla(${fhue},100%,65%,${burst * 0.3})`;
                 ctx.beginPath();
                 ctx.moveTo(cx + Math.cos(fa) * fr,         cy + Math.sin(fa) * fr);
                 ctx.lineTo(cx + Math.cos(fa) * (fr + fl2), cy + Math.sin(fa) * (fr + fl2));
                 ctx.stroke();
+                octx.strokeStyle = `hsla(${fhue},100%,65%,${burst * 0.3})`;
+                octx.lineWidth   = 4 + burst * 5;
+                octx.beginPath();
+                octx.moveTo(cx + Math.cos(fa) * fr,         cy + Math.sin(fa) * fr);
+                octx.lineTo(cx + Math.cos(fa) * (fr + fl2), cy + Math.sin(fa) * (fr + fl2));
+                octx.stroke();
             }
         }
 
@@ -295,24 +355,28 @@ window.HaloSmokeFace = (function () {
                 const dy = cy + Math.sin(baseAngle) * ringR;
                 const dotHue = (calmHue + i * 40) % 360;
 
-                // Comet trail
+                // Comet trail — crisp only; the low-res glow layer made these
+                // read as blobby rings, so thinking dots stay off it entirely.
                 ctx.beginPath();
                 ctx.arc(cx, cy, ringR, baseAngle - trailLen, baseAngle, false);
-                ctx.strokeStyle = `hsla(${dotHue},80%,65%,0.25)`;
+                ctx.strokeStyle = `hsla(${dotHue},80%,65%,0.3)`;
                 ctx.lineWidth = 3;
-                ctx.shadowColor = `hsla(${dotHue},90%,60%,0.3)`;
-                ctx.shadowBlur = 10;
                 ctx.stroke();
 
-                // Bright dot
+                // Bright dot with a small crisp gradient halo (3 dots — cheap)
+                const halo = ctx.createRadialGradient(dx, dy, 0, dx, dy, dotRadius * 3);
+                halo.addColorStop(0,   `hsla(${dotHue},100%,75%,0.5)`);
+                halo.addColorStop(0.4, `hsla(${dotHue},90%,65%,0.18)`);
+                halo.addColorStop(1,   'rgba(0,0,0,0)');
+                ctx.beginPath();
+                ctx.arc(dx, dy, dotRadius * 3, 0, TAU);
+                ctx.fillStyle = halo;
+                ctx.fill();
                 ctx.beginPath();
                 ctx.arc(dx, dy, dotRadius, 0, TAU);
-                ctx.fillStyle = `hsla(${dotHue},85%,75%,0.9)`;
-                ctx.shadowColor = `hsla(${dotHue},100%,70%,0.8)`;
-                ctx.shadowBlur = 18;
+                ctx.fillStyle = `hsla(${dotHue},85%,80%,0.95)`;
                 ctx.fill();
             }
-            ctx.shadowBlur = 0;
         }
 
         // ── Central bright core dot ──
@@ -322,10 +386,9 @@ window.HaloSmokeFace = (function () {
         dotGrad.addColorStop(0.5, `hsla(${hue0},80%,65%,${0.08 + burst * 0.3})`);
         dotGrad.addColorStop(1,   'rgba(0,0,0,0)');
         ctx.fillStyle   = dotGrad;
-        ctx.shadowBlur  = 20 + burst * 40;
-        ctx.shadowColor = `hsla(${hue0},90%,70%,${0.2 + burst * 0.4})`;
         ctx.beginPath(); ctx.arc(cx, cy, dotR, 0, TAU); ctx.fill();
-        ctx.shadowBlur = 0;
+        octx.fillStyle = `hsla(${hue0},90%,70%,${0.2 + burst * 0.4})`;
+        octx.beginPath(); octx.arc(cx, cy, dotR * 2 + 8 + burst * 8, 0, TAU); octx.fill();
         ctx.restore();
 
         // ── Halo ring: frequency bars ──
@@ -352,23 +415,28 @@ window.HaloSmokeFace = (function () {
         ctx.lineCap = 'round';
         _spin += dt * (0.15 + dr * 1.1 + ki * 2.0 + burst * 1.5) * mo;
 
-        // Blurred halo pass
-        ctx.filter = `blur(${(6 + dr * 16 + ki * 20).toFixed(1)}px)`;
+        // Soft halo pass — drawn on the 1/4-res glow layer (upscale = free blur).
+        // The old ctx.filter='blur(Npx)' here re-ran a software blur for each of
+        // the ~160 strokes and was the single heaviest cost of this face.
+        // Bloom grows only mildly with voice drive — the old dr*16/ki*20 terms
+        // made the whole halo balloon into soft mush whenever it spoke.
+        const bloom = 4 + dr * 2 + ki * 3;
         for (let i = 0; i < bars; i++) {
             const a   = (i / bars) * TAU + _spin;
             const mg  = freq ? freq[i * step] / 255 : 0.04;
             const len = base * (0.12 + mg * 0.55 * (0.65 + f.treble * 0.5 + dr * 0.45));
             const hu  = (hue0 + (i / bars) * 150 + f.treble * 120) % 360;
-            ctx.strokeStyle = `hsla(${hu},100%,64%,${0.06 + mg * 0.25 + dr * 0.08})`;
-            ctx.lineWidth   = 2.5 + mg * 4.2 + dr * 1.5;
-            ctx.beginPath();
-            ctx.moveTo(cx + Math.cos(a) * ringR, cy + Math.sin(a) * ringR);
-            ctx.lineTo(cx + Math.cos(a) * (ringR + len), cy + Math.sin(a) * (ringR + len));
-            ctx.stroke();
+            // Speech animates the CRISP bars; the glow stays nearly constant so
+            // reacting to sound doesn't turn into bright haze.
+            octx.strokeStyle = `hsla(${hu},100%,64%,${0.05 + mg * 0.14 + dr * 0.03})`;
+            octx.lineWidth   = 2.5 + mg * 3 + bloom * 0.3;
+            octx.beginPath();
+            octx.moveTo(cx + Math.cos(a) * ringR, cy + Math.sin(a) * ringR);
+            octx.lineTo(cx + Math.cos(a) * (ringR + len), cy + Math.sin(a) * (ringR + len));
+            octx.stroke();
         }
 
         // Crisp halo pass
-        ctx.filter = 'none';
         for (let i = 0; i < bars; i++) {
             const a   = (i / bars) * TAU + _spin;
             const mg  = freq ? freq[i * step] / 255 : 0.04;
@@ -382,21 +450,33 @@ window.HaloSmokeFace = (function () {
             ctx.stroke();
         }
 
-        // Sparks
-        ctx.shadowBlur = 18 * (0.15 + dr + ki * 1.2);
+        // Sparks (glow halo on the low-res layer instead of per-fill shadowBlur)
+        const sparkR = 1.3 + dr * 1.8 + burst * 1.2;
+        const sparkGlowR = sparkR + 6 * (0.15 + dr + ki * 1.2);
         for (let i = _sparks.length - 1; i >= 0; i--) {
             const s = _sparks[i];
             s.life -= dt * (0.75 + dr * 0.4);
             s.a    += dt * s.v * (1 + ki * 1.4 + burst * 0.8) * mo;
             const al = clamp(s.life, 0, 1) * (0.08 + dr * 0.20 + ki * 0.18);
             if (al <= 0) { _sparks.splice(i, 1); continue; }
-            ctx.shadowColor = `hsla(${s.hue},100%,70%,${al})`;
-            ctx.fillStyle   = `hsla(${s.hue},100%,70%,${al})`;
+            const sx = cx + Math.cos(s.a) * s.r, sy = cy + Math.sin(s.a) * s.r;
+            ctx.fillStyle = `hsla(${s.hue},100%,70%,${al})`;
             ctx.beginPath();
-            ctx.arc(cx + Math.cos(s.a) * s.r, cy + Math.sin(s.a) * s.r, 1.3 + dr * 1.8 + burst * 1.2, 0, TAU);
+            ctx.arc(sx, sy, sparkR, 0, TAU);
             ctx.fill();
+            octx.fillStyle = `hsla(${s.hue},100%,70%,${al * 0.7})`;
+            octx.beginPath();
+            octx.arc(sx, sy, sparkGlowR, 0, TAU);
+            octx.fill();
         }
-        ctx.shadowBlur = 0;
+
+        // Composite the glow layer once, upscaled (bilinear smoothing = blur).
+        // globalAlpha keeps the additive layer soft — the old blur spread the
+        // same energy over a wide radius, so full-strength here reads too hot.
+        ctx.imageSmoothingEnabled = true;
+        ctx.globalAlpha = S.glowAlpha;
+        ctx.drawImage(_off, 0, 0, w, h);
+        ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
     }
 
@@ -408,6 +488,15 @@ window.HaloSmokeFace = (function () {
         if (!_canvas) return;
         _raf = requestAnimationFrame(_loop);
 
+        // FPS cap: governor cap when the device is struggling, and a 30fps
+        // idle throttle when nothing is playing and we're not thinking —
+        // the idle swirl doesn't need 60fps and this halves idle battery/heat.
+        const gov = GOV_LEVELS[_gov.level];
+        const idle = !window.audioAnalyser && !_thinking;
+        let capFps = gov.fpsCap;
+        if (idle) capFps = capFps ? Math.min(capFps, 30) : 30;
+        if (capFps && (now - _last) < (1000 / capFps) - 2) return;
+
         let dt = (now - _last) / 1000;
         _last = now;
         dt = Math.max(0.001, Math.min(dt, 0.05));
@@ -415,7 +504,7 @@ window.HaloSmokeFace = (function () {
 
         // Resize canvas to match its own CSS size (90% of face-box, circular)
         const rect = _canvas.getBoundingClientRect();
-        const dpr  = Math.min(2, window.devicePixelRatio || 1);
+        const dpr  = Math.min(gov.dpr, window.devicePixelRatio || 1);
         const w    = Math.max(2, Math.floor(rect.width  * dpr));
         const h    = Math.max(2, Math.floor(rect.height * dpr));
         if (_canvas.width !== w || _canvas.height !== h) {
@@ -430,8 +519,10 @@ window.HaloSmokeFace = (function () {
             _firstFrame = false;
         }
 
+        const drawStart = performance.now();
         const f = _getFeatures();
         _draw(_ctx, t, dt, f, w, h);
+        _govTick(performance.now() - drawStart, now);
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -444,6 +535,7 @@ window.HaloSmokeFace = (function () {
         stop(); // clean up any previous run
         _initPerlin();
         _resetSm();
+        _resetGov();
 
         _container = container;
 
@@ -514,7 +606,10 @@ window.HaloSmokeFace = (function () {
         _thinking = (mood === 'thinking');
     }
 
-    return { start, stop, setThinking, setMood };
+    // `settings` exposed for live tuning from the console, e.g.:
+    //   HaloSmokeFace.settings.glowAlpha = 0.35   // less haze/brightness
+    //   HaloSmokeFace.settings.glowScale = 0.65   // tighter, crisper glow
+    return { start, stop, setThinking, setMood, settings: S };
 })();
 
 // Self-register with FaceRenderer plugin system

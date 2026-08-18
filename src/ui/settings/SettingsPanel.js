@@ -224,6 +224,19 @@ window.SettingsPanel = {
         const currentMode = window.FaceRenderer?.getCurrentMode() || 'eyes';
         const modes = window.FaceRenderer?.getAvailableModes() || [];
 
+        const benchRow = window.FaceBench ? `
+            <div class="face-bench-row" style="margin-top:10px;">
+                <button type="button" id="face-bench-btn"
+                    style="width:100%;padding:10px 12px;min-height:44px;background:rgba(59,130,246,0.12);
+                           border:1px solid rgba(59,130,246,0.45);border-radius:8px;color:#3b82f6;
+                           font-size:13px;font-weight:600;cursor:pointer;">
+                    Run Face Benchmark
+                </button>
+                <div style="margin-top:4px;font-size:11px;opacity:0.6;text-align:center;">
+                    Measures each face's FPS on this device (~25s, keep tab in foreground)
+                </div>
+            </div>` : '';
+
         return `
             <div class="face-modes">
                 <label>Display Mode</label>
@@ -235,6 +248,7 @@ window.SettingsPanel = {
                         </button>
                     `).join('')}
                 </div>
+                ${benchRow}
             </div>
         `;
     },
@@ -453,6 +467,8 @@ window.SettingsPanel = {
     },
 
     attachFaceListeners() {
+        this.attachBenchButton();
+
         const root = document.getElementById('face-picker-root');
         if (root && window.FacePicker) {
             window.FacePicker.mount(root);
@@ -468,6 +484,24 @@ window.SettingsPanel = {
                 document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
             });
+        });
+    },
+
+    attachBenchButton() {
+        const benchBtn = document.getElementById('face-bench-btn');
+        if (!benchBtn || benchBtn._benchWired) return;
+        benchBtn._benchWired = true;
+        benchBtn.addEventListener('click', async () => {
+            if (!window.FaceBench) return;
+            // Close the settings modal first — its full-screen overlay adds
+            // compositing load that drags EVERY face's numbers down equally
+            // (measured: floor fps halved with the modal open).
+            this.close();
+            try {
+                await window.FaceBench.run();
+            } catch (e) {
+                console.warn('[SettingsPanel] Face benchmark failed:', e);
+            }
         });
     },
 
