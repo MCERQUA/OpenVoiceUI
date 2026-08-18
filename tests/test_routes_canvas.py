@@ -83,6 +83,34 @@ class TestCanvasHelpers:
 
 
 # ---------------------------------------------------------------------------
+# API: /api/canvas/manifest GET — ETag / conditional fetch (#235)
+# ---------------------------------------------------------------------------
+
+class TestCanvasManifestEtag:
+    def test_manifest_sends_etag(self, canvas_client):
+        resp = canvas_client.get("/api/canvas/manifest")
+        assert resp.status_code == 200
+        assert resp.headers.get("ETag", "").startswith('"')
+
+    def test_matching_if_none_match_returns_304(self, canvas_client):
+        first = canvas_client.get("/api/canvas/manifest")
+        etag = first.headers["ETag"]
+        second = canvas_client.get(
+            "/api/canvas/manifest", headers={"If-None-Match": etag}
+        )
+        assert second.status_code == 304
+        assert second.headers["ETag"] == etag
+        assert second.get_data() == b""
+
+    def test_stale_if_none_match_returns_full_body(self, canvas_client):
+        resp = canvas_client.get(
+            "/api/canvas/manifest", headers={"If-None-Match": '"bogus-etag"'}
+        )
+        assert resp.status_code == 200
+        assert isinstance(resp.get_json(), dict)
+
+
+# ---------------------------------------------------------------------------
 # API: /api/canvas/context GET
 # ---------------------------------------------------------------------------
 

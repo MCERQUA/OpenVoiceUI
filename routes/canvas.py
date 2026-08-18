@@ -6,6 +6,7 @@ and manifest management helpers that other modules (e.g. server.py's
 conversation handler) need via direct import.
 """
 
+import hashlib
 import html as html_module
 import json
 import logging
@@ -1200,7 +1201,21 @@ def get_canvas_manifest():
         manifest = sync_canvas_manifest()
     else:
         manifest = load_canvas_manifest()
-    response = jsonify(manifest)
+    # Content-hash ETag so 30s pollers (desktop.html) can skip re-downloading
+    # and re-parsing an unchanged manifest. `last_updated` is excluded: the 60s
+    # auto-sync re-stamps it on every save even when nothing changed, and no
+    # client renders it — including it would mean the ETag never matches.
+    # Clients send If-None-Match manually (Cache-Control stays no-store so no
+    # proxy/browser HTTP cache is involved).
+    _hashable = {k: v for k, v in manifest.items() if k != 'last_updated'}
+    etag = '"' + hashlib.md5(
+        json.dumps(_hashable, sort_keys=True, separators=(',', ':')).encode()
+    ).hexdigest() + '"'
+    if request.headers.get('If-None-Match') == etag:
+        response = Response(status=304)
+    else:
+        response = jsonify(manifest)
+    response.headers['ETag'] = etag
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
