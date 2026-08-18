@@ -71,6 +71,8 @@ class STTConfig:
     wake_words: Optional[list] = None
     wake_word_required: Optional[bool] = None
     ptt_default: Optional[bool] = None
+    # FFT-average VAD gate for the wake-word detector (kiosk mics vary widely)
+    wake_vad_threshold: Optional[int] = None
 
 
 @dataclass

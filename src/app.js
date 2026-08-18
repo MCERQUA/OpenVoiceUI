@@ -22,7 +22,7 @@ connectAiradio();
 
         import { WebSpeechSTT, WakeWordDetector } from '/src/providers/WebSpeechSTT.js?v=4';
         import { GroqSTT, GroqWakeWordDetector } from '/src/providers/GroqSTT.js';
-        import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js?v=3';
+        import { DeepgramSTT, DeepgramWakeWordDetector } from '/src/providers/DeepgramSTT.js?v=4';
         import { ExternalSTT, ExternalWakeWordDetector } from '/src/providers/ExternalSTT.js';
         import { DeepgramStreamingSTT, DeepgramStreamingWakeWordDetector } from '/src/providers/DeepgramStreamingSTT.js?v=3';
 
@@ -7503,6 +7503,21 @@ connectAiradio();
 
                 // Wake word detection is manual - user toggles via ear button
                 // Auto-start was removed because it conflicts with STT (both use Web Speech API)
+
+                // Opt-in auto-arm for kiosk terminals (?wake=1 or profile stt.wake_on_load).
+                // Deferred 3s so STT/provider init completes first — the conflict that got
+                // blanket auto-start removed was a load-order race with the STT instance.
+                const _wakeOnLoad = new URLSearchParams(window.location.search).get('wake') === '1'
+                    || window._serverProfile?.stt?.wake_on_load === true;
+                if (_wakeOnLoad) {
+                    setTimeout(() => {
+                        if (wakeDetector.isSupported() && !wakeDetector.isListening) {
+                            wakeDetector.start();
+                            document.getElementById('wake-button')?.classList.add('listening');
+                            console.log('[WakeWord] Auto-armed on load (kiosk wake-on-load)');
+                        }
+                    }, 3000);
+                }
             }
 
             // Set TTS provider from ProviderManager selection

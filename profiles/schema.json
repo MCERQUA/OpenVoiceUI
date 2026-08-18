@@ -2,24 +2,48 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "openvoiceui/profile-schema",
   "title": "Agent Profile",
-  "description": "Schema for agent personality and configuration profiles. ADR-002. v3.2 — full capability model: gateway queue, STT/TTS advanced, conversation flow, modes, session strategy, auth.",
+  "description": "Schema for agent personality and configuration profiles. ADR-002. v3.2 \u2014 full capability model: gateway queue, STT/TTS advanced, conversation flow, modes, session strategy, auth.",
   "type": "object",
-  "required": ["id", "name", "system_prompt"],
+  "required": [
+    "id",
+    "name",
+    "system_prompt"
+  ],
   "additionalProperties": true,
   "properties": {
-
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9-]+$",
       "description": "Unique identifier (lowercase, hyphens only)"
     },
-    "name":        { "type": "string", "maxLength": 50 },
-    "description": { "type": "string", "maxLength": 200 },
-    "version":     { "type": "string", "pattern": "^\\d+\\.\\d+$", "default": "1.0" },
-    "author":      { "type": "string" },
-    "created":     { "type": "string", "format": "date" },
-    "icon":        { "type": "string", "description": "Emoji icon for UI display" },
-    "mode":        { "type": "string", "description": "Legacy special mode flag. Use adapter instead." },
+    "name": {
+      "type": "string",
+      "maxLength": 50
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$",
+      "default": "1.0"
+    },
+    "author": {
+      "type": "string"
+    },
+    "created": {
+      "type": "string",
+      "format": "date"
+    },
+    "icon": {
+      "type": "string",
+      "description": "Emoji icon for UI display"
+    },
+    "mode": {
+      "type": "string",
+      "description": "Legacy special mode flag. Use adapter instead."
+    },
     "adapter": {
       "type": "string",
       "pattern": "^[a-z0-9-]+$",
@@ -35,25 +59,37 @@
       "minLength": 10,
       "description": "Agent personality / instructions."
     },
-
     "llm": {
       "type": "object",
-      "required": ["provider"],
+      "required": [
+        "provider"
+      ],
       "additionalProperties": false,
       "properties": {
         "provider": {
           "type": "string",
           "minLength": 1,
-          "description": "LLM/agent provider id. Validation-only (any non-empty string) — the real option list comes from /api/services/catalog, not a fixed enum, so new providers (resemble, qwen3, plugins) never drift out of a hardcoded list. WO-3.3."
+          "description": "LLM/agent provider id. Validation-only (any non-empty string) \u2014 the real option list comes from /api/services/catalog, not a fixed enum, so new providers (resemble, qwen3, plugins) never drift out of a hardcoded list. WO-3.3."
         },
-        "model":     { "type": "string" },
-        "config_id": { "type": "string" },
+        "model": {
+          "type": "string"
+        },
+        "config_id": {
+          "type": "string"
+        },
         "parameters": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "max_tokens":  { "type": "integer", "minimum": 1 },
-            "temperature": { "type": "number",  "minimum": 0, "maximum": 2 }
+            "max_tokens": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            }
           }
         },
         "queue": {
@@ -62,20 +98,34 @@
           "description": "OpenClaw Gateway queue + streaming behaviour. null = use openclaw.json global default.",
           "properties": {
             "mode": {
-              "type": ["string", "null"],
-              "enum": ["collect", "steer", "steer-backlog", null],
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "collect",
+                "steer",
+                "steer-backlog",
+                null
+              ],
               "default": null,
               "description": "collect = full response then TTS (safe, default). steer = user can interrupt mid-tool-chain, gateway pivots immediately. steer-backlog = steer but original message preserved."
             },
             "block_streaming_chunk": {
-              "type": ["integer", "null"],
+              "type": [
+                "integer",
+                "null"
+              ],
               "minimum": 10,
               "maximum": 2000,
               "default": null,
               "description": "Min chars in streaming delta before firing a TTS sentence. Maps to _extract_sentence(min_len) in conversation.py. null = platform default (40)."
             },
             "block_streaming_coalesce": {
-              "type": ["boolean", "null"],
+              "type": [
+                "boolean",
+                "null"
+              ],
               "default": null,
               "description": "Coalesce streaming tokens into larger chunks before TTS. null = platform default."
             }
@@ -83,202 +133,377 @@
         }
       }
     },
-
     "voice": {
       "type": "object",
-      "required": ["tts_provider", "voice_id"],
+      "required": [
+        "tts_provider",
+        "voice_id"
+      ],
       "additionalProperties": false,
       "properties": {
         "tts_provider": {
           "type": "string",
           "minLength": 1,
-          "description": "TTS provider id. Validation-only (any non-empty string) — options come from the tts_providers registry via /api/services/catalog, so resemble/qwen3-local/custom providers never drift out of a fixed enum. WO-3.3."
+          "description": "TTS provider id. Validation-only (any non-empty string) \u2014 options come from the tts_providers registry via /api/services/catalog, so resemble/qwen3-local/custom providers never drift out of a fixed enum. WO-3.3."
         },
-        "voice_id":  { "type": "string" },
-        "speed":     { "type": "number", "minimum": 0.5, "maximum": 2.0, "default": 1.0 },
-        "parameters":{ "type": "object" },
-        "notes":     { "type": "string" },
+        "voice_id": {
+          "type": "string"
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0,
+          "default": 1.0
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "notes": {
+          "type": "string"
+        },
         "parallel_sentences": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "default": null,
           "description": "Fire TTS for all post-LLM sentences simultaneously. false = sequential. null = platform default (true). Set false if provider rate-limits parallel requests."
         },
         "min_sentence_chars": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 5,
           "maximum": 500,
           "default": null,
           "description": "Min chars before dispatching a chunk to TTS. Prevents TTS on single words. null = platform default (40)."
         },
         "inter_sentence_gap_ms": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "maximum": 2000,
           "default": null,
-          "description": "Silence between TTS audio chunks in playback. null = no gap. Future hook — not yet wired in frontend."
+          "description": "Silence between TTS audio chunks in playback. null = no gap. Future hook \u2014 not yet wired in frontend."
         }
       }
     },
-
     "stt": {
       "type": "object",
-      "required": ["provider"],
+      "required": [
+        "provider"
+      ],
       "additionalProperties": false,
       "properties": {
         "provider": {
           "type": "string",
           "minLength": 1,
-          "description": "STT provider id. Validation-only (any non-empty string) — options come from /api/services/catalog (webspeech/deepgram/groq_whisper/whisper/external), so a new STT provider never drifts out of a fixed enum. WO-3.3."
+          "description": "STT provider id. Validation-only (any non-empty string) \u2014 options come from /api/services/catalog (webspeech/deepgram/groq_whisper/whisper/external), so a new STT provider never drifts out of a fixed enum. WO-3.3."
         },
-        "language": { "type": "string", "default": "en-US" },
-        "notes":    { "type": "string" },
+        "language": {
+          "type": "string",
+          "default": "en-US"
+        },
+        "notes": {
+          "type": "string"
+        },
         "silence_timeout_ms": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 500,
           "maximum": 10000,
           "default": null,
           "description": "Ms of silence after final result before dispatching to AI. Maps to WebSpeechSTT.silenceDelayMs. null = platform default (3000ms)."
         },
         "vad_threshold": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 10,
           "maximum": 80,
           "default": null,
           "description": "FFT average amplitude threshold for voice detection. Lower = more sensitive. null = platform default (35). Range 10-80."
         },
         "max_recording_s": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 10,
           "maximum": 120,
           "default": null,
           "description": "Max recording duration in seconds before auto-chunking. Prevents FFmpeg timeout on long speech. null = platform default (45)."
         },
         "continuous": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "default": null,
           "description": "Continuous listening vs one-shot per utterance. null = provider default. false = PTT-only agents."
         },
         "wake_words": {
-          "type": ["array", "null"],
-          "items": { "type": "string" },
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
           "default": null,
           "description": "Override WakeWordDetector phrase list. null = platform defaults. [] = disable wake-word."
         },
         "wake_word_required": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "default": null,
           "description": "Start session in passive wake-word mode. null = not required (active from start)."
         },
         "ptt_default": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "default": null,
           "description": "Default UI to PTT mode on session start. null = continuous listening (current default)."
         },
         "identify_on_wake": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "default": null,
           "description": "Run face identification when wake word fires. Result is injected as context so agent can greet by name. null/true = enabled when camera is on."
         },
         "require_camera_auth": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "default": null,
           "description": "Block wake word activation unless a registered face is recognized (min 50% confidence). Requires camera to be on. null/false = disabled."
+        },
+        "wake_vad_threshold": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 255,
+          "description": "FFT-average VAD gate for the wake-word detector (default 40). Lower for low-sensitivity kiosk mics."
         }
       }
     },
-
     "context": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enable_fts":           { "type": "boolean", "default": true },
-        "enable_briefing":      { "type": "boolean", "default": true },
-        "enable_history":       { "type": "boolean", "default": true },
-        "max_history_messages": { "type": "integer", "minimum": 1, "maximum": 100, "default": 12 },
-        "notes":                { "type": "string" }
+        "enable_fts": {
+          "type": "boolean",
+          "default": true
+        },
+        "enable_briefing": {
+          "type": "boolean",
+          "default": true
+        },
+        "enable_history": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_history_messages": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 12
+        },
+        "notes": {
+          "type": "string"
+        }
       }
     },
-
     "vision": {
       "type": "object",
       "additionalProperties": false,
       "description": "Vision / camera AI model configuration.",
       "properties": {
-        "model":    { "type": "string", "default": "glm-4.6v",
-                      "description": "Vision model ID for camera analysis and face recognition." },
-        "provider": { "type": "string", "default": "zai",
-                      "description": "Vision provider (zai = ZhipuAI/GLM)." }
+        "model": {
+          "type": "string",
+          "default": "glm-4.6v",
+          "description": "Vision model ID for camera analysis and face recognition."
+        },
+        "provider": {
+          "type": "string",
+          "default": "zai",
+          "description": "Vision provider (zai = ZhipuAI/GLM)."
+        }
       }
     },
-
     "features": {
       "type": "object",
       "additionalProperties": true,
       "description": "Feature toggles. Unknown features are allowed (forward-compat). Absent = off.",
       "properties": {
-        "canvas":           { "type": "boolean", "default": true },
-        "vision":           { "type": "boolean", "default": true },
-        "music":            { "type": "boolean", "default": false },
-        "tools":            { "type": "boolean", "default": false },
-        "emotion_detection":{ "type": "boolean", "default": false },
-        "dj_soundboard":    { "type": "boolean", "default": false }
+        "canvas": {
+          "type": "boolean",
+          "default": true
+        },
+        "vision": {
+          "type": "boolean",
+          "default": true
+        },
+        "music": {
+          "type": "boolean",
+          "default": false
+        },
+        "tools": {
+          "type": "boolean",
+          "default": false
+        },
+        "emotion_detection": {
+          "type": "boolean",
+          "default": false
+        },
+        "dj_soundboard": {
+          "type": "boolean",
+          "default": false
+        }
       }
     },
-
     "ui": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "theme":            { "type": "string", "enum": ["dark", "light"], "default": "dark" },
-        "theme_preset":     { "type": "string", "enum": ["blue", "purple", "green", "red", "orange"] },
-        "face_enabled":     { "type": "boolean", "default": true },
-        "face_mode":        { "type": "string", "description": "Active face ID. Built-in: 'eyes', 'halo-smoke', 'orb'. Custom: 'custom:slug-name'." },
-        "face_config":      { "type": ["object", "null"], "additionalProperties": true, "default": null, "description": "Face-specific configuration (e.g. BigHead character traits, custom face settings)." },
-        "face_mood":        { "type": "string", "default": "neutral" },
-        "transcript_panel": { "type": "boolean", "default": true },
-        "thought_bubbles":  { "type": "boolean", "default": true },
-        "show_mode_badge":  { "type": "boolean", "default": false },
-        "mode_badge_text":  { "type": "string" }
+        "theme": {
+          "type": "string",
+          "enum": [
+            "dark",
+            "light"
+          ],
+          "default": "dark"
+        },
+        "theme_preset": {
+          "type": "string",
+          "enum": [
+            "blue",
+            "purple",
+            "green",
+            "red",
+            "orange"
+          ]
+        },
+        "face_enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "face_mode": {
+          "type": "string",
+          "description": "Active face ID. Built-in: 'eyes', 'halo-smoke', 'orb'. Custom: 'custom:slug-name'."
+        },
+        "face_config": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "default": null,
+          "description": "Face-specific configuration (e.g. BigHead character traits, custom face settings)."
+        },
+        "face_mood": {
+          "type": "string",
+          "default": "neutral"
+        },
+        "transcript_panel": {
+          "type": "boolean",
+          "default": true
+        },
+        "thought_bubbles": {
+          "type": "boolean",
+          "default": true
+        },
+        "show_mode_badge": {
+          "type": "boolean",
+          "default": false
+        },
+        "mode_badge_text": {
+          "type": "string"
+        }
       }
     },
-
     "speech_normalization": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "strip_markdown": { "type": "boolean", "default": true },
-        "strip_urls":     { "type": "boolean", "default": true },
-        "strip_emoji":    { "type": "boolean", "default": true },
-        "max_length":     { "type": "integer", "minimum": 50, "maximum": 5000, "default": 800 },
-        "abbreviations":  { "type": "object", "additionalProperties": { "type": "string" } }
+        "strip_markdown": {
+          "type": "boolean",
+          "default": true
+        },
+        "strip_urls": {
+          "type": "boolean",
+          "default": true
+        },
+        "strip_emoji": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_length": {
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 5000,
+          "default": 800
+        },
+        "abbreviations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
       }
     },
-
     "conversation": {
       "type": "object",
       "additionalProperties": false,
       "description": "Conversation flow controls.",
       "properties": {
         "greeting": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "maxLength": 500,
           "default": null,
           "description": "Text spoken on session start. null = random pool. '' = silent connect."
         },
         "auto_hangup_silence_ms": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 5000,
           "maximum": 600000,
           "default": null,
           "description": "Auto-hangup after N ms total silence. null = never."
         },
         "interruption_enabled": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "default": null,
-          "description": "STT active during TTS playback — user can barge in. Requires llm.queue.mode=steer on gateway. null = platform default (false, STT blocked during TTS)."
+          "description": "STT active during TTS playback \u2014 user can barge in. Requires llm.queue.mode=steer on gateway. null = platform default (false, STT blocked during TTS)."
         },
         "max_response_chars": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 50,
           "maximum": 16000,
           "default": null,
@@ -286,57 +511,88 @@
         }
       }
     },
-
     "modes": {
       "type": "object",
       "additionalProperties": false,
       "description": "Which UI mode buttons are available for this agent.",
       "properties": {
-        "normal": { "type": "boolean", "default": true,  "description": "Standard continuous voice." },
-        "listen": { "type": "boolean", "default": false, "description": "Transcribe-only, no AI sends." },
-        "ptt":    { "type": "boolean", "default": true,  "description": "Push-to-talk UI option." },
-        "a2a":    { "type": "boolean", "default": false, "description": "Agent-to-Agent programmatic input mode." }
+        "normal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Standard continuous voice."
+        },
+        "listen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Transcribe-only, no AI sends."
+        },
+        "ptt": {
+          "type": "boolean",
+          "default": true,
+          "description": "Push-to-talk UI option."
+        },
+        "a2a": {
+          "type": "boolean",
+          "default": false,
+          "description": "Agent-to-Agent programmatic input mode."
+        }
       }
     },
-
     "session": {
       "type": "object",
       "additionalProperties": false,
       "description": "Gateway session key strategy.",
       "properties": {
         "key_strategy": {
-          "type": ["string", "null"],
-          "enum": ["persistent", "per-call", "per-message", null],
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "persistent",
+            "per-call",
+            "per-message",
+            null
+          ],
           "default": null,
           "description": "persistent = warm shared key (best for voice). per-call = new key per session.start(). per-message = fresh key per message (stateless). null = defer to adapter_config.sessionKey or platform default."
         },
         "key_prefix": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^[a-z0-9-]+$",
           "default": null,
-          "description": "Prefix for auto-generated keys. 'voice-dj' → 'voice-dj-1'. null = use env var or 'voice-main'."
+          "description": "Prefix for auto-generated keys. 'voice-dj' \u2192 'voice-dj-1'. null = use env var or 'voice-main'."
         }
       }
     },
-
     "auth": {
       "type": "object",
       "additionalProperties": false,
       "description": "Per-profile auth override. Supplements global Clerk auth gate.",
       "properties": {
         "required": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "default": null,
           "description": "Override global auth. true = always require Clerk. false = public even when global on. null = inherit global."
         },
         "allowed_roles": {
-          "type": ["array", "null"],
-          "items": { "type": "string" },
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
           "default": null,
           "description": "Clerk roles allowed to activate this profile. null = any auth user. [] = disabled. ['admin'] = admin only."
         }
       }
     }
-
   }
 }
