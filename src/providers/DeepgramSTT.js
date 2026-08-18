@@ -424,7 +424,9 @@ class DeepgramWakeWordDetector {
         this._stt = new DeepgramSTT();
         this._stt.silenceDelayMs = 1500;
         this._stt.maxRecordingMs = 10000;
-        this._stt.vadThreshold = 40;
+        // Profile-tunable: low-sensitivity kiosk mics need a lower gate
+        // (piguy 2026-08-18: real speech peaked ~29 FFT-avg vs the old fixed 40).
+        this._stt.vadThreshold = window._serverProfile?.stt?.wake_vad_threshold ?? 40;
 
         this._stt.onResult = (transcript) => {
             const lower = transcript.toLowerCase();
