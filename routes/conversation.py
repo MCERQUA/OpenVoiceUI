@@ -137,6 +137,7 @@ _VOICE_INSTRUCTIONS = (
     "ONLY the [CANVAS:page-id] tag works to open pages. "
     "Repeating [CANVAS:same-page] on an already-open page forces a refresh. "
     "[CANVAS_MENU] — opens the page picker so the user can browse all pages. "
+    "[CANVAS_CLOSE] — closes/hides the canvas (use when the user asks to close, hide, or dismiss the canvas or a stuck page). "
     "[CANVAS_URL:https://example.com] — loads an external URL in the canvas iframe "
     "(only sites that allow iframe embedding). "
 
@@ -1050,6 +1051,7 @@ def clean_for_tts(text: str) -> str:
 
     # Remove canvas/task/music triggers (handled by frontend, not spoken)
     text = re.sub(r'\[CANVAS_MENU\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[CANVAS_CLOSE\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[CANVAS:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[CANVAS_URL:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[MUSIC_PLAY(?::[^\]]*)?\]', '', text, flags=re.IGNORECASE)
