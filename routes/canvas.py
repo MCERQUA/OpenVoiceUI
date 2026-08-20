@@ -861,7 +861,11 @@ def canvas_pages_proxy(path):
         # inside the app's own iframe and the parent page already handled authentication.
         # The iframe may not have the Clerk __session cookie on cross-subdomain visits.
         _is_html = path.endswith('.html')
-        _OS_PAGES = {'desktop.html', 'file-explorer.html', 'monaco-editor.html', 'terminal.html'}
+        # monaco-editor.html removed 2026-08-20 with the page itself (retired to
+        # default-pages/retired/). This set SKIPS AUTH, so a stale entry for a page we no
+        # longer ship is a latent hole: anything later dropped at that filename in a
+        # tenant's canvas-pages would serve unauthenticated.
+        _OS_PAGES = {'desktop.html', 'file-explorer.html', 'terminal.html'}
         if CANVAS_REQUIRE_AUTH and _is_html and path not in _OS_PAGES:
             page_id = Path(path).stem
             manifest = load_canvas_manifest()
