@@ -5091,7 +5091,11 @@ connectAiradio();
                                     this.handleCanvasCommands(cleanedResponse, canvasCommandsProcessed);
 
                                     this.callbacks.onMessage('assistant', displayText);
-                                    TranscriptPanel.finalizeStreaming(displayText);
+                                    // replace:true — this is the COMPLETE response, not an
+                                    // abort marker. The default (append) exists so an aborted
+                                    // stream keeps what it already said; a normal completion
+                                    // must overwrite the partial or the reply renders twice.
+                                    TranscriptPanel.finalizeStreaming(displayText, { replace: true });
 
                                     this._wasAgentic = false;
                                     // data.actions not re-processed here — see text_interim for rationale
@@ -8766,6 +8770,21 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 if (!query || !this.manifest?.pages) return null;
 
                 const q = query.toLowerCase().trim();
+                // Structured id => exact-match only. Spoken phrase => fuzzy. (2026-08-23)
+                // Any hyphen/underscore-segmented single token is a PAGE ID, not speech:
+                // agents emit [CANVAS:job-2026-0001] / [CANVAS:marketing-plan]; people say
+                // "job albums" with spaces. Requiring a digit was too narrow — it left
+                // [CANVAS:marketing-plan] fuzzy-matchable by a page aliased "marketing".
+                // Real ids are still resolved by the exact-id lookup above, so being strict
+                // here costs nothing and closes the whole collision class.
+                const _looksLikePageId = (v) => /^[a-z0-9]+(?:[-_][a-z0-9]+)+$/.test(v);
+                const _wordish = (hay, needle) => {
+                    if (!needle) return false;
+                    const i = hay.indexOf(needle);
+                    if (i < 0) return false;
+                    const isSep = (c) => c === '' || /[^a-z0-9]/.test(c);
+                    return isSep(i === 0 ? '' : hay[i - 1]) && isSep(hay[i + needle.length] || '');
+                };
 
                 // Exact page ID match (highest priority — agent sends [CANVAS:page-id])
                 if (this.manifest.pages[q]) {
@@ -8782,7 +8801,27 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                         if (alias.toLowerCase() === q) {
                             return { page, pageId, score: 100 }; // Exact alias match
                         }
-                        if (alias.toLowerCase().includes(q) || q.includes(alias.toLowerCase())) {
+                        // GUARD (2026-08-23): `q.includes(alias)` let a SHORT alias swallow a
+                        // longer page id. job-albums carries the alias "job", so the agent tag
+                        // [CANVAS:job-2026-0001] scored it 83 and opened the CAMERA ALBUM —
+                        // four times in a row while Mike asked for the quote. Worse, returning a
+                        // confident wrong match skips the else-branch below, which would have
+                        // loaded /pages/job-2026-0001.html correctly by URL.
+                        // A short substring of a longer, differently-structured id is not a
+                        // match; it is a collision. Require the alias to be a WORD-BOUNDARY
+                        // match, not any substring.
+                        const _a = alias.toLowerCase();
+                        // A STRUCTURED PAGE ID (hyphen-segmented AND containing digits, e.g.
+                        // "job-2026-0001") is what an agent's [CANVAS:<id>] tag sends. It is
+                        // never a spoken phrase, so it must match EXACTLY — never by substring.
+                        // Word-boundary alone is insufficient: "-" is a boundary, so the alias
+                        // "job" is a boundary-match inside "job-2026-0001" and still wins.
+                        // Natural-language queries ("show me the job page") keep fuzzy matching.
+                        if (_looksLikePageId(q)) {
+                            if (_a !== q) continue;
+                            return { page, pageId, score: 100 };
+                        }
+                        if (_a.length >= 3 && (_wordish(_a, q) || _wordish(q, _a))) {
                             const score = 80 + Math.min(alias.length, 20);
                             if (score > bestScore) {
                                 bestScore = score;
@@ -8796,7 +8835,10 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     if (displayName === q) {
                         return { page, pageId, score: 95 }; // Exact name match
                     }
-                    if (displayName.includes(q) || q.includes(displayName)) {
+                    // Same collision guard on display_name. "Job Albums" must not match
+                    // "job-2026-0001" via bare substring containment.
+                    if (_looksLikePageId(q)) { continue; }   // structured id: exact-only, handled above
+                    if (displayName.length >= 3 && (_wordish(displayName, q) || _wordish(q, displayName))) {
                         const score = 70 + Math.min(displayName.length, 25);
                         if (score > bestScore) {
                             bestScore = score;
@@ -9190,10 +9232,31 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 if (this.messages) this.messages.scrollTop = this.messages.scrollHeight;
             },
 
-            finalizeStreaming(text) {
+            finalizeStreaming(text, opts = {}) {
                 if (this._streamingEl) {
                     this._streamingEl.classList.remove('tp-streaming');
-                    if (text) this.updateStreaming(text);
+                    if (text) {
+                        // APPEND status markers, never overwrite the partial reply.
+                        // (2026-08-23, Mike) updateStreaming() does `textEl.innerHTML = html`,
+                        // so finalising an ABORTED stream with a marker like "🔀 Redirected."
+                        // DESTROYED everything the agent had already streamed. Mike saw his
+                        // nudge answered with only "🔀 Redirected." and reported transcript
+                        // text "getting removed and replaced by the end of what the agent
+                        // said". The record of what was actually said is the thing worth
+                        // keeping — the marker is an annotation on it, not a replacement for it.
+                        const prior = this._streamingEl.querySelector('.tp-text')?.textContent || '';
+                        if (opts.replace || !prior.trim()) {
+                            this.updateStreaming(text);
+                        } else {
+                            const el = this._streamingEl.querySelector('.tp-text');
+                            const mark = document.createElement('div');
+                            mark.className = 'tp-abort-note';
+                            mark.style.cssText = 'margin-top:6px;opacity:0.75;font-size:0.9em';
+                            mark.textContent = text;
+                            el.appendChild(mark);
+                            if (this.messages) this.messages.scrollTop = this.messages.scrollHeight;
+                        }
+                    }
                     this._streamingEl = null;
                 } else if (text) {
                     this.addMessage('assistant', text);
