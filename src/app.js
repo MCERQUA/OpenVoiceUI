@@ -5091,7 +5091,11 @@ connectAiradio();
                                     this.handleCanvasCommands(cleanedResponse, canvasCommandsProcessed);
 
                                     this.callbacks.onMessage('assistant', displayText);
-                                    TranscriptPanel.finalizeStreaming(displayText);
+                                    // replace:true — this is the COMPLETE response, not an
+                                    // abort marker. The default (append) exists so an aborted
+                                    // stream keeps what it already said; a normal completion
+                                    // must overwrite the partial or the reply renders twice.
+                                    TranscriptPanel.finalizeStreaming(displayText, { replace: true });
 
                                     this._wasAgentic = false;
                                     // data.actions not re-processed here — see text_interim for rationale
@@ -9228,10 +9232,31 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 if (this.messages) this.messages.scrollTop = this.messages.scrollHeight;
             },
 
-            finalizeStreaming(text) {
+            finalizeStreaming(text, opts = {}) {
                 if (this._streamingEl) {
                     this._streamingEl.classList.remove('tp-streaming');
-                    if (text) this.updateStreaming(text);
+                    if (text) {
+                        // APPEND status markers, never overwrite the partial reply.
+                        // (2026-08-23, Mike) updateStreaming() does `textEl.innerHTML = html`,
+                        // so finalising an ABORTED stream with a marker like "🔀 Redirected."
+                        // DESTROYED everything the agent had already streamed. Mike saw his
+                        // nudge answered with only "🔀 Redirected." and reported transcript
+                        // text "getting removed and replaced by the end of what the agent
+                        // said". The record of what was actually said is the thing worth
+                        // keeping — the marker is an annotation on it, not a replacement for it.
+                        const prior = this._streamingEl.querySelector('.tp-text')?.textContent || '';
+                        if (opts.replace || !prior.trim()) {
+                            this.updateStreaming(text);
+                        } else {
+                            const el = this._streamingEl.querySelector('.tp-text');
+                            const mark = document.createElement('div');
+                            mark.className = 'tp-abort-note';
+                            mark.style.cssText = 'margin-top:6px;opacity:0.75;font-size:0.9em';
+                            mark.textContent = text;
+                            el.appendChild(mark);
+                            if (this.messages) this.messages.scrollTop = this.messages.scrollHeight;
+                        }
+                    }
                     this._streamingEl = null;
                 } else if (text) {
                     this.addMessage('assistant', text);
