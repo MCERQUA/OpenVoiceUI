@@ -866,6 +866,11 @@ def canvas_pages_proxy(path):
         # longer ship is a latent hole: anything later dropped at that filename in a
         # tenant's canvas-pages would serve unauthenticated.
         _OS_PAGES = {'desktop.html', 'file-explorer.html', 'terminal.html'}
+        # _data/ under /pages/ bypasses the *.html gate entirely -- gate it here too.
+        if CANVAS_REQUIRE_AUTH and (path.startswith('_data/') or '/_data/' in path):
+            denied = _canvas_data_denied(path)
+            if denied:
+                return denied
         if CANVAS_REQUIRE_AUTH and _is_html and path not in _OS_PAGES:
             page_id = Path(path).stem
             manifest = load_canvas_manifest()
@@ -1512,6 +1517,63 @@ def create_canvas_page():
 # ---------------------------------------------------------------------------
 _CANVAS_DATA_DIR = CANVAS_PAGES_DIR / '_data'
 
+# --------------------------------------------------------------------------
+# _data/ AUTH GATE  (2026-08-23)
+#
+# canvas-pages/_data/*.json was readable with NO authentication by THREE routes,
+# all returning identical bytes -- measured live, not inferred:
+#     GET /api/canvas/data/<f>.json   -> 200
+#     GET /pages/_data/<f>.json       -> 200
+#     GET /canvas-data/<f>            -> 200   (ANY file type, not just json)
+# On one tenant that was 785KB of a client's whole commercial domain portfolio
+# (renewal_price, est_value, expires, days_to_expiry, auto_renew, locked,
+# privacy, nameservers) -- effectively a domain-sniping target list -- while the
+# page rendering it sat behind Clerk.
+#
+# ROOT CAUSE: app.py's require_auth() exempts GET under _PUBLIC_READ_PREFIXES,
+# which contains '/api/canvas/' for "manifest/context/pages". That prefix also
+# matches /api/canvas/data/. Separately the same gate waves /pages/ through
+# entirely because "canvas pages have their own auth logic" -- and that logic
+# gates only *.html, so _data/ under /pages/ was never checked by anyone.
+#
+# Fixing one route would have been a FALSE FIX that tests green. All three call
+# this helper.
+#
+# Mike, 2026-08-23: "theres no need for anything to be public its a canvas page
+# behind his clerk login."
+#
+# DEFAULT-DENY + narrow allowlist. The allowlist is load-bearing: the JamWall
+# office display is unauthenticated BY DESIGN (wall-mounted monitor, nobody to
+# log in) and fetches wallboard-layout.json. Gating it without this exemption
+# takes a live client display down. Anything listed here is world-readable
+# forever -- no PII, no commercial data, ever.
+_PUBLIC_DATA_FILES = {
+    'wallboard-layout.json',            # JamWall office display (no-login by design)
+    'wallboard-theme-overrides.json',   # ditto -- styling only
+}
+
+
+def _canvas_data_denied(filename):
+    """401 Response if this _data file needs auth and the caller lacks it, else None.
+
+    Fails CLOSED: any error while verifying denies rather than allows.
+    """
+    if not CANVAS_REQUIRE_AUTH:
+        return None                                   # self-hosted default: open
+    if Path(filename).name in _PUBLIC_DATA_FILES:
+        return None                                   # explicit, audited exemption
+    try:
+        from services.auth import get_token_from_request, verify_clerk_token
+        token = get_token_from_request()
+        user_id = verify_clerk_token(token) if token else None
+    except Exception as exc:                          # noqa: BLE001 -- fail closed
+        logger.warning('[canvas-data-auth] verify error on %s: %s', filename, exc)
+        user_id = None
+    if user_id:
+        return None
+    logger.warning('[canvas-data-auth] DENIED %s (no valid token)', filename)
+    return jsonify({'error': 'unauthorized'}), 401
+
 @canvas_bp.route('/api/canvas/data/<path:filename>', methods=['GET'])
 def canvas_data(filename):
     """Serve JSON data files for system canvas pages.
@@ -1519,6 +1581,9 @@ def canvas_data(filename):
     Reads from canvas-pages/_data/ directory.
     Returns empty {} if file doesn't exist yet (graceful empty state).
     """
+    denied = _canvas_data_denied(filename)
+    if denied:
+        return denied
     if not filename.endswith('.json'):
         return jsonify({'error': 'only .json files'}), 400
     resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
@@ -1540,6 +1605,9 @@ def canvas_data_static(filename):
     vocal/stem .mp3 files and processed-song fixtures from a stable /canvas-data/ path.
     The dir is mounted in both openclaw + openvoiceui, so it's the shared media bridge.
     Added 2026-06-25 for the suno-audio-editor Phase 1 bridge (bun submesh)."""
+    denied = _canvas_data_denied(filename)
+    if denied:
+        return denied
     resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
     if resolved and resolved.exists() and resolved.is_file():
         try:
