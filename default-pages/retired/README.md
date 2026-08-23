@@ -26,3 +26,30 @@ design. Retiring a default stops NEW tenants from getting it; it does not reach 
   clickable". The fix is a ~6-line blob: worker shim, kept here with the page if it is ever revived.
   Its entry was also removed from `_OS_PAGES` in `routes/canvas.py` — that set skips auth, so an
   allowlist entry for a page we no longer ship is a latent hole.
+
+## 2026-08-23 — retired at Mike's request
+
+- **`style-guide.html`** — superseded by `canvas-styles.html`, the per-tenant design-system
+  picker (meridian/atelier/obsidian presets + clone/customize). No code references
+  `style-guide` in `routes/`, `services/` or `src/`, so the move is inert to the app.
+
+### The half of "retire" that was missing until today
+
+Everything above is true and is only HALF the operation. Because the seeder never reaches
+into existing tenants, every page retired here stayed live on all 29 tenant desktops —
+in `canvas-manifest.json` and in the desktop state (`desktopPages` / `knownPages` /
+custom folders). Mike, 2026-08-23: *"monaco editor was supposed to be removed but i see it
+added back to desktops instead"* and *"style guide is supposed to be removed but i keep
+seeing that too"*. He was right, and the count was 29/29 for both.
+
+Retiring a page now has a second, host-side step:
+
+1. Move the file here (this repo) — stops NEW tenants getting it.
+2. Add the slug to `/home/mike/MIKE-AI/data/canvas-retired-pages.txt` — stops the canvas
+   manifest reconciler (cron `7-59/10`) re-registering it from disk, which it otherwise
+   WILL do, because that reconciler adds any `.html` it finds and the files are never
+   deleted. Without this step, deregistering a page is undone within ten minutes.
+3. Deregister from existing tenants' manifests + desktop state.
+
+Step 2 is the non-obvious one: "the file is still on disk" is not evidence a page should be
+registered, but that is precisely what the reconciler assumes.
