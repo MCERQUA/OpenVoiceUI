@@ -16,7 +16,7 @@ PySocks==1.7.1                 # SOCKS5 proxy support for requests (residential 
 httpx==0.28.1
 
 # Environment & config
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 
 # System monitoring
 psutil==7.2.2
