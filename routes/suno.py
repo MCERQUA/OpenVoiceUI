@@ -2386,7 +2386,23 @@ def suno_callback():
 
         if data.get('code') == 200:
             callback_type = data.get('data', {}).get('callbackType', '')
-            task_id = data.get('data', {}).get('taskId', '')
+            # BOTH CASINGS (2026-08-24). Suno's webhook delivers this field as snake_case
+            # `task_id` on some callback types and camelCase `taskId` on others. This line read
+            # ONLY camelCase, so every snake_case callback wrote its song to metadata with an
+            # EMPTY task_id — measured by host-clone@mesh: 62 callback rows, ZERO task_ids,
+            # while the poller leg was 36/36 clean.
+            #
+            # Why that is expensive rather than untidy: a Suno taskId+audioId pair is the key to
+            # timestamped lyrics, stems, extends, covers and video. Without it the track is a
+            # dead audio file. Suno keeps log data only ~2 MONTHS, so a dropped id has an expiry:
+            # of 101 test-dev tracks missing the pair, 78 are already past recovery and 13 expire
+            # 2026-09-20.
+            #
+            # The codebase already knew: `cb_task` twelve lines above does the both-casings read
+            # correctly for the vocal-removal path. This is the same payload; the difference was
+            # that the variable used downstream only checked one spelling.
+            task_id = ((data.get('data') or {}).get('taskId')
+                       or (data.get('data') or {}).get('task_id', ''))
 
             # Failure callback — surface to user + agent
             if callback_type == 'error':
