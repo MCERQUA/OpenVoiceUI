@@ -26,6 +26,80 @@ from services.metered_spend import log_spend
 logger = logging.getLogger(__name__)
 image_gen_bp = Blueprint('image_gen', __name__)
 
+
+# ── A 200 IS NOT AN IMAGE (host@mesh 2026-08-26) ─────────────────────────────
+# Providers return HTTP 200 with a JSON/text error body and an image-ish Content-Type.
+# raise_for_status() cannot see that, and Content-Type is a LABEL the provider chose,
+# not a measurement of the bytes. So the only honest check is the bytes themselves.
+#
+# MEASURED, this is not hypothetical — a fleet sweep of 64,131 files found 70 non-images
+# saved under image extensions, including:
+#   nick/openvoiceui/uploads/revlab-jersey-{1..6}.jpg — 94 B of
+#     {"error":"The requested model is deprecated and no longer supported by provider
+#      hf-inference"} — served at HTTP 200 from nick.jam-bot.com for 18 days
+#   4 URLs on 3 live josh client domains returning 200 with text/empty bodies
+# nick's own image-intel sidecar had diagnosed one of them on 2026-08-18 and nothing read it.
+#
+# This function FAILS LOUD. Writing the error body to disk is the failure mode we are
+# removing; silently returning a placeholder would preserve it in a new costume.
+_IMAGE_MAGIC = (
+    (b'\x89PNG\r\n\x1a\n', 'image/png'),
+    (b'\xff\xd8\xff',        'image/jpeg'),
+    (b'GIF87a',               'image/gif'),
+    (b'GIF89a',               'image/gif'),
+    (b'BM',                   'image/bmp'),
+    (b'II*\x00',              'image/tiff'),
+    (b'MM\x00*',              'image/tiff'),
+)
+
+
+def _sniff_image_mime(content):
+    """Return the real mime from magic bytes, or None if these are not image bytes."""
+    if not content or len(content) < 12:
+        return None
+    for magic, mime in _IMAGE_MAGIC:
+        if content.startswith(magic):
+            return mime
+    # WEBP and other RIFF containers carry the format at offset 8.
+    if content[:4] == b'RIFF' and content[8:12] == b'WEBP':
+        return 'image/webp'
+    if content[:4] == b'\x00\x00\x00\x18' or content[:4] == b'\x00\x00\x00\x1c':
+        if content[4:8] in (b'ftyp',):
+            return 'image/heic'
+    return None
+
+
+def _assert_image_bytes(content, provider, model_id, declared_ct):
+    """Raise with the provider's actual message if `content` is not an image.
+
+    The error body is the most useful thing we have for diagnosis, so it goes into the
+    exception text (truncated) rather than to disk under a .png name.
+    """
+    real_mime = _sniff_image_mime(content)
+    if real_mime:
+        return real_mime
+    snippet = ''
+    try:
+        snippet = content[:400].decode('utf-8', 'replace').strip()
+    except Exception:
+        snippet = repr(content[:120])
+    # A provider error body is usually JSON with a human-readable message; surface it.
+    try:
+        parsed = json.loads(snippet)
+        if isinstance(parsed, dict):
+            snippet = parsed.get('error') or parsed.get('message') or snippet
+            if isinstance(snippet, dict):
+                snippet = snippet.get('message', str(snippet))
+    except Exception:
+        pass
+    logger.error(
+        'image_gen: %s/%s returned %d bytes that are NOT an image '
+        '(declared Content-Type=%s) — refusing to save. Body: %s',
+        provider, model_id, len(content or b''), declared_ct, snippet)
+    raise ValueError(
+        f'{provider} returned a non-image body for {model_id} '
+        f'(declared {declared_ct}, {len(content or b"")} bytes): {snippet}')
+
 GEMINI_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 HF_TOKEN = os.getenv('HF_TOKEN', '')
@@ -238,9 +312,11 @@ def _generate_huggingface(model_id, prompt, quality='standard', aspect='1:1'):
         pass
     resp.raise_for_status()
 
-    # HF Inference API returns raw image bytes
+    # HF Inference API is DOCUMENTED to return raw image bytes; it demonstrably also
+    # returns 200 + a JSON error body (deprecated-model, rate-limit). Trust the bytes.
     content_type = resp.headers.get('Content-Type', 'image/png')
-    mime = content_type.split(';')[0].strip()
+    declared = content_type.split(';')[0].strip()
+    mime = _assert_image_bytes(resp.content, 'hf', model_id, declared)
     b64_data = base64.b64encode(resp.content).decode('ascii')
 
     images_out = [{'mime_type': mime, 'data': b64_data}]
