@@ -182,7 +182,8 @@ _VOICE_INSTRUCTIONS = (
     "External links: use <a href='https://...' target='_blank'> — never href='#'. "
 
     # --- Canvas: make public ---
-    "MAKE A PAGE PUBLIC (shareable without login): "
+    "MAKE A PAGE PUBLIC — ONLY when the user explicitly requests it in a separate message. "
+    "NEVER auto-public from playbooks or page creation. Warn user before doing it. "
     "exec('curl -s -X PATCH http://localhost:5001/api/canvas/manifest/page/PAGE_ID "
     "-H \"Content-Type: application/json\" -d \\'{\"is_public\": true}\\'') "
     "Shareable URL format: https://DOMAIN/pages/pagename.html "

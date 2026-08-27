@@ -26,10 +26,94 @@ from services.metered_spend import log_spend
 logger = logging.getLogger(__name__)
 image_gen_bp = Blueprint('image_gen', __name__)
 
+
+# ── A 200 IS NOT AN IMAGE (host@mesh 2026-08-26) ─────────────────────────────
+# Providers return HTTP 200 with a JSON/text error body and an image-ish Content-Type.
+# raise_for_status() cannot see that, and Content-Type is a LABEL the provider chose,
+# not a measurement of the bytes. So the only honest check is the bytes themselves.
+#
+# MEASURED, this is not hypothetical — a fleet sweep of 64,131 files found 70 non-images
+# saved under image extensions, including:
+#   nick/openvoiceui/uploads/revlab-jersey-{1..6}.jpg — 94 B of
+#     {"error":"The requested model is deprecated and no longer supported by provider
+#      hf-inference"} — served at HTTP 200 from nick.jam-bot.com for 18 days
+#   4 URLs on 3 live josh client domains returning 200 with text/empty bodies
+# nick's own image-intel sidecar had diagnosed one of them on 2026-08-18 and nothing read it.
+#
+# This function FAILS LOUD. Writing the error body to disk is the failure mode we are
+# removing; silently returning a placeholder would preserve it in a new costume.
+_IMAGE_MAGIC = (
+    (b'\x89PNG\r\n\x1a\n', 'image/png'),
+    (b'\xff\xd8\xff',        'image/jpeg'),
+    (b'GIF87a',               'image/gif'),
+    (b'GIF89a',               'image/gif'),
+    (b'BM',                   'image/bmp'),
+    (b'II*\x00',              'image/tiff'),
+    (b'MM\x00*',              'image/tiff'),
+)
+
+
+def _sniff_image_mime(content):
+    """Return the real mime from magic bytes, or None if these are not image bytes."""
+    if not content or len(content) < 12:
+        return None
+    for magic, mime in _IMAGE_MAGIC:
+        if content.startswith(magic):
+            return mime
+    # WEBP and other RIFF containers carry the format at offset 8.
+    if content[:4] == b'RIFF' and content[8:12] == b'WEBP':
+        return 'image/webp'
+    if content[:4] == b'\x00\x00\x00\x18' or content[:4] == b'\x00\x00\x00\x1c':
+        if content[4:8] in (b'ftyp',):
+            return 'image/heic'
+    return None
+
+
+def _assert_image_bytes(content, provider, model_id, declared_ct):
+    """Raise with the provider's actual message if `content` is not an image.
+
+    The error body is the most useful thing we have for diagnosis, so it goes into the
+    exception text (truncated) rather than to disk under a .png name.
+    """
+    real_mime = _sniff_image_mime(content)
+    if real_mime:
+        return real_mime
+    snippet = ''
+    try:
+        snippet = content[:400].decode('utf-8', 'replace').strip()
+    except Exception:
+        snippet = repr(content[:120])
+    # A provider error body is usually JSON with a human-readable message; surface it.
+    try:
+        parsed = json.loads(snippet)
+        if isinstance(parsed, dict):
+            snippet = parsed.get('error') or parsed.get('message') or snippet
+            if isinstance(snippet, dict):
+                snippet = snippet.get('message', str(snippet))
+    except Exception:
+        pass
+    logger.error(
+        'image_gen: %s/%s returned %d bytes that are NOT an image '
+        '(declared Content-Type=%s) — refusing to save. Body: %s',
+        provider, model_id, len(content or b''), declared_ct, snippet)
+    raise ValueError(
+        f'{provider} returned a non-image body for {model_id} '
+        f'(declared {declared_ct}, {len(content or b"")} bytes): {snippet}')
+
 GEMINI_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 HF_TOKEN = os.getenv('HF_TOKEN', '')
-HF_INFERENCE_BASE = 'https://router.huggingface.co/hf-inference/models'
+HF_INFERENCE_BASE = 'https://router.huggingface.co/hf-inference/models'  # DEAD (HTTP 410)
+# 2026-08-27: hf-inference no longer serves FLUX — POSTing the line above returns
+#   410 'The requested model is deprecated and no longer supported by provider hf-inference'
+# (verified directly against the live endpoint, not inferred). HF's provider map lists
+# fal-ai (our account is 403 exhausted), together (status=error), wavespeed and nscale.
+# nscale is what the fleet's own skills/huggingface/scripts/hf-image-gen.sh already uses
+# successfully, so it is the proven port target rather than a guess.
+# NOT A URL SWAP: nscale is OpenAI-images-compatible — JSON in, JSON out with the image
+# in .data[0].b64_json. Swapping only the URL would write a JSON envelope to disk as if
+# it were a PNG.
+HF_IMAGES_BASE = 'https://router.huggingface.co/nscale/v1/images/generations'
 
 # Cheap-by-default (Mike 2026-07-28): last month's ~$100 Gemini bill was driven by
 # generation defaulting to Nano Banana PRO (~$0.13-0.24/img). Flash image is ~4-6x
@@ -215,15 +299,17 @@ def _generate_huggingface(model_id, prompt, quality='standard', aspect='1:1'):
     logger.info('image_gen: HF model=%s quality=%s size=%dx%d prompt_len=%d',
                 model_id, quality, width, height, len(prompt))
 
+    # nscale SILENTLY IGNORES width/height keys (the shape the old hf-inference path used)
+    # and takes dimensions only via OpenAI's `size` string. Sending the old parameters block
+    # would be accepted and quietly ignored — a wrong-size image with no error.
     payload = {
-        'inputs': prompt,
-        'parameters': {
-            'width': width,
-            'height': height,
-        },
+        'model': model_id,
+        'prompt': prompt,
+        'n': 1,
+        'size': f'{width}x{height}',
     }
 
-    url = f'{HF_INFERENCE_BASE}/{model_id}'
+    url = HF_IMAGES_BASE
     headers = {
         'Authorization': f'Bearer {HF_TOKEN}',
         'Content-Type': 'application/json',
@@ -238,10 +324,22 @@ def _generate_huggingface(model_id, prompt, quality='standard', aspect='1:1'):
         pass
     resp.raise_for_status()
 
-    # HF Inference API returns raw image bytes
-    content_type = resp.headers.get('Content-Type', 'image/png')
-    mime = content_type.split(';')[0].strip()
-    b64_data = base64.b64encode(resp.content).decode('ascii')
+    # nscale returns JSON: {"data":[{"b64_json": "..."}]} — already base64. Decode it ONLY to
+    # run the magic-byte assertion, then pass the ORIGINAL string through. Re-encoding it (as
+    # the old raw-bytes path did) would double-encode and produce an unopenable file.
+    try:
+        body = resp.json()
+        b64_data = body['data'][0]['b64_json']
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise ValueError(
+            f'HF/nscale returned 200 but no .data[0].b64_json ({type(exc).__name__}). '
+            f'A 200 is not an image — body starts: {resp.text[:200]!r}'
+        ) from exc
+    try:
+        raw = base64.b64decode(b64_data, validate=True)
+    except Exception as exc:
+        raise ValueError(f'HF/nscale b64_json is not valid base64: {exc}') from exc
+    mime = _assert_image_bytes(raw, 'hf', model_id, 'image/png')
 
     images_out = [{'mime_type': mime, 'data': b64_data}]
     return images_out, ''
