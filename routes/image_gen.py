@@ -103,7 +103,17 @@ def _assert_image_bytes(content, provider, model_id, declared_ct):
 GEMINI_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 HF_TOKEN = os.getenv('HF_TOKEN', '')
-HF_INFERENCE_BASE = 'https://router.huggingface.co/hf-inference/models'
+HF_INFERENCE_BASE = 'https://router.huggingface.co/hf-inference/models'  # DEAD (HTTP 410)
+# 2026-08-27: hf-inference no longer serves FLUX — POSTing the line above returns
+#   410 'The requested model is deprecated and no longer supported by provider hf-inference'
+# (verified directly against the live endpoint, not inferred). HF's provider map lists
+# fal-ai (our account is 403 exhausted), together (status=error), wavespeed and nscale.
+# nscale is what the fleet's own skills/huggingface/scripts/hf-image-gen.sh already uses
+# successfully, so it is the proven port target rather than a guess.
+# NOT A URL SWAP: nscale is OpenAI-images-compatible — JSON in, JSON out with the image
+# in .data[0].b64_json. Swapping only the URL would write a JSON envelope to disk as if
+# it were a PNG.
+HF_IMAGES_BASE = 'https://router.huggingface.co/nscale/v1/images/generations'
 
 # Cheap-by-default (Mike 2026-07-28): last month's ~$100 Gemini bill was driven by
 # generation defaulting to Nano Banana PRO (~$0.13-0.24/img). Flash image is ~4-6x
@@ -289,15 +299,17 @@ def _generate_huggingface(model_id, prompt, quality='standard', aspect='1:1'):
     logger.info('image_gen: HF model=%s quality=%s size=%dx%d prompt_len=%d',
                 model_id, quality, width, height, len(prompt))
 
+    # nscale SILENTLY IGNORES width/height keys (the shape the old hf-inference path used)
+    # and takes dimensions only via OpenAI's `size` string. Sending the old parameters block
+    # would be accepted and quietly ignored — a wrong-size image with no error.
     payload = {
-        'inputs': prompt,
-        'parameters': {
-            'width': width,
-            'height': height,
-        },
+        'model': model_id,
+        'prompt': prompt,
+        'n': 1,
+        'size': f'{width}x{height}',
     }
 
-    url = f'{HF_INFERENCE_BASE}/{model_id}'
+    url = HF_IMAGES_BASE
     headers = {
         'Authorization': f'Bearer {HF_TOKEN}',
         'Content-Type': 'application/json',
@@ -312,12 +324,22 @@ def _generate_huggingface(model_id, prompt, quality='standard', aspect='1:1'):
         pass
     resp.raise_for_status()
 
-    # HF Inference API is DOCUMENTED to return raw image bytes; it demonstrably also
-    # returns 200 + a JSON error body (deprecated-model, rate-limit). Trust the bytes.
-    content_type = resp.headers.get('Content-Type', 'image/png')
-    declared = content_type.split(';')[0].strip()
-    mime = _assert_image_bytes(resp.content, 'hf', model_id, declared)
-    b64_data = base64.b64encode(resp.content).decode('ascii')
+    # nscale returns JSON: {"data":[{"b64_json": "..."}]} — already base64. Decode it ONLY to
+    # run the magic-byte assertion, then pass the ORIGINAL string through. Re-encoding it (as
+    # the old raw-bytes path did) would double-encode and produce an unopenable file.
+    try:
+        body = resp.json()
+        b64_data = body['data'][0]['b64_json']
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise ValueError(
+            f'HF/nscale returned 200 but no .data[0].b64_json ({type(exc).__name__}). '
+            f'A 200 is not an image — body starts: {resp.text[:200]!r}'
+        ) from exc
+    try:
+        raw = base64.b64decode(b64_data, validate=True)
+    except Exception as exc:
+        raise ValueError(f'HF/nscale b64_json is not valid base64: {exc}') from exc
+    mime = _assert_image_bytes(raw, 'hf', model_id, 'image/png')
 
     images_out = [{'mime_type': mime, 'data': b64_data}]
     return images_out, ''
