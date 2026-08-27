@@ -9046,7 +9046,23 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
             },
 
             _stageFile(file) {
+                // iOS FILE-HANDLE STALENESS (2026-08-26) ────────────────────────────────
+                // A File handle from the phone camera can go dead while it sits staged:
+                // iOS suspends Safari during capture, and on return the object still
+                // reports .name/.size but its bytes are gone. FormData then serialises to
+                // NOTHING, and the server sees content_length=0 with an empty form —
+                // observed on test-dev, iOS 18.7/Safari 26.6, two consecutive 400s.
+                // Holding the handle and reading it later is the bug. Snapshot the bytes
+                // NOW, while the handle is still live, and upload the snapshot.
+                // Correct on every platform; only iOS made it load-bearing.
                 this._pendingFile = { file, name: file.name, type: file.type, size: file.size };
+                file.arrayBuffer().then((buf) => {
+                    if (this._pendingFile && this._pendingFile.file === file) {
+                        this._pendingFile.blob = new Blob([buf], { type: file.type || 'application/octet-stream' });
+                    }
+                }).catch((e) => {
+                    console.warn('stage: could not snapshot file bytes, will fall back to live handle:', e);
+                });
                 this._pendingBulkFiles = null;
                 // Create blob URL for thumbnail preview in chat
                 if (file.type.startsWith('image/')) {
@@ -9319,7 +9335,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 // Single file upload
                 else if (stagedFile) {
                     try {
-                        const result = await this.uploadFile(stagedFile.file);
+                        const result = await this.uploadFile(stagedFile.file, stagedFile);
                         // Full location string so the agent always knows exactly where the
                         // file lives (local path + public URL, indexed in .uploads-index.jsonl)
                         const loc = result.url_full ? `${result.path} (public URL: ${result.url_full})` : result.path;
@@ -9401,9 +9417,16 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 if (fileInput) fileInput.value = '';
             },
 
-            async uploadFile(file) {
+            async uploadFile(file, staged) {
                 const formData = new FormData();
-                formData.append('file', file);
+                // Prefer the byte snapshot taken at stage time (see _stageFile). Falls back
+                // to the live handle when there is no snapshot (drag-drop, desktop picker).
+                const body = (staged && staged.blob) ? staged.blob : file;
+                const fname = (staged && staged.name) || file.name || 'upload';
+                if (body && body.size === 0) {
+                    throw new Error(`${fname} came back empty — re-attach the photo and try again`);
+                }
+                formData.append('file', body, fname);
 
                 const serverUrl = window.CONFIG?.serverUrl || '';
                 let resp;

@@ -100,6 +100,9 @@ If a page downloads a file, it is captured automatically; [BROWSE_STATE] will sh
 ---
 
 CANVAS — MAKE A PAGE PUBLIC (shareable without login):
+CRITICAL: NEVER set is_public=true automatically, from a playbook, or as part of page creation.
+A page may ONLY be made public if the USER explicitly requests it in a SEPARATE message after the page exists.
+When the user asks to make it public, warn them: "This will make the page viewable by anyone with the link — are you sure?"
 exec("curl -s -X PATCH http://localhost:5001/api/canvas/manifest/page/PAGE_ID -H 'Content-Type: application/json' -d '{\"is_public\": true}'")
 Replace PAGE_ID with the page filename without .html extension.
 To make private again: use {"is_public": false}
