@@ -640,7 +640,11 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
             'modified': datetime.now().isoformat(),
             'starred': False,
             'is_public': False,
-            'is_locked': False,
+            # LOCKED BY DEFAULT (2026-08-29). The admin-only visibility guard below only
+            # fires on locked pages; with this False it never fired on ANY page ever created
+            # (measured: 0 locked / 72 unlocked / 2127 key-absent fleet-wide), leaving a 30s
+            # cooldown as the only thing between an agent and a public page.
+            'is_locked': True,
             'voice_aliases': generate_voice_aliases(title),
             'access_count': 0,
         }
@@ -1341,7 +1345,11 @@ def handle_page_metadata(page_id):
         # Guard: locked pages — visibility can only be changed by an admin.
         # The unauthenticated path is already 401'd by require_auth (SEC-2 fix in
         # app.py); this guard is defense-in-depth and blocks the agent key too.
-        if 'is_public' in data and page.get('is_locked', False) and not is_admin:
+        # Only the UNSAFE direction is blocked: making a page PUBLIC needs an admin.
+        # Making a page PRIVATE is always allowed — an agent that realises it exposed
+        # something must never be prevented from closing it.
+        # Default is True: a page with no is_locked key is treated as LOCKED (fail closed).
+        if data.get('is_public') is True and page.get('is_locked', True) and not is_admin:
             return jsonify({
                 'error': 'This page is locked. Visibility can only be changed from the admin dashboard.',
                 'is_locked': True,
@@ -1368,7 +1376,9 @@ def handle_page_metadata(page_id):
                             'age_seconds': round(age_seconds, 1),
                         }), 429
                 except (ValueError, TypeError):
-                    pass  # malformed date — allow through
+                    # FAIL CLOSED: an unparseable 'created' must not become a free pass
+                    # past the cooldown. Previously this allowed the change through.
+                    return jsonify({'error': 'Cannot verify page age; refusing to make public.'}), 409
 
         for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon', 'style']:
             if field in data:
