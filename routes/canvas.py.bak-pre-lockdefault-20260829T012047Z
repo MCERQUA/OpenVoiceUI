@@ -1,0 +1,2097 @@
+"""
+Canvas routes blueprint — extracted from server.py (P2-T5).
+
+Provides all canvas-related HTTP endpoints plus the canvas context tracking
+and manifest management helpers that other modules (e.g. server.py's
+conversation handler) need via direct import.
+"""
+
+import hashlib
+import html as html_module
+import json
+import logging
+import os
+import re
+import shutil
+import threading
+import time
+from datetime import datetime
+import mimetypes
+from pathlib import Path
+
+import requests as http_requests
+from flask import Blueprint, Response, g, jsonify, redirect, request, send_file
+
+# 3D asset MIME types — without these, send_file falls back to
+# application/octet-stream which (combined with X-Content-Type-Options:nosniff)
+# makes browsers download .glb instead of letting <model-viewer> load it inline.
+mimetypes.add_type('model/gltf-binary', '.glb')
+mimetypes.add_type('model/gltf+json', '.gltf')
+mimetypes.add_type('model/vnd.usdz+zip', '.usdz')
+mimetypes.add_type('model/obj', '.obj')
+mimetypes.add_type('model/stl', '.stl')
+mimetypes.add_type('application/octet-stream', '.fbx')  # no registered model/* for FBX
+
+from services.canvas_versioning import (
+    list_versions,
+    restore_version,
+    get_version_content,
+    start_version_watcher,
+)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR, CODE_WORKSPACE_DIR
+CANVAS_SSE_PORT = int(os.getenv('CANVAS_SSE_PORT', '3030'))
+CANVAS_SESSION_PORT = int(os.getenv('CANVAS_SESSION_PORT', '3002'))
+BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
+# Self-hosted installs: auth is disabled by default. Set CANVAS_REQUIRE_AUTH=true to enable Clerk JWT checks.
+CANVAS_REQUIRE_AUTH = os.getenv('CANVAS_REQUIRE_AUTH', 'false').lower() == 'true'
+
+CATEGORY_KEYWORDS = {
+    'dashboards': ['dashboard', 'monitor', 'status', 'overview', 'control panel', 'panel'],
+    'weather': ['weather', 'temperature', 'forecast', 'climate', 'rain', 'sunny', 'humidity'],
+    'research': ['research', 'analysis', 'study', 'compare', 'investigate', 'explore'],
+    'social': ['twitter', 'x.com', 'social', 'post', 'tweet', 'follower', 'engagement'],
+    'finance': ['price', 'cost', 'budget', 'money', 'crypto', 'stock', 'market'],
+    'tasks': ['todo', 'task', 'project', 'plan', 'roadmap', 'checklist'],
+    'reference': ['guide', 'reference', 'documentation', 'help', 'how to', 'tutorial'],
+    'entertainment': ['music', 'radio', 'playlist', 'dj', 'audio', 'song'],
+    'video': ['video', 'remotion', 'render', 'animation', 'movie', 'clip', 'recording'],
+}
+
+CATEGORY_ICONS = {
+    'dashboards': '📊',
+    'weather': '🌤️',
+    'research': '🔬',
+    'social': '🐦',
+    'finance': '💰',
+    'tasks': '✅',
+    'reference': '📖',
+    'entertainment': '🎵',
+    'video': '🎬',
+    'uncategorized': '📁',
+}
+
+CATEGORY_COLORS = {
+    'dashboards': '#4a9eff',
+    'weather': '#ffb347',
+    'research': '#9b59b6',
+    'social': '#1da1f2',
+    'finance': '#2ecc71',
+    'tasks': '#e74c3c',
+    'reference': '#95a5a6',
+    'entertainment': '#e91e63',
+    'video': '#ff6b35',
+    'uncategorized': '#6e7681',
+}
+
+# ---------------------------------------------------------------------------
+# Canvas context state (module-level so other modules can import it)
+# ---------------------------------------------------------------------------
+
+_canvas_context_lock = threading.Lock()
+
+canvas_context = {
+    'current_page': None,    # filename of current page
+    'current_title': None,   # title of current page
+    'page_content': None,    # brief content summary
+    'updated_at': None,      # when context was last updated
+    'all_pages': [],         # list of all known canvas pages
+}
+
+# ---------------------------------------------------------------------------
+# Manifest cache
+# ---------------------------------------------------------------------------
+
+_manifest_cache: dict = {'data': None, 'mtime': 0}
+_last_sync_time: float = 0
+_SYNC_THROTTLE_SECONDS: int = 60  # auto-sync at most once per minute
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _notify_brain(event_type: str, **data) -> None:
+    """Append a canvas event to the Brain event log (non-critical)."""
+    try:
+        event = {'type': event_type, 'timestamp': datetime.now().isoformat()}
+        event.update(data)
+        with open(BRAIN_EVENTS_PATH, 'a') as f:
+            f.write(json.dumps(event) + '\n')
+    except Exception as exc:
+        logging.getLogger(__name__).debug(f'Brain notification failed (non-critical): {exc}')
+
+
+# ---------------------------------------------------------------------------
+# Page icon extraction — canonical icon lives in the HTML via meta tag
+# ---------------------------------------------------------------------------
+
+_PAGE_ICON_RE = re.compile(
+    r'<meta\s+name=["\']page-icon["\']\s+content=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+def extract_page_icon(html_content: str) -> str | None:
+    """Extract icon type from <meta name="page-icon" content="..."> in page HTML.
+
+    Returns the content value (an icon type name like 'dashboard', 'game', etc.)
+    or None if no meta tag is found.  Only reads the first 2KB for speed.
+    """
+    m = _PAGE_ICON_RE.search(html_content[:2048])
+    return m.group(1).strip() if m else None
+
+
+def extract_page_icon_from_file(filepath: Path) -> str | None:
+    """Read a canvas page HTML file and extract its icon meta tag."""
+    try:
+        with open(filepath, 'r', errors='ignore') as f:
+            head = f.read(2048)
+        return extract_page_icon(head)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Canvas context helpers (imported by server.py conversation handler)
+# ---------------------------------------------------------------------------
+
+def update_canvas_context(page_path: str, title: str = None, content_summary: str = None) -> None:
+    """Update the current canvas context (called by frontend)."""
+    global canvas_context
+    canvas_context['current_page'] = page_path
+    canvas_context['current_title'] = title
+    canvas_context['page_content'] = content_summary
+    canvas_context['updated_at'] = datetime.now().isoformat()
+
+    _notify_brain('canvas_display', page=page_path, title=title)
+
+    try:
+        if CANVAS_PAGES_DIR.exists():
+            pages = sorted(
+                CANVAS_PAGES_DIR.glob('*.html'),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )[:30]
+            canvas_context['all_pages'] = [
+                {'name': p.name, 'title': p.stem.replace('-', ' '), 'mtime': p.stat().st_mtime}
+                for p in pages
+            ]
+    except Exception:
+        pass
+
+
+def extract_canvas_page_content(page_path: str, max_chars: int = 1000) -> str:
+    """Extract readable text content from a canvas HTML page."""
+    try:
+        if page_path.startswith('/pages/'):
+            page_path = page_path[7:]
+        full_path = CANVAS_PAGES_DIR / page_path
+        if not full_path.exists():
+            return ''
+        html_raw = full_path.read_text(errors='ignore')
+        html_raw = re.sub(r'<script[^>]*>.*?</script>', '', html_raw, flags=re.DOTALL | re.IGNORECASE)
+        html_raw = re.sub(r'<style[^>]*>.*?</style>', '', html_raw, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', html_raw)
+        text = re.sub(r'\s+', ' ', text).strip()
+        text = html_module.unescape(text)
+        return text[:max_chars]
+    except Exception as exc:
+        logging.getLogger(__name__).debug(f'Failed to extract canvas content: {exc}')
+        return ''
+
+
+def get_canvas_context() -> str:
+    """Return canvas context string for the agent's system prompt with full page catalog."""
+    manifest = load_canvas_manifest()
+    parts = ['\n--- CANVAS CONTEXT ---']
+
+    if canvas_context.get('current_page'):
+        page_name = canvas_context['current_title'] or canvas_context['current_page']
+        parts.append(f"Currently viewing: {page_name}")
+        page_content = extract_canvas_page_content(canvas_context['current_page'], max_chars=800)
+        if page_content:
+            parts.append('\nPage content summary:')
+            parts.append(page_content[:800])
+
+    starred = [p for p in manifest.get('pages', {}).values() if p.get('starred')]
+    if starred:
+        parts.append('\nStarred pages (user favorites, say name to open):')
+        for p in starred[:5]:
+            aliases = p.get('voice_aliases', [])[:2]
+            alias_str = f" (say: {', '.join(aliases)})" if aliases else ''
+            parts.append(f"  - {p['display_name']}{alias_str}")
+
+    categories = manifest.get('categories', {})
+    all_pages = manifest.get('pages', {})
+    if categories:
+        parts.append('\nAvailable pages (use [CANVAS:page-id] to open):')
+        for cat_id, cat in categories.items():
+            cat_pages = cat.get('pages', [])
+            if cat_pages:
+                parts.append(f"  {cat.get('icon', '📄')} {cat['name']}:")
+                for pid in cat_pages:
+                    display = all_pages.get(pid, {}).get('display_name', pid)
+                    parts.append(f"    - {display} → [CANVAS:{pid}]")
+
+    recent = manifest.get('recently_viewed', [])[:5]
+    if recent:
+        recent_names = []
+        for pid in recent:
+            if pid in manifest.get('pages', {}):
+                recent_names.append(manifest['pages'][pid].get('display_name', pid))
+        if recent_names:
+            parts.append(f"\nRecently viewed: {', '.join(recent_names[:3])}")
+
+    parts.append('\nVOICE COMMANDS:')
+    parts.append('- "Show [page name]" - Open a specific canvas page')
+    parts.append('- "Show [category] pages" - Show category overview')
+    parts.append('- "What pages do we have?" - List available pages')
+    parts.append('- "Update this page" - Modify the current page')
+    parts.append('\nAGENT CANVAS CONTROL:')
+    parts.append('- To open a canvas page, include: [CANVAS:page-name]')
+    parts.append('- Example: [CANVAS:dashboard] or [CANVAS:weather]')
+    parts.append('- To open the canvas menu, include: [CANVAS_MENU]')
+    parts.append('- The canvas will open automatically when user sees your response')
+    parts.append('\nAGENT SONG GENERATION (Suno AI):')
+    parts.append('- To generate a new song, include: [SUNO_GENERATE:describe the song here]')
+    parts.append('- Example: [SUNO_GENERATE:upbeat track about a sunny day]')
+    parts.append('- The frontend will call /api/suno, poll for completion (~45s), then auto-play the new song')
+    parts.append('- Songs are saved to generated_music/ and appear in the music player')
+    parts.append('- Costs ~12 Suno credits per song (2 tracks generated per request)')
+    parts.append('\nAGENT MUSIC CONTROL:')
+    parts.append('- To play music/radio, include: [MUSIC_PLAY]')
+    parts.append('- To play a specific track, include: [MUSIC_PLAY:track name]')
+    parts.append('- To stop music, include: [MUSIC_STOP]')
+    parts.append('- To skip to next track, include: [MUSIC_NEXT]')
+    parts.append('- Available tracks are loaded dynamically from the music library')
+    parts.append('- The music player will open/close automatically when user sees your response')
+    parts.append('--- END CANVAS CONTEXT ---')
+
+    return '\n'.join(parts)
+
+
+def get_current_canvas_page_for_worker() -> str | None:
+    """Return current canvas page filename for workers to update."""
+    if canvas_context.get('current_page'):
+        page = canvas_context['current_page']
+        if page.startswith('/pages/'):
+            page = page[7:]
+        return page
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Manifest helpers
+# ---------------------------------------------------------------------------
+
+import copy
+
+_manifest_lock = threading.Lock()
+
+
+def load_canvas_manifest() -> dict:
+    """Load manifest with mtime-based caching.
+
+    Returns a deep copy so callers can mutate freely without corrupting the
+    cache or racing with other threads.  The _manifest_lock MUST be held by
+    the caller when load+modify+save must be atomic (use ``with _manifest_lock:``).
+    """
+    global _manifest_cache
+    if CANVAS_MANIFEST_PATH.exists():
+        try:
+            mtime = CANVAS_MANIFEST_PATH.stat().st_mtime
+            if mtime > _manifest_cache['mtime']:
+                with open(CANVAS_MANIFEST_PATH, 'r') as f:
+                    _manifest_cache['data'] = json.load(f)
+                    _manifest_cache['mtime'] = mtime
+            if _manifest_cache['data']:
+                return copy.deepcopy(_manifest_cache['data'])
+        except (json.JSONDecodeError, IOError) as exc:
+            logging.getLogger(__name__).warning(f'Failed to load canvas manifest: {exc}')
+
+    return {
+        'version': 1,
+        'last_updated': datetime.now().isoformat(),
+        'categories': {},
+        'pages': {},
+        'uncategorized': [],
+        'recently_viewed': [],
+        'user_custom_order': None,
+    }
+
+
+def save_canvas_manifest(manifest: dict) -> None:
+    """Save manifest directly (Docker bind-mounted files don't support atomic rename)."""
+    manifest['last_updated'] = datetime.now().isoformat()
+    try:
+        data = json.dumps(manifest, indent=2)
+        with open(CANVAS_MANIFEST_PATH, 'w') as f:
+            f.write(data)
+        _manifest_cache['data'] = copy.deepcopy(manifest)
+        _manifest_cache['mtime'] = CANVAS_MANIFEST_PATH.stat().st_mtime
+    except Exception as exc:
+        logging.getLogger(__name__).error(f'Failed to save canvas manifest: {exc}')
+
+
+def suggest_category(title: str, content: str = '') -> str:
+    """Suggest category based on title and content keywords."""
+    text = (title + ' ' + (content or '')[:500]).lower()
+    scores = {}
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        score = sum(3 if kw in text else 0 for kw in keywords)
+        if score > 0:
+            scores[category] = score
+    return max(scores, key=scores.get) if scores else 'uncategorized'
+
+
+def generate_voice_aliases(title: str) -> list[str]:
+    """Generate voice-friendly aliases for a page."""
+    aliases = []
+    name = title.lower()
+    aliases.append(name)
+    words = name.replace('-', ' ').split()
+    if len(words) > 1:
+        aliases.extend(words)
+    if words:
+        aliases.append(f'{words[0]} page')
+    return list(set(aliases))[:5]
+
+
+def sync_canvas_manifest() -> dict:
+    """Full sync with pages directory."""
+    with _manifest_lock:
+        manifest = _sync_canvas_manifest_locked()
+    _kick_off_pending_icon_generation(manifest)
+    return manifest
+
+
+# Pages still missing a custom icon after HTML-meta extraction get a real
+# generated one automatically — the icon-generation skill tells agents to do
+# this themselves, but nothing enforced it (grep found no call site besides
+# the route), so pages silently fell back to the generic document icon
+# whenever an agent skipped the step. This is the enforcement layer.
+_ICON_GEN_RETRY_COOLDOWN = 6 * 3600  # seconds — backoff after a failed attempt
+_icon_gen_lock = threading.Lock()  # single-flight guard — see _kick_off_pending_icon_generation
+
+
+def _kick_off_pending_icon_generation(manifest: dict) -> None:
+    """Fire-and-forget: spawn a background thread to generate icons for any
+    page still missing one. Must never run inline here — this function is
+    called on every /api/canvas/manifest sync (throttled to 60s, but still a
+    request path polled by every open desktop), and Gemini calls take
+    seconds.
+
+    Single-flight: _kick_off_pending_icon_generation is called on every sync,
+    and a large backlog takes many sync cycles (2s stagger per page) to work
+    through. Without this lock, each cycle spawned its OWN thread over the
+    SAME still-pending list — multiple overlapping threads generating the
+    same pages concurrently. That burst blew through Gemini's rate limit
+    (confirmed live: 429s across 139 pages) and none of them recovered until
+    their independent 6h cooldowns expired. Only one batch may run at a time,
+    fleet-wide within this process."""
+    # GATED OFF by default (2026-07-29): auto-icon gen on Gemini was 100% 429-failing
+    # (josh 588/0, danielle 286/0 — zero icons produced, permanent retry storm because
+    # failed pages stay pending and re-fire every sync). Mike confirmed pages show only
+    # default icons. Re-enable ONLY once icon-gen is repointed off Gemini to the Mac's
+    # ComfyUI (env AUTO_ICON_GEN=on). Root fix = the Mac creative node, not this path.
+    import os
+    if os.getenv('AUTO_ICON_GEN', '').strip().lower() not in ('1', 'true', 'yes', 'on'):
+        return
+
+    if not _icon_gen_lock.acquire(blocking=False):
+        return  # a batch is already in flight — this sync cycle's backlog will be picked up next time
+    now = time.time()
+    pending = []
+    for page_id, page_data in manifest.get('pages', {}).items():
+        if page_id == 'desktop' or page_data.get('icon'):
+            continue
+        failed_at = page_data.get('icon_gen_failed_at')
+        if failed_at and now - failed_at < _ICON_GEN_RETRY_COOLDOWN:
+            continue
+        pending.append(page_id)
+    if not pending:
+        _icon_gen_lock.release()
+        return
+    threading.Thread(target=_generate_pending_icons, args=(pending,), daemon=True).start()
+
+
+def _generate_pending_icons(page_ids) -> None:
+    """Background-thread worker — see _kick_off_pending_icon_generation()."""
+    try:
+        _generate_pending_icons_inner(page_ids)
+    finally:
+        _icon_gen_lock.release()
+
+
+def _generate_pending_icons_inner(page_ids) -> None:
+    from routes.icons import generate_icon_image, IconGenerationError
+    logger = logging.getLogger(__name__)
+    extra_backoff = 0  # seconds — grows on a 429, so the batch self-throttles instead of hammering a rate-limited API
+    for i, page_id in enumerate(page_ids):
+        if i > 0:
+            time.sleep(2 + extra_backoff)  # stagger Gemini calls
+        try:
+            with _manifest_lock:
+                manifest = load_canvas_manifest()
+                page_data = manifest['pages'].get(page_id)
+                if not page_data or page_data.get('icon'):
+                    continue  # something else set an icon meanwhile
+                title = page_data.get('display_name') or page_id.replace('-', ' ').title()
+                category = page_data.get('category', 'uncategorized')
+                description = page_data.get('description', '')
+
+            prompt = f'A {category} icon for: {title}.' + (f' {description}' if description else '')
+            try:
+                result = generate_icon_image(prompt, name=f'{page_id}-icon')
+                extra_backoff = 0  # reset once a call actually succeeds
+            except IconGenerationError as e:
+                logger.warning(f'Auto icon-gen failed for {page_id}: {e}')
+                is_rate_limited = '429' in str(e)
+                if is_rate_limited:
+                    # Rate-limited, not actually broken — don't stamp the long
+                    # cooldown (that would strand it for 6h over a transient
+                    # limit). Back off harder for the rest of THIS batch instead.
+                    extra_backoff = min(extra_backoff + 4, 20)
+                else:
+                    with _manifest_lock:
+                        manifest = load_canvas_manifest()
+                        if page_id in manifest['pages']:
+                            manifest['pages'][page_id]['icon_gen_failed_at'] = time.time()
+                            save_canvas_manifest(manifest)
+                continue
+
+            with _manifest_lock:
+                manifest = load_canvas_manifest()
+                if page_id in manifest['pages'] and not manifest['pages'][page_id].get('icon'):
+                    manifest['pages'][page_id]['icon'] = result['url']
+                    manifest['pages'][page_id].pop('icon_gen_failed_at', None)
+                    save_canvas_manifest(manifest)
+                    logger.info(f"Auto-generated icon for {page_id}: {result['url']}")
+        except Exception as e:
+            logger.warning(f'Auto icon-gen error for {page_id}: {e}')
+
+
+def _sync_canvas_manifest_locked() -> dict:
+    """Inner implementation — caller must hold _manifest_lock."""
+    global _last_sync_time
+    _last_sync_time = time.time()
+    manifest = load_canvas_manifest()
+    logger = logging.getLogger(__name__)
+
+    if not CANVAS_PAGES_DIR.exists():
+        logger.warning(f'Canvas pages directory not found: {CANVAS_PAGES_DIR}')
+        return manifest
+
+    existing_files = {p.name for p in CANVAS_PAGES_DIR.glob('*.html')}
+    # Only consider pages that have a proper 'filename' field — entries using
+    # non-standard keys (e.g. 'file') are treated as un-tracked and will be
+    # re-synced below, which also standardises their format.
+    manifest_files = {p.get('filename') for p in manifest['pages'].values() if p.get('filename')}
+
+    for filename in existing_files - manifest_files:
+        page_id = Path(filename).stem
+        # Preserve any existing metadata (starred, display_name, etc.) but fix
+        # non-standard entries that used 'file'/'title' instead of 'filename'/'display_name'.
+        existing = manifest['pages'].get(page_id, {})
+        filepath = CANVAS_PAGES_DIR / filename
+        title = existing.get('display_name') or existing.get('title') or page_id.replace('-', ' ').title()
+        try:
+            content = filepath.read_text()[:1000]
+        except Exception:
+            content = ''
+        category = existing.get('category') or suggest_category(title, content)
+        # Extract canonical icon from page HTML meta tag
+        page_icon = extract_page_icon_from_file(filepath) or existing.get('icon')
+        manifest['pages'][page_id] = {
+            **{k: v for k, v in existing.items() if k not in ('file', 'title', 'created_at')},
+            'filename': filename,
+            'display_name': title,
+            'description': existing.get('description', ''),
+            'category': category,
+            'tags': existing.get('tags', []),
+            'created': existing.get('created') or existing.get('created_at') or datetime.fromtimestamp(filepath.stat().st_ctime).isoformat(),
+            'modified': datetime.fromtimestamp(filepath.stat().st_mtime).isoformat(),
+            'starred': existing.get('starred', False),
+            'voice_aliases': existing.get('voice_aliases') or generate_voice_aliases(title),
+            'access_count': existing.get('access_count', 0),
+        }
+        if page_icon:
+            manifest['pages'][page_id]['icon'] = page_icon
+        # Agents write page files directly (not via the pages API), so newly
+        # discovered files get stamped with the active canvas style here too.
+        if not manifest['pages'][page_id].get('style'):
+            try:
+                from services.canvas_styles import get_active_style_id as _gas
+                _active_style = _gas()
+                if _active_style:
+                    manifest['pages'][page_id]['style'] = _active_style
+            except Exception:
+                pass
+        if category not in manifest['categories']:
+            manifest['categories'][category] = {
+                'name': category.title(),
+                'icon': CATEGORY_ICONS.get(category, '📄'),
+                'color': CATEGORY_COLORS.get(category, '#4a9eff'),
+                'pages': [],
+            }
+        if page_id not in manifest['categories'][category]['pages']:
+            manifest['categories'][category]['pages'].append(page_id)
+        # Inject every newly-discovered page into the desktop icon list so it
+        # appears immediately without requiring the desktop to be open first.
+        _inject_page_into_desktop_state(manifest, page_id)
+
+    # Extract icons from page HTML for any page missing an icon in the manifest.
+    # The <meta name="page-icon"> tag in the HTML is the canonical source.
+    for page_id, page_data in manifest['pages'].items():
+        if page_id == 'desktop' or page_data.get('icon'):
+            continue  # already has icon or is the desktop entry
+        filepath = CANVAS_PAGES_DIR / page_data.get('filename', f'{page_id}.html')
+        page_icon = extract_page_icon_from_file(filepath)
+        if page_icon:
+            page_data['icon'] = page_icon
+
+    # Reconcile: pages registered in pages{} but missing from their category list
+    for page_id, page_data in manifest['pages'].items():
+        cat = page_data.get('category', 'uncategorized')
+        if cat not in manifest['categories']:
+            manifest['categories'][cat] = {
+                'name': cat.title(),
+                'icon': CATEGORY_ICONS.get(cat, '📄'),
+                'color': CATEGORY_COLORS.get(cat, '#4a9eff'),
+                'pages': [],
+            }
+        if page_id not in manifest['categories'][cat]['pages']:
+            manifest['categories'][cat]['pages'].append(page_id)
+            logger.info(f'Reconciled missing category entry: {page_id} → {cat}')
+
+    deleted_files = manifest_files - existing_files
+    for filename in list(deleted_files):
+        page_id = Path(filename).stem
+        if page_id in manifest['pages']:
+            old_cat = manifest['pages'][page_id].get('category')
+            if old_cat and old_cat in manifest['categories']:
+                if page_id in manifest['categories'][old_cat].get('pages', []):
+                    manifest['categories'][old_cat]['pages'].remove(page_id)
+            if page_id in manifest.get('uncategorized', []):
+                manifest['uncategorized'].remove(page_id)
+            del manifest['pages'][page_id]
+
+    save_canvas_manifest(manifest)
+    logger.info(f'Canvas manifest synced: {len(manifest["pages"])} pages')
+    return manifest
+
+
+def add_page_to_manifest(filename: str, title: str, description: str = '', content: str = '') -> dict:
+    """Add or update a page in the manifest (called after page creation/update).
+    When updating an existing page, all user-customised fields are preserved —
+    only 'modified' and, if explicitly supplied, 'display_name' are touched.
+    """
+    with _manifest_lock:
+        return _add_page_to_manifest_locked(filename, title, description, content)
+
+
+def _add_page_to_manifest_locked(filename: str, title: str, description: str = '', content: str = '') -> dict:
+    """Inner implementation — caller must hold _manifest_lock."""
+    manifest = load_canvas_manifest()
+    page_id = Path(filename).stem
+    category = suggest_category(title, content)
+
+    # Stamp the tenant's active canvas style — the serve-time base-CSS injection
+    # follows the style the page was authored under (legacy pages keep dark).
+    from services.canvas_styles import get_active_style_id
+    active_style = get_active_style_id()
+
+    # Extract canonical icon from the page HTML meta tag
+    page_icon = extract_page_icon(content) if content else None
+    if not page_icon:
+        page_icon = extract_page_icon_from_file(CANVAS_PAGES_DIR / filename)
+
+    is_new_page = False
+    if page_id in manifest['pages']:
+        # Page already exists — preserve user-customised state (description, starred, etc.)
+        existing = manifest['pages'][page_id]
+        manifest['pages'][page_id] = {
+            **existing,
+            'filename': filename,
+            'modified': datetime.now().isoformat(),
+            # Only update display_name if one is explicitly provided
+            'display_name': title if title else existing.get('display_name', page_id),
+            # Never clear description — it may hold serialised desktop state or notes
+            'description': description[:200] if description else existing.get('description', ''),
+        }
+        # Update icon from page HTML if present (page is source of truth)
+        if page_icon:
+            manifest['pages'][page_id]['icon'] = page_icon
+        # Rewritten pages are re-authored under the current active style
+        if active_style:
+            manifest['pages'][page_id]['style'] = active_style
+    else:
+        is_new_page = True
+        manifest['pages'][page_id] = {
+            'filename': filename,
+            'display_name': title,
+            'description': description[:200] if description else '',
+            'category': category,
+            'tags': [],
+            'created': datetime.now().isoformat(),
+            'modified': datetime.now().isoformat(),
+            'starred': False,
+            'is_public': False,
+            'is_locked': False,
+            'voice_aliases': generate_voice_aliases(title),
+            'access_count': 0,
+        }
+        if active_style:
+            manifest['pages'][page_id]['style'] = active_style
+        if page_icon:
+            manifest['pages'][page_id]['icon'] = page_icon
+    if category not in manifest['categories']:
+        manifest['categories'][category] = {
+            'name': category.title(),
+            'icon': CATEGORY_ICONS.get(category, '📄'),
+            'color': CATEGORY_COLORS.get(category, '#4a9eff'),
+            'pages': [],
+        }
+    if page_id not in manifest['categories'][category]['pages']:
+        manifest['categories'][category]['pages'].append(page_id)
+    if page_id in manifest.get('uncategorized', []):
+        manifest['uncategorized'].remove(page_id)
+
+    # Auto-inject new pages into the desktop state so they appear as icons
+    # even when the desktop page isn't actively open in the browser
+    if is_new_page and page_id != 'desktop':
+        _inject_page_into_desktop_state(manifest, page_id)
+
+    save_canvas_manifest(manifest)
+    return manifest['pages'][page_id]
+
+
+def _inject_page_into_desktop_state(manifest: dict, page_id: str) -> None:
+    """Inject a newly created page into the desktop's serialised state.
+
+    The desktop stores its icon layout in the 'description' field of the
+    'desktop' page entry as a JSON blob with desktopPages, knownPages, etc.
+    When a page is created while the desktop isn't open, it would never get
+    added.  This ensures every new page appears as a desktop icon immediately.
+    """
+    desktop_entry = manifest.get('pages', {}).get('desktop')
+    if not desktop_entry:
+        return
+    desc = desktop_entry.get('description', '')
+    if not desc:
+        return
+    try:
+        state = json.loads(desc)
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    changed = False
+    known = state.get('knownPages', [])
+    desktop_pages = state.get('desktopPages', [])
+    hidden = state.get('hiddenPages', [])
+    recycle = state.get('recycleBin', [])
+
+    if page_id not in known:
+        known.append(page_id)
+        changed = True
+    # Add to desktop unless user previously recycled/hid it
+    if page_id not in desktop_pages and page_id not in hidden and page_id not in recycle:
+        desktop_pages.append(page_id)
+        changed = True
+
+    if changed:
+        state['knownPages'] = known
+        state['desktopPages'] = desktop_pages
+        desktop_entry['description'] = json.dumps(state)
+
+
+def track_page_access(page_id: str) -> None:
+    """Track when a page is accessed (for recently viewed)."""
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
+        if page_id in manifest['pages']:
+            manifest['pages'][page_id]['access_count'] = manifest['pages'][page_id].get('access_count', 0) + 1
+            recently = manifest.get('recently_viewed', [])
+            if page_id in recently:
+                recently.remove(page_id)
+            recently.insert(0, page_id)
+            manifest['recently_viewed'] = recently[:20]
+            save_canvas_manifest(manifest)
+
+
+# ---------------------------------------------------------------------------
+# Blueprint
+# ---------------------------------------------------------------------------
+
+canvas_bp = Blueprint('canvas', __name__)
+logger = logging.getLogger(__name__)
+
+
+@canvas_bp.route('/api/canvas/update', methods=['POST'])
+def canvas_update():
+    """
+    Canvas Display Proxy — forward display commands to Canvas SSE server.
+    POST /api/canvas/update
+    Body: {"displayOutput": {"type": "page|image|status", "path": "/pages/xyz.html", "title": "Title"}}
+    """
+    try:
+        data = request.get_json()
+        if not data or 'displayOutput' not in data:
+            return jsonify({'error': 'Missing displayOutput'}), 400
+
+        display_output = data['displayOutput']
+        display_type = display_output.get('type')
+        path = display_output.get('path', '')
+        title = display_output.get('title', '')
+
+        logger.info(f'Canvas update: {display_type} - {title}')
+
+        if display_type == 'page' and path:
+            update_canvas_context(path, title)
+            logger.info(f'Canvas context updated: {path}')
+
+        try:
+            canvas_response = http_requests.post(
+                f'http://localhost:{CANVAS_SSE_PORT}/update',
+                json=data,
+                headers={'Content-Type': 'application/json'},
+                timeout=5,
+            )
+            if canvas_response.status_code != 200:
+                logger.warning(f'Canvas SSE server error: {canvas_response.status_code}')
+        except Exception as sse_exc:
+            # SSE server not running — canvas context already updated above, non-fatal
+            logger.debug(f'Canvas SSE not available (no live display): {sse_exc}')
+
+        return jsonify({'success': True, 'message': 'Canvas updated successfully'})
+
+    except Exception as exc:
+        logger.error(f'Canvas update error: {exc}')
+        return jsonify({'error': 'Canvas update failed'}), 500
+
+
+@canvas_bp.route('/api/canvas/show', methods=['POST'])
+def canvas_show_page():
+    """
+    Quick helper to show a page on canvas.
+    POST /api/canvas/show
+    Body: {"type": "page", "path": "/pages/test.html", "title": "My Page"}
+    """
+    try:
+        data = request.get_json()
+        path = data.get('path', '')
+        if not path:
+            return jsonify({'error': 'Missing path'}), 400
+        # Delegate to canvas_update (same logic, wraps displayOutput format)
+        return canvas_update()
+    except Exception as exc:
+        logger.error(f'Canvas show error: {exc}')
+        return jsonify({'error': 'Canvas operation failed'}), 500
+
+
+@canvas_bp.route('/canvas-proxy')
+def canvas_proxy():
+    """Proxy Canvas live.html to serve over HTTPS; rewrites SSE/session URLs."""
+    try:
+        canvas_path = '/var/www/canvas-display/canvas/live.html'
+        with open(canvas_path, 'r') as f:
+            html_content = f.read()
+        html_content = html_content.replace(f'http://localhost:{CANVAS_SSE_PORT}/events', '/canvas-sse/events')
+        html_content = html_content.replace('http://localhost:3030/events', '/canvas-sse/events')
+        html_content = html_content.replace('/sse/events', '/canvas-sse/events')
+        html_content = html_content.replace('/api/session/', '/canvas-session/')
+        return Response(html_content, mimetype='text/html')
+    except Exception as exc:
+        logger.error(f'Canvas proxy error: {exc}')
+        return '<html><body><h1>Canvas Error</h1><p>Internal server error</p></body></html>', 500
+
+
+@canvas_bp.route('/canvas-sse/<path:path>')
+def canvas_sse_proxy(path):
+    """Proxy SSE events from Canvas server."""
+    try:
+        resp = http_requests.get(
+            f'http://localhost:{CANVAS_SSE_PORT}/{path}',
+            stream=True,
+            headers={'Accept': 'text/event-stream'},
+        )
+
+        def generate():
+            for chunk in resp.iter_content(chunk_size=1024):
+                if chunk:
+                    yield chunk
+
+        return Response(
+            generate(),
+            mimetype='text/event-stream',
+            headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+        )
+    except Exception as exc:
+        logger.debug(f'Canvas SSE not available: {exc}')
+        return jsonify({'error': 'Canvas SSE not available'}), 503
+
+
+def _safe_canvas_path(base: str, user_path: str) -> Path | None:
+    """Resolve user_path inside base, rejecting path traversal."""
+    try:
+        base_p = Path(base).resolve()
+        resolved = (base_p / user_path).resolve()
+        if base_p == resolved or base_p in resolved.parents:
+            return resolved
+    except Exception:
+        pass
+    return None
+
+
+@canvas_bp.route('/pages/<path:path>')
+def canvas_pages_proxy(path):
+    """Serve files from Canvas pages directory.
+
+    Access control:
+    - If CANVAS_REQUIRE_AUTH=true: pages with is_public=False require a valid Clerk session token.
+    - Default (self-hosted): all pages served without auth.
+    """
+    try:
+        # Auth check — only when explicitly enabled (opt-in for self-hosted deployments)
+        # Skip auth for non-HTML assets (images, icons, CSS) — they're embedded resources
+        # Skip auth for OS infrastructure pages (desktop, file-explorer) — they are loaded
+        # inside the app's own iframe and the parent page already handled authentication.
+        # The iframe may not have the Clerk __session cookie on cross-subdomain visits.
+        _is_html = path.endswith('.html')
+        # monaco-editor.html removed 2026-08-20 with the page itself (retired to
+        # default-pages/retired/). This set SKIPS AUTH, so a stale entry for a page we no
+        # longer ship is a latent hole: anything later dropped at that filename in a
+        # tenant's canvas-pages would serve unauthenticated.
+        _OS_PAGES = {'desktop.html', 'file-explorer.html', 'terminal.html'}
+        # _data/ under /pages/ bypasses the *.html gate entirely -- gate it here too.
+        if CANVAS_REQUIRE_AUTH and (path.startswith('_data/') or '/_data/' in path):
+            denied = _canvas_data_denied(path)
+            if denied:
+                return denied
+        if CANVAS_REQUIRE_AUTH and _is_html and path not in _OS_PAGES:
+            page_id = Path(path).stem
+            manifest = load_canvas_manifest()
+            page_meta = manifest.get('pages', {}).get(page_id, {})
+            is_public = page_meta.get('is_public', False)
+            if not is_public:
+                from services.auth import get_token_from_request, verify_clerk_token
+                token = get_token_from_request()
+                has_cookie = bool(request.cookies.get('__session'))
+                has_header = bool(request.headers.get('Authorization', '').startswith('Bearer '))
+                logger.info('[canvas-auth] page=%s cookie=%s header=%s token=%s',
+                            path, has_cookie, has_header, bool(token))
+                user_id = verify_clerk_token(token) if token else None
+                if not user_id:
+                    logger.warning('[canvas-auth] DENIED page=%s (no valid token)', path)
+                    if request.headers.get('Accept', '').startswith('text/html'):
+                        return redirect('/?redirect=/pages/' + path)
+                    return 'Unauthorized', 401
+
+        # P7-T3 security: prevent path traversal
+        resolved = _safe_canvas_path(str(CANVAS_PAGES_DIR), path)
+        if resolved is None:
+            return 'Invalid path', 400
+        # Slug-only URLs (no extension): redirect to .html so shared client links work.
+        if not resolved.exists() and not path.endswith('.html') and '.' not in Path(path).name:
+            html_resolved = _safe_canvas_path(str(CANVAS_PAGES_DIR), path + '.html')
+            if html_resolved and html_resolved.exists():
+                return redirect('/pages/' + path + '.html', code=301)
+        if resolved.exists():
+            # HTML files need custom processing (script stripping, CSS/error injection)
+            if path.endswith('.html'):
+                with open(resolved, 'rb') as f:
+                    content = f.read()
+                # Tailwind CDN is allowed through — CSP controls script loading.
+                import re as _re
+                content_str = content.decode('utf-8', errors='replace')
+                content = content_str.encode('utf-8')
+
+                # Inject base-theme fallback + padding for UI chrome clearance.
+                # Edge tabs are 44px wide on left+right — safe area is 52px each side.
+                # CSS custom props let fixed/absolute elements also honour the safe area.
+                # Colors come from the style the page was authored under (canvas
+                # style system); pages with no style stamp get the legacy dark base.
+                # Color rules are :where()-wrapped (zero specificity) so page-authored
+                # CSS always wins — see services/canvas_styles.py.
+                from services.canvas_styles import base_css_for
+                _page_style = None
+                try:
+                    _style_manifest = load_canvas_manifest()
+                    _page_style = _style_manifest.get('pages', {}).get(
+                        Path(path).stem, {}).get('style')
+                except Exception:
+                    pass
+                _base_css = base_css_for(_page_style)
+                # Inject error bridge — posts JS errors back to parent for debugging
+                _error_bridge = (
+                    b'<script id="canvas-error-bridge">'
+                    b"window.onerror=function(msg,src,line,col,err){"
+                    b"window.parent.postMessage({type:'canvas-error',"
+                    b"error:msg,source:src,line:line,col:col},'*');"
+                    b"};"
+                    b"window.addEventListener('unhandledrejection',function(e){"
+                    b"window.parent.postMessage({type:'canvas-error',"
+                    b"error:'Unhandled promise: '+e.reason},'*');"
+                    b"});"
+                    b'</script>'
+                )
+                # Inject nav() and speak() helpers into every page
+                _nav_helpers = (
+                    b'<script id="canvas-nav-helpers">'
+                    b'if(!window.nav){window.nav=function(p){'
+                    b'window.parent.postMessage({type:"canvas-action",action:"navigate",page:p},"*");};}'
+                    b'if(!window.speak){window.speak=function(t){'
+                    b'window.parent.postMessage({type:"canvas-action",action:"speak",text:t},"*");};}'
+                    b'</script>'
+                )
+                # Inject auth token bridge — parent pushes fresh Clerk JWT,
+                # canvas pages use it via authFetch() or _canvasAuthToken
+                _auth_bridge = (
+                    b'<script id="canvas-auth-bridge">'
+                    b'window._canvasAuthToken=null;'
+                    b'window.addEventListener("message",function(e){'
+                    b'if(e.data&&e.data.type==="auth-token"){'
+                    b'window._canvasAuthToken=e.data.token;}});'
+                    b'window.authFetch=function(url,opts){'
+                    b'opts=opts||{};'
+                    b'if(window._canvasAuthToken){'
+                    b'opts.headers=Object.assign(opts.headers||{},{"Authorization":"Bearer "+window._canvasAuthToken});}'
+                    b'return fetch(url,opts);};'
+                    b'window.parent.postMessage({type:"canvas-action",action:"request-auth-token"},"*");'
+                    b'</script>'
+                )
+                _inject = _base_css + _error_bridge
+                if b'</head>' in content:
+                    content = content.replace(b'</head>', _inject + b'</head>', 1)
+                else:
+                    content = _inject + content
+                # Inject nav/speak helpers + auth bridge before </body>
+                _body_inject = _nav_helpers + _auth_bridge
+                if b'</body>' in content:
+                    content = content.replace(b'</body>', _body_inject + b'</body>', 1)
+                else:
+                    content += _body_inject
+                resp = Response(content, mimetype='text/html')
+                resp.headers['Cache-Control'] = 'private, no-cache, no-store, must-revalidate, max-age=0'
+                resp.headers['Pragma'] = 'no-cache'
+                resp.headers['Expires'] = '0'
+                resp.headers['CDN-Cache-Control'] = 'no-store'
+                resp.headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
+                # ETag based on file mtime to force revalidation
+                import os as _os
+                _mtime = str(int(_os.path.getmtime(resolved)))
+                resp.headers['ETag'] = '"canvas-' + _mtime + '"'
+                # Canvas-specific CSP: allow inline scripts (interactive pages)
+                # Canvas CSP: allow scripts and styles inline, allow API connections
+                # for interactive apps (Awesome App Library etc.) that call AI APIs
+                # directly from the browser with user's own API keys.
+                resp.headers['Content-Security-Policy'] = (
+                    "default-src 'none'; "
+                    # maps.googleapis.com + maps.gstatic.com: required by the `maps` skill's
+                    # Google Maps JS canvas pages. Omitting them silently blanks every map
+                    # (console-only CSP violation). Found 2026-07-24. Do NOT re-strip.
+                    # cdn.jsdelivr.net in style-src: Monaco/xterm stylesheets (Code Blocks).
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://games.jam-bot.com https://maps.googleapis.com https://maps.gstatic.com blob:; "
+                    "style-src 'unsafe-inline' https://games.jam-bot.com https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+                    "img-src 'self' data: blob: https:; "
+                    "media-src 'self' blob: https:; "
+                    "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+                    "connect-src 'self' blob: https://games.jam-bot.com "
+                        "https://*.jam-bot.com wss://*.jam-bot.com "
+                        "https://api.openai.com https://generativelanguage.googleapis.com "
+                        "https://api.x.ai https://api.groq.com "
+                        "https://api.together.xyz https://openrouter.ai "
+                        "https://api.anthropic.com https://api.cohere.ai "
+                        "https://api.dataforseo.com https://sandbox.dataforseo.com "
+                        "https://maps.googleapis.com; "
+                    "worker-src blob:; "
+                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app https://midiviz.com "
+                        "https://w.soundcloud.com https://bandcamp.com https://*.bandcamp.com"
+                )
+                return resp
+            else:
+                # Non-HTML files served from canvas-pages/ — icons, JSON state,
+                # backing images, generated audio, etc. Agents update these live
+                # via the API, so caching breaks the "live updates" guarantee.
+                # See docs/jambot/no-cache-policy.md.
+                # NOTE: conditional=True is kept so range requests still work for
+                # audio/video streaming playback; only the cache headers change.
+                resp = send_file(
+                    resolved,
+                    conditional=True,
+                )
+                resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                resp.headers['Pragma'] = 'no-cache'
+                resp.headers['Expires'] = '0'
+                resp.headers['CDN-Cache-Control'] = 'no-store'
+                resp.headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
+                resp.headers['Accept-Ranges'] = 'bytes'
+                return resp
+        return 'Page not found', 404
+    except Exception as exc:
+        logger.error(f'Canvas pages proxy error: {exc}')
+        return 'Internal server error', 500
+
+
+@canvas_bp.route('/images/<path:path>')
+def canvas_images_proxy(path):
+    """Serve files from Canvas images directory.
+
+    NO-CACHE: see docs/jambot/no-cache-policy.md. Canvas images are
+    agent-updatable surfaces.
+    """
+    try:
+        # P7-T3 security: prevent path traversal
+        resolved = _safe_canvas_path('/var/www/canvas-display/images', path)
+        if resolved is None:
+            return 'Invalid path', 400
+        if resolved.exists():
+            resp = send_file(resolved)
+            resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            resp.headers['Pragma'] = 'no-cache'
+            resp.headers['Expires'] = '0'
+            return resp
+        return 'Image not found', 404
+    except Exception as exc:
+        logger.error(f'Canvas images proxy error: {exc}')
+        return 'Internal server error', 500
+
+
+# Dev server proxy for website preview in canvas
+WEBSITE_DEV_PORT = int(os.getenv('WEBSITE_DEV_PORT', '15050'))
+
+@canvas_bp.route('/website-dev', methods=['GET', 'POST', 'PUT', 'DELETE'], strict_slashes=False)
+@canvas_bp.route('/website-dev/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def website_dev_proxy(path=''):
+    """Proxy requests to the local website dev server (for HTTPS canvas compatibility)."""
+    import re as re_module
+    try:
+        dev_url = f'http://localhost:{WEBSITE_DEV_PORT}/{path}'
+        if request.method == 'GET':
+            resp = http_requests.get(dev_url, params=request.args, timeout=30, stream=True)
+        elif request.method == 'POST':
+            resp = http_requests.post(dev_url, json=request.get_json(silent=True), data=request.get_data(), timeout=30, stream=True)
+        elif request.method == 'PUT':
+            resp = http_requests.put(dev_url, json=request.get_json(silent=True), data=request.get_data(), timeout=30, stream=True)
+        elif request.method == 'DELETE':
+            resp = http_requests.delete(dev_url, timeout=30, stream=True)
+        else:
+            return 'Method not allowed', 405
+
+        content_type = resp.headers.get('content-type', '')
+
+        # For HTML responses, rewrite absolute URLs to go through proxy
+        if 'text/html' in content_type:
+            content = resp.content.decode('utf-8', errors='replace')
+            # Rewrite absolute URLs: src="/..." -> src="/website-dev/..."
+            content = re_module.sub(r'(src|href|action)=("|\')/(?!website-dev)', r'\1=\2/website-dev/', content)
+            return Response(content.encode('utf-8'), status=resp.status_code, content_type=content_type)
+
+        def generate():
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+
+        # Forward content type and other relevant headers
+        excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        headers = [(k, v) for k, v in resp.headers.items() if k.lower() not in excluded_headers]
+
+        return Response(generate(), status=resp.status_code, headers=headers)
+    except Exception as exc:
+        logger.error(f'Website dev proxy error: {exc}')
+        return 'Dev server unavailable', 503
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw Control UI proxy — serves the built-in dashboard behind Clerk auth
+# ---------------------------------------------------------------------------
+
+@canvas_bp.route('/openclaw-ui/')
+@canvas_bp.route('/openclaw-ui/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+def openclaw_ui_proxy(path=''):
+    """Proxy the OpenClaw Control UI behind Clerk auth.
+
+    Routes all HTTP requests to the internal openclaw gateway container which
+    serves the built-in dashboard SPA at its basePath (/openclaw-ui).
+    Clerk auth is enforced by the require_auth() before_request handler —
+    this path is NOT in the public prefixes.
+    """
+    target_url = f'http://openclaw:18789/openclaw-ui/{path}'
+
+    try:
+        kwargs = dict(params=request.args, timeout=30, stream=True)
+        if request.method in ('POST', 'PUT', 'PATCH'):
+            kwargs['data'] = request.get_data()
+            if request.content_type:
+                kwargs['headers'] = {'Content-Type': request.content_type}
+
+        resp = getattr(http_requests, request.method.lower())(target_url, **kwargs)
+
+        def generate():
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+
+        # Strip headers that interfere with iframe/proxy rendering
+        excluded_headers = [
+            'content-encoding', 'content-length', 'transfer-encoding',
+            'connection', 'x-frame-options', 'content-security-policy',
+        ]
+        headers = [(k, v) for k, v in resp.headers.items()
+                   if k.lower() not in excluded_headers]
+
+        return Response(generate(), status=resp.status_code, headers=headers)
+    except Exception as exc:
+        logger.error(f'OpenClaw UI proxy error: {exc}')
+        return 'OpenClaw Control UI unavailable', 503
+
+
+@canvas_bp.route('/canvas-session/<path:path>', methods=['GET', 'POST'])
+def canvas_session_proxy(path):
+    """Proxy Canvas session API requests."""
+    _default_session = {
+        'id': 'default',
+        'stats': {'imageCount': 0, 'pageCount': 0, 'dataCount': 0, 'commandCount': 0},
+        'outputs': {'images': [], 'pages': [], 'data': [], 'commands': []},
+        'timestamp': '',
+    }
+    try:
+        if request.method == 'GET':
+            resp = http_requests.get(f'http://localhost:{CANVAS_SESSION_PORT}/api/session/{path}', timeout=5)
+        else:
+            resp = http_requests.post(
+                f'http://localhost:{CANVAS_SESSION_PORT}/api/session/{path}',
+                json=request.get_json(),
+                headers={'Content-Type': 'application/json'},
+                timeout=5,
+            )
+        try:
+            return jsonify(resp.json()), resp.status_code
+        except Exception:
+            return jsonify(_default_session), 200
+    except Exception as exc:
+        logger.error(f'Canvas session proxy error: {exc}')
+        return jsonify(_default_session), 200
+
+
+@canvas_bp.route('/api/canvas/context', methods=['POST'])
+def update_canvas_route():
+    """Receive canvas context from frontend — what page is being displayed."""
+    data = request.get_json() or {}
+    page_path = data.get('page', '')
+    title = data.get('title', '')
+    content_summary = data.get('content_summary', '')
+    update_canvas_context(page_path, title, content_summary)
+    return jsonify({'status': 'ok', 'current_page': page_path})
+
+
+@canvas_bp.route('/api/canvas/context', methods=['GET'])
+def get_canvas_route():
+    """Get current canvas context."""
+    return jsonify(canvas_context)
+
+
+@canvas_bp.route('/api/canvas/manifest', methods=['GET'])
+def get_canvas_manifest():
+    """Get full canvas manifest with all pages and categories.
+
+    Auto-syncs with the filesystem (throttled to once per 60s) so that
+    pages written directly by agents appear without a manual sync call.
+    Pass ?sync=1 to force an immediate sync (bypasses throttle).
+    """
+    global _last_sync_time
+    force_sync = request.args.get('sync') == '1'
+    now = time.time()
+    if force_sync or now - _last_sync_time >= _SYNC_THROTTLE_SECONDS:
+        _last_sync_time = now
+        manifest = sync_canvas_manifest()
+    else:
+        manifest = load_canvas_manifest()
+    # Content-hash ETag so 30s pollers (desktop.html) can skip re-downloading
+    # and re-parsing an unchanged manifest. `last_updated` is excluded: the 60s
+    # auto-sync re-stamps it on every save even when nothing changed, and no
+    # client renders it — including it would mean the ETag never matches.
+    # Clients send If-None-Match manually (Cache-Control stays no-store so no
+    # proxy/browser HTTP cache is involved).
+    _hashable = {k: v for k, v in manifest.items() if k != 'last_updated'}
+    etag = '"' + hashlib.md5(
+        json.dumps(_hashable, sort_keys=True, separators=(',', ':')).encode()
+    ).hexdigest() + '"'
+    if request.headers.get('If-None-Match') == etag:
+        response = Response(status=304)
+    else:
+        response = jsonify(manifest)
+    response.headers['ETag'] = etag
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
+@canvas_bp.route('/api/canvas/manifest/sync', methods=['POST'])
+def sync_manifest():
+    """Sync manifest with pages directory — adds new pages, removes deleted."""
+    manifest = sync_canvas_manifest()
+    return jsonify({
+        'status': 'ok',
+        'pages_count': len(manifest['pages']),
+        'categories_count': len(manifest['categories']),
+    })
+
+
+@canvas_bp.route('/api/canvas/manifest/page/<page_id>', methods=['GET', 'PATCH', 'DELETE'])
+def handle_page_metadata(page_id):
+    """Get, update, or delete page metadata."""
+    if request.method == 'GET':
+        manifest = load_canvas_manifest()
+        if page_id not in manifest['pages']:
+            return jsonify({'error': 'Page not found'}), 404
+        return jsonify(manifest['pages'][page_id])
+
+    # PATCH/DELETE — hold lock to prevent concurrent manifest clobbering
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
+
+        if page_id not in manifest['pages']:
+            return jsonify({'error': 'Page not found'}), 404
+
+        if request.method == 'DELETE':
+            page = manifest['pages'][page_id]
+            filename = page.get('filename')
+            page_title = page.get('display_name', page_id)
+            logger.info(f'Deleting canvas page: {page_title} ({filename})')
+
+            old_category = page.get('category')
+            if old_category and old_category in manifest['categories']:
+                if page_id in manifest['categories'][old_category].get('pages', []):
+                    manifest['categories'][old_category]['pages'].remove(page_id)
+            if page_id in manifest.get('uncategorized', []):
+                manifest['uncategorized'].remove(page_id)
+            if page_id in manifest.get('recently_viewed', []):
+                manifest['recently_viewed'].remove(page_id)
+
+            del manifest['pages'][page_id]
+
+            # Clear canvas_context if this was the current page
+            global canvas_context
+            current_page = canvas_context.get('current_page') or ''
+            if filename and current_page.endswith(filename):
+                canvas_context['current_page'] = None
+                canvas_context['current_title'] = None
+                canvas_context['page_content'] = None
+                logger.info('Cleared canvas context (deleted page was current)')
+
+            # Refresh all_pages list
+            try:
+                if CANVAS_PAGES_DIR.exists():
+                    pages = sorted(CANVAS_PAGES_DIR.glob('*.html'), key=lambda p: p.stat().st_mtime, reverse=True)[:30]
+                    canvas_context['all_pages'] = [
+                        {'name': p.name, 'title': p.stem.replace('-', ' '), 'mtime': p.stat().st_mtime}
+                        for p in pages
+                    ]
+            except Exception as exc:
+                logger.warning(f'Failed to refresh all_pages: {exc}')
+
+            # Archive the file (rename to .bak)
+            if filename:
+                filepath = CANVAS_PAGES_DIR / filename
+                try:
+                    if filepath.exists():
+                        bak_path = filepath.with_suffix('.bak')
+                        counter = 1
+                        while bak_path.exists():
+                            bak_path = filepath.with_name(f'{filepath.stem}.bak.{counter}')
+                            counter += 1
+                        filepath.rename(bak_path)
+                        logger.info(f'Archived canvas page: {filename} -> {bak_path.name}')
+                except Exception as exc:
+                    logger.warning(f'Failed to archive file {filename}: {exc}')
+
+            save_canvas_manifest(manifest)
+            _notify_brain('canvas_page_deleted', page_id=page_id, title=page_title, filename=filename)
+
+            try:
+                http_requests.post(
+                    f'http://localhost:{CANVAS_SSE_PORT}/clear-display',
+                    json={'path': f'/pages/{filename}'},
+                    timeout=2,
+                )
+            except Exception as exc:
+                logger.debug(f'Could not clear canvas display: {exc}')
+
+            return jsonify({'status': 'ok', 'message': 'Page archived', 'page_id': page_id, 'title': page_title})
+
+        # PATCH — update metadata
+        data = request.get_json() or {}
+        page = manifest['pages'][page_id]
+
+        # Detect agent requests (X-Agent-Key header) vs admin requests (Clerk JWT)
+        _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
+        is_agent_request = bool(_agent_api_key and request.headers.get('X-Agent-Key') == _agent_api_key)
+
+        # Admin identity — only a Clerk-authenticated admin may lock/unlock pages
+        # or flip visibility on a locked page. Resolve from g.clerk_user_id (set
+        # by require_auth) — never trust the agent key for these mutations.
+        from services.auth import is_admin_user
+        is_admin = is_admin_user(getattr(g, 'clerk_user_id', None))
+
+        # Guard: locked pages — visibility can only be changed by an admin.
+        # The unauthenticated path is already 401'd by require_auth (SEC-2 fix in
+        # app.py); this guard is defense-in-depth and blocks the agent key too.
+        if 'is_public' in data and page.get('is_locked', False) and not is_admin:
+            return jsonify({
+                'error': 'This page is locked. Visibility can only be changed from the admin dashboard.',
+                'is_locked': True,
+            }), 403
+
+        # Guard: only an admin may lock/unlock pages (never the agent).
+        if 'is_locked' in data and not is_admin:
+            return jsonify({
+                'error': 'Page lock status can only be changed from the admin dashboard.',
+            }), 403
+
+        # Guard: reject is_public=True if page was created less than 30 seconds ago.
+        # Prevents agents from making pages public immediately on creation.
+        if data.get('is_public') is True:
+            created_str = page.get('created', '')
+            if created_str:
+                try:
+                    created_dt = datetime.fromisoformat(created_str)
+                    age_seconds = (datetime.now() - created_dt).total_seconds()
+                    if age_seconds < 30:
+                        return jsonify({
+                            'error': 'Cannot make a page public within 30 seconds of creation. '
+                                     'Wait a moment and try again.',
+                            'age_seconds': round(age_seconds, 1),
+                        }), 429
+                except (ValueError, TypeError):
+                    pass  # malformed date — allow through
+
+        for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon', 'style']:
+            if field in data:
+                old_category = page.get('category')
+                page[field] = data[field]
+
+                if field == 'category' and old_category != data[field]:
+                    if old_category and old_category in manifest['categories']:
+                        if page_id in manifest['categories'][old_category].get('pages', []):
+                            manifest['categories'][old_category]['pages'].remove(page_id)
+                    if old_category == 'uncategorized' and page_id in manifest.get('uncategorized', []):
+                        manifest['uncategorized'].remove(page_id)
+
+                    new_cat = data[field]
+                    if new_cat not in manifest['categories']:
+                        manifest['categories'][new_cat] = {
+                            'name': new_cat.title(),
+                            'icon': CATEGORY_ICONS.get(new_cat, '📄'),
+                            'color': CATEGORY_COLORS.get(new_cat, '#4a9eff'),
+                            'pages': [],
+                        }
+                    if page_id not in manifest['categories'][new_cat]['pages']:
+                        manifest['categories'][new_cat]['pages'].append(page_id)
+
+        save_canvas_manifest(manifest)
+        return jsonify({'status': 'ok', 'page': page})
+
+
+@canvas_bp.route('/api/canvas/manifest/category', methods=['GET', 'POST', 'PATCH'])
+def handle_category():
+    """List, create, or update categories."""
+    if request.method == 'GET':
+        manifest = load_canvas_manifest()
+        return jsonify(manifest.get('categories', {}))
+
+    # POST/PATCH — hold lock to prevent concurrent manifest clobbering
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
+
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            cat_id = data.get('id', '').lower().replace(' ', '-')
+            if not cat_id:
+                return jsonify({'error': 'Category ID required'}), 400
+            manifest['categories'][cat_id] = {
+                'name': data.get('name', cat_id.title()),
+                'icon': data.get('icon', '📄'),
+                'color': data.get('color', '#4a9eff'),
+                'pages': [],
+            }
+            save_canvas_manifest(manifest)
+            return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
+
+        # PATCH
+        data = request.get_json() or {}
+        cat_id = data.get('id')
+        if not cat_id or cat_id not in manifest['categories']:
+            return jsonify({'error': 'Category not found'}), 404
+        for field in ['name', 'icon', 'color']:
+            if field in data:
+                manifest['categories'][cat_id][field] = data[field]
+        save_canvas_manifest(manifest)
+        return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
+
+
+@canvas_bp.route('/api/canvas/manifest/access/<page_id>', methods=['POST'])
+def track_access(page_id):
+    """Track page access (for recently viewed and access count)."""
+    track_page_access(page_id)
+    return jsonify({'status': 'ok'})
+
+
+@canvas_bp.route('/api/canvas/pages', methods=['POST'])
+def create_canvas_page():
+    """
+    Save a new canvas page from HTML content.
+    POST /api/canvas/pages
+    Body: {"filename": "my-page.html", "html": "<html>...</html>", "title": "My Page"}
+    Returns: {"filename": "my-page.html", "page_id": "my-page", "url": "/pages/my-page.html"}
+    """
+    try:
+        data = request.get_json()
+        if not data or 'html' not in data:
+            return jsonify({'error': 'Missing html content'}), 400
+
+        html_content = data['html']
+        title = data.get('title', 'Canvas Page')
+
+        # Derive filename from title if not provided
+        raw_filename = data.get('filename', '')
+        if not raw_filename:
+            slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+            raw_filename = f'{slug}.html'
+
+        # Guard: protected system pages cannot be overwritten via this API.
+        # desktop.html and file-explorer.html are OS infrastructure — their HTML
+        # is maintained by admins, not agents. State is in the manifest description.
+        _PROTECTED_PAGES = {'desktop.html', 'file-explorer.html'}
+        if Path(raw_filename).name in _PROTECTED_PAGES:
+            return jsonify({
+                'error': f'{Path(raw_filename).name} is a protected system page and cannot be overwritten. '
+                         'To update desktop icons or layout, use the desktop UI or ask the admin.',
+            }), 403
+
+        # Sanitize: strip directory traversal, ensure .html
+        filename = Path(raw_filename).name
+        if not filename.endswith('.html'):
+            filename += '.html'
+
+        CANVAS_PAGES_DIR.mkdir(parents=True, exist_ok=True)
+        filepath = CANVAS_PAGES_DIR / filename
+
+        filepath.write_text(html_content, encoding='utf-8')
+        logger.info(f'Canvas page saved: {filename} ({len(html_content)} bytes)')
+
+        page_meta = add_page_to_manifest(filename, title, content=html_content[:500])
+        _notify_brain('canvas_page_created', filename=filename, title=title)
+
+        # Deterministic QA — agents see warnings in the tool result and fix them.
+        try:
+            from services.canvas_styles import lint_page_html
+            _warnings = lint_page_html(html_content)
+        except Exception:
+            _warnings = []
+
+        _resp = {
+            'filename': filename,
+            'page_id': Path(filename).stem,
+            'url': f'/pages/{filename}',
+            'title': title,
+            'category': page_meta.get('category', 'uncategorized'),
+        }
+        if _warnings:
+            _resp['warnings'] = _warnings
+            _resp['action_required'] = 'Fix the warnings and re-save this page.'
+        return jsonify(_resp)
+    except Exception as exc:
+        logger.error(f'Canvas page create error: {exc}')
+        return jsonify({'error': 'Canvas page creation failed'}), 500
+
+
+# ---------------------------------------------------------------------------
+# System page data API — serves JSON from _data/ inside canvas-pages dir
+# Both openclaw and openvoiceui containers mount canvas-pages, so _data/
+# is the shared bridge for system page data (autopilot stats, inbox, etc.)
+# ---------------------------------------------------------------------------
+_CANVAS_DATA_DIR = CANVAS_PAGES_DIR / '_data'
+
+# --------------------------------------------------------------------------
+# _data/ AUTH GATE  (2026-08-23)
+#
+# canvas-pages/_data/*.json was readable with NO authentication by THREE routes,
+# all returning identical bytes -- measured live, not inferred:
+#     GET /api/canvas/data/<f>.json   -> 200
+#     GET /pages/_data/<f>.json       -> 200
+#     GET /canvas-data/<f>            -> 200   (ANY file type, not just json)
+# On one tenant that was 785KB of a client's whole commercial domain portfolio
+# (renewal_price, est_value, expires, days_to_expiry, auto_renew, locked,
+# privacy, nameservers) -- effectively a domain-sniping target list -- while the
+# page rendering it sat behind Clerk.
+#
+# ROOT CAUSE: app.py's require_auth() exempts GET under _PUBLIC_READ_PREFIXES,
+# which contains '/api/canvas/' for "manifest/context/pages". That prefix also
+# matches /api/canvas/data/. Separately the same gate waves /pages/ through
+# entirely because "canvas pages have their own auth logic" -- and that logic
+# gates only *.html, so _data/ under /pages/ was never checked by anyone.
+#
+# Fixing one route would have been a FALSE FIX that tests green. All three call
+# this helper.
+#
+# Mike, 2026-08-23: "theres no need for anything to be public its a canvas page
+# behind his clerk login."
+#
+# DEFAULT-DENY + narrow allowlist. The allowlist is load-bearing: the JamWall
+# office display is unauthenticated BY DESIGN (wall-mounted monitor, nobody to
+# log in) and fetches wallboard-layout.json. Gating it without this exemption
+# takes a live client display down. Anything listed here is world-readable
+# forever -- no PII, no commercial data, ever.
+_PUBLIC_DATA_FILES = {
+    'wallboard-layout.json',            # JamWall office display (no-login by design)
+    'wallboard-theme-overrides.json',   # ditto -- styling only
+}
+
+
+def _canvas_data_denied(filename):
+    """401 Response if this _data file needs auth and the caller lacks it, else None.
+
+    Fails CLOSED: any error while verifying denies rather than allows.
+    """
+    if not CANVAS_REQUIRE_AUTH:
+        return None                                   # self-hosted default: open
+    if Path(filename).name in _PUBLIC_DATA_FILES:
+        return None                                   # explicit, audited exemption
+    try:
+        from services.auth import get_token_from_request, verify_clerk_token
+        token = get_token_from_request()
+        user_id = verify_clerk_token(token) if token else None
+    except Exception as exc:                          # noqa: BLE001 -- fail closed
+        logger.warning('[canvas-data-auth] verify error on %s: %s', filename, exc)
+        user_id = None
+    if user_id:
+        return None
+    logger.warning('[canvas-data-auth] DENIED %s (no valid token)', filename)
+    return jsonify({'error': 'unauthorized'}), 401
+
+@canvas_bp.route('/api/canvas/data/<path:filename>', methods=['GET'])
+def canvas_data(filename):
+    """Serve JSON data files for system canvas pages.
+
+    Reads from canvas-pages/_data/ directory.
+    Returns empty {} if file doesn't exist yet (graceful empty state).
+    """
+    denied = _canvas_data_denied(filename)
+    if denied:
+        return denied
+    if not filename.endswith('.json'):
+        return jsonify({'error': 'only .json files'}), 400
+    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
+    if resolved and resolved.exists() and resolved.is_file():
+        try:
+            return Response(resolved.read_bytes(), mimetype='application/json',
+                            headers={'Cache-Control': 'no-cache'})
+        except Exception as exc:
+            logger.error(f'canvas_data read error: {exc}')
+            return jsonify({}), 200
+    return jsonify({}), 200
+
+
+@canvas_bp.route('/canvas-data/<path:filename>', methods=['GET'])
+def canvas_data_static(filename):
+    """Serve processed-song / canvas media assets (audio stems, json, etc.) from
+    canvas-pages/_data/. Companion to /api/canvas/data/ (json-only) — this one serves
+    ANY file type with a correct mimetype so the Suno Studio audio editor can load
+    vocal/stem .mp3 files and processed-song fixtures from a stable /canvas-data/ path.
+    The dir is mounted in both openclaw + openvoiceui, so it's the shared media bridge.
+    Added 2026-06-25 for the suno-audio-editor Phase 1 bridge (bun submesh)."""
+    denied = _canvas_data_denied(filename)
+    if denied:
+        return denied
+    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
+    if resolved and resolved.exists() and resolved.is_file():
+        try:
+            return send_file(str(resolved), conditional=True,
+                             download_name=resolved.name,
+                             max_age=0)  # canvas no-cache rule
+        except Exception as exc:
+            logger.error(f'canvas_data_static read error: {exc}')
+            return jsonify({'error': 'read error'}), 500
+    return jsonify({'error': 'not found'}), 404
+
+
+def _ovu_is_empty(v):
+    return v is None or v == "" or v == [] or v == {}
+
+
+def _ovu_merge_preserve(base, incoming):
+    """Deep-merge `incoming` into `base` but NEVER overwrite a populated base value
+    with an empty incoming one. Protects the website-setup record so a partial/fresh
+    save (e.g. pushing new business data) can't blank already-set fields like the
+    `stitch` design block. Scoped to website-setup.json — other keys keep replace."""
+    if isinstance(base, dict) and isinstance(incoming, dict):
+        merged = dict(base)
+        for k, v in incoming.items():
+            merged[k] = _ovu_merge_preserve(base[k], v) if k in base else v
+        return merged
+    if _ovu_is_empty(incoming) and not _ovu_is_empty(base):
+        return base
+    return incoming
+
+
+@canvas_bp.route('/api/canvas/data/<path:filename>', methods=['POST'])
+def canvas_data_write(filename):
+    """Write JSON data from canvas pages (e.g. approval actions)."""
+    if not filename.endswith('.json'):
+        return jsonify({'error': 'only .json files'}), 400
+    data = request.get_json(silent=True)
+    if data is None:
+        return jsonify({'error': 'invalid json'}), 400
+    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
+    if resolved is None:
+        return jsonify({'error': 'invalid path'}), 400
+    try:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        # Scoped protection for the website-setup record: timestamped backup + a merge
+        # that never blanks already-populated fields (prevents a full-record save from
+        # wiping the stitch design block). All other canvas data keys keep replace.
+        if resolved.name in ('website-setup.json', 'website-creator.json'):
+            existing = {}
+            if resolved.exists():
+                try:
+                    existing = json.loads(resolved.read_text(encoding='utf-8'))
+                except Exception:
+                    existing = {}
+                try:
+                    bdir = resolved.parent / '.backups'
+                    bdir.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.now().strftime('%Y%m%dT%H%M%S')
+                    stem = resolved.stem  # website-setup | website-creator
+                    shutil.copy2(str(resolved), str(bdir / f'{stem}.{ts}.json'))
+                    baks = sorted(bdir.glob(f'{stem}.*.json'))
+                    for old in baks[:-30]:
+                        try:
+                            old.unlink()
+                        except Exception:
+                            pass
+                except Exception as bexc:
+                    logger.warning(f'website-setup backup failed (non-fatal): {bexc}')
+            if isinstance(existing, dict) and isinstance(data, dict):
+                data = _ovu_merge_preserve(existing, data)
+        resolved.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        return jsonify({'ok': True})
+    except Exception as exc:
+        logger.error(f'canvas_data write error: {exc}')
+        return jsonify({'error': str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Workspace file API — backs the Monaco code-editor canvas block.
+# Scoped to WORKSPACE_DIR (/app/runtime/workspace). NOT under the public
+# /api/canvas/ prefix, so the global Clerk before_request gate protects every
+# read/write when auth is enabled. _safe_canvas_path blocks traversal.
+# ---------------------------------------------------------------------------
+_WORKSPACE_MAX_BYTES = 5 * 1024 * 1024  # 5MB per-file ceiling for the editor
+_WORKSPACE_SKIP_SEGMENTS = {'.git', 'node_modules', '__pycache__', '.cache'}
+
+
+def _workspace_root() -> Path:
+    CODE_WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    return CODE_WORKSPACE_DIR
+
+
+@canvas_bp.route('/api/workspace/tree', methods=['GET'])
+def workspace_tree():
+    """Return the workspace file tree (relative paths, dirs + files)."""
+    root = _workspace_root()
+    entries = []
+    try:
+        for p in sorted(root.rglob('*')):
+            rel = p.relative_to(root)
+            parts = rel.parts
+            if any(seg in _WORKSPACE_SKIP_SEGMENTS for seg in parts):
+                continue
+            if len(parts) > 12:  # avoid pathological deep trees
+                continue
+            try:
+                is_dir = p.is_dir()
+                entries.append({
+                    'path': str(rel),
+                    'name': p.name,
+                    'type': 'dir' if is_dir else 'file',
+                    'size': 0 if is_dir else p.stat().st_size,
+                })
+            except OSError:
+                continue
+    except Exception as exc:
+        logger.error(f'workspace_tree error: {exc}')
+        return jsonify({'error': str(exc)}), 500
+    return jsonify({'root': 'workspace', 'entries': entries})
+
+
+@canvas_bp.route('/api/workspace/file', methods=['GET'])
+def workspace_file_read():
+    """Read a single workspace file as UTF-8 text for the editor."""
+    rel = request.args.get('path', '').strip()
+    if not rel:
+        return jsonify({'error': 'path required'}), 400
+    resolved = _safe_canvas_path(str(_workspace_root()), rel)
+    if resolved is None or not resolved.exists() or not resolved.is_file():
+        return jsonify({'error': 'not found'}), 404
+    if resolved.stat().st_size > _WORKSPACE_MAX_BYTES:
+        return jsonify({'error': 'file too large to edit'}), 413
+    try:
+        content = resolved.read_text(encoding='utf-8')
+    except UnicodeDecodeError:
+        return jsonify({'error': 'binary file — not editable'}), 415
+    return jsonify({'path': rel, 'content': content})
+
+
+@canvas_bp.route('/api/workspace/file', methods=['POST'])
+def workspace_file_write():
+    """Create or overwrite a workspace file (also creates parent dirs)."""
+    data = request.get_json(silent=True) or {}
+    rel = (data.get('path') or '').strip()
+    content = data.get('content')
+    if not rel or content is None:
+        return jsonify({'error': 'path and content required'}), 400
+    if not isinstance(content, str):
+        return jsonify({'error': 'content must be a string'}), 400
+    if len(content.encode('utf-8')) > _WORKSPACE_MAX_BYTES:
+        return jsonify({'error': 'content too large'}), 413
+    resolved = _safe_canvas_path(str(_workspace_root()), rel)
+    if resolved is None:
+        return jsonify({'error': 'invalid path'}), 400
+    if resolved.exists() and resolved.is_dir():
+        return jsonify({'error': 'path is a directory'}), 400
+    try:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content, encoding='utf-8')
+        return jsonify({'ok': True, 'path': rel, 'bytes': len(content.encode('utf-8'))})
+    except Exception as exc:
+        logger.error(f'workspace_file_write error: {exc}')
+        return jsonify({'error': str(exc)}), 500
+
+
+@canvas_bp.route('/api/workspace/mkdir', methods=['POST'])
+def workspace_mkdir():
+    """Create a directory inside the workspace."""
+    data = request.get_json(silent=True) or {}
+    rel = (data.get('path') or '').strip()
+    if not rel:
+        return jsonify({'error': 'path required'}), 400
+    resolved = _safe_canvas_path(str(_workspace_root()), rel)
+    if resolved is None:
+        return jsonify({'error': 'invalid path'}), 400
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+        return jsonify({'ok': True, 'path': rel})
+    except Exception as exc:
+        logger.error(f'workspace_mkdir error: {exc}')
+        return jsonify({'error': str(exc)}), 500
+
+
+@canvas_bp.route('/api/canvas/mtime/<path:filename>', methods=['GET'])
+def canvas_mtime(filename):
+    """Return last modified time of a canvas page (frontend uses to detect changes)."""
+    resolved = _safe_canvas_path(str(CANVAS_PAGES_DIR), filename)
+    if resolved is None or not resolved.exists() or not resolved.is_file():
+        return jsonify({'error': 'not found'}), 404
+    mtime = resolved.stat().st_mtime
+    return jsonify({'mtime': mtime, 'filename': filename})
+
+
+# ---------------------------------------------------------------------------
+# Canvas Page Version History
+# ---------------------------------------------------------------------------
+
+@canvas_bp.route('/api/canvas/versions/<page_id>', methods=['GET'])
+def get_page_versions(page_id):
+    """List all saved versions of a canvas page.
+    GET /api/canvas/versions/my-dashboard
+    Returns: {"page_id": "my-dashboard", "versions": [...], "count": N}
+    """
+    versions = list_versions(page_id)
+    return jsonify({
+        'page_id': page_id,
+        'versions': versions,
+        'count': len(versions),
+    })
+
+
+@canvas_bp.route('/api/canvas/versions/<page_id>/<int:timestamp>', methods=['GET'])
+def preview_version(page_id, timestamp):
+    """Preview a specific version's HTML content.
+    GET /api/canvas/versions/my-dashboard/1709510400
+    Returns the HTML content directly.
+    """
+    content = get_version_content(page_id, timestamp)
+    if content is None:
+        return jsonify({'error': 'Version not found'}), 404
+    return Response(content, mimetype='text/html')
+
+
+@canvas_bp.route('/api/canvas/versions/<page_id>/<int:timestamp>/restore', methods=['POST'])
+def restore_page_version(page_id, timestamp):
+    """Restore a canvas page to a previous version.
+    POST /api/canvas/versions/my-dashboard/1709510400/restore
+    Saves the current version before restoring.
+    """
+    success = restore_version(page_id, timestamp)
+    if not success:
+        return jsonify({'error': 'Version not found or restore failed'}), 404
+
+    # Update manifest modified time
+    with _manifest_lock:
+        manifest = load_canvas_manifest()
+        if page_id in manifest.get('pages', {}):
+            manifest['pages'][page_id]['modified'] = datetime.now().isoformat()
+            save_canvas_manifest(manifest)
+
+    return jsonify({
+        'status': 'ok',
+        'page_id': page_id,
+        'restored_from': timestamp,
+        'message': f'Page restored to version from {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))}',
+    })
+
+
+# ---------------------------------------------------------------------------
+# Build Log API — serves z-code session JSONL files parsed into human-readable lines
+# The openclaw workspace is mounted into openvoiceui at /app/runtime/workspace/Agent
+# JSONL session files are synced here: Agent/scripts/logs/zcode-sessions/*.jsonl
+# ---------------------------------------------------------------------------
+
+_BUILD_LOG_DIR = WORKSPACE_DIR / 'Agent' / 'scripts' / 'logs'
+_ZCODE_SESSIONS_DIR = _BUILD_LOG_DIR / 'zcode-sessions'
+
+
+def _parse_jsonl_to_lines(jsonl_path):
+    """Parse a z-code JSONL session file into human-readable activity lines."""
+    import json as _json
+    results = []
+    try:
+        with open(jsonl_path, encoding='utf-8', errors='replace') as _f:
+            for raw in _f:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    obj = _json.loads(raw)
+                except Exception:
+                    continue
+                if obj.get('type') != 'assistant':
+                    continue
+                ts_raw = obj.get('timestamp', '')
+                ts = ts_raw[11:16] if len(ts_raw) >= 16 else '?'
+                content = obj.get('message', {}).get('content', [])
+                for c in content:
+                    if not isinstance(c, dict):
+                        continue
+                    ct = c.get('type')
+                    if ct == 'text':
+                        text = c.get('text', '').strip()
+                        if text:
+                            short = text.replace('\n', ' ')[:160]
+                            results.append((ts_raw, f'[{ts}] {short}'))
+                    elif ct == 'tool_use':
+                        name = c.get('name', '?')
+                        inp = c.get('input', {})
+                        _pfx = '/home/node/.openclaw/workspace/'
+                        if name == 'Read':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Reading: {fp}'))
+                        elif name == 'WebSearch':
+                            results.append((ts_raw, f'[{ts}] Searching: {inp.get("query", "")}'))
+                        elif name == 'Bash':
+                            cmd = inp.get('command', '').strip().replace('\n', ' ')[:100]
+                            results.append((ts_raw, f'[{ts}] Running: {cmd}'))
+                        elif name == 'Write':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Writing: {fp}'))
+                        elif name == 'Edit':
+                            fp = inp.get('file_path', '').replace(_pfx, '')
+                            results.append((ts_raw, f'[{ts}] Editing: {fp}'))
+                        elif name == 'Glob':
+                            results.append((ts_raw, f'[{ts}] Scanning: {inp.get("pattern", "")}'))
+                        elif name == 'Grep':
+                            results.append((ts_raw, f'[{ts}] Searching: {inp.get("pattern", "")}'))
+                        elif name == 'TodoWrite':
+                            todos = inp.get('todos', [])
+                            in_prog = [
+                                t['content'] for t in todos
+                                if isinstance(t, dict) and t.get('status') == 'in_progress'
+                            ]
+                            if in_prog:
+                                results.append((ts_raw, f'[{ts}] Starting: {in_prog[0][:80]}'))
+                        elif name == 'Agent':
+                            desc = inp.get('description', '')
+                            if desc:
+                                results.append((ts_raw, f'[{ts}] Spawning agent: {desc[:80]}'))
+                        else:
+                            results.append((ts_raw, f'[{ts}] {name}: {str(inp)[:80]}'))
+    except Exception:
+        pass
+    return results
+
+
+@canvas_bp.route('/api/canvas/build-log/<project>', methods=['GET'])
+def canvas_build_log(project):
+    """Return parsed z-code JSONL session activity as human-readable console lines.
+
+    GET /api/canvas/build-log/<project>?lines=300&since=<iso-timestamp>
+    Returns: {"lines": [...], "status": "ok", "sources": N, "updated_at": "..."}
+    Returns: {"lines": [], "status": "no_log"} if no JSONL files found yet.
+    """
+    import re as _re
+    import json as _json
+    if not _re.match(r'^[a-z0-9][a-z0-9\-_]{0,80}$', project):
+        return jsonify({'error': 'Invalid project name'}), 400
+
+    try:
+        n_lines = min(int(request.args.get('lines', 300)), 1000)
+    except (ValueError, TypeError):
+        n_lines = 300
+
+    # Optional: only return lines after this ISO timestamp (for incremental polling)
+    since_ts = request.args.get('since', '')
+
+    try:
+        sessions_dir = _ZCODE_SESSIONS_DIR
+        if not sessions_dir.exists():
+            return jsonify({'lines': [], 'status': 'no_log'})
+
+        # Find JSONL files — use ALL of them sorted by mtime (single-tenant: newest = current build)
+        all_jsonl = sorted(sessions_dir.glob('*.jsonl'), key=lambda p: p.stat().st_mtime)
+        if not all_jsonl:
+            return jsonify({'lines': [], 'status': 'no_log'})
+
+        # Determine build start time from the project status file (if available)
+        build_start_ts = ''
+        status_path = CANVAS_PAGES_DIR / '_data' / 'builds' / f'{project}-status.json'
+        if status_path.exists():
+            try:
+                with open(status_path) as _sf:
+                    _sd = _json.load(_sf)
+                build_start_ts = _sd.get('startedAt', '')
+            except Exception:
+                pass
+
+        # Collect entries from all JSONL files, filtered to files updated after build start
+        all_entries = []
+        sources_used = 0
+        for jf in all_jsonl:
+            # Skip JSONL files older than build start (if we know it)
+            if build_start_ts:
+                import time as _time
+                try:
+                    # Compare file mtime to build start
+                    file_mtime_iso = _time.strftime(
+                        '%Y-%m-%dT%H:%M:%S', _time.gmtime(jf.stat().st_mtime)
+                    )
+                    if file_mtime_iso < build_start_ts[:19]:
+                        continue
+                except Exception:
+                    pass
+            entries = _parse_jsonl_to_lines(jf)
+            if entries:
+                all_entries.extend(entries)
+                sources_used += 1
+
+        if not all_entries:
+            # Fall back: use ALL files if nothing matched the build-start filter
+            for jf in all_jsonl:
+                entries = _parse_jsonl_to_lines(jf)
+                all_entries.extend(entries)
+                sources_used += 1
+
+        # Sort by timestamp string (ISO, sorts lexically), dedupe adjacent identical lines
+        all_entries.sort(key=lambda x: x[0])
+
+        # Filter by since_ts if provided
+        if since_ts:
+            all_entries = [(ts, line) for ts, line in all_entries if ts > since_ts]
+
+        # Deduplicate: remove consecutive identical display lines
+        deduped = []
+        last_line = None
+        for ts, line in all_entries:
+            if line != last_line:
+                deduped.append((ts, line))
+                last_line = line
+
+        # Return tail
+        tail_entries = deduped[-n_lines:] if len(deduped) > n_lines else deduped
+        lines_out = [line for _, line in tail_entries]
+        last_ts = tail_entries[-1][0] if tail_entries else ''
+
+        return jsonify({
+            'lines': lines_out,
+            'status': 'ok',
+            'sources': sources_used,
+            'total_lines': len(deduped),
+            'updated_at': last_ts,
+        })
+    except Exception as exc:
+        logger.error(f'Build log read error for {project}: {exc}')
+        return jsonify({'lines': [], 'status': 'error', 'error': str(exc)}), 500
+
+
+# ---------------------------------------------------------------------------
+# DataForSEO API proxy — credentials stay server-side
+# ---------------------------------------------------------------------------
+
+_DATAFORSEO_BASE = 'https://api.dataforseo.com/v3'
+
+def _dataforseo_auth():
+    """Return (login, password) from env or None."""
+    login = os.getenv('DATAFORSEO_LOGIN', '')
+    password = os.getenv('DATAFORSEO_PASSWORD', '')
+    if not login or not password:
+        return None
+    return (login, password)
+
+
+@canvas_bp.route('/api/dataforseo/balance', methods=['GET'])
+def dataforseo_balance():
+    """Return DataForSEO account balance and usage info."""
+    auth = _dataforseo_auth()
+    if not auth:
+        return jsonify({'error': 'DataForSEO credentials not configured'}), 503
+    try:
+        resp = http_requests.get(
+            f'{_DATAFORSEO_BASE}/appendix/user_data',
+            auth=auth,
+            timeout=15,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as exc:
+        logger.error(f'DataForSEO balance error: {exc}')
+        return jsonify({'error': str(exc)}), 502
+
+
+@canvas_bp.route('/api/dataforseo/proxy', methods=['POST'])
+def dataforseo_proxy():
+    """Proxy a DataForSEO API call. Body: {endpoint: "...", data: [...]}."""
+    auth = _dataforseo_auth()
+    if not auth:
+        return jsonify({'error': 'DataForSEO credentials not configured'}), 503
+    body = request.get_json(silent=True) or {}
+    endpoint = body.get('endpoint', '')
+    data = body.get('data', [])
+    if not endpoint:
+        return jsonify({'error': 'Missing endpoint'}), 400
+    # Sanitize: only allow alphanum, slashes, underscores, hyphens
+    if not re.match(r'^[a-zA-Z0-9/_\-]+$', endpoint):
+        return jsonify({'error': 'Invalid endpoint'}), 400
+    try:
+        resp = http_requests.post(
+            f'{_DATAFORSEO_BASE}/{endpoint}',
+            auth=auth,
+            json=data,
+            timeout=30,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as exc:
+        logger.error(f'DataForSEO proxy error ({endpoint}): {exc}')
+        return jsonify({'error': str(exc)}), 502
