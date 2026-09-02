@@ -90,6 +90,56 @@ def _load_voice_system_prompt() -> str:
     except Exception:
         pass
     return _VOICE_INSTRUCTIONS  # fallback to hardcoded constant
+
+
+# ── DEGRADED-MODE ADDENDUM for the Z.AI-direct fallback ─────────────────────
+# WHY (danielle, 2026-08-31 + 2026-09-01, escalated by danielle-sms@mesh):
+# when the openclaw turn stalls (llm_inference 500-600s with ZERO output tokens,
+# then "STREAM EXIT ... unprocessed"), we answer the user from a DIRECT Z.AI call.
+# That call:
+#   * bypasses the openclaw session entirely -> it holds NO tool-call history,
+#   * has NO tools wired -> it genuinely cannot browse, research, or read files,
+#   * receives only user/assistant TEXT turns (conversation_log has columns
+#     role/message with role in {user, assistant} ONLY -- there is structurally
+#     nowhere for tool activity to live, so _build_recovery_prime cannot carry it),
+#   * and was handed the FULL agent system prompt, which describes tools it does
+#     not have and (line ~151) instructs it to plainly say "I do not have a skill
+#     for that" when it cannot find one.
+# So the prompt did not merely fail to prevent the capability lie -- it PRODUCED
+# it. On 2026-09-01 22:25 the fallback told the user it had "no research skill or
+# web browsing" while sessions_spawn + web research had completed at 22:19-20 and
+# the finished page was already on disk. The user replied "youre lying".
+#
+# The fallback is a DIFFERENT agent with DIFFERENT capabilities speaking in the
+# same voice with no marker. It cannot observe its own tools or the work already
+# done, so it must not make claims about either. Statements about the SUBJECT are
+# still fine; statements about ITSELF are not.
+_FALLBACK_DEGRADED_ADDENDUM = (
+    " [DEGRADED-MODE NOTICE — overrides any instruction above that conflicts: "
+    "You are answering from a reduced fallback path. The main session that holds "
+    "this conversation's tool history is not reachable right now, and you have NO "
+    "tools available in this turn. "
+    "Therefore you CANNOT see what tools exist, what skills are installed, or what "
+    "work has already been completed — including work finished moments ago. "
+    "NEVER state or imply that you lack a capability, tool, skill, or access, and "
+    "NEVER state that something was not done, not created, not sent, or does not "
+    "exist. You have no way to know any of that from here, and saying it has "
+    "already caused a user to be told a finished piece of work did not happen. "
+    "Ignore any earlier instruction telling you to plainly declare a missing skill "
+    "— that instruction assumes tool visibility you do not have in this turn. "
+    "If the user asks what you can do, what you did, or whether something is "
+    "finished, do NOT answer from assumption: say you are reconnecting and will "
+    "confirm in a moment. Answer normally on everything else.]"
+)
+
+
+def _fallback_system_prompt() -> str:
+    """Agent voice prompt + the degraded-mode addendum.
+
+    Use for EVERY Z.AI-direct fallback that is handed the agent system prompt.
+    Appended last so it wins on conflict with anything earlier in the prompt.
+    """
+    return _load_voice_system_prompt() + _FALLBACK_DEGRADED_ADDENDUM
 _VOICE_INSTRUCTIONS = (
     "[OPENVOICEUI SYSTEM INSTRUCTIONS: "
 
@@ -2985,7 +3035,7 @@ def _conversation_inner():
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
                                     # Use full context so the fallback LLM has agent personality
                                     _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
-                                    _fallback_system = _load_voice_system_prompt()
+                                    _fallback_system = _fallback_system_prompt()
                                     if _zai_key:
                                         _zai_resp = _req.post(
                                             'https://api.z.ai/api/anthropic/v1/messages',
@@ -3035,7 +3085,7 @@ def _conversation_inner():
                                         import requests as _req
                                         _zai_key = os.environ.get('ZAI_API_KEY', '')
                                         _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
-                                        _fallback_system = _load_voice_system_prompt()
+                                        _fallback_system = _fallback_system_prompt()
                                         if _zai_key:
                                             _zai_resp = _req.post(
                                                 'https://api.z.ai/api/anthropic/v1/messages',
