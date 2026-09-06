@@ -81,8 +81,18 @@ VISION_MODELS = [
     {'id': 'glm-4v-plus',   'label': 'GLM-4V Plus (Legacy · Paid)',     'provider': 'zai'},
 ]
 
-DEFAULT_VISION_MODEL    = os.environ.get('VISION_MODEL', 'glm-4.6v')
-DEFAULT_VISION_PROVIDER = 'zai'
+# Gemini is THE vision provider for this stack (Mike, 2026-09-06), matching the openclaw
+# media chain in openclaw.json which is confirmed working on the same test images.
+#
+# ⚠️ DO NOT point this at Z.AI/GLM. GLM models ARE vision-capable, but the endpoint we are
+# mandated to use (api.z.ai/api/anthropic) SILENTLY STRIPS IMAGE CONTENT — measured 2026-05-05
+# against one screenshot on glm-5.1 / glm-5 / glm-5-turbo / glm-4.5v: every one confidently
+# described a desktop that does not exist. The same glm-4.5v on the native paas/v4 endpoint was
+# correct. A stripped image does not error; the model confabulates, which is worse than a failure.
+# Until openclaw's zaiProvider routes image requests via paas/v4, Z.AI is text-only here.
+DEFAULT_VISION_MODEL    = os.environ.get('VISION_MODEL', 'gemini-flash-latest')
+DEFAULT_VISION_FALLBACK = os.environ.get('VISION_MODEL_FALLBACK', 'gemini-pro-latest')
+DEFAULT_VISION_PROVIDER = 'google'
 
 
 def _get_vision_model() -> tuple[str, str]:
@@ -154,62 +164,82 @@ def _call_vision_via_claude(container_img_path: str, prompt: str) -> str:
     return result
 
 
-def _call_vision(image_b64: str, prompt: str, model: str | None = None, file_path: str | None = None) -> str:
-    """
-    Send an image + prompt to the configured vision model and return the text response.
-
-    For uploaded image files (file_path provided): routes through headless Claude Code
-    subscription via docker run — no Groq/Gemini/OpenAI, no marginal cost.
-    For camera frames (no file_path): uses Groq qwen3.6-27b as before.
-
-    image_b64 may be a raw base64 string or a data-URI (data:image/jpeg;base64,...).
-    """
-    # Uploaded files: use Claude subscription (image-intel system pattern)
-    if file_path:
-        return _call_vision_via_claude(file_path, prompt)
-
-    # Camera frames: Groq path (in-memory frames have no on-disk path)
-    # Strip data-URI prefix if present
-    if image_b64.startswith('data:'):
-        image_b64 = image_b64.split(',', 1)[1]
-
-    api_key = os.environ.get('GROQ_API_KEY', '')
-    if not api_key:
-        raise ValueError('GROQ_API_KEY is not set — cannot call vision model for camera frame')
-
-    vision_model = os.environ.get('GROQ_VISION_MODEL', 'qwen/qwen3.6-27b')
-
-    payload = {
-        'model': vision_model,
-        'messages': [{
-            'role': 'user',
-            'content': [
-                {'type': 'image_url',
-                 'image_url': {'url': f'data:image/png;base64,{image_b64}'}},
-                {'type': 'text', 'text': prompt},
-            ],
-        }],
-        'max_tokens': 1500,
-        # qwen3 is a reasoning model — without this its <think> tokens eat the
-        # budget and can leak into the returned description
-        'reasoning_format': 'hidden',
-    }
-
+def _gemini_vision(image_b64: str, mime: str, prompt: str, model: str) -> str:
+    """One Gemini generateContent call. Raises on non-2xx so the caller can fall back."""
+    key = os.environ.get('GEMINI_API_KEY', '')
+    if not key:
+        raise ValueError('GEMINI_API_KEY is not set — cannot call vision model')
+    # KEY GOES IN A HEADER, NEVER THE URL. Gemini accepts ?key= as a query param, but requests'
+    # HTTPError message embeds the full URL — so a single 404 on a bad model name writes the live
+    # GEMINI_API_KEY into the log, the exception, and any transcript that captures it. Measured
+    # 2026-09-06: a fallback test did exactly that. x-goog-api-key keeps it out of every error path.
     resp = requests.post(
-        'https://api.groq.com/openai/v1/chat/completions',
-        headers={
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json',
-        },
-        json=payload,
-        timeout=30,
+        f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+        headers={'x-goog-api-key': key},
+        json={'contents': [{'parts': [
+            {'text': prompt},
+            {'inline_data': {'mime_type': mime, 'data': image_b64}},
+        ]}]},
+        timeout=60,
     )
     resp.raise_for_status()
-    text = (resp.json()['choices'][0]['message']['content'] or '').strip()
-    # Defense in depth: strip any <think> block if reasoning_format was ignored
-    if '</think>' in text:
-        text = text.rsplit('</think>', 1)[1].strip()
-    return text
+    cands = resp.json().get('candidates') or []
+    if not cands:
+        raise RuntimeError('gemini returned no candidates')
+    return (cands[0]['content']['parts'][0].get('text') or '').strip()
+
+
+def _call_vision(image_b64: str, prompt: str, model: str | None = None, file_path: str | None = None) -> str:
+    """
+    Send an image + prompt to Gemini and return the text response.
+
+    ONE path for uploads and camera frames alike (2026-09-06). What this replaced, and why:
+
+      * uploaded files spawned a whole container per image —
+        `docker run --rm -v /mnt:/mnt:ro jambot/openclaw:latest claude -p --model claude-sonnet-5`
+        — a container launch, a 90s timeout, and the entire /mnt tree (every tenant's data and
+        .platform-keys.env) bind-mounted in, to look at one picture. Retained below as
+        _call_vision_via_claude() for reference; no longer called.
+      * camera frames were hardcoded to Groq qwen3.6-27b, bypassing the configured provider
+        entirely — while this stack's standing rule is that Groq is STT/TTS only.
+      * _get_vision_model() was read and its result DISCARDED: the `model` argument existed and
+        was never used, so the configured vision model had no effect on anything.
+
+    image_b64 may be raw base64 or a data-URI. file_path (a path inside this container) is read
+    from disk when no base64 is supplied.
+    """
+    mime = 'image/png'
+
+    if not image_b64 and file_path:
+        p = Path(file_path)
+        if not p.is_file():
+            raise FileNotFoundError(f'vision: no such image {file_path}')
+        image_b64 = base64.b64encode(p.read_bytes()).decode()
+        ext = p.suffix.lower()
+        mime = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+                '.gif': 'image/gif'}.get(ext, 'image/png')
+
+    if image_b64.startswith('data:'):
+        head, image_b64 = image_b64.split(',', 1)
+        if ';' in head and ':' in head:
+            mime = head.split(':', 1)[1].split(';', 1)[0] or mime
+
+    if not image_b64:
+        raise ValueError('vision: no image supplied (need image_b64 or file_path)')
+
+    primary = model or _get_vision_model()[0]
+    chain = [m for m in (primary, DEFAULT_VISION_FALLBACK) if m]
+    last = None
+    for m in chain:
+        try:
+            return _gemini_vision(image_b64, mime, prompt, m)
+        except Exception as exc:            # try the next model in the chain
+            last = exc
+            # Scrub any key= / api-key that a library put in the message before it is logged.
+            msg = re.sub(r'(key=|api[-_]?key["\':\s]+)[A-Za-z0-9._\-]{8,}', r'\1<redacted>',
+                         str(exc), flags=re.I)
+            logger.warning('vision: %s failed (%s) — trying next in chain', m, msg[:200])
+    raise RuntimeError(f'all vision models failed; last error: {last}')
 
 
 # ---------------------------------------------------------------------------

@@ -189,3 +189,8 @@ app/static/canvas-pages/
 # never committed. The committed template is .platform-oauth.env.example.
 .platform-oauth.env
 routes/song_tagger.py
+
+# Dated pre-change backups (never-delete convention). The existing `*.bak` rule
+# does NOT match these: `vision.py.bak-pre-gemini-20260906T023605Z` has a suffix
+# AFTER .bak, so it showed as untracked and looked like pending work.
+*.bak-*
