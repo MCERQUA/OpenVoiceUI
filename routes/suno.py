@@ -719,6 +719,36 @@ def _action_sfx(_q, body: dict):
         return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
 
 
+# ── JINGLE LENGTH HONESTY (host@mesh 2026-09-06, Mike's request) ──────────────
+# Suno's jingle recipe is NOT length-deterministic. Measured over the whole task
+# log: 13 jingle requests -> 72 generations, only 16 came back <=20s. That is a
+# 22% hit rate, with the SAME parameters returning 9.2s and 167.8s on adjacent
+# attempts. The skill doc's own row calls this recipe "v1 untested".
+#
+# The defect was ours, not Suno's: nothing checked the length, so a 44s and a
+# 139s clip were both saved and announced as finished jingles. Mike had to be the
+# duration check himself, by listening, four times in a row. A system that
+# reports success on output that misses the spec it was handed is the same
+# failure as a form POST returning 200 on a lead it never stored.
+#
+# We do NOT auto-retry — each attempt costs credits, and at a 22% hit rate that
+# is ~4 generations per usable jingle. We tell the truth and OFFER.
+JINGLE_TARGET_MAX_S = 20.0
+
+def _jingle_length_note(kind: str, duration, title: str) -> str:
+    """Return '' when the clip is a usable jingle, else an honest note + retry offer."""
+    if kind != 'jingle':
+        return ''
+    try:
+        secs = float(duration or 0)
+    except (TypeError, ValueError):
+        return ''
+    if secs <= 0 or secs <= JINGLE_TARGET_MAX_S:
+        return ''
+    return (f" Heads up: this one came back {secs:.0f}s, longer than the short jingle"
+            f" you asked for. Suno doesn't always hit an exact length — it's a bit of a"
+            f" lottery on short clips. Want me to try again?")
+
 def _action_jingle(_q, body: dict):
     """Generate a 10-15 second vocal-logo jingle of a brand name.
 
@@ -927,7 +957,10 @@ def _action_status(job_id: str):
             'song_id': job.get('song_id', ''),
             'title': job.get('title', 'Generated Track'),
             'url': job.get('url', ''),
-            'response': f"Done! '{job.get('title', 'your track')}' is ready to spin!",
+            'response': (f"Done! '{job.get('title', 'your track')}' is ready to spin!"
+                         + _jingle_length_note(job.get('kind', 'song'),
+                                               job.get('duration', 0),
+                                               job.get('title', 'your track'))),
         })
 
     elapsed = time.time() - job['created_at']
@@ -1089,7 +1122,9 @@ def _action_status(job_id: str):
                             'song_id': song_id,
                             'title': song_title,
                             'url': f'{_url_base}/{filename}',
-                            'response': f"Done! '{song_title}' is ready to spin!",
+                            'response': (f"Done! '{song_title}' is ready to spin!"
+                                         + _jingle_length_note(kind, duration, song_title)),
+                            'duration_seconds': round(float(duration or 0), 1),
                         })
 
                     return jsonify({'action': 'status', 'status': 'complete_no_audio', 'response': 'Song generated but audio unavailable.'})
