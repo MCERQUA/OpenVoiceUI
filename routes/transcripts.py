@@ -402,7 +402,15 @@ def save_conversation_turn(
         return f'transcripts/{date_str}/{filename}'
 
     except Exception as exc:
-        _transcript_logger.getLogger(__name__).debug(
-            f'save_conversation_turn failed (non-critical): {exc}'
+        # WAS logger.debug (invisible in normal operation). A transcript writer that
+        # silently stops is indistinguishable from a tenant who simply had no
+        # conversations -- which is exactly how tenant `ica` lost every dialogue turn
+        # from 2026-08-18 onward while its conversation_request events kept arriving.
+        # Nobody could see it, and the nightly reflection just reported an empty day.
+        # The write itself stays non-fatal (a failed transcript must never break a live
+        # voice call), but it is now VISIBLE and names the path so it is actionable.
+        _transcript_logger.getLogger(__name__).warning(
+            f'save_conversation_turn FAILED for session={session_id} '
+            f'dir={TRANSCRIPTS_DIR}: {type(exc).__name__}: {exc}'
         )
         return None
