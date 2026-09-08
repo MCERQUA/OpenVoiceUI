@@ -323,8 +323,13 @@ def load_canvas_manifest() -> dict:
     }
 
 
-def save_canvas_manifest(manifest: dict) -> None:
-    """Save manifest directly (Docker bind-mounted files don't support atomic rename)."""
+def save_canvas_manifest(manifest: dict) -> bool:
+    """Save manifest directly (Docker bind-mounted files don't support atomic rename).
+
+    Returns True on success, False on failure. Callers that turn this into an
+    HTTP response MUST check the result — a swallowed write failure previously
+    rendered as an HTTP 200 while the manifest silently failed to persist.
+    """
     manifest['last_updated'] = datetime.now().isoformat()
     try:
         data = json.dumps(manifest, indent=2)
@@ -332,8 +337,10 @@ def save_canvas_manifest(manifest: dict) -> None:
             f.write(data)
         _manifest_cache['data'] = copy.deepcopy(manifest)
         _manifest_cache['mtime'] = CANVAS_MANIFEST_PATH.stat().st_mtime
+        return True
     except Exception as exc:
         logging.getLogger(__name__).error(f'Failed to save canvas manifest: {exc}')
+        return False
 
 
 def suggest_category(title: str, content: str = '') -> str:
@@ -1314,7 +1321,8 @@ def handle_page_metadata(page_id):
                 except Exception as exc:
                     logger.warning(f'Failed to archive file {filename}: {exc}')
 
-            save_canvas_manifest(manifest)
+            if not save_canvas_manifest(manifest):
+                return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
             _notify_brain('canvas_page_deleted', page_id=page_id, title=page_title, filename=filename)
 
             try:
@@ -1403,7 +1411,8 @@ def handle_page_metadata(page_id):
                     if page_id not in manifest['categories'][new_cat]['pages']:
                         manifest['categories'][new_cat]['pages'].append(page_id)
 
-        save_canvas_manifest(manifest)
+        if not save_canvas_manifest(manifest):
+            return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
         return jsonify({'status': 'ok', 'page': page})
 
 
@@ -1429,7 +1438,8 @@ def handle_category():
                 'color': data.get('color', '#4a9eff'),
                 'pages': [],
             }
-            save_canvas_manifest(manifest)
+            if not save_canvas_manifest(manifest):
+                return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
             return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
 
         # PATCH
@@ -1440,7 +1450,8 @@ def handle_category():
         for field in ['name', 'icon', 'color']:
             if field in data:
                 manifest['categories'][cat_id][field] = data[field]
-        save_canvas_manifest(manifest)
+        if not save_canvas_manifest(manifest):
+            return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
         return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
 
 
@@ -1852,11 +1863,15 @@ def restore_page_version(page_id, timestamp):
         return jsonify({'error': 'Version not found or restore failed'}), 404
 
     # Update manifest modified time
+    manifest_save_ok = True
     with _manifest_lock:
         manifest = load_canvas_manifest()
         if page_id in manifest.get('pages', {}):
             manifest['pages'][page_id]['modified'] = datetime.now().isoformat()
-            save_canvas_manifest(manifest)
+            manifest_save_ok = save_canvas_manifest(manifest)
+
+    if not manifest_save_ok:
+        return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
 
     return jsonify({
         'status': 'ok',

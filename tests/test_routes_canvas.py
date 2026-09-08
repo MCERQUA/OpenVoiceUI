@@ -179,3 +179,59 @@ class TestCanvasUpdate:
                 content_type="application/json",
             )
         assert resp.status_code in (200, 500)
+
+
+# ---------------------------------------------------------------------------
+# save_canvas_manifest() return value — a write failure must surface as a
+# result the caller can check, not a silent None (fleet-wide bug 2026-09-08:
+# [Errno 13] Permission denied on the bind-mounted manifest was swallowed and
+# every route still returned HTTP 200/'ok').
+# ---------------------------------------------------------------------------
+
+class TestSaveCanvasManifestReturnValue:
+    def test_returns_true_on_success(self, tmp_path, monkeypatch):
+        from routes import canvas
+        manifest_path = tmp_path / "canvas-manifest.json"
+        monkeypatch.setattr(canvas, "CANVAS_MANIFEST_PATH", manifest_path)
+        result = canvas.save_canvas_manifest({"pages": {}, "categories": {}})
+        assert result is True
+        assert manifest_path.exists()
+
+    def test_returns_false_on_write_failure(self, tmp_path, monkeypatch):
+        from routes import canvas
+        # Parent directory doesn't exist -> open() raises, caught by save_canvas_manifest
+        manifest_path = tmp_path / "missing-dir" / "canvas-manifest.json"
+        monkeypatch.setattr(canvas, "CANVAS_MANIFEST_PATH", manifest_path)
+        result = canvas.save_canvas_manifest({"pages": {}, "categories": {}})
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# API: PATCH /api/canvas/manifest/page/<page_id> — manifest write failure
+# must return 500, never a false 200/'ok'.
+# ---------------------------------------------------------------------------
+
+class TestHandlePageMetadataManifestWrite:
+    def test_patch_returns_500_when_manifest_write_fails(self, canvas_client):
+        manifest = {"pages": {"test-page": {"display_name": "Test"}}, "categories": {}}
+        with patch("routes.canvas.load_canvas_manifest", return_value=manifest), \
+             patch("routes.canvas.save_canvas_manifest", return_value=False):
+            resp = canvas_client.patch(
+                "/api/canvas/manifest/page/test-page",
+                json={"display_name": "New Name"},
+            )
+        assert resp.status_code == 500
+        data = resp.get_json()
+        assert data["status"] == "error"
+
+    def test_patch_returns_200_when_manifest_write_succeeds(self, canvas_client):
+        manifest = {"pages": {"test-page": {"display_name": "Test"}}, "categories": {}}
+        with patch("routes.canvas.load_canvas_manifest", return_value=manifest), \
+             patch("routes.canvas.save_canvas_manifest", return_value=True):
+            resp = canvas_client.patch(
+                "/api/canvas/manifest/page/test-page",
+                json={"display_name": "New Name"},
+            )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "ok"
