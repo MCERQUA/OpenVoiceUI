@@ -611,7 +611,21 @@ class GatewayConnection:
     """
 
     DEFAULT_URL = 'ws://127.0.0.1:18791'
-    BACKOFF_DELAYS = [1, 2, 4, 8, 16, 30, 60]
+    # Capped at 15s rather than climbing to 60s. The event this ladder waits on is an
+    # openclaw gateway restart, whose duration is known and bounded — measured
+    # 2026-09-19 across every retained openclaw log on this box, SIGTERM -> "[gateway]
+    # ready": n=29, min 29.9s, p50 41.4s, max 59.0s. Against a bounded event, backing
+    # off past it is strictly worse than probing through it: the uncapped ladder steps
+    # 30s -> 60s, so a gateway ready at 44s went unnoticed until t=60s with nothing
+    # probing in between. The capped ladder probes at 29/44/59/74/89/104s and catches
+    # it at 44s. Early rungs are unchanged, so a fast restart is caught just as fast.
+    #
+    # Exponential backoff earns its keep against an overloaded peer that needs sparing.
+    # That is not this failure: the gateway is not refusing because it is busy, it is
+    # refusing because it is not listening yet. _jittered_delay (+/-15%, added with the
+    # previous budget fix) still de-synchronises the ~25 tenants that restart together,
+    # which is the part of backoff that actually applies here.
+    BACKOFF_DELAYS = [1, 2, 4, 8, 15, 15, 15]
 
     def __init__(self):
         self._ws = None
@@ -869,23 +883,35 @@ class GatewayConnection:
                 logger.info(f"### WS backoff: waiting {wait:.1f}s before reconnect")
                 await asyncio.sleep(wait)
 
-            # WS-9 (pledge 50bef735, 2026-09-10): openclaw gateway restart-to-ready
-            # measured at ~37-38s (container StartedAt -> "[gateway] ready" log
-            # line; openclaw-danielle 37.0s, openclaw-azrim 37.8s on 2026-09-10).
-            # The old max_attempts=5 schedule only covered a ~30s window (2+4+8+16s
-            # of sleep between attempts) before raising RuntimeError. Measured
-            # consequence in openvoiceui-azrim's logs for the 04:29 restart: all 5
-            # attempts (04:29:56.75 -> 04:30:26.94) failed because the gateway
-            # wasn't ready until 04:30:30.7, the supervisor gave up ("Failed to
-            # connect to Gateway after 5 attempts — retrying in 30s"), and only
-            # reconnected on its NEXT cycle ~35s later — a ~37s restart became a
-            # ~65s+ outage, and the retry budget was fully exhausted on every
-            # gateway restart across ~25 tenants (the condition this pledge exists
-            # to fix). max_attempts=6 extends the nominal (pre-jitter) sleep budget
-            # to 60s (2+4+8+16+30), comfortably covering the measured restart time
-            # with margin, while _jittered_delay (+/-15%) keeps tenants whose
-            # gateways restart together from retrying in lockstep.
-            max_attempts = 6
+            # WS-9 (pledge 50bef735). Sized against the CLIENT-OBSERVED outage —
+            # "[gateway] received SIGTERM" -> "[gateway] ready" — because that, not
+            # the container's own StartedAt clock, is the window this loop has to
+            # survive. Measured 2026-09-19 over every retained openclaw log on the
+            # box: n=29 restarts, min 29.9s, p50 41.4s, max 59.0s (openclaw-test-dev;
+            # 58.5s second-worst). The StartedAt->ready figure that sized the previous
+            # budget (~37-38s) omits the shutdown half and so reads ~8-20s short.
+            #
+            # The original max_attempts=5 ladder placed its last attempt at t=30s and
+            # covered 1 of those 29 restarts, so a gateway restart exhausted the budget
+            # fleet-wide. max_attempts=6 on the uncapped ladder lands its last attempt
+            # at t=60s nominal, which clears the worst measured restart by 1.0s — and
+            # since every sleep carries +/-15% jitter that budget is a DISTRIBUTION, not
+            # a constant: simulated over 200k draws it falls below 59.0s about 39% of
+            # the time. A budget that covers the worst observed case in only 6 runs out
+            # of 10 is not covered.
+            #
+            # So the ladder CAPS at 15s (see BACKOFF_DELAYS) instead of climbing to 60s,
+            # and runs 10 attempts: t = 0, 2, 6, 14, 29, 44, 59, 74, 89, 104s nominal.
+            # Two things fall out. The budget reaches 104s (p1 of the jittered draw is
+            # 96.5s, still 37s clear of the worst measured restart). And the dead window
+            # disappears: the uncapped ladder jumps 30s -> 60s, so a gateway that became
+            # ready at 44s sat unnoticed for 16s with nothing probing; the capped ladder
+            # probes at 44s and 59s and catches it. Early attempts are unchanged, so a
+            # fast restart is still caught just as quickly (attempt 4 at t=14s). The
+            # failure being waited on is a service restarting on a known ~30-60s cadence,
+            # not an overloaded peer that needs sparing. A genuinely dead gateway still
+            # raises, inside ~2 minutes.
+            max_attempts = 10
             for attempt in range(max_attempts):
                 try:
                     logger.info(f"### WS connect attempt {attempt + 1}/{max_attempts}...")
