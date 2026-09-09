@@ -10,8 +10,9 @@ NEVER Groq — Groq is TTS only, never for LLM.
 import logging
 import os
 
-import requests
 from flask import Blueprint, jsonify, request
+
+from services.zai_direct import zai_messages_post
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +27,13 @@ def chat_complete():
         return jsonify({'error': 'No message provided'}), 400
 
     api_key = os.environ.get('ZAI_API_KEY', '')
-    if not api_key:
+    fallback_key = os.environ.get('ZAI_FALLBACK_API_KEY', '')
+    if not api_key and not fallback_key:
         return jsonify({'error': 'ZAI_API_KEY not configured'}), 500
 
     try:
-        r = requests.post(
-            'https://api.z.ai/api/anthropic/v1/messages',
-            headers={
-                'x-api-key': api_key,
-                'anthropic-version': '2023-06-01',
-                'content-type': 'application/json',
-            },
-            json={
+        r = zai_messages_post(
+            {
                 'model': 'glm-5-turbo',
                 'messages': [{'role': 'user', 'content': message}],
                 'max_tokens': 1024,
