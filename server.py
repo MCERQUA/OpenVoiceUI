@@ -1827,19 +1827,39 @@ def _warm_gateway_connection():
     """Open the persistent gateway WS at boot (it is otherwise lazy — first
     chat.send opens it). Without this, subagent completions that land after a
     server restart but before the first user message are invisible to the
-    orphan-continuation watcher."""
+    orphan-continuation watcher.
+
+    Docker restarts a container's dependencies without compose `depends_on`
+    ordering, so on a host reboot the openvoiceui container can come up
+    before its openclaw gateway is listening. `_ensure_connected()` only
+    makes 5 attempts before raising — without a retry here, the persistent
+    WS never opens and stays down until a user turn happens to call
+    `_ensure_connected()` lazily. So retry indefinitely in the background;
+    once a lazy connect (or a later warm-up attempt) succeeds,
+    `_ensure_connected()` short-circuits on `_connected` being True, so this
+    loop's next pass is a cheap no-op and simply returns.
+    """
     try:
         from services.gateway_manager import gateway_manager as _gm
+        from services.warmup_retry import retry_until_success
         _gw = _gm.get('openclaw')
         if _gw is None or not _gw.is_configured():
             return
         _conn = _gw._router._get_connection(None)
         _conn._ensure_started()
-        asyncio.run_coroutine_threadsafe(
-            _conn._ensure_connected(), _conn._loop).result(timeout=30)
-        logger.info("Gateway WS warmed at boot — orphan completion watcher live")
+
+        def _connect():
+            asyncio.run_coroutine_threadsafe(
+                _conn._ensure_connected(), _conn._loop).result(timeout=30)
+
+        def _log(msg):
+            logger.warning(f"Gateway boot warm-up {msg}")
+
+        attempts = retry_until_success(_connect, time.sleep, _log)
+        logger.info(f"Gateway WS warmed at boot after {attempts} attempt(s) — "
+                    f"orphan completion watcher live")
     except Exception as e:
-        logger.warning(f"Gateway boot warm-up failed (will connect lazily): {e}")
+        logger.warning(f"Gateway boot warm-up failed permanently (will connect lazily): {e}")
 
 
 threading.Thread(target=_warm_gateway_connection,
