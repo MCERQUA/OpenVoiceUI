@@ -3031,20 +3031,15 @@ def _conversation_inner():
 
                                 # 4. Z.AI direct fallback for this message (NEVER Groq — Groq is TTS only)
                                 try:
-                                    import requests as _req
+                                    from services.zai_direct import zai_messages_post
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
+                                    _zai_fb_key = os.environ.get('ZAI_FALLBACK_API_KEY', '')
                                     # Use full context so the fallback LLM has agent personality
                                     _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
                                     _fallback_system = _fallback_system_prompt()
-                                    if _zai_key:
-                                        _zai_resp = _req.post(
-                                            'https://api.z.ai/api/anthropic/v1/messages',
-                                            headers={
-                                                'x-api-key': _zai_key,
-                                                'anthropic-version': '2023-06-01',
-                                                'content-type': 'application/json',
-                                            },
-                                            json={
+                                    if _zai_key or _zai_fb_key:
+                                        _zai_resp = zai_messages_post(
+                                            {
                                                 'model': 'glm-5-turbo',
                                                 'max_tokens': 1500,
                                                 'system': _fallback_system,
