@@ -413,6 +413,58 @@ def _flush_db_writes(timeout: float = 5.0) -> None:
     _db_write_queue.join()
 
 # ---------------------------------------------------------------------------
+# Exit-path TTS flush (issue #487)
+# ---------------------------------------------------------------------------
+#
+# stream_response()'s main event loop has two exit paths that `break` WITHOUT
+# ever running the text_done flush loop that waits on `_tts_pending`:
+#   1. STREAM HARD TIMEOUT (queue.Empty branch, elapsed > _STREAM_HARD_TIMEOUT)
+#   2. a gateway-level 'error' event
+# Both leave any TTS chunks still in `_tts_pending` un-waited-on. Each chunk's
+# background _fire_tts()._run() always pings event_queue with a payload-free
+# {'type': 'tts_ready'} wake event when it finishes (regardless of whether
+# anything ever consumes it), which is what the old "STREAM EXIT with N
+# unprocessed events: ['tts_ready', ...]" warning was seeing — but that ping
+# carries no audio, so re-yielding it to the client does nothing. The actual
+# payload lives in `_tts_pending`'s (done_event, result) tuples, so THIS is
+# what must be drained before the generator returns. The text_done path
+# already drains `_tts_pending` synchronously and resets it to [] afterward,
+# so calling this there is a no-op.
+def drain_pending_tts_on_exit(tts_pending, chunks_sent, audio_event_fn, error_event_fn,
+                               cap_seconds=15, log=None):
+    """Wait up to cap_seconds (one wall-clock budget shared across every
+    remaining chunk, not per-chunk) for outstanding TTS chunks to finish,
+    returning (events, dropped_count).
+
+    events: ndjson-line strings (built via audio_event_fn/error_event_fn) for
+    every chunk that finished within the cap, in original order — caller
+    yields these to the client exactly like the normal flush does.
+    dropped_count: chunks whose done_event never fired within the cap. These
+    are genuinely lost (provider hung past the budget); the caller logs it.
+    """
+    log = log or logger
+    events = []
+    dropped = 0
+    if not tts_pending:
+        return events, dropped
+    deadline = time.time() + cap_seconds
+    for i, (done_evt, res) in enumerate(tts_pending):
+        remaining = max(0.0, deadline - time.time())
+        if done_evt.wait(timeout=remaining):
+            if res.get('error'):
+                events.append(error_event_fn(res['error']))
+            elif res.get('audio'):
+                events.append(audio_event_fn(res['audio'], chunks_sent + i))
+        else:
+            dropped += 1
+    if dropped:
+        log.warning(
+            f"### STREAM EXIT: {dropped} TTS chunk(s) still not ready after "
+            f"waiting {cap_seconds}s for exit flush — audio DROPPED"
+        )
+    return events, dropped
+
+# ---------------------------------------------------------------------------
 # In-memory session key cache (FIND-02 fix from performance audit)
 # ---------------------------------------------------------------------------
 
@@ -3410,6 +3462,10 @@ def _conversation_inner():
                                         f"audio not delivered (provider hung); paid generation logged, not discarded"
                                     )
 
+                            # Fully handled above (waited + yielded or logged) — clear so
+                            # the post-loop exit flush (#487) never re-processes these.
+                            _tts_pending = []
+
                             metrics['tts_generation_ms'] = int((time.time() - t_tts_start) * 1000)
                             metrics['tts_text_len'] = metrics['response_len']
                             metrics['total_ms'] = int((time.time() - t_request_start) * 1000)
@@ -3450,7 +3506,29 @@ def _conversation_inner():
                             }) + '\n'
                             break
 
-                    # Drain any unprocessed events (debug: detect generator exit without text_done)
+                    # Exit-path TTS flush (#487) — if we're leaving via a path that
+                    # skipped the text_done flush (STREAM HARD TIMEOUT / gateway
+                    # 'error' break), _tts_pending may still hold finished-or-finishing
+                    # TTS audio the client never got. Wait a bounded cap and deliver it
+                    # instead of silently dropping the tail of the spoken answer.
+                    _tts_exit_cap = int(os.getenv('TTS_EXIT_FLUSH_CAP', '15'))
+                    _exit_events, _exit_dropped = drain_pending_tts_on_exit(
+                        _tts_pending, _chunks_sent, _audio_event, _tts_error_event,
+                        cap_seconds=_tts_exit_cap, log=logger,
+                    )
+                    for _exit_evt in _exit_events:
+                        yield _exit_evt
+                    if _exit_events:
+                        logger.info(
+                            f"### STREAM EXIT: flushed {len(_exit_events)} TTS chunk(s) "
+                            f"that would otherwise have been dropped"
+                        )
+
+                    # Drain any remaining raw queue events (debug: detect generator exit
+                    # without text_done). tts_ready is a payload-free wake ping — its
+                    # audio (if any) was already handled above via _tts_pending, so a
+                    # leftover tts_ready here is expected noise, not a loss, and is
+                    # logged at info rather than warning.
                     _remaining_evts = []
                     while not event_queue.empty():
                         try:
@@ -3459,7 +3537,11 @@ def _conversation_inner():
                             break
                     if _remaining_evts:
                         _types = [e.get('type', '?') for e in _remaining_evts]
-                        logger.warning(f"### STREAM EXIT with {len(_remaining_evts)} unprocessed events: {_types}")
+                        _noteworthy = [t for t in _types if t != 'tts_ready']
+                        if _noteworthy or _exit_dropped:
+                            logger.warning(f"### STREAM EXIT with {len(_remaining_evts)} unprocessed events: {_types}")
+                        else:
+                            logger.info(f"### STREAM EXIT drained {len(_remaining_evts)} stale tts_ready wake-ping(s) (already flushed)")
 
                 return Response(
                     stream_response(),
