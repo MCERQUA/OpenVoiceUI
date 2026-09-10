@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import queue
+import random
 import re as _re
 import threading
 import time
@@ -626,6 +627,19 @@ class GatewayConnection:
         self._server_version: str | None = None
         self._reconnected_at: float = 0.0  # timestamp of last successful reconnect after failure
 
+    @staticmethod
+    def _jittered_delay(base_delay):
+        """Full jitter within +/-15% of base_delay.
+
+        Pledge 50bef735: ~25 tenants share this same restart-recovery
+        schedule, and a gateway restart (fleet roll, image update, crash
+        loop) tends to hit several of them within the same second. Without
+        jitter every affected tenant's supervisor sleeps the exact same
+        BACKOFF_DELAYS value and then retries in lockstep, turning "the
+        gateway just came back" into a thundering-herd reconnect burst.
+        """
+        return base_delay * random.uniform(0.85, 1.15)
+
     @property
     def url(self):
         return getattr(self, '_custom_url', None) or os.getenv('CLAWDBOT_GATEWAY_URL', self.DEFAULT_URL)
@@ -846,14 +860,32 @@ class GatewayConnection:
                 logger.info("### _ensure_connected: socket reports closed — reconnecting")
                 self._connected = False
 
-            backoff = self.BACKOFF_DELAYS[min(self._backoff_idx, len(self.BACKOFF_DELAYS) - 1)]
+            backoff = self._jittered_delay(
+                self.BACKOFF_DELAYS[min(self._backoff_idx, len(self.BACKOFF_DELAYS) - 1)]
+            )
             elapsed = time.time() - self._last_disconnect_time
             if elapsed < backoff and self._last_disconnect_time > 0:
                 wait = backoff - elapsed
                 logger.info(f"### WS backoff: waiting {wait:.1f}s before reconnect")
                 await asyncio.sleep(wait)
 
-            max_attempts = 5
+            # WS-9 (pledge 50bef735, 2026-09-10): openclaw gateway restart-to-ready
+            # measured at ~37-38s (container StartedAt -> "[gateway] ready" log
+            # line; openclaw-danielle 37.0s, openclaw-azrim 37.8s on 2026-09-10).
+            # The old max_attempts=5 schedule only covered a ~30s window (2+4+8+16s
+            # of sleep between attempts) before raising RuntimeError. Measured
+            # consequence in openvoiceui-azrim's logs for the 04:29 restart: all 5
+            # attempts (04:29:56.75 -> 04:30:26.94) failed because the gateway
+            # wasn't ready until 04:30:30.7, the supervisor gave up ("Failed to
+            # connect to Gateway after 5 attempts — retrying in 30s"), and only
+            # reconnected on its NEXT cycle ~35s later — a ~37s restart became a
+            # ~65s+ outage, and the retry budget was fully exhausted on every
+            # gateway restart across ~25 tenants (the condition this pledge exists
+            # to fix). max_attempts=6 extends the nominal (pre-jitter) sleep budget
+            # to 60s (2+4+8+16+30), comfortably covering the measured restart time
+            # with margin, while _jittered_delay (+/-15%) keeps tenants whose
+            # gateways restart together from retrying in lockstep.
+            max_attempts = 6
             for attempt in range(max_attempts):
                 try:
                     logger.info(f"### WS connect attempt {attempt + 1}/{max_attempts}...")
@@ -863,8 +895,10 @@ class GatewayConnection:
                     self._backoff_idx = min(self._backoff_idx + 1, len(self.BACKOFF_DELAYS) - 1)
                     self._last_disconnect_time = time.time()
                     if attempt < max_attempts - 1:
-                        delay = self.BACKOFF_DELAYS[min(self._backoff_idx, len(self.BACKOFF_DELAYS) - 1)]
-                        logger.warning(f"### WS connect failed ({e}), retrying in {delay}s...")
+                        delay = self._jittered_delay(
+                            self.BACKOFF_DELAYS[min(self._backoff_idx, len(self.BACKOFF_DELAYS) - 1)]
+                        )
+                        logger.warning(f"### WS connect failed ({e}), retrying in {delay:.1f}s...")
                         await asyncio.sleep(delay)
 
             raise RuntimeError(f"Failed to connect to Gateway after {max_attempts} attempts")
