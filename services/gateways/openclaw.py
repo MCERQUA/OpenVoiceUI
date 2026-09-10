@@ -610,7 +610,24 @@ class GatewayConnection:
     """
 
     DEFAULT_URL = 'ws://127.0.0.1:18791'
-    BACKOFF_DELAYS = [1, 2, 4, 8, 16, 30, 60]
+    # Sized against the MEASURED gateway restart-to-listen time, not a guess.
+    # gcu-voice supplied 4 timestamped occurrences (2026-08-28, 09-05, 09-06 x2), each
+    # with the same shape: claw_sigterm at t=0, then Errno 111 refusals until the
+    # gateway listens again at t≈70-72s. The old ladder [1,2,4,8,16,30,60] with
+    # max_attempts=5 spent its gaps 2+4+8+16 = 30s and exhausted at t≈35s — less than
+    # HALF the outage — so every gateway restart guaranteed a 5/5 exhaustion, on ~25
+    # tenants at once (the nightly review's identical fleet-wide signature).
+    #
+    # Exhausting is not merely cosmetic: after the 5th failure the client stops probing
+    # and waits for a fresh cycle, so a gateway that came back EARLY was still not
+    # noticed until the next cycle began (measured: exhausted 19:45:57, reconnected
+    # 19:46:32 — a 35s window in which nothing was even trying).
+    #
+    # The ladder now CAPS at 15s instead of climbing to 60s. Early attempts stay fast
+    # (a quick restart is caught in seconds), then it probes steadily rather than
+    # backing off past the event it is waiting for — the failure here is a service
+    # restarting on a known ~70s cadence, not an overloaded peer that needs sparing.
+    BACKOFF_DELAYS = [1, 2, 4, 8, 15, 15, 15]
 
     def __init__(self):
         self._ws = None
@@ -853,7 +870,14 @@ class GatewayConnection:
                 logger.info(f"### WS backoff: waiting {wait:.1f}s before reconnect")
                 await asyncio.sleep(wait)
 
-            max_attempts = 5
+            # 10 attempts x the capped ladder = 104s of coverage. Sized by SIMULATING the
+            # loop against the four measured outages (70/71/71/72s) rather than by eye:
+            # 8 attempts covers only 74s, which clears the worst observed restart by 2s —
+            # no margin at all for a slower one, and the failure mode is silent (another
+            # 5/5-style exhaustion). Attempt 5 still lands at t=14s so a quick restart is
+            # caught just as fast; attempts 6-10 probe every 15s out to 104s, ~44% clear
+            # of the worst case. A genuinely dead gateway still raises inside 2 minutes.
+            max_attempts = 10
             for attempt in range(max_attempts):
                 try:
                     logger.info(f"### WS connect attempt {attempt + 1}/{max_attempts}...")
