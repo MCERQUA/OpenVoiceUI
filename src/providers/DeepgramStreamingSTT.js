@@ -36,6 +36,11 @@ class DeepgramStreamingSTT {
         this._micMuted = false;
         this._pttHolding = false;
         this._muteActive = false;
+        this._pttRestoreMuted = false; // mute state to return to when a press ends
+        this._pttFlushing = false;     // released; waiting for Deepgram's last finals
+        this._pttFlushTimer = null;
+        this._flushWs = null;          // the socket that was sent CloseStream
+        this._flushText = '';          // the released press's text, incl. finals from that socket
 
         // Profile-overridable settings (same interface as DeepgramSTT)
         this.silenceDelayMs = 800;       // Not used for VAD (Deepgram handles it), but kept for profile compat
@@ -55,6 +60,7 @@ class DeepgramStreamingSTT {
         this._reconnecting = false;
         this._intentionalClose = false;
         this._reconnectFailures = 0;
+        this._connectPromise = null;   // in-flight _connectWebSocket()
 
         // Deepgram model config
         this._model = config.model || 'nova-2';
@@ -85,7 +91,11 @@ class DeepgramStreamingSTT {
 
     async start() {
         if (this.isListening) return true;
-        if (this._micMuted) return false;
+        // PTT mode (_micMuted) does not block start(). The mic stream, socket and
+        // audio pipeline come up muted — onaudioprocess drops audio while
+        // _micMuted — so a PTT hold streams at once. Refusing here left no mic
+        // stream for the whole call when PTT mode was switched on before the call
+        // started: every hold then opened a socket and sent zero audio.
 
         // If already in fallback mode, delegate
         if (this._usingFallback && this._fallback) {
@@ -229,10 +239,12 @@ class DeepgramStreamingSTT {
 
     pttActivate() {
         if (this._usingFallback && this._fallback) { this._fallback.pttActivate(); return; }
-        // Cancel any in-flight pttRelease timer — user is starting a new press.
-        // Without this, the previous release's 300ms timer would fire mid-press
-        // and re-mute the audio pipeline (line ~525), killing this press.
-        if (this._pttReleaseTimer) { clearTimeout(this._pttReleaseTimer); this._pttReleaseTimer = null; }
+        // Remember the mute state to return to on release — muted in PTT mode,
+        // unmuted when a hotkey press interrupts hands-free listening. While a
+        // previous release is still flushing, _micMuted has not been restored
+        // yet, so keep the value recorded by that press. (That flush keeps
+        // running on its own socket; closing it here lost its last finals.)
+        if (!this._pttHolding && !this._pttFlushing) this._pttRestoreMuted = this._micMuted;
 
         this._pttHolding = true;
         this._micMuted = false;
@@ -240,6 +252,13 @@ class DeepgramStreamingSTT {
         this.isProcessing = false;
         this.accumulatedText = '';
         if (this._accumulationTimer) { clearTimeout(this._accumulationTimer); this._accumulationTimer = null; }
+
+        // No mic stream means no call is active (start() never ran, or stop()
+        // released it). A WebSocket opened now would stream nothing.
+        if (!this._stream || !this._stream.active) {
+            console.warn('PTT pressed with no active mic stream — start a call first');
+            return;
+        }
 
         // Ensure WebSocket and audio pipeline are active
         if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
@@ -251,44 +270,84 @@ class DeepgramStreamingSTT {
 
     pttRelease() {
         if (this._usingFallback && this._fallback) { this._fallback.pttRelease(); return; }
+        if (!this._pttHolding) return;
+        // A second release before the previous flush finished (a very fast double
+        // press): fold that flush into this one rather than juggling two.
+        if (this._pttFlushing) this._finishPttFlush();
         this._pttHolding = false;
-        // _micMuted is intentionally NOT set to true here.
-        //
-        // Deepgram's final transcript arrives async via onmessage AFTER we send
-        // CloseStream below. The downstream handler in app.js (ClawdbotMode's
-        // stt.onResult) checks `if (this.stt._micMuted) return;` — so muting
-        // synchronously would cause the result to be dropped before it ever
-        // reaches sendMessage(). We mute below in the timer, AFTER onResult
-        // has been called.
-        if (this._pttReleaseTimer) { clearTimeout(this._pttReleaseTimer); this._pttReleaseTimer = null; }
+        // _micMuted stays false until the transcript is delivered: ClawdbotMode's
+        // stt.onResult checks `if (this.stt._micMuted) return;` and would drop it.
+        this._pttFlushing = true;
+        // This press's text, plus finals still to come on the socket being
+        // flushed — kept apart from a new press that starts before the flush ends.
+        this._flushText = this.accumulatedText;
+        this.accumulatedText = '';
 
-        // Tell Deepgram we're done speaking — triggers final transcript
-        if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-            this._ws.send(JSON.stringify({ type: 'CloseStream' }));
+        const ws = this._ws;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            // CloseStream makes Deepgram send its remaining finals, then Metadata,
+            // then close the socket — the close is the "everything delivered"
+            // signal. A fixed 300ms wait raced it: on a short press the final only
+            // exists after CloseStream, so a slow round trip lost the transcript.
+            // Detach the socket so the next press opens a fresh one instead of
+            // streaming into this closing one.
+            this._flushWs = ws;
+            this._ws = null;
+            this._stopKeepAlive();
+            ws.addEventListener('close', () => {
+                if (this._flushWs === ws) this._finishPttFlush();
+            }, { once: true });
+            try { ws.send(JSON.stringify({ type: 'CloseStream' })); } catch (_) {}
+            // Safety cap in case the close never arrives.
+            this._pttFlushTimer = setTimeout(() => this._finishPttFlush(), 2000);
+        } else {
+            // No open socket (still connecting, or no call): nothing more will arrive.
+            this._finishPttFlush();
+        }
+    }
+
+    /** Deliver the flushed PTT transcript, restore the pre-press mute state, re-open the socket. */
+    _finishPttFlush() {
+        if (!this._pttFlushing) return;
+        this._pttFlushing = false;
+        if (this._pttFlushTimer) { clearTimeout(this._pttFlushTimer); this._pttFlushTimer = null; }
+        const flushWs = this._flushWs;
+        this._flushWs = null;
+        if (flushWs && flushWs.readyState < WebSocket.CLOSING) {
+            try { flushWs.close(); } catch (_) {}
         }
 
-        // Wait briefly for the final transcript to arrive, then deliver it.
-        this._pttReleaseTimer = setTimeout(() => {
-            this._pttReleaseTimer = null;
-            const text = this.accumulatedText.trim();
-            if (text && this.onResult) {
-                console.log('PTT release — sending:', text);
-                this.isProcessing = true;
-                this.onResult(text);   // call BEFORE muting so the gate is open
-            }
-            this.accumulatedText = '';
-            // Only mute if user hasn't already started a new PTT press during
-            // this 300ms window — otherwise we'd re-mute mid-press and kill it.
-            if (!this._pttHolding) {
-                this._micMuted = true;
-            }
-        }, 300);
+        const text = this._flushText.trim();
+        this._flushText = '';
+        if (this._pttHolding) {
+            // Already holding again: send both utterances together on that
+            // release instead of starting a request mid-press.
+            if (text) this.accumulatedText = this.accumulatedText ? text + ' ' + this.accumulatedText : text;
+            return;
+        }
+        if (text && this.onResult) {
+            console.log('PTT release — sending:', text);
+            this.isProcessing = true;
+            this.onResult(text);   // call BEFORE restoring mute so the gate is open
+        }
+        // Back to the pre-press state: muted in PTT mode, listening after a hotkey
+        // press during hands-free mode (always muting here left hands-free dead).
+        this._micMuted = !!this._pttRestoreMuted;
+
+        // Re-open the socket now so the next press (or hands-free listening)
+        // streams at once instead of losing its first words to the handshake.
+        if (this.isListening && !this._ws) {
+            this._connectWebSocket().then(ok => {
+                if (ok) this._startAudioPipeline();
+            });
+        }
     }
 
     pttMute() {
         if (this._usingFallback && this._fallback) { this._fallback.pttMute(); return; }
         this._pttHolding = false;
         this._micMuted = true;
+        this._pttRestoreMuted = true;
         this.isProcessing = true;
         this.accumulatedText = '';
         if (this._accumulationTimer) { clearTimeout(this._accumulationTimer); this._accumulationTimer = null; }
@@ -297,6 +356,7 @@ class DeepgramStreamingSTT {
     pttUnmute() {
         if (this._usingFallback && this._fallback) { this._fallback.pttUnmute(); return; }
         this._micMuted = false;
+        this._pttRestoreMuted = false;
         this._pttHolding = false;
         this.isProcessing = false;
         this._muteActive = false;  // clear stuck TTS mute from when TTS played during PTT mode
@@ -371,7 +431,16 @@ class DeepgramStreamingSTT {
 
     // ---- WebSocket Connection ----
 
-    async _connectWebSocket() {
+    _connectWebSocket() {
+        // One attempt at a time: a PTT press during the token fetch would
+        // otherwise open a second socket and orphan the first.
+        if (!this._connectPromise) {
+            this._connectPromise = this._openWebSocket().finally(() => { this._connectPromise = null; });
+        }
+        return this._connectPromise;
+    }
+
+    async _openWebSocket() {
         // Get a temporary API key from our server (don't expose the real key to the browser)
         let apiKey;
         try {
@@ -409,23 +478,25 @@ class DeepgramStreamingSTT {
             const url = `wss://api.deepgram.com/v1/listen?${params}`;
             this._intentionalClose = false;
 
+            let ws;
             try {
-                this._ws = new WebSocket(url, ['token', apiKey]);
+                ws = new WebSocket(url, ['token', apiKey]);
             } catch (err) {
                 console.error('Deepgram WebSocket creation failed:', err);
                 resolve(false);
                 return;
             }
+            this._ws = ws;
 
             const timeout = setTimeout(() => {
-                if (this._ws && this._ws.readyState === WebSocket.CONNECTING) {
+                if (ws.readyState === WebSocket.CONNECTING) {
                     console.error('Deepgram WebSocket connection timeout');
-                    this._ws.close();
+                    ws.close();
                     resolve(false);
                 }
             }, 5000);
 
-            this._ws.onopen = () => {
+            ws.onopen = () => {
                 clearTimeout(timeout);
                 console.log('Deepgram WebSocket connected');
                 this._reconnectFailures = 0;
@@ -433,19 +504,28 @@ class DeepgramStreamingSTT {
                 resolve(true);
             };
 
-            this._ws.onmessage = (event) => {
-                this._handleMessage(event);
+            ws.onmessage = (event) => {
+                // A replaced socket is ignored; the one flushing a PTT release
+                // still delivers its last finals.
+                if (ws !== this._ws && ws !== this._flushWs) return;
+                this._handleMessage(event, ws);
             };
 
-            this._ws.onerror = (event) => {
+            ws.onerror = (event) => {
                 clearTimeout(timeout);
                 console.error('Deepgram WebSocket error:', event);
             };
 
-            this._ws.onclose = (event) => {
+            ws.onclose = (event) => {
                 clearTimeout(timeout);
-                this._stopKeepAlive();
                 console.log(`Deepgram WebSocket closed (code: ${event.code})`);
+                // A replaced or flushing socket closing must not stop the current
+                // socket's KeepAlive or trigger a reconnect.
+                if (ws !== this._ws) {
+                    resolve(false);
+                    return;
+                }
+                this._stopKeepAlive();
 
                 // Auto-reconnect if not intentional and still supposed to be listening
                 if (!this._intentionalClose && this.isListening && !this._micMuted && !this._reconnecting) {
@@ -480,7 +560,6 @@ class DeepgramStreamingSTT {
                     }, delay);
                 }
 
-                if (this._ws === null) return; // already cleaned up
                 resolve(false);
             };
         });
@@ -488,6 +567,14 @@ class DeepgramStreamingSTT {
 
     _closeWebSocket() {
         this._stopKeepAlive();
+        // Abandon an in-progress PTT flush (call ended, or falling back).
+        this._pttFlushing = false;
+        if (this._pttFlushTimer) { clearTimeout(this._pttFlushTimer); this._pttFlushTimer = null; }
+        if (this._flushWs) {
+            try { this._flushWs.close(); } catch (_) {}
+            this._flushWs = null;
+        }
+        this._flushText = '';
         if (this._ws) {
             this._intentionalClose = true;
             // Send CloseStream to get final transcript before closing
@@ -597,13 +684,15 @@ class DeepgramStreamingSTT {
 
     // ---- Message Handling ----
 
-    _handleMessage(event) {
+    _handleMessage(event, ws) {
         let data;
         try {
             data = JSON.parse(event.data);
         } catch (_) {
             return;
         }
+        // Sent by the socket flushing a released PTT press (after CloseStream)
+        const fromFlush = !!ws && ws === this._flushWs;
 
         // Speech started event (Deepgram VAD)
         if (data.type === 'SpeechStarted') {
@@ -614,7 +703,8 @@ class DeepgramStreamingSTT {
         // UtteranceEnd — Deepgram detected end of utterance (silence after speech)
         // Use same accumulation window as speech_final so pauses don't split mid-sentence
         if (data.type === 'UtteranceEnd') {
-            if (this.accumulatedText.trim()) {
+            // PTT delivers on release, never on a pause mid-hold.
+            if (this.accumulatedText.trim() && !this._pttHolding && !fromFlush) {
                 if (this._accumulationTimer) clearTimeout(this._accumulationTimer);
                 this._accumulationTimer = setTimeout(() => {
                     this._accumulationTimer = null;
@@ -635,8 +725,12 @@ class DeepgramStreamingSTT {
 
             if (!transcript.trim()) return;
 
+            // Held, or released and waiting for the last finals after CloseStream
+            const ptt = this._pttHolding || fromFlush;
+            if (fromFlush && !isFinal) return;
+
             // Ignore during mute (TTS playing)
-            if (this._muteActive || (this.isProcessing && !this._pttHolding)) return;
+            if (this._muteActive || (this.isProcessing && !ptt)) return;
 
             if (isFinal) {
                 // Filter hallucinations
@@ -648,8 +742,15 @@ class DeepgramStreamingSTT {
                 console.log('Deepgram Streaming final:', transcript);
                 if (this.onListenFinal) this.onListenFinal(transcript.trim());
 
+                if (fromFlush) {
+                    this._flushText = this._flushText
+                        ? this._flushText + ' ' + transcript.trim()
+                        : transcript.trim();
+                    return;
+                }
+
                 // PTT mode: accumulate and wait for pttRelease to send
-                if (this._pttHolding) {
+                if (ptt) {
                     this.accumulatedText = this.accumulatedText
                         ? this.accumulatedText + ' ' + transcript.trim()
                         : transcript.trim();
