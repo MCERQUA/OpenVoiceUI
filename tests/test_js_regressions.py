@@ -6,6 +6,10 @@ socket, sent zero audio, and nothing reached the agent (measured 2026-09-14 in C
 live Deepgram). A node test that only runs by hand would not catch that coming back, so pytest
 runs it.
 
+tests/js/ptt-button-standalone.test.js covers PTT with no call running: it must send the
+words the same way the transcript text box does, then give the mic back. Before, such a press
+only changed the button colour.
+
 Skips only when node is absent, and the skip is visible in pytest output. CI (ubuntu-latest)
 always has node.
 """
@@ -20,7 +24,7 @@ import pytest
 JS_TESTS = Path(__file__).resolve().parent / "js"
 
 
-@pytest.mark.parametrize("name", ["deepgram-streaming-ptt.test.js"])
+@pytest.mark.parametrize("name", ["deepgram-streaming-ptt.test.js", "ptt-button-standalone.test.js"])
 def test_js_regression_suite(name: str) -> None:
     node = shutil.which("node")
     if not node:

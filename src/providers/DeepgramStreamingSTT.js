@@ -41,6 +41,7 @@ class DeepgramStreamingSTT {
         this._pttFlushTimer = null;
         this._flushWs = null;          // the socket that was sent CloseStream
         this._flushText = '';          // the released press's text, incl. finals from that socket
+        this._openingStream = false;   // a no-call press is waiting on getUserMedia
 
         // Profile-overridable settings (same interface as DeepgramSTT)
         this.silenceDelayMs = 800;       // Not used for VAD (Deepgram handles it), but kept for profile compat
@@ -253,10 +254,11 @@ class DeepgramStreamingSTT {
         this.accumulatedText = '';
         if (this._accumulationTimer) { clearTimeout(this._accumulationTimer); this._accumulationTimer = null; }
 
-        // No mic stream means no call is active (start() never ran, or stop()
-        // released it). A WebSocket opened now would stream nothing.
+        // No mic stream means no call is running (start() never ran, or stop()
+        // released it). Open the mic for this press; the app releases it again
+        // with stop() once the message is sent.
         if (!this._stream || !this._stream.active) {
-            console.warn('PTT pressed with no active mic stream — start a call first');
+            this._openStreamForPress();
             return;
         }
 
@@ -266,6 +268,35 @@ class DeepgramStreamingSTT {
                 if (ok) this._startAudioPipeline();
             });
         }
+    }
+
+    /** PTT with no call running: get the mic, then the socket and audio pipeline, for this press. */
+    async _openStreamForPress() {
+        if (this._openingStream) return;   // a press moments ago is already opening it
+        this._openingStream = true;
+        try {
+            this._stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    sampleRate: 16000,
+                }
+            });
+        } catch (error) {
+            console.error('PTT: microphone unavailable:', error);
+            if (this.onError) this.onError(error.name === 'NotAllowedError' ? 'not-allowed' : 'no-device');
+            return;
+        } finally {
+            this._openingStream = false;
+        }
+        // Released before the mic came up: there is nothing to stream, so give it back.
+        if (!this._pttHolding) {
+            this._stream.getTracks().forEach(t => t.stop());
+            this._stream = null;
+            return;
+        }
+        const ok = await this._connectWebSocket();
+        if (ok) this._startAudioPipeline();
     }
 
     pttRelease() {
