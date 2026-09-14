@@ -1638,7 +1638,17 @@ def _conversation_inner():
                             'could not be started. If the user asks about it, run the image tool on '
                             'that exact workspace path — the image tool rejects /app/runtime/uploads/.'
                         )
-                context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
+                context_parts.append(
+                    f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]\n'
+                    '[ATTACHED-IMAGE RULE: The user attached THIS image with their message. '
+                    'If their request is about this image (use it, recreate it, reorganize it, '
+                    'build from it), the attached image is the subject of the task — work from '
+                    'the description above. Do NOT substitute other files from the uploads '
+                    'library; that fallback is only for when the user gives no direction. If '
+                    'the task needs the individual image files visible inside this image and '
+                    'they are not separately available, say so and ask the user to attach them '
+                    'or name which upload files map to them.]'
+                )
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
                 context_parts.append('[UPLOADED IMAGE: File could not be analyzed — may be too large or missing.]')
