@@ -13,6 +13,7 @@
 //   - a hotkey press during hands-free listening left the mic muted for the rest of the call
 //   - a pause mid-hold (UtteranceEnd) sent a partial transcript while the button was still down
 //   - a quick re-press closed the flushing socket early and lost the first utterance
+//   - with no call running, a PTT press opened no mic at all (PTT must work call or not)
 //
 // The WebSpeech fallback stub THROWS. Any error inside the provider (a missing sandbox global, a
 // bad socket call) makes it fall back to WebSpeech silently, and every PTT call would then be
@@ -229,14 +230,21 @@ test('a quick re-press keeps the first utterance', async () => {
   assert(all.includes('first') && all.includes('second'), `delivered ${JSON.stringify(results)}`);
 });
 
-test('PTT with no call active opens no socket', async () => {
-  const { stt, stats } = load();
-  stt.pttMute();
+test('PTT with no call running opens the mic for that press and delivers the transcript', async () => {
+  const { stt, results, stats } = load();
+  stt.pttMute();                        // PTT mode on, no call started
   stt.pttActivate();
-  await tick(); await tick();
+  await openNewSocket(0);
+  assert(stats.getUserMedia === 1, `getUserMedia called ${stats.getUserMedia} time(s)`);
+  pumpAudio(stt);
+  assert(totalBinary() > 0, 'no audio reached Deepgram during a no-call hold');
+  latest().final('what is on my calendar');
   stt.pttRelease();
-  assert(FakeWebSocket.instances.length === 0 && stats.tokenFetches === 0,
-    `opened ${FakeWebSocket.instances.length} socket(s), ${stats.tokenFetches} token fetch(es) with no mic stream`);
+  latest().serverClose(1000);
+  await tick(20);
+  assert(results.join('|') === 'what is on my calendar', `delivered ${JSON.stringify(results)}`);
+  assert(!stt.isListening && FakeWebSocket.instances.length === 1,
+    `after a no-call press: listening=${stt.isListening}, sockets opened=${FakeWebSocket.instances.length}`);
 });
 
 test('control: hands-free listening still delivers on end of utterance', async () => {
