@@ -50,6 +50,16 @@ BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
 # Self-hosted installs: auth is disabled by default. Set CANVAS_REQUIRE_AUTH=true to enable Clerk JWT checks.
 CANVAS_REQUIRE_AUTH = os.getenv('CANVAS_REQUIRE_AUTH', 'false').lower() == 'true'
 
+# Embedded-resource types /pages/ serves WITHOUT a session: public pages need their images, styles, scripts, fonts
+# and media. Every OTHER non-.html file under /pages/ (page backups, .htm, .json/.md/.txt/.pdf, no extension)
+# requires the same session as _data/ -- see canvas_pages_proxy. Add a type here only if a public page needs it.
+_CANVAS_OPEN_ASSET_EXTS = frozenset({
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'ico', 'bmp',
+    'css', 'js', 'mjs', 'woff', 'woff2', 'ttf', 'otf', 'eot',
+    'mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'mp4', 'webm', 'mov', 'm4v', 'vtt',
+    'glb', 'gltf', 'wasm', 'webmanifest',
+})
+
 CATEGORY_KEYWORDS = {
     'dashboards': ['dashboard', 'monitor', 'status', 'overview', 'control panel', 'panel'],
     'weather': ['weather', 'temperature', 'forecast', 'climate', 'rain', 'sunny', 'humidity'],
@@ -882,6 +892,22 @@ def canvas_pages_proxy(path):
             denied = _canvas_data_denied(path)
             if denied:
                 return denied
+        # NON-ASSET FILES under /pages/ (2026-09-15). The *.html gate below used to wave every other type through
+        # as an "embedded resource". Measured on the fleet, that served to anyone with the URL: 900 page BACKUPS
+        # (*.html.bak-* as octet-stream = full old page HTML), 116 .htm pages, and plans/data such as seo-plan.json,
+        # website-plan.md, email-data.json and a brand-plan .pdf. Only real asset types stay open. Measured before
+        # this change: 0 of 45 public pages reference an existing non-asset file outside _data/.
+        if CANVAS_REQUIRE_AUTH and not _is_html and not (path.startswith('_data/') or '/_data/' in path):
+            _name = Path(path).name
+            _ext = _name.rsplit('.', 1)[-1].lower() if '.' in _name else ''
+            if _ext not in _CANVAS_OPEN_ASSET_EXTS:
+                _target = _safe_canvas_path(str(CANVAS_PAGES_DIR), path)
+                # A slug-only URL that is not a file falls through to the .html redirect below, where the
+                # page's own is_public gate applies. Anything that IS a file needs a session.
+                if _ext or (_target is not None and _target.is_file()):
+                    denied = _canvas_data_denied(path)
+                    if denied:
+                        return denied
         if CANVAS_REQUIRE_AUTH and _is_html and path not in _OS_PAGES:
             page_id = Path(path).stem
             manifest = load_canvas_manifest()
