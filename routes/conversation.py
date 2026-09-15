@@ -2658,9 +2658,16 @@ def _conversation_inner():
                                 _tts_pending.append(_fire_tts(_remaining_interim))
                                 _tts_buf = ''
 
-                            # If no sentences were extracted mid-stream, fire TTS
-                            # for the full interim text
-                            if not _tts_pending and interim_response:
+                            # Fallback: no sentences extracted mid-stream, fire TTS
+                            # for the full interim text. Guard on _chunks_sent, NOT
+                            # just _tts_pending (same double-audio bug text_done
+                            # fixed 2026-07-12): the delta path pops finished
+                            # sentences from _tts_pending as their audio is yielded,
+                            # so when the interim event arrives after a fast sentence
+                            # the list is already empty and this re-spoke the WHOLE
+                            # reply a second time (measured live on test-dev
+                            # 2026-09-15 — same 217-char sentence TTS'd twice).
+                            if not _tts_pending and _chunks_sent == 0 and interim_response:
                                 tts_text_interim = clean_for_tts(interim_response)
                                 if tts_text_interim and tts_text_interim.strip():
                                     _tts_pending.append(_fire_tts(tts_text_interim))
