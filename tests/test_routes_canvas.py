@@ -59,6 +59,21 @@ class TestCanvasHelpers:
         cat = suggest_category("Overview", content="This is a dashboard for monitoring")
         assert cat == "dashboards"
 
+    def test_suggest_category_market_substring_in_marketing(self):
+        """Regression: 'market' (finance keyword) must not match inside
+        'marketing' — found 2026-09-18 by the jev shadow lane canvas-category
+        replay (nick/printguys-marketing-strategy.html scored 'finance' with
+        zero finance content)."""
+        from routes.canvas import suggest_category
+        cat = suggest_category("Printguys Marketing Strategy")
+        assert cat != "finance"
+
+    def test_suggest_category_market_still_matches_finance(self):
+        """The word-boundary fix must not break the genuine word match."""
+        from routes.canvas import suggest_category
+        cat = suggest_category("Stock Market Tracker")
+        assert cat == "finance"
+
     def test_generate_voice_aliases_returns_list(self):
         from routes.canvas import generate_voice_aliases
         aliases = generate_voice_aliases("Voice Agent Dashboard")
