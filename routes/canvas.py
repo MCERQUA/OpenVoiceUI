@@ -72,6 +72,11 @@ CATEGORY_KEYWORDS = {
     'video': ['video', 'remotion', 'render', 'animation', 'movie', 'clip', 'recording'],
 }
 
+_KEYWORD_RE = {
+    kw: re.compile(r'\b' + re.escape(kw) + r'(?:s|es)?\b')
+    for _kws in CATEGORY_KEYWORDS.values() for kw in _kws
+}
+
 CATEGORY_ICONS = {
     'dashboards': '📊',
     'weather': '🌤️',
@@ -354,11 +359,21 @@ def save_canvas_manifest(manifest: dict) -> bool:
 
 
 def suggest_category(title: str, content: str = '') -> str:
-    """Suggest category based on title and content keywords."""
+    """Suggest category based on title and content keywords.
+
+    Keyword matching is word-boundary aware (\b...\b), not plain substring —
+    a plain "in text" check let short ambiguous tokens match inside unrelated
+    longer words, e.g. the finance keyword "market" matched inside "marketing"
+    and forced every marketing-strategy page into 'finance' regardless of
+    content (found 2026-09-18 by a shadow-classifier replay over the fleet).
+    Fixed for the mechanism, not just that one word, so any other keyword with
+    the same shape is covered too; a simple plural suffix (s/es) still matches
+    so "charts"/"videos"/"songs" keep scoring as before.
+    """
     text = (title + ' ' + (content or '')[:500]).lower()
     scores = {}
     for category, keywords in CATEGORY_KEYWORDS.items():
-        score = sum(3 if kw in text else 0 for kw in keywords)
+        score = sum(3 if _KEYWORD_RE[kw].search(text) else 0 for kw in keywords)
         if score > 0:
             scores[category] = score
     return max(scores, key=scores.get) if scores else 'uncategorized'
