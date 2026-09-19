@@ -10322,6 +10322,9 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     }
                 }
 
+                // No call running: this press sends one message, like the transcript text box
+                this._beginStandalone(stt);
+
                 // Start recording — pttActivate handles all state
                 stt.pttActivate();
             },
@@ -10334,6 +10337,52 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 // Stop recording and force transcription — pttRelease handles all state
                 // onstop handler will send to Groq and call onResult asynchronously
                 stt.pttRelease();
+
+                // Standalone press: if no transcript comes back (nothing was said),
+                // still give the mic back.
+                if (this._standalone) {
+                    clearTimeout(this._standalone.timer);
+                    this._standalone.timer = setTimeout(() => this._endStandalone(stt, ''), 6000);
+                }
+            },
+
+            // ── Standalone PTT (no call running) ──
+            // Borrows the shared STT for one utterance and sends it through
+            // ClawdbotMode.sendMessage — the same path as the transcript text box —
+            // then restores the callbacks and releases the mic. Same borrow pattern
+            // as Listen mode in ModeSelector.select().
+            _standalone: null,
+
+            _beginStandalone(stt) {
+                if (this._standalone) return;              // re-press while the last one finishes
+                const cm = ModeManager?.clawdbotMode;
+                if (!cm || cm._voiceActive) return;        // a call owns the STT callbacks
+                if (stt.isListening || window.ModeSelector?.currentMode === 'listen') return;  // Listen mode owns the mic
+                this._standalone = { onResult: stt.onResult, onListenFinal: stt.onListenFinal, timer: null };
+                stt.onListenFinal = null;                  // sendMessage shows the user's text itself
+                stt.onResult = (text) => this._endStandalone(stt, text);
+            },
+
+            _endStandalone(stt, text) {
+                const s = this._standalone;
+                if (!s) return;
+                const message = (text || '').trim();
+                if (stt._pttHolding) {
+                    // Pressed again before this one finished: send it and keep the
+                    // borrow for the press in progress.
+                    if (message) ModeManager.clawdbotMode.sendMessage(message);
+                    return;
+                }
+                this._standalone = null;
+                clearTimeout(s.timer);
+                stt.onResult = s.onResult;
+                stt.onListenFinal = s.onListenFinal;
+                if (!ModeManager.clawdbotMode._voiceActive) {
+                    stt.stop();                            // release the mic
+                    stt.resetProcessing?.();
+                    if (this.pttMode) stt.pttMute();       // stop() clears the provider's PTT mute
+                }
+                if (message) ModeManager.clawdbotMode.sendMessage(message);
             },
 
             // Set PTT mode to a specific target state (idempotent). Delegates to

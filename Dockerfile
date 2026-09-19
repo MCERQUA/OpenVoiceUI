@@ -46,4 +46,5 @@ ENV HOST=0.0.0.0
 
 EXPOSE 5001
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["python3", "server.py"]
