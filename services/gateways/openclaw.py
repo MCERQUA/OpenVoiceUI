@@ -611,7 +611,24 @@ class GatewayConnection:
     """
 
     DEFAULT_URL = 'ws://127.0.0.1:18791'
-    BACKOFF_DELAYS = [1, 2, 4, 8, 16, 30, 60]
+    # Sized against the MEASURED gateway restart-to-listen time, not a guess.
+    # gcu-voice supplied 4 timestamped occurrences (2026-08-28, 09-05, 09-06 x2), each
+    # with the same shape: claw_sigterm at t=0, then Errno 111 refusals until the
+    # gateway listens again at t≈70-72s. The old ladder [1,2,4,8,16,30,60] with
+    # max_attempts=5 spent its gaps 2+4+8+16 = 30s and exhausted at t≈35s — less than
+    # HALF the outage — so every gateway restart guaranteed a 5/5 exhaustion, on ~25
+    # tenants at once (the nightly review's identical fleet-wide signature).
+    #
+    # Exhausting is not merely cosmetic: after the 5th failure the client stops probing
+    # and waits for a fresh cycle, so a gateway that came back EARLY was still not
+    # noticed until the next cycle began (measured: exhausted 19:45:57, reconnected
+    # 19:46:32 — a 35s window in which nothing was even trying).
+    #
+    # The ladder now CAPS at 15s instead of climbing to 60s. Early attempts stay fast
+    # (a quick restart is caught in seconds), then it probes steadily rather than
+    # backing off past the event it is waiting for — the failure here is a service
+    # restarting on a known ~70s cadence, not an overloaded peer that needs sparing.
+    BACKOFF_DELAYS = [1, 2, 4, 8, 15, 15, 15]
 
     def __init__(self):
         self._ws = None
@@ -869,23 +886,32 @@ class GatewayConnection:
                 logger.info(f"### WS backoff: waiting {wait:.1f}s before reconnect")
                 await asyncio.sleep(wait)
 
-            # WS-9 (pledge 50bef735, 2026-09-10): openclaw gateway restart-to-ready
-            # measured at ~37-38s (container StartedAt -> "[gateway] ready" log
-            # line; openclaw-danielle 37.0s, openclaw-azrim 37.8s on 2026-09-10).
-            # The old max_attempts=5 schedule only covered a ~30s window (2+4+8+16s
-            # of sleep between attempts) before raising RuntimeError. Measured
-            # consequence in openvoiceui-azrim's logs for the 04:29 restart: all 5
-            # attempts (04:29:56.75 -> 04:30:26.94) failed because the gateway
-            # wasn't ready until 04:30:30.7, the supervisor gave up ("Failed to
-            # connect to Gateway after 5 attempts — retrying in 30s"), and only
-            # reconnected on its NEXT cycle ~35s later — a ~37s restart became a
-            # ~65s+ outage, and the retry budget was fully exhausted on every
-            # gateway restart across ~25 tenants (the condition this pledge exists
-            # to fix). max_attempts=6 extends the nominal (pre-jitter) sleep budget
-            # to 60s (2+4+8+16+30), comfortably covering the measured restart time
-            # with margin, while _jittered_delay (+/-15%) keeps tenants whose
-            # gateways restart together from retrying in lockstep.
-            max_attempts = 6
+            # RECONCILES TWO MEASUREMENTS THAT DISAGREED (merge of #482 with WS-9 on main).
+            # Both were real; they measured different restarts:
+            #   WS-9 (pledge 50bef735, 2026-09-10): openclaw restart-to-ready 37.0s / 37.8s
+            #     (container StartedAt -> "[gateway] ready"; openclaw-danielle, openclaw-azrim).
+            #   #482 (gcu-voice, 4 timestamped cases 2026-08-28 / 09-05 / 09-06 x2): claw_sigterm
+            #     at t=0, Errno 111 refusals until the gateway listens again at t=70-72s.
+            # A restart is therefore not one duration but a RANGE, ~37s to ~72s, and the schedule
+            # has to clear the top of it.
+            #
+            # WHY max_attempts=6 (main's value) IS NOW WRONG rather than merely smaller: it was
+            # sized against the OLD ladder [1,2,4,8,16,30,60], where 6 attempts bought
+            # 2+4+8+16+30 = 60s. #482 caps the ladder at 15s, and that change merged cleanly —
+            # so under the ladder now in this file, 6 attempts buys only 2+4+8+15+15 = 44s.
+            # Keeping 6 would silently cut WS-9's own budget from 60s to 44s and miss every
+            # 70s restart gcu measured. 10 attempts restores the intent: 2+4+8+15*6 = 104s.
+            #
+            # Attempt 5 still lands at t=14s, so a fast restart is caught exactly as quickly as
+            # before; attempts 6-10 probe every 15s out to 104s, ~44% clear of the worst measured
+            # case. A genuinely dead gateway still raises inside ~2 minutes.
+            #
+            # Corroborated by the 2026-09-19 nightly review, which is what this schedule is for:
+            # hrsf-voice recovered on attempt 5 (261ms) and gcu-voice saw a ~35s refusal window
+            # the same night. Exhausting the budget is not cosmetic — after the final failure the
+            # client stops probing until a fresh cycle, so a gateway that came back EARLY went
+            # unnoticed anyway (measured: exhausted 19:45:57, reconnected 19:46:32).
+            max_attempts = 10
             for attempt in range(max_attempts):
                 try:
                     logger.info(f"### WS connect attempt {attempt + 1}/{max_attempts}...")
