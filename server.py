@@ -876,7 +876,7 @@ def diagnostics():
         "config": {
             "gateway_url": os.getenv("CLAWDBOT_GATEWAY_URL", "ws://127.0.0.1:18791"),
             "session_key": get_voice_session_key(),
-            "tts_provider": os.getenv("DEFAULT_TTS_PROVIDER", "groq"),
+            "tts_provider": os.getenv("DEFAULT_TTS_PROVIDER", "supertonic"),
             "port": os.getenv("PORT", "5001"),
         },
     }
