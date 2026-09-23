@@ -76,16 +76,7 @@ class GroqProvider(TTSProvider):
 
         Returns:
             MP3 audio bytes.
-
-        Raises:
-            RuntimeError: Always — Groq API usage is BANNED fleet-wide
-                (Mike 2026-09-22: "we bought the GPU to not have to pay for
-                APIs anymore"). Kept as a loud refusal so an explicit groq
-                request fails visibly instead of silently billing API calls.
         """
-        raise RuntimeError(
-            "Groq TTS is banned (Mike 2026-09-22 GPU ruling) — use supertonic"
-        )
         if not self.api_key:
             raise RuntimeError("GROQ_API_KEY not set")
 

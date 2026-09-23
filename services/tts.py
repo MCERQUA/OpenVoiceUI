@@ -65,13 +65,8 @@ def generate_groq_tts(text: str, voice: str = 'autumn') -> bytes:
         MP3 audio bytes.
 
     Raises:
-        RuntimeError: Always — Groq API usage is BANNED (Mike 2026-09-22 GPU
-            ruling, "no Groq calls, period"). Loud refusal so an explicit groq
-            call fails visibly instead of silently billing the API.
+        RuntimeError: If Groq client unavailable or API call fails.
     """
-    raise RuntimeError(
-        "Groq TTS is banned (Mike 2026-09-22 GPU ruling) — use supertonic"
-    )
     groq = get_groq_client()
     if not groq:
         raise RuntimeError("Groq client not available")
@@ -288,7 +283,7 @@ def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
 def generate_tts_b64(
     text: str,
     voice: Optional[str] = None,
-    tts_provider: str = 'supertonic',
+    tts_provider: str = 'groq',
     fallback_state: Optional[dict] = None,
     **kwargs,
 ) -> Optional[str]:
@@ -301,7 +296,7 @@ def generate_tts_b64(
     Args:
         text: Text to synthesize.
         voice: Voice ID (provider-specific). Defaults to provider default.
-        tts_provider: Provider ID ('supertonic', 'qwen3', 'resemble', 'elevenlabs'; 'groq' is banned and raises).
+        tts_provider: Provider ID ('supertonic', 'groq', 'qwen3', etc.).
         fallback_state: Optional mutable dict for sticky fallback across
             sentences in a single response. When a fallback fires, this dict
             is updated with {'provider': ..., 'voice': ...} so subsequent

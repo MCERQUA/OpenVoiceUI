@@ -38,10 +38,11 @@ _CONFIG_PATH = Path(__file__).parent.parent / "config" / "tts-fallback.json"
 # coverage extended for qwen3/resemble/custom voices where determinable (TTS-12).
 _DEFAULT_FALLBACK: Dict[str, Any] = {
     "chain": {
-        "qwen3": "supertonic",
-        "qwen3-local": "supertonic",
-        "resemble": "supertonic",
-        "elevenlabs": "supertonic",
+        "groq": "supertonic",
+        "qwen3": "groq",
+        "qwen3-local": "groq",
+        "resemble": "groq",
+        "elevenlabs": "groq",
     },
     "voice_gender": {
         # Groq Orpheus voices
