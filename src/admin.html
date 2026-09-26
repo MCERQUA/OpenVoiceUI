@@ -6,6 +6,33 @@
 <title>OpenUI Admin</title>
 <!-- Clerk Authentication (optional — loaded dynamically if configured) -->
 <script>
+    // Every same-origin request carries a FRESH Clerk token as a Bearer header. The server
+    // reads Authorization before the __session cookie. Clerk tokens live ~60s. The main app
+    // re-syncs __session every 50s (app.js _syncSessionCookie) but this page never did, so
+    // any call more than a minute after arriving, or after switching away to copy a key on a
+    // phone, went out with an expired cookie and got 401. Measured on foambot 2026-09-26:
+    // four PUT /api/vault/credentials/supabase -> 401. getToken() returns the cached token
+    // while valid and refreshes it when not. Until Clerk has loaded there is no session,
+    // and requests pass through unchanged (cookie auth, as before).
+    (function(){
+        const _fetch = window.fetch.bind(window);
+        window.fetch = async function(input, init){
+            try {
+                const url = typeof input === 'string' ? input : (input && input.url) || '';
+                const same = url.startsWith('/') && !url.startsWith('//') || url.startsWith(location.origin + '/');
+                if (same && window.Clerk && window.Clerk.session) {
+                    const t = await window.Clerk.session.getToken();
+                    if (t) {
+                        init = Object.assign({}, init || {});
+                        const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+                        if (!h.has('Authorization')) h.set('Authorization', 'Bearer ' + t);
+                        init.headers = h;
+                    }
+                }
+            } catch (e) { /* no session: fall through to cookie auth */ }
+            return _fetch(input, init);
+        };
+    })();
     fetch('/api/config').then(r=>r.json()).then(cfg=>{
         if(cfg.clerkPublishableKey){
             const s=document.createElement('script');
