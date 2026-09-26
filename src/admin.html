@@ -53,7 +53,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .hdr-back:hover{color:var(--text);border-color:var(--dim)}
 
 /* Sidebar */
-#sidebar{background:var(--panel);border-right:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;transition:width .2s}
+#sidebar{background:var(--panel);border-right:1px solid var(--border);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;transition:width .2s}
 .nav-section{padding:16px 0 4px}
 .nav-label{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--subtle);padding:0 12px 6px;white-space:nowrap;transition:opacity .15s}
 #app.sidebar-collapsed .nav-label{opacity:0;pointer-events:none}
