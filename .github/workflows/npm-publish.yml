@@ -5,6 +5,12 @@ on:
     types: [published]
   workflow_dispatch:
 
+# SEC-056 least privilege: GITHUB_TOKEN is only used by checkout. The publish authenticates
+# with secrets.NPM_TOKEN (no --provenance / trusted publishing), so no id-token or packages
+# scope is needed. Add `id-token: write` only if this ever switches to npm provenance/OIDC.
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
