@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "_comment": "Built-in one-click connectors. Merged under the platform catalog (platform-credentials.json): an entry there with the same id wins. Each stays disabled until the operator registers the provider's OAuth app and sets <PROVIDER>_OAUTH_CLIENT_ID / _CLIENT_SECRET (see .platform-oauth.env.example). redirect=relay means the OAuth app registers ONE callback, OAUTH_RELAY_BASE_URL/api/vault/oauth/relay/<provider>, instead of one per tenant.",
+  "credentials": [
+    {
+      "id": "supabase_connect",
+      "name": "Supabase",
+      "description": "Connect your Supabase account, pick the project your app uses, and the project URL and keys are filled in for you.",
+      "unlocks": "Your agent can work with your app's database. No keys to copy.",
+      "type": "oauth2",
+      "group": "Connections",
+      "icon": "supabase",
+      "fills": "supabase",
+      "oauth": {
+        "provider": "supabase",
+        "auth_url": "https://api.supabase.com/v1/oauth/authorize",
+        "token_url": "https://api.supabase.com/v1/oauth/token",
+        "scopes": [],
+        "app_scopes": ["organizations:read", "projects:read", "secrets:read"],
+        "token_auth": "basic",
+        "pkce": true,
+        "redirect": "relay"
+      },
+      "docs_url": "https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration"
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "description": "Let your builder read and push code in your GitHub repositories.",
+      "unlocks": "Your builder can open, change and save the code for your site or app.",
+      "type": "oauth2",
+      "group": "Connections",
+      "icon": "github",
+      "oauth": {
+        "provider": "github",
+        "auth_url": "https://github.com/login/oauth/authorize",
+        "token_url": "https://github.com/login/oauth/access_token",
+        "scopes": ["repo", "read:user"],
+        "token_auth": "body",
+        "pkce": true,
+        "redirect": "relay"
+      },
+      "docs_url": "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps"
+    },
+    {
+      "id": "netlify_connect",
+      "name": "Netlify",
+      "description": "Let your builder manage your Netlify sites: deploys, environment variables and domains.",
+      "unlocks": "Your builder can publish your site and set its environment variables.",
+      "type": "oauth2",
+      "group": "Connections",
+      "icon": "netlify",
+      "oauth": {
+        "provider": "netlify",
+        "auth_url": "https://app.netlify.com/authorize",
+        "token_url": "https://api.netlify.com/oauth/token",
+        "scopes": [],
+        "token_auth": "body",
+        "pkce": false,
+        "redirect": "relay"
+      },
+      "docs_url": "https://docs.netlify.com/api-and-cli-guides/api-guides/get-started-with-api/"
+    }
+  ]
+}

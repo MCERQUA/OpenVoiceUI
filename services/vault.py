@@ -407,18 +407,36 @@ def restart_container_now(container_name: str) -> bool:
 _catalog_cache: Optional[dict] = None
 _catalog_mtime: float = 0
 
+# Built-in one-click connectors shipped with the app (Supabase, GitHub, Netlify).
+# They live in the repo so the feature lands with the code that serves it; the
+# operator's platform-credentials.json still wins on any id it also defines.
+_BUILTIN_CATALOG_PATH = Path(__file__).resolve().parent.parent / 'config' / 'connectors-catalog.json'
+
+
+def _builtin_catalog() -> list[dict]:
+    try:
+        data = json.loads(_BUILTIN_CATALOG_PATH.read_text())
+    except (OSError, ValueError) as exc:
+        logger.warning(f"[vault] built-in connector catalog unreadable: {exc}")
+        return []
+    return [c for c in data.get('credentials', []) if isinstance(c, dict) and c.get('id')]
+
 
 def get_platform_catalog() -> list[dict]:
-    """Load platform credential catalog (cached, reloads on file change)."""
+    """Load platform credential catalog (cached, reloads on file change), with
+    the built-in connectors appended for any id the platform file lacks."""
     global _catalog_cache, _catalog_mtime
     try:
         mtime = _PLATFORM_CATALOG_PATH.stat().st_mtime
     except OSError:
-        return []
+        mtime = -1.0  # no platform file (local/Pinokio): built-ins still apply
     if _catalog_cache is not None and mtime == _catalog_mtime:
         return _catalog_cache
-    data = _read_json(_PLATFORM_CATALOG_PATH)
-    _catalog_cache = data.get('credentials', [])
+    data = _read_json(_PLATFORM_CATALOG_PATH) if mtime >= 0 else {}
+    platform = list(data.get('credentials', []))
+    have = {c.get('id') for c in platform}
+    platform.extend(c for c in _builtin_catalog() if c['id'] not in have)
+    _catalog_cache = platform
     _catalog_mtime = mtime
     return _catalog_cache
 
@@ -545,7 +563,8 @@ def get_credential_fields(username: str, cred_id: str) -> Optional[dict]:
 
 
 def set_credential(username: str, cred_id: str, value: str = None,
-                   fields: dict = None, source: str = 'user') -> set[str]:
+                   fields: dict = None, source: str = 'user',
+                   validation: dict = None, meta: dict = None) -> set[str]:
     """
     Set a credential value in the vault, then sync to consumers and schedule
     a restart of affected containers so the new env values take effect.
@@ -555,7 +574,11 @@ def set_credential(username: str, cred_id: str, value: str = None,
         cred_id: Credential ID from catalog
         value: For single-key credentials
         fields: For multi-field credentials (e.g. {"login": "x", "password": "y"})
-        source: "platform", "user", or "plugin"
+        source: "platform", "user", "plugin" or "oauth" (filled by a connector)
+        validation: verdict record from a credential validator (no secrets) —
+            written in the same vault write, so a saved value and the verdict
+            about it never disagree
+        meta: extra non-secret keys to keep on the entry (e.g. oauth_project)
 
     Returns: set of container names that will be restarted. Caller can use
         this to inform the user that the agent is restarting.
@@ -576,6 +599,11 @@ def set_credential(username: str, cred_id: str, value: str = None,
         # only his Supabase secret key lost the project URL and publishable key saved minutes
         # earlier. Fields in this save win; fields not in it are kept.
         entry['fields'] = {**(entry.get('fields') or {}), **fields}
+    if validation is not None:
+        entry['validation'] = validation
+    if meta:
+        entry.update({k: v for k, v in meta.items()
+                      if k not in ('value', 'fields', 'validation', 'source', 'updated')})
 
     creds[cred_id] = entry
     _write_vault(username, vault)
@@ -623,6 +651,82 @@ def add_custom_credential(username: str, name: str, env_var: str, value: str,
 
 
 # ---------------------------------------------------------------------------
+# Credential validators — check saved values against the provider itself.
+#
+# Keyed by credential id (or a catalog entry's "validator" field). A validator
+# takes the credential's fields and returns {verdict: pass|fail|cannot_tell,
+# message, checks[]}. Three verdicts, never two: an unreachable provider is
+# CANNOT-TELL, not a pass and not a fail.
+# ---------------------------------------------------------------------------
+def _validator_for(entry: dict):
+    name = (entry or {}).get('validator') or (entry or {}).get('id')
+    if name == 'supabase':
+        from services.connectors import validate_supabase_fields
+        return validate_supabase_fields
+    return None
+
+
+def _has_validator(entry: dict) -> bool:
+    name = (entry or {}).get('validator') or (entry or {}).get('id')
+    return name == 'supabase'
+
+
+def validate_credential_fields(cred_id: str, fields: dict) -> Optional[dict]:
+    """Run the credential's validator on the given field values. None when the
+    credential has no validator."""
+    entry = get_catalog_credential(cred_id)
+    fn = _validator_for(entry) if entry else None
+    if not fn:
+        return None
+    return fn(fields)
+
+
+def _current_validation(vault_entry: dict, resolved_fields: dict) -> dict:
+    """The stored verdict, if it was computed for the values saved now;
+    otherwise an explicit 'unchecked' state."""
+    from services.connectors import fields_fingerprint
+    v = (vault_entry or {}).get('validation') or {}
+    if v and v.get('fingerprint') == fields_fingerprint(resolved_fields):
+        return {k: v.get(k) for k in ('verdict', 'message', 'checked_at', 'checks')}
+    return {'verdict': 'unchecked',
+            'message': 'Saved, but not checked against the provider yet. Press Test.',
+            'checked_at': None, 'checks': []}
+
+
+def _resolved_fields(cat_entry: dict, vault_entry: dict) -> dict:
+    """Field values as consumers see them: vault first, env var fallback."""
+    out = {}
+    fields = (vault_entry or {}).get('fields', {}) or {}
+    for f in (cat_entry or {}).get('fields', []) or []:
+        fid = f['id']
+        val = fields.get(fid, '')
+        if not val and f.get('env_var'):
+            val = os.environ.get(f['env_var'], '')
+        if val:
+            out[fid] = val
+    return out
+
+
+def _oauth_token_connected(token_data: dict) -> bool:
+    """Connected = we can still get a working access token: a refresh token,
+    or an access token that has not expired (providers such as Netlify issue
+    no refresh token and no expiry)."""
+    if not isinstance(token_data, dict):
+        return False
+    if token_data.get('refresh_token'):
+        return True
+    if not token_data.get('access_token'):
+        return False
+    exp = token_data.get('expires_at', '')
+    if not exp:
+        return True
+    try:
+        return datetime.fromisoformat(exp).timestamp() > time.time()
+    except ValueError:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Credential status — merge catalog + vault into displayable list
 # ---------------------------------------------------------------------------
 def get_credentials_status(username: str) -> list[dict]:
@@ -646,21 +750,22 @@ def get_credentials_status(username: str) -> list[dict]:
         has_value = False
         masked_value = ''
 
+        account_detail = None
+        resolved = {}
         if cred_type == 'oauth2':
             # Check for OAuth token file
-            oauth_provider = entry.get('oauth', {}).get('provider', cred_id)
             token_path = _vault_oauth_path(username, cred_id)
             if _safe_exists(token_path):
                 token_data = _read_json(token_path)
-                has_value = bool(token_data.get('refresh_token'))
-                masked_value = token_data.get('connected_account', 'Connected')
+                has_value = _oauth_token_connected(token_data)
+                masked_value = token_data.get('connected_account', '') or 'Connected'
+                account_detail = token_data.get('account_detail')
         elif cred_type in ('multi_field', 'basic_auth'):
             fields = vault_entry.get('fields', {})
             field_defs = entry.get('fields', [])
             # Phase 1.5 fix: check env var fallback for each field. A credential
             # configured via .platform-keys.env (without a vault entry) should
             # still show as connected, otherwise the UI lies about state.
-            resolved = {}
             for f in field_defs:
                 fid = f['id']
                 fval = fields.get(fid, '')
@@ -698,16 +803,33 @@ def get_credentials_status(username: str) -> list[dict]:
             'source': vault_entry.get('source', 'platform' if entry.get('platform_default') else 'none'),
             'env_var': entry.get('env_var', ''),
             'docs_url': entry.get('docs_url', ''),
-            'has_test': bool(entry.get('test')),
+            'has_test': bool(entry.get('test')) or _has_validator(entry),
             'fields': entry.get('fields'),  # For multi-field rendering
             # Phase 1.5 Cycle B: tells UI whether the platform operator has
             # set up this provider. Only meaningful for OAuth — for non-OAuth
             # creds it's always True (operator setup not required).
             'platform_configured': _is_oauth_platform_configured(entry),
+            'icon': entry.get('icon', ''),
+            'unlocks': entry.get('unlocks', ''),
         }
 
         if cred_type == 'oauth2':
-            item['oauth'] = entry.get('oauth', {})
+            item['oauth'] = {k: v for k, v in (entry.get('oauth') or {}).items()
+                             if k in ('provider', 'scopes', 'app_scopes', 'redirect')}
+            item['fills'] = entry.get('fills', '')
+            if account_detail:
+                item['account_detail'] = account_detail
+
+        # Validator-backed credentials (e.g. Supabase): the card shows the
+        # VERDICT about the values saved now, never just "has a value". A
+        # verdict computed for different values is stale and reads as unchecked.
+        if _has_validator(entry):
+            item['has_validator'] = True
+            item['validation'] = (_current_validation(vault_entry, resolved)
+                                  if (has_value or vault_entry.get('validation')) else None)
+            proj = vault_entry.get('oauth_project') or {}
+            if proj.get('ref') and proj['ref'] in (resolved.get('url') or ''):
+                item['oauth_project'] = {k: proj.get(k) for k in ('ref', 'name', 'organization', 'key_type')}
 
         # Plugin source info
         if entry.get('_plugin_id'):
@@ -1128,6 +1250,8 @@ def test_credential(username: str, cred_id: str) -> dict:
             if c['id'] == cred_id:
                 cat_entry = c
                 break
+    if cat_entry and not cat_entry.get('test') and _has_validator(cat_entry):
+        return _test_with_validator(username, cred_id, cat_entry)
     if not cat_entry or not cat_entry.get('test'):
         return {'ok': False, 'message': 'No test configuration for this credential'}
 
@@ -1215,6 +1339,28 @@ def test_credential(username: str, cred_id: str) -> dict:
         return {'ok': False, 'message': str(e)}
 
 
+def _test_with_validator(username: str, cred_id: str, cat_entry: dict) -> dict:
+    """Test button for validator-backed credentials. Stores the verdict next
+    to the credential (no sync, no restart) so the card reflects it."""
+    from services.connectors import validation_record
+    vault = read_vault(username)
+    vault_entry = vault.get('credentials', {}).get(cred_id, {}) or {}
+    fields = _resolved_fields(cat_entry, vault_entry)
+    start = time.time()
+    v = _validator_for(cat_entry)(fields)
+    latency = int((time.time() - start) * 1000)
+    if cred_id in vault.get('credentials', {}):
+        vault['credentials'][cred_id]['validation'] = validation_record(v, fields)
+        _write_vault(username, vault)
+    return {
+        'ok': v['verdict'] == 'pass',
+        'verdict': v['verdict'],
+        'message': v['message'],
+        'checks': v.get('checks', []),
+        'latency_ms': latency,
+    }
+
+
 # ---------------------------------------------------------------------------
 # OAuth token management
 #
@@ -1250,7 +1396,7 @@ def _get_oauth_app_creds(catalog_entry: dict, domain: str) -> Optional[dict]:
         return {
             'client_id': cid,
             'client_secret': csec,
-            'redirect_uri': f'https://{domain}/api/vault/oauth/callback/{provider}',
+            'redirect_uri': oauth_redirect_uri(catalog_entry, domain),
         }
 
     # Legacy fallback — platform-oauth.json (deprecated, kept for backcompat)
@@ -1259,6 +1405,26 @@ def _get_oauth_app_creds(catalog_entry: dict, domain: str) -> Optional[dict]:
         return legacy
 
     return None
+
+
+def oauth_redirect_uri(catalog_entry: dict, domain: str) -> str:
+    """The redirect_uri sent to the provider — identical at authorize, token
+    exchange and in the Platform Setup list, or the provider rejects the code.
+
+    Default: the tenant's own callback, one registered URI per tenant.
+    `oauth.redirect: "relay"` + OAUTH_RELAY_BASE_URL: ONE platform URI for every
+    tenant (for providers that accept one or a handful of callback URLs); the
+    relay forwards the browser to the tenant named in `state`, and the tenant
+    verifies its own single-use nonce exactly as before.
+    """
+    oauth_cfg = (catalog_entry or {}).get('oauth', {}) or {}
+    provider = oauth_cfg.get('provider', '').strip().lower()
+    if oauth_cfg.get('redirect') == 'relay':
+        from services.connectors import relay_redirect_uri
+        relayed = relay_redirect_uri(provider)
+        if relayed:
+            return relayed
+    return f'https://{domain}/api/vault/oauth/callback/{provider}'
 
 
 def get_oauth_apps() -> dict:
@@ -1294,7 +1460,10 @@ def _oauth_nonce_path(username: str) -> Path:
     return _vault_dir(username) / 'oauth-nonces.json'
 
 
-def _mint_oauth_nonce(username: str, cred_id: str) -> str:
+def _mint_oauth_nonce(username: str, cred_id: str, code_verifier: str = '') -> str:
+    """Mint + persist a single-use state nonce. A PKCE code_verifier, when the
+    provider uses PKCE, is stored WITH the nonce: it never leaves the tenant,
+    so an authorization code that lands anywhere else cannot be redeemed."""
     import secrets
     nonce = secrets.token_urlsafe(24)
     p = _oauth_nonce_path(username)
@@ -1311,6 +1480,8 @@ def _mint_oauth_nonce(username: str, cred_id: str) -> str:
         store = {k: v for k, v in store.items()
                  if isinstance(v, dict) and (now - v.get('ts', 0)) < _OAUTH_NONCE_TTL_SEC}
         store[nonce] = {'cred_id': cred_id, 'ts': now}
+        if code_verifier:
+            store[nonce]['cv'] = code_verifier
         tmp = p.with_suffix('.json.tmp')
         tmp.write_text(json.dumps(store))
         tmp.replace(p)
@@ -1321,15 +1492,22 @@ def _mint_oauth_nonce(username: str, cred_id: str) -> str:
 
 def verify_oauth_nonce(username: str, cred_id: str, nonce: str) -> bool:
     """Single-use, TTL-bound verification of an OAuth state nonce. Consumes on success."""
+    return consume_oauth_nonce(username, cred_id, nonce) is not None
+
+
+def consume_oauth_nonce(username: str, cred_id: str, nonce: str) -> Optional[dict]:
+    """Verify + consume a state nonce. Returns the stored entry (which carries
+    the PKCE code_verifier as 'cv' when one was used) or None. Consumed
+    whether or not it matched: a nonce is good for exactly one callback."""
     if not nonce:
-        return False
+        return None
     p = _oauth_nonce_path(username)
     try:
         if not p.exists():
-            return False
+            return None
         store = json.loads(p.read_text())
     except Exception:
-        return False
+        return None
     entry = store.get(nonce)
     ok = (isinstance(entry, dict)
           and entry.get('cred_id') == cred_id
@@ -1344,7 +1522,7 @@ def verify_oauth_nonce(username: str, cred_id: str, nonce: str) -> bool:
         tmp.replace(p)
     except Exception:
         pass
-    return ok
+    return entry if ok else None
 
 
 def build_oauth_url(cred_id: str, username: str, domain: str) -> Optional[str]:
@@ -1370,25 +1548,90 @@ def build_oauth_url(cred_id: str, username: str, domain: str) -> Optional[str]:
 
     oauth_cfg = cat_entry.get('oauth', {})
     import urllib.parse
+    code_verifier, code_challenge = '', ''
+    if oauth_cfg.get('pkce'):
+        from services.connectors import pkce_pair
+        code_verifier, code_challenge = pkce_pair()
     params = {
         'client_id': app_creds['client_id'],
         'redirect_uri': app_creds['redirect_uri'],
         'response_type': 'code',
-        'scope': ' '.join(oauth_cfg.get('scopes', [])),
-        # F-6: state carries a single-use, server-persisted CSRF nonce verified on callback
+        # F-6: state carries a single-use, server-persisted CSRF nonce verified on callback.
+        # `d` is this tenant's domain: the single-callback relay forwards the browser
+        # there and nowhere else (allow-listed); the tenant then checks the nonce.
         'state': json.dumps({
             'cred_id': cred_id,
             'username': username,
-            'nonce': _mint_oauth_nonce(username, cred_id),
+            'nonce': _mint_oauth_nonce(username, cred_id, code_verifier),
+            'd': domain,
         }),
     }
+    scopes = oauth_cfg.get('scopes', [])
+    if scopes:
+        # Only when there are any: Supabase deprecated the param (scopes are set on
+        # the app) and Netlify has none. An empty `scope=` is noise at best.
+        params['scope'] = ' '.join(scopes)
+    if code_challenge:
+        params['code_challenge'] = code_challenge
+        params['code_challenge_method'] = 'S256'
     # Extra params (e.g. access_type=offline for Google)
     params.update(oauth_cfg.get('extra_params', {}))
 
     return oauth_cfg['auth_url'] + '?' + urllib.parse.urlencode(params)
 
 
-def exchange_oauth_code(cred_id: str, code: str, username: str) -> dict:
+def _token_request(oauth_cfg: dict, app_creds: dict, data: dict) -> dict:
+    """POST to the provider's token endpoint. Returns the parsed token dict,
+    or {'error': ...}.
+
+    Client authentication follows the catalog: `token_auth: "basic"` sends
+    client_id/secret as an HTTP Basic header (Supabase documents this), the
+    default "body" sends them as form fields (Google, Facebook, Intuit, GitHub,
+    Netlify). Accept: application/json because GitHub answers form-encoded
+    without it. GitHub also reports a bad code as 200 + {"error": ...}.
+    """
+    data = dict(data)
+    kwargs = {'headers': {'Accept': 'application/json'}, 'timeout': 15}
+    if oauth_cfg.get('token_auth') == 'basic':
+        kwargs['auth'] = (app_creds['client_id'], app_creds['client_secret'])
+    else:
+        data['client_id'] = app_creds['client_id']
+        data['client_secret'] = app_creds['client_secret']
+    try:
+        resp = requests.post(oauth_cfg['token_url'], data=data, **kwargs)
+    except Exception as exc:
+        return {'error': f'Token request failed: {exc.__class__.__name__}'}
+    try:
+        body = resp.json()
+    except ValueError:
+        import urllib.parse
+        body = {k: v[0] for k, v in urllib.parse.parse_qs(resp.text or '').items()}
+    if not isinstance(body, dict):
+        body = {}
+    if resp.status_code != 200:
+        detail = body.get('error_description') or body.get('error') or (resp.text or '')[:200]
+        return {'error': f'Token exchange failed: {resp.status_code} {detail}'}
+    if not body.get('access_token'):
+        detail = body.get('error_description') or body.get('error') or 'no access token'
+        return {'error': f'Token exchange failed: {detail}'}
+    return body
+
+
+def _expires_at_from(token_data: dict) -> str:
+    """ISO expiry, or '' when the provider issued a non-expiring token (no
+    expires_in — Netlify, GitHub with expiring tokens off). Never invent one:
+    a made-up 1h expiry turns a working token into 'disconnected' after an hour."""
+    try:
+        expires_in = int(token_data.get('expires_in'))
+    except (TypeError, ValueError):
+        return ''
+    if expires_in <= 0:
+        return ''
+    return datetime.fromtimestamp(time.time() + expires_in, tz=timezone.utc).isoformat()
+
+
+def exchange_oauth_code(cred_id: str, code: str, username: str,
+                        code_verifier: str = '') -> dict:
     """
     Exchange an authorization code for tokens and store them.
     Returns: {"ok": bool, "account": str, "error": str}
@@ -1407,43 +1650,40 @@ def exchange_oauth_code(cred_id: str, code: str, username: str) -> dict:
     if not app_creds:
         return {'ok': False, 'error': f'No OAuth app configured for provider {provider}'}
 
-    # Exchange code for tokens
-    try:
-        resp = requests.post(oauth_cfg['token_url'], data={
-            'code': code,
-            'client_id': app_creds['client_id'],
-            'client_secret': app_creds['client_secret'],
-            'redirect_uri': app_creds['redirect_uri'],
-            'grant_type': 'authorization_code',
-        }, timeout=15)
-
-        if resp.status_code != 200:
-            return {'ok': False, 'error': f'Token exchange failed: {resp.status_code} {resp.text[:200]}'}
-
-        token_data = resp.json()
-    except Exception as exc:
-        return {'ok': False, 'error': str(exc)}
-
-    # Calculate expiry
-    expires_in = token_data.get('expires_in', 3600)
-    expires_at = datetime.now(timezone.utc).timestamp() + expires_in
+    data = {
+        'code': code,
+        'redirect_uri': app_creds['redirect_uri'],
+        'grant_type': 'authorization_code',
+    }
+    if code_verifier:
+        data['code_verifier'] = code_verifier
+    token_data = _token_request(oauth_cfg, app_creds, data)
+    if token_data.get('error') and not token_data.get('access_token'):
+        return {'ok': False, 'error': token_data['error']}
 
     # Try to get connected account info
-    account_email = _get_oauth_account_info(provider, token_data.get('access_token', ''))
+    detail = _get_oauth_account_detail(provider, token_data.get('access_token', ''))
+    account_email = detail.get('account', '')
 
     # Store token
     token_file = {
         'access_token': token_data.get('access_token', ''),
         'refresh_token': token_data.get('refresh_token', ''),
         'token_type': token_data.get('token_type', 'Bearer'),
-        'expires_at': datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
-        'scopes': oauth_cfg.get('scopes', []),
+        'expires_at': _expires_at_from(token_data),
+        'scopes': oauth_cfg.get('scopes', []) or oauth_cfg.get('app_scopes', []),
         'connected_account': account_email,
         'connected_at': _now_iso(),
     }
+    if detail.get('detail'):
+        token_file['account_detail'] = detail['detail']
 
     ensure_vault(username)
     _write_json(_vault_oauth_path(username, cred_id), token_file)
+    try:
+        os.chmod(str(_vault_oauth_path(username, cred_id)), 0o600)
+    except OSError:
+        pass
 
     # Also mark in vault credentials
     vault = read_vault(username)
@@ -1462,8 +1702,13 @@ def exchange_oauth_code(cred_id: str, code: str, username: str) -> dict:
 
 def _get_oauth_account_info(provider: str, access_token: str) -> str:
     """Get the email/account name for the connected OAuth account."""
+    return _get_oauth_account_detail(provider, access_token).get('account', '')
+
+
+def _get_oauth_account_detail(provider: str, access_token: str) -> dict:
+    """{'account': display string, 'detail': optional dict}. Best effort."""
     if not access_token:
-        return ''
+        return {'account': ''}
     try:
         if provider == 'google':
             resp = requests.get(
@@ -1472,7 +1717,7 @@ def _get_oauth_account_info(provider: str, access_token: str) -> str:
                 timeout=5,
             )
             if resp.ok:
-                return resp.json().get('email', '')
+                return {'account': resp.json().get('email', '')}
         elif provider == 'facebook':
             resp = requests.get(
                 'https://graph.facebook.com/me?fields=name,email',
@@ -1481,10 +1726,34 @@ def _get_oauth_account_info(provider: str, access_token: str) -> str:
             )
             if resp.ok:
                 data = resp.json()
-                return data.get('email', data.get('name', ''))
+                return {'account': data.get('email', data.get('name', ''))}
+        elif provider == 'github':
+            resp = requests.get(
+                'https://api.github.com/user',
+                headers={'Authorization': f'Bearer {access_token}',
+                         'Accept': 'application/vnd.github+json'},
+                timeout=5,
+            )
+            if resp.ok:
+                data = resp.json()
+                return {'account': data.get('login', '') or data.get('name', '')}
+        elif provider == 'netlify':
+            resp = requests.get(
+                'https://api.netlify.com/api/v1/user',
+                headers={'Authorization': f'Bearer {access_token}'},
+                timeout=5,
+            )
+            if resp.ok:
+                data = resp.json()
+                return {'account': data.get('email', '') or data.get('full_name', '')}
+        elif provider == 'supabase':
+            from services.connectors import supabase_account_info
+            info = supabase_account_info(access_token)
+            orgs = ', '.join(o['name'] for o in info.get('orgs', []) if o.get('name'))
+            return {'account': info.get('email') or orgs, 'detail': info}
     except Exception:
         pass
-    return ''
+    return {'account': ''}
 
 
 def get_fresh_oauth_token(username: str, cred_id: str) -> Optional[str]:
@@ -1500,69 +1769,95 @@ def get_fresh_oauth_token(username: str, cred_id: str) -> Optional[str]:
     if not token_data.get('access_token'):
         return None
 
-    # Check if expired
     expires_at = token_data.get('expires_at', '')
-    if expires_at:
-        try:
-            exp_dt = datetime.fromisoformat(expires_at)
-            if exp_dt.timestamp() < time.time() - 60:  # 60s buffer
-                # Refresh needed
-                refreshed = _refresh_oauth_token(cred_id, token_data['refresh_token'])
-                if refreshed:
-                    token_data.update(refreshed)
-                    _write_json(token_path, token_data)
-                else:
-                    return None
-        except (ValueError, KeyError):
-            pass
-
+    if not expires_at:
+        return token_data.get('access_token')  # non-expiring token
+    try:
+        exp_ts = datetime.fromisoformat(expires_at).timestamp()
+    except ValueError:
+        exp_ts = 0
+    # Refresh 60s BEFORE expiry. (Was `exp < now - 60`: refreshed only once the
+    # token had been dead for a minute, and handed out a dying token until then.)
+    if exp_ts > time.time() + 60:
+        return token_data.get('access_token')
+    rt = token_data.get('refresh_token', '')
+    if not rt:
+        return None
+    refreshed = _refresh_oauth_token(cred_id, rt)
+    if not refreshed:
+        return None
+    token_data.update(refreshed)
+    _write_json(token_path, token_data)
     return token_data.get('access_token')
 
 
 def _refresh_oauth_token(cred_id: str, refresh_token: str) -> Optional[dict]:
-    """Refresh an OAuth token."""
+    """Refresh an OAuth token.
+
+    Uses the same app-credential resolution as authorize/exchange
+    (.platform-oauth.env first, legacy platform-oauth.json second). It used to
+    read ONLY the legacy json, so every env-configured provider failed to
+    refresh and went dark when its first access token expired.
+    """
     cat_entry = get_catalog_credential(cred_id)
     if not cat_entry:
         return None
 
     oauth_cfg = cat_entry.get('oauth', {})
-    provider = oauth_cfg.get('provider', '')
-    apps = get_oauth_apps()
-    app_creds = apps.get(provider)
+    app_creds = _get_oauth_app_creds(cat_entry, os.getenv('DOMAIN', 'localhost'))
     if not app_creds:
         return None
 
-    try:
-        resp = requests.post(oauth_cfg['token_url'], data={
-            'client_id': app_creds['client_id'],
-            'client_secret': app_creds['client_secret'],
-            'refresh_token': refresh_token,
-            'grant_type': 'refresh_token',
-        }, timeout=15)
-
-        if resp.status_code != 200:
-            logger.error(f"OAuth refresh failed for {cred_id}: {resp.status_code}")
-            return None
-
-        data = resp.json()
-        expires_in = data.get('expires_in', 3600)
-        expires_at = datetime.now(timezone.utc).timestamp() + expires_in
-
-        return {
-            'access_token': data['access_token'],
-            'expires_at': datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
-            # Some providers return new refresh_token
-            'refresh_token': data.get('refresh_token', refresh_token),
-        }
-    except Exception as exc:
-        logger.error(f"OAuth refresh error for {cred_id}: {exc}")
+    data = _token_request(oauth_cfg, app_creds, {
+        'refresh_token': refresh_token,
+        'grant_type': 'refresh_token',
+    })
+    if not data.get('access_token'):
+        logger.error(f"OAuth refresh failed for {cred_id}: {data.get('error', 'no access token')}")
         return None
+    return {
+        'access_token': data['access_token'],
+        'expires_at': _expires_at_from(data),
+        # Some providers rotate the refresh token (GitHub always does)
+        'refresh_token': data.get('refresh_token', refresh_token),
+    }
+
+
+def _revoke_provider_grant(cat_entry: dict, token_data: dict):
+    """Best effort: tell the provider we are done, so the grant does not stay
+    live on their side after a Disconnect. Never blocks the disconnect."""
+    oauth_cfg = (cat_entry or {}).get('oauth', {}) or {}
+    provider = oauth_cfg.get('provider', '')
+    app_creds = _get_oauth_app_creds(cat_entry, os.getenv('DOMAIN', 'localhost'))
+    if not app_creds:
+        return
+    try:
+        if provider == 'supabase' and token_data.get('refresh_token'):
+            # POST /v1/oauth/revoke {client_id, client_secret, refresh_token} (Management API spec)
+            requests.post('https://api.supabase.com/v1/oauth/revoke', json={
+                'client_id': app_creds['client_id'],
+                'client_secret': app_creds['client_secret'],
+                'refresh_token': token_data['refresh_token'],
+            }, timeout=10)
+        elif provider == 'github' and token_data.get('access_token'):
+            # DELETE /applications/{client_id}/grant — revokes the user's grant
+            requests.delete(
+                f"https://api.github.com/applications/{app_creds['client_id']}/grant",
+                auth=(app_creds['client_id'], app_creds['client_secret']),
+                json={'access_token': token_data['access_token']},
+                headers={'Accept': 'application/vnd.github+json'}, timeout=10)
+    except Exception as exc:
+        logger.warning(f"[vault] revoke at {provider} failed (disconnect continues): {exc.__class__.__name__}")
 
 
 def disconnect_oauth(username: str, cred_id: str):
-    """Disconnect an OAuth connection — remove tokens."""
+    """Disconnect an OAuth connection — revoke at the provider (best effort),
+    then move the token file aside (never deleted)."""
     token_path = _vault_oauth_path(username, cred_id)
     if _safe_exists(token_path):
+        cat_entry = get_catalog_credential(cred_id)
+        if cat_entry:
+            _revoke_provider_grant(cat_entry, _read_json(token_path))
         # Rename to .revoked instead of deleting
         revoked_path = token_path.with_suffix('.revoked')
         token_path.rename(revoked_path)
@@ -1581,15 +1876,18 @@ def get_oauth_status(username: str, cred_id: str) -> dict:
         return {'connected': False}
 
     token_data = _read_json(token_path)
-    if not token_data.get('refresh_token'):
+    if not _oauth_token_connected(token_data):
         return {'connected': False}
 
-    return {
+    out = {
         'connected': True,
         'account': token_data.get('connected_account', ''),
         'connected_at': token_data.get('connected_at', ''),
         'scopes': token_data.get('scopes', []),
     }
+    if token_data.get('account_detail'):
+        out['account_detail'] = token_data['account_detail']
+    return out
 
 
 # ---------------------------------------------------------------------------
