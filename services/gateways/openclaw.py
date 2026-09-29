@@ -902,9 +902,10 @@ class GatewayConnection:
             # Keeping 6 would silently cut WS-9's own budget from 60s to 44s and miss every
             # 70s restart gcu measured. 10 attempts restores the intent: 2+4+8+15*6 = 104s.
             #
-            # Attempt 5 still lands at t=14s, so a fast restart is caught exactly as quickly as
-            # before; attempts 6-10 probe every 15s out to 104s, ~44% clear of the worst measured
-            # case. A genuinely dead gateway still raises inside ~2 minutes.
+            # Attempt 4 still lands at t=14s, so a fast restart is caught exactly as quickly as
+            # before; attempts 5-10 probe every 15s (t=29,44,59,74,89,104s nominal), ~44% clear of
+            # the worst measured case. With +/-15% jitter on every sleep the last attempt lands
+            # between ~88s and ~120s. A genuinely dead gateway still raises inside ~2 minutes.
             #
             # Corroborated by the 2026-09-19 nightly review, which is what this schedule is for:
             # hrsf-voice recovered on attempt 5 (261ms) and gcu-voice saw a ~35s refusal window
