@@ -23,9 +23,10 @@ When documenting, state them **separately** — e.g.
 component version.
 
 ## Release steps
-1. On `dev`: bump `package.json` `"version"` to today's date `YYYY.M.D` (`-N` if it's a repeat
-   release the same day).
-2. Merge `dev → main` (PR, CI green).
+1. On a `release/YYYY.M.D` branch off `main`: bump `package.json` `"version"` to today's date
+   `YYYY.M.D` (`-N` if it's a repeat release the same day). The repo is trunk-based — there is
+   no `dev` branch; every open PR is reviewed and merged (or closed) BEFORE this step.
+2. Open the release PR into `main` (CI green), squash-merge it.
 3. Tag the release commit on `main`:
    ```bash
    git tag vYYYY.M.D
