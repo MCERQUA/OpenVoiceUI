@@ -185,6 +185,10 @@ def create_app(config_override: dict = None):
             '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
             '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
             '/share/capture/', # Camera Capture share portal — token-gated public access for clients
+            '/u/',         # Signed one-time upload links (routes/intake.py) — the TOKEN is the
+                           # gate, not Clerk; GET renders the form, POST accepts the upload. Never
+                           # add '/api/intake/mint' here — minting stays behind require_auth below
+                           # (agent key or Clerk session), only /u/<token> itself is public.
         )
         # Public for READS ONLY (GET/HEAD/OPTIONS). These prefixes serve config
         # lists the UI loads before Clerk init, but their state-changing methods

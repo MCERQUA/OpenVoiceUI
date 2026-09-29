@@ -50,6 +50,16 @@ BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
 # Self-hosted installs: auth is disabled by default. Set CANVAS_REQUIRE_AUTH=true to enable Clerk JWT checks.
 CANVAS_REQUIRE_AUTH = os.getenv('CANVAS_REQUIRE_AUTH', 'false').lower() == 'true'
 
+# Embedded-resource types /pages/ serves WITHOUT a session: public pages need their images, styles, scripts, fonts
+# and media. Every OTHER non-.html file under /pages/ (page backups, .htm, .json/.md/.txt/.pdf, no extension)
+# requires the same session as _data/ -- see canvas_pages_proxy. Add a type here only if a public page needs it.
+_CANVAS_OPEN_ASSET_EXTS = frozenset({
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'ico', 'bmp',
+    'css', 'js', 'mjs', 'woff', 'woff2', 'ttf', 'otf', 'eot',
+    'mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'mp4', 'webm', 'mov', 'm4v', 'vtt',
+    'glb', 'gltf', 'wasm', 'webmanifest',
+})
+
 CATEGORY_KEYWORDS = {
     'dashboards': ['dashboard', 'monitor', 'status', 'overview', 'control panel', 'panel'],
     'weather': ['weather', 'temperature', 'forecast', 'climate', 'rain', 'sunny', 'humidity'],
@@ -60,6 +70,11 @@ CATEGORY_KEYWORDS = {
     'reference': ['guide', 'reference', 'documentation', 'help', 'how to', 'tutorial'],
     'entertainment': ['music', 'radio', 'playlist', 'dj', 'audio', 'song'],
     'video': ['video', 'remotion', 'render', 'animation', 'movie', 'clip', 'recording'],
+}
+
+_KEYWORD_RE = {
+    kw: re.compile(r'\b' + re.escape(kw) + r'(?:s|es)?\b')
+    for _kws in CATEGORY_KEYWORDS.values() for kw in _kws
 }
 
 CATEGORY_ICONS = {
@@ -323,8 +338,13 @@ def load_canvas_manifest() -> dict:
     }
 
 
-def save_canvas_manifest(manifest: dict) -> None:
-    """Save manifest directly (Docker bind-mounted files don't support atomic rename)."""
+def save_canvas_manifest(manifest: dict) -> bool:
+    """Save manifest directly (Docker bind-mounted files don't support atomic rename).
+
+    Returns True on success, False on failure. Callers that turn this into an
+    HTTP response MUST check the result — a swallowed write failure previously
+    rendered as an HTTP 200 while the manifest silently failed to persist.
+    """
     manifest['last_updated'] = datetime.now().isoformat()
     try:
         data = json.dumps(manifest, indent=2)
@@ -332,16 +352,28 @@ def save_canvas_manifest(manifest: dict) -> None:
             f.write(data)
         _manifest_cache['data'] = copy.deepcopy(manifest)
         _manifest_cache['mtime'] = CANVAS_MANIFEST_PATH.stat().st_mtime
+        return True
     except Exception as exc:
         logging.getLogger(__name__).error(f'Failed to save canvas manifest: {exc}')
+        return False
 
 
 def suggest_category(title: str, content: str = '') -> str:
-    """Suggest category based on title and content keywords."""
+    """Suggest category based on title and content keywords.
+
+    Keyword matching is word-boundary aware (\b...\b), not plain substring —
+    a plain "in text" check let short ambiguous tokens match inside unrelated
+    longer words, e.g. the finance keyword "market" matched inside "marketing"
+    and forced every marketing-strategy page into 'finance' regardless of
+    content (found 2026-09-18 by a shadow-classifier replay over the fleet).
+    Fixed for the mechanism, not just that one word, so any other keyword with
+    the same shape is covered too; a simple plural suffix (s/es) still matches
+    so "charts"/"videos"/"songs" keep scoring as before.
+    """
     text = (title + ' ' + (content or '')[:500]).lower()
     scores = {}
     for category, keywords in CATEGORY_KEYWORDS.items():
-        score = sum(3 if kw in text else 0 for kw in keywords)
+        score = sum(3 if _KEYWORD_RE[kw].search(text) else 0 for kw in keywords)
         if score > 0:
             scores[category] = score
     return max(scores, key=scores.get) if scores else 'uncategorized'
@@ -875,6 +907,22 @@ def canvas_pages_proxy(path):
             denied = _canvas_data_denied(path)
             if denied:
                 return denied
+        # NON-ASSET FILES under /pages/ (2026-09-15). The *.html gate below used to wave every other type through
+        # as an "embedded resource". Measured on the fleet, that served to anyone with the URL: 900 page BACKUPS
+        # (*.html.bak-* as octet-stream = full old page HTML), 116 .htm pages, and plans/data such as seo-plan.json,
+        # website-plan.md, email-data.json and a brand-plan .pdf. Only real asset types stay open. Measured before
+        # this change: 0 of 45 public pages reference an existing non-asset file outside _data/.
+        if CANVAS_REQUIRE_AUTH and not _is_html and not (path.startswith('_data/') or '/_data/' in path):
+            _name = Path(path).name
+            _ext = _name.rsplit('.', 1)[-1].lower() if '.' in _name else ''
+            if _ext not in _CANVAS_OPEN_ASSET_EXTS:
+                _target = _safe_canvas_path(str(CANVAS_PAGES_DIR), path)
+                # A slug-only URL that is not a file falls through to the .html redirect below, where the
+                # page's own is_public gate applies. Anything that IS a file needs a session.
+                if _ext or (_target is not None and _target.is_file()):
+                    denied = _canvas_data_denied(path)
+                    if denied:
+                        return denied
         if CANVAS_REQUIRE_AUTH and _is_html and path not in _OS_PAGES:
             page_id = Path(path).stem
             manifest = load_canvas_manifest()
@@ -1314,7 +1362,8 @@ def handle_page_metadata(page_id):
                 except Exception as exc:
                     logger.warning(f'Failed to archive file {filename}: {exc}')
 
-            save_canvas_manifest(manifest)
+            if not save_canvas_manifest(manifest):
+                return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
             _notify_brain('canvas_page_deleted', page_id=page_id, title=page_title, filename=filename)
 
             try:
@@ -1403,7 +1452,8 @@ def handle_page_metadata(page_id):
                     if page_id not in manifest['categories'][new_cat]['pages']:
                         manifest['categories'][new_cat]['pages'].append(page_id)
 
-        save_canvas_manifest(manifest)
+        if not save_canvas_manifest(manifest):
+            return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
         return jsonify({'status': 'ok', 'page': page})
 
 
@@ -1429,7 +1479,8 @@ def handle_category():
                 'color': data.get('color', '#4a9eff'),
                 'pages': [],
             }
-            save_canvas_manifest(manifest)
+            if not save_canvas_manifest(manifest):
+                return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
             return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
 
         # PATCH
@@ -1440,7 +1491,8 @@ def handle_category():
         for field in ['name', 'icon', 'color']:
             if field in data:
                 manifest['categories'][cat_id][field] = data[field]
-        save_canvas_manifest(manifest)
+        if not save_canvas_manifest(manifest):
+            return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
         return jsonify({'status': 'ok', 'category': manifest['categories'][cat_id]})
 
 
@@ -1852,11 +1904,15 @@ def restore_page_version(page_id, timestamp):
         return jsonify({'error': 'Version not found or restore failed'}), 404
 
     # Update manifest modified time
+    manifest_save_ok = True
     with _manifest_lock:
         manifest = load_canvas_manifest()
         if page_id in manifest.get('pages', {}):
             manifest['pages'][page_id]['modified'] = datetime.now().isoformat()
-            save_canvas_manifest(manifest)
+            manifest_save_ok = save_canvas_manifest(manifest)
+
+    if not manifest_save_ok:
+        return jsonify({'status': 'error', 'error': 'manifest write failed — see server log'}), 500
 
     return jsonify({
         'status': 'ok',
