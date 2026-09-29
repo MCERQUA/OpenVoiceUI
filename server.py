@@ -2306,7 +2306,11 @@ def browse_stream_websocket(ws):
     # The real browser auto-sends the __session cookie (same origin). The internal
     # agent key is also accepted (via ?agent_key= or X-Agent-Key) for parity with
     # the /api/browse/* HTTP proxy, which lets internal tooling attach a viewer.
-    if os.getenv("CLERK_PUBLISHABLE_KEY") or os.getenv("CLERK_SECRET_KEY"):
+    # SEC-046: gate on the SAME "Clerk configured" flag services/auth.py uses (publishable key),
+    # never on the secret. The app never needs CLERK_SECRET_KEY, so removing it from a tenant
+    # must not switch this gate off (it used to: "publishable OR secret").
+    from services.auth import _CLERK_CONFIGURED
+    if _CLERK_CONFIGURED:
         _agent_key = os.getenv("AGENT_API_KEY", "").strip()
         _presented = request.args.get("agent_key", "") or request.headers.get("X-Agent-Key", "")
         _agent_ok = bool(_agent_key) and _presented == _agent_key

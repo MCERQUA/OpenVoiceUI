@@ -570,7 +570,12 @@ def set_credential(username: str, cred_id: str, value: str = None,
     if value is not None:
         entry['value'] = value
     if fields is not None:
-        entry['fields'] = fields
+        # MERGE, never replace (2026-09-26). The admin page sends only the boxes that have
+        # text in them, and the route drops masked '***' values: "not sent" means UNCHANGED.
+        # Replacing wiped every other field of a multi-field credential. A client re-saving
+        # only his Supabase secret key lost the project URL and publishable key saved minutes
+        # earlier. Fields in this save win; fields not in it are kept.
+        entry['fields'] = {**(entry.get('fields') or {}), **fields}
 
     creds[cred_id] = entry
     _write_vault(username, vault)
