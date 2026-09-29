@@ -29,10 +29,12 @@ Docs this is built against (verified 2026-09-27):
 """
 import base64
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import time
 from typing import Optional
 from urllib.parse import urlencode, urlparse
@@ -77,16 +79,80 @@ def normalize_supabase_url(raw: str) -> tuple[str, str, str]:
                 'That was a dashboard link, so it was changed to the project API URL.')
     if '://' not in s:
         s = 'https://' + s
-    p = urlparse(s)
-    host = (p.hostname or '').lower()
+    try:
+        p = urlparse(s)
+        host = (p.hostname or '').lower()
+        port = p.port          # raises ValueError for 'host:99999' / 'host:abc'
+    except ValueError:         # also 'https://[::1' (unbalanced bracket)
+        return '', '', ''
     if not host:
         return '', '', ''
-    base = f'{p.scheme or "https"}://{host}' + (f':{p.port}' if p.port else '')
+    netloc = f'[{host}]' if ':' in host else host
+    base = f'{p.scheme or "https"}://{netloc}' + (f':{port}' if port else '')
     note = ''
     if p.path.strip('/'):
         note = 'The part after the domain was removed; the Project URL is just the address of the project.'
     hm = _SUPABASE_HOST_RE.match(host)
     return base, (hm.group(1) if hm else ''), note
+
+
+INVALID_URL_MESSAGE = ('That is not a valid Project URL. Use the https:// address of your Supabase '
+                       'project, like https://<project-ref>.supabase.co (Settings > API).')
+
+
+def _resolve_addresses(host: str, port: int) -> list:
+    """Every address `host` resolves to. A module-level seam so tests never
+    touch real DNS."""
+    return [info[4][0] for info in socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)]
+
+
+def _is_public_address(addr: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(addr.split('%', 1)[0])   # drop an IPv6 zone id
+    except ValueError:
+        return False
+    mapped = getattr(ip, 'ipv4_mapped', None)
+    if mapped is not None:      # judge ::ffff:a.b.c.d by its IPv4 half
+        ip = mapped
+    # is_global is False for loopback, RFC1918, link-local (incl. the cloud
+    # metadata address), unspecified, reserved AND 100.64.0.0/10 (CGNAT /
+    # Tailscale), which is_private does not cover. Multicast and a few
+    # reserved v6 ranges (64:ff9b::/96 can embed 127.0.0.1) still read as
+    # global, hence the two extra checks.
+    return ip.is_global and not ip.is_multicast and not ip.is_reserved
+
+
+def _fetch_refusal(base_url: str) -> Optional[tuple[str, str]]:
+    """SSRF guard for the Project URL, which the user types and this server
+    fetches. None = safe to fetch. Otherwise (verdict, message), and the URL
+    is never fetched:
+      - not https, or no parsable host      -> FAIL, invalid Project URL
+      - any resolved address is not public  -> FAIL, invalid Project URL
+      - the name does not resolve           -> CANNOT_TELL (nothing answered);
+        the offline key checks still run, only the probe is skipped
+    Pairs with allow_redirects=False on the probe itself: a public host
+    cannot bounce the request somewhere internal. Resolving here and again in
+    `requests` leaves a DNS-rebinding window; with redirects off and no body
+    echoed, a rebind learns a status code at most."""
+    try:
+        p = urlparse(base_url)
+        host = p.hostname or ''
+        port = p.port or 443
+    except ValueError:
+        return FAIL, INVALID_URL_MESSAGE
+    if p.scheme != 'https' or not host:
+        return FAIL, INVALID_URL_MESSAGE
+    try:
+        addrs = _resolve_addresses(host, port)
+    except (OSError, UnicodeError, ValueError):   # socket.gaierror is an OSError
+        addrs = []
+    if not addrs:
+        return CANNOT_TELL, f'Could not check the keys: nothing answered at {base_url}. Check the Project URL.'
+    bad = [a for a in addrs if not _is_public_address(a)]
+    if bad:
+        logger.warning('[connectors] Project URL refused: %s resolves to non-public %s', host, bad)
+        return FAIL, INVALID_URL_MESSAGE
+    return None
 
 
 def _jwt_claims(key: str) -> Optional[dict]:
@@ -129,7 +195,8 @@ def _short(ref: str) -> str:
     return ref or 'unknown'
 
 
-def _check_one_key(field: str, key: str, base_url: str, url_ref: str, http) -> dict:
+def _check_one_key(field: str, key: str, base_url: str, url_ref: str, http,
+                   reachable: bool = True) -> dict:
     wants, plain, path = _FIELD_WANTS[field]
     kind, claims = _key_kind(key)
     out = {'field': field, 'kind': kind, 'verdict': CANNOT_TELL, 'message': '', 'status': None}
@@ -160,19 +227,25 @@ def _check_one_key(field: str, key: str, base_url: str, url_ref: str, http) -> d
             out.update(verdict=FAIL, message=f'This {plain} has expired. Copy a current one from the project.')
             return out
 
-    # 2. Ask the project itself.
+    # 2. Ask the project itself — only a host _fetch_refusal cleared.
+    unreachable = (f'Could not check the {plain}: nothing answered at {base_url}. '
+                   'Check the Project URL.')
+    if not reachable:
+        out['message'] = unreachable
+        return out
     headers = {'apikey': key, 'Accept': 'application/json'}
     if claims:
         headers['Authorization'] = f'Bearer {key}'
     target = base_url.rstrip('/') + path
     try:
-        resp = http.get(target, headers=headers, timeout=_HTTP_TIMEOUT)
+        # Never follow a redirect: the URL was typed by the user and has already
+        # been vetted by _fetch_refusal; a redirect would go somewhere that was not.
+        resp = http.get(target, headers=headers, timeout=_HTTP_TIMEOUT, allow_redirects=False)
     except requests.Timeout:
         out['message'] = f'Could not check the {plain}: the project did not answer in time.'
         return out
     except requests.RequestException:
-        out['message'] = (f'Could not check the {plain}: nothing answered at {base_url}. '
-                          'Check the Project URL.')
+        out['message'] = unreachable
         return out
 
     out['status'] = resp.status_code
@@ -192,9 +265,10 @@ def _check_one_key(field: str, key: str, base_url: str, url_ref: str, http) -> d
         out['message'] = (f'Could not check the {plain}: the project answered {resp.status_code}. '
                           'It may be paused or restarting.')
     else:
-        snippet = re.sub(r'\s+', ' ', body.replace(key, '***')).strip()[:160]
+        # Status code only. The body is never echoed: it is whatever the URL the
+        # user typed chose to send, and it goes back into the save response.
         out['message'] = (f'Could not tell whether the {plain} works: the project answered '
-                          f'{resp.status_code}{" (" + snippet + ")" if snippet else ""}.')
+                          f'{resp.status_code}.')
     return out
 
 
@@ -204,18 +278,27 @@ def validate_supabase_fields(fields: dict, http=None) -> dict:
     """
     http = http or requests
     fields = fields or {}
-    base_url, url_ref, note = normalize_supabase_url(fields.get('url', ''))
+    raw_url = str(fields.get('url') or '').strip()
+    base_url, url_ref, note = normalize_supabase_url(raw_url)
     result = {'verdict': CANNOT_TELL, 'message': '', 'checks': [], 'url': base_url,
               'ref': url_ref, 'note': note, 'checked_at': time.time()}
     if not base_url:
-        result['message'] = 'Add the Project URL (box 1) so the keys can be checked against it.'
+        if raw_url:
+            result.update(verdict=FAIL, message=INVALID_URL_MESSAGE)
+        else:
+            result['message'] = 'Add the Project URL (box 1) so the keys can be checked against it.'
+        return result
+    refusal = _fetch_refusal(base_url)
+    if refusal and refusal[0] == FAIL:
+        result['verdict'], result['message'] = refusal
         return result
     keys = [(f, (fields.get(f) or '').strip()) for f in ('anon_key', 'service_role_key')]
     keys = [(f, k) for f, k in keys if k]
     if not keys:
         result['message'] = 'No keys to check yet.'
         return result
-    checks = [_check_one_key(f, k, base_url, url_ref, http) for f, k in keys]
+    checks = [_check_one_key(f, k, base_url, url_ref, http, reachable=refusal is None)
+              for f, k in keys]
     result['checks'] = checks
     fails = [c for c in checks if c['verdict'] == FAIL]
     unknown = [c for c in checks if c['verdict'] == CANNOT_TELL]

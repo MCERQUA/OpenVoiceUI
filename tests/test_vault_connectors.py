@@ -11,11 +11,14 @@ pasting unnecessary.
 """
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import shutil
 import subprocess
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
@@ -75,7 +78,8 @@ class FakeHTTP:
 
     def _go(self, method, url, kw):
         call = SimpleNamespace(method=method, url=url, **{k: kw.get(k) for k in
-                               ('headers', 'data', 'json', 'auth', 'params', 'timeout')})
+                               ('headers', 'data', 'json', 'auth', 'params', 'timeout',
+                                'allow_redirects')})
         self.calls.append(call)
         for m, prefix, resp in self.routes:
             if m == method and url.startswith(prefix):
@@ -98,6 +102,27 @@ class FakeHTTP:
 
     def made(self, method, prefix):
         return [c for c in self.calls if c.method == method and c.url.startswith(prefix)]
+
+
+PUBLIC_IP = '104.18.38.10'   # stands in for a Supabase edge address
+
+
+def _fake_resolver(table: dict):
+    """host -> [addresses] | Exception. An IP literal resolves to itself (as
+    getaddrinfo does); any other unlisted host resolves to PUBLIC_IP. Keeps
+    every test off real DNS."""
+    def resolve(host, port):
+        hit = table.get(host)
+        if isinstance(hit, Exception):
+            raise hit
+        if hit is not None:
+            return list(hit)
+        try:
+            ipaddress.ip_address(host)
+            return [host]
+        except ValueError:
+            return [PUBLIC_IP]
+    return resolve
 
 
 SUPABASE_ENTRY = {
@@ -146,9 +171,13 @@ def env(tmp_path, monkeypatch):
     http = FakeHTTP()
     monkeypatch.setattr(vault, 'requests', http)
     monkeypatch.setattr(connectors, 'requests', http)
+    dns = {}
+    real_resolve = getattr(connectors, '_resolve_addresses', None)
+    monkeypatch.setattr(connectors, '_resolve_addresses', _fake_resolver(dns), raising=False)
     vault.ensure_vault('alice')
     return SimpleNamespace(vault=vault, connectors=connectors, http=http, restarts=restarts,
-                           clients=clients, user='alice', monkeypatch=monkeypatch)
+                           clients=clients, user='alice', monkeypatch=monkeypatch,
+                           dns=dns, real_resolve=real_resolve)
 
 
 @pytest.fixture()
@@ -264,6 +293,162 @@ class TestSupabaseValidation:
     def test_url_normalization(self, env, raw):
         base, ref, _note = env.connectors.normalize_supabase_url(raw)
         assert base == f'https://{REF_A}.supabase.co' and ref == REF_A
+
+
+# ---------------------------------------------------------------------------
+# A2. The Project URL is typed by the user and the SERVER fetches it (SSRF).
+#     Review of PR #515: a URL that redirected to http://127.0.0.1:<port>/
+#     returned internal-only data in the save response; a malformed port or
+#     IPv6 bracket turned the save into an HTTP 500.
+# ---------------------------------------------------------------------------
+SECRET_BODY = '{"admin_token": "INTERNAL-ONLY-7f3a9c"}'
+
+
+class TestProjectUrlGuard:
+    def test_probe_never_follows_redirects(self, env):
+        env.http.on('GET', f'https://{REF_A}.supabase.co', FakeResp(
+            302, text=SECRET_BODY))
+        v = env.connectors.validate_supabase_fields({
+            'url': f'https://{REF_A}.supabase.co',
+            'anon_key': jwt(REF_A, 'anon'), 'service_role_key': jwt(REF_A, 'service_role')})
+        assert env.http.calls, 'the public project itself is still probed'
+        assert all(c.allow_redirects is False for c in env.http.calls), \
+            [c.allow_redirects for c in env.http.calls]
+        assert v['verdict'] == 'cannot_tell', 'a redirect is not an answer about the key'
+        assert 'INTERNAL-ONLY' not in json.dumps(v)
+
+    @pytest.mark.parametrize('status', [302, 404, 418])
+    def test_remote_body_is_never_echoed(self, env, status):
+        env.http.on('GET', f'https://{REF_A}.supabase.co', FakeResp(status, text=SECRET_BODY))
+        v = env.connectors.validate_supabase_fields({
+            'url': f'https://{REF_A}.supabase.co', 'anon_key': jwt(REF_A, 'anon')})
+        assert v['verdict'] == 'cannot_tell'
+        assert str(status) in v['message'], 'the status code is the whole report'
+        assert 'INTERNAL-ONLY' not in json.dumps(v) and 'admin_token' not in json.dumps(v)
+
+    @pytest.mark.parametrize('host,addrs', [
+        ('loopback.example.com', ['127.0.0.1']),
+        ('rfc1918.example.com', ['10.0.0.5']),
+        ('home.example.com', ['192.168.1.20']),
+        ('metadata.example.com', ['169.254.169.254']),
+        ('tailnet.example.com', ['100.117.10.28']),       # CGNAT / Tailscale: is_private is False here
+        ('v6loop.example.com', ['::1']),
+        ('mapped.example.com', ['::ffff:127.0.0.1']),
+        ('reserved.example.com', ['240.0.0.1']),
+        ('multicast.example.com', ['224.0.0.1']),
+        ('split.example.com', [PUBLIC_IP, '127.0.0.1']),  # ONE bad address refuses the host
+    ])
+    def test_host_resolving_to_a_non_public_address_is_refused_without_fetching(self, env, host, addrs):
+        env.dns[host] = addrs
+        v = env.connectors.validate_supabase_fields({
+            'url': f'https://{host}', 'anon_key': 'sb_publishable_x', 'service_role_key': 'sb_secret_x'})
+        assert env.http.calls == [], 'refused means never fetched'
+        assert v['verdict'] == 'fail'
+        assert 'not a valid Project URL' in v['message']
+
+    @pytest.mark.parametrize('url', [
+        'https://127.0.0.1', 'https://10.0.0.1:8443', 'https://[::1]', 'https://0.0.0.0',
+        f'http://{REF_A}.supabase.co',                    # https only
+        'file:///etc/passwd',
+    ])
+    def test_literal_and_non_https_urls_are_refused_without_fetching(self, env, url):
+        v = env.connectors.validate_supabase_fields({'url': url, 'anon_key': 'sb_publishable_x'})
+        assert env.http.calls == []
+        assert v['verdict'] == 'fail' and 'not a valid Project URL' in v['message']
+
+    def test_real_resolver_refuses_loopback(self, env):
+        """The same guard with the production resolver (a literal needs no DNS)."""
+        env.monkeypatch.setattr(env.connectors, '_resolve_addresses', env.real_resolve, raising=False)
+        v = env.connectors.validate_supabase_fields({'url': 'https://127.0.0.1:1', 'anon_key': 'sb_publishable_x'})
+        assert env.http.calls == [] and v['verdict'] == 'fail'
+
+    def test_unresolvable_host_is_cannot_tell_without_fetching(self, env):
+        import socket
+        env.dns['gone.example.com'] = socket.gaierror(-2, 'Name or service not known')
+        v = env.connectors.validate_supabase_fields({'url': 'https://gone.example.com', 'anon_key': 'sb_publishable_x'})
+        assert env.http.calls == []
+        assert v['verdict'] == 'cannot_tell', 'no answer is not a verdict about the key'
+        assert 'nothing answered' in v['message']
+
+    def test_unresolvable_host_still_runs_the_offline_checks(self, env):
+        import socket
+        env.dns[f'{REF_A}.supabase.co'] = socket.gaierror(-2, 'Name or service not known')
+        v = env.connectors.validate_supabase_fields({
+            'url': f'https://{REF_A}.supabase.co',
+            'anon_key': jwt(REF_B, 'anon'), 'service_role_key': jwt(REF_B, 'service_role')})
+        assert env.http.calls == []
+        assert v['verdict'] == 'fail' and REF_B in v['message'], 'a key/URL mismatch needs no network'
+
+    @pytest.mark.parametrize('url', ['https://abc.supabase.co:99999', 'https://[::1', 'https://abc.supabase.co:port'])
+    def test_malformed_url_is_an_invalid_verdict_not_an_exception(self, env, url):
+        base, ref, _ = env.connectors.normalize_supabase_url(url)
+        assert base == ''
+        v = env.connectors.validate_supabase_fields({'url': url, 'anon_key': jwt(REF_A, 'anon')})
+        assert env.http.calls == []
+        assert v['verdict'] == 'fail' and 'not a valid Project URL' in v['message']
+
+    @pytest.mark.parametrize('url', ['https://abc.supabase.co:99999', 'https://[::1'])
+    def test_malformed_url_save_is_422_with_save_anyway_not_500(self, env, client, url):
+        r = client.put('/api/vault/credentials/supabase', json={'fields': {
+            'url': url, 'anon_key': jwt(REF_A, 'anon')}})
+        assert r.status_code == 422
+        d = r.get_json()
+        assert d['verdict'] == 'fail' and d['can_force'] is True and d['saved'] is False
+        assert 'not a valid Project URL' in d['message']
+
+    def test_ssrf_save_is_refused_and_leaks_nothing(self, env, client):
+        env.dns['internal.example.com'] = ['127.0.0.1']
+        r = client.put('/api/vault/credentials/supabase', json={'fields': {
+            'url': 'https://internal.example.com', 'anon_key': 'sb_publishable_x'}})
+        assert r.status_code == 422 and r.get_json()['verdict'] == 'fail'
+        assert env.http.calls == []
+        assert 'supabase' not in env.vault.read_vault(env.user).get('credentials', {})
+
+    def test_real_requests_does_not_follow_a_redirect_to_an_internal_server(self, env):
+        """Second layer, real sockets: even if a host passed the address check
+        (DNS rebinding between check and fetch), the probe does not follow a
+        redirect, so an internal service is never reached through it."""
+        hits = []
+
+        class Internal(BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                body = SECRET_BODY.encode()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        internal = HTTPServer(('127.0.0.1', 0), Internal)
+        target = f'http://127.0.0.1:{internal.server_address[1]}/internal'
+
+        class Redirector(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header('Location', target)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        redirector = HTTPServer(('127.0.0.1', 0), Redirector)
+        for srv in (internal, redirector):
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            env.monkeypatch.setattr(env.connectors, 'requests', real_requests)
+            env.monkeypatch.setattr(env.connectors, '_fetch_refusal', lambda _url: None, raising=False)
+            v = env.connectors.validate_supabase_fields({
+                'url': f'http://127.0.0.1:{redirector.server_address[1]}', 'anon_key': 'sb_publishable_x'})
+        finally:
+            for srv in (internal, redirector):
+                srv.shutdown()
+                srv.server_close()
+        assert hits == [], 'the redirect was followed to the internal server'
+        assert v['verdict'] == 'cannot_tell' and 'INTERNAL-ONLY' not in json.dumps(v)
 
 
 # ---------------------------------------------------------------------------
