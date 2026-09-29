@@ -1918,13 +1918,15 @@ connectAiradio();
                         const err = data.response || 'unknown error';
                         ActionConsole?.addEntry('error', `🎵 Jingle failed to start: ${err}`);
                         this._showStatus(`🎵 Jingle: ${err}`);
-                        setTimeout(() => this._hideStatus(), 5000);
+                        setTimeout(() => this._hideStatus(), 12000);
+                        this._announceFailure('jingle');
                     }
                 } catch (err) {
                     console.error('[Suno] jingle error:', err);
                     ActionConsole?.addEntry('error', `🎵 Jingle: connection error — ${err.message || err}`);
                     this._showStatus('🎵 Jingle: connection error');
-                    setTimeout(() => this._hideStatus(), 4000);
+                    setTimeout(() => this._hideStatus(), 8000);
+                    this._announceFailure('jingle');
                 }
             },
 
@@ -1977,12 +1979,14 @@ connectAiradio();
                         const err = data.response || 'Error starting generation';
                         ActionConsole?.addEntry('error', `🎵 Suno failed to start: ${err}`);
                         this._showStatus(`🎵 Suno: ${err}`);
-                        setTimeout(() => this._hideStatus(), 5000);
+                        setTimeout(() => this._hideStatus(), 12000);
+                        this._announceFailure('song');
                     }
                 } catch (err) {
                     console.error('[Suno] generate error:', err);
                     this._showStatus('🎵 Suno: connection error');
-                    setTimeout(() => this._hideStatus(), 4000);
+                    setTimeout(() => this._hideStatus(), 8000);
+                    this._announceFailure('song');
                 }
             },
 
@@ -2008,7 +2012,8 @@ connectAiradio();
                             const reason = data.reason || data.response || 'unknown error';
                             ActionConsole?.addEntry('error', `🎵 Suno generation failed: ${reason}`);
                             this._showStatus(`🎵 Suno failed: ${reason}`);
-                            setTimeout(() => this._hideStatus(), 8000);
+                            setTimeout(() => this._hideStatus(), 12000);
+                            this._announceFailure(data.kind === 'jingle' ? 'jingle' : 'song');
                         } else if (data.status === 'not_found' || data.status === 'no_jobs') {
                             this._stopPolling();
                             this._hideStatus();
@@ -2100,6 +2105,37 @@ connectAiradio();
                     this._playMutedAnnouncement(url);
                 } catch (e) {
                     console.warn('[Suno] TTS completion error:', e);
+                }
+            },
+
+            // A generation that does not go through must be SAID, not only shown in a banner
+            // the user may never look at (2026-09-28: a client was told "45 seconds" for his
+            // son's song; Suno refused it for credits and nothing told him or the agent). The
+            // server queues the failure for the agent's next turn (routes/suno.py
+            // SUNO-REJECT-SURFACED); this says it now — after the agent's own sentence finishes,
+            // so it never talks over it. Deliberately plain: no cause, no promise.
+            async _announceFailure(kind) {
+                const what = kind === 'jingle' ? 'jingle' : 'song';
+                const line = `Heads up, that ${what} didn't go through.`;
+                TranscriptPanel?.addMessage('system', `🎵 ${line}`);
+                const cm = (typeof ModeManager !== 'undefined') ? ModeManager?.clawdbotMode : null;
+                const deadline = Date.now() + 45000;
+                while (cm?._ttsPlaying && Date.now() < deadline) {
+                    await new Promise(r => setTimeout(r, 400));
+                }
+                try {
+                    const provider = window.voiceAgent?.selectedProvider || 'groq';
+                    const voice = window.voiceAgent?.currentVoice || 'autumn';
+                    const resp = await fetch(`${CONFIG.serverUrl}/api/tts/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: line, provider, voice }),
+                    });
+                    if (!resp.ok) throw new Error(`tts ${resp.status}`);
+                    const blob = await resp.blob();
+                    this._playMutedAnnouncement(URL.createObjectURL(blob));
+                } catch (e) {
+                    console.warn('[Suno] failure announce TTS failed:', e);
                 }
             },
 

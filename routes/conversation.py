@@ -1882,19 +1882,11 @@ def _conversation_inner():
         except Exception:
             pass
 
-        # Recently FAILED Suno generations — agent must tell user something went wrong
-        try:
-            from routes.suno import failed_songs_queue
-            if failed_songs_queue:
-                _failed = failed_songs_queue[-3:]
-                _failed_lines = []
-                for f in _failed:
-                    label = f.get('brand') or f.get('title') or 'a track'
-                    reason = f.get('reason', 'unknown error')
-                    _failed_lines.append(f'{label!r} — {reason}')
-                context_parts.append(f'[Suno generation FAILED: {"; ".join(_failed_lines)} — apologize to user and offer to try again]')
-        except Exception:
-            pass
+        # Recently FAILED Suno generations are NOT injected here. This block used to append
+        # them to context_parts on every turn and nothing ever cleared the queue, so one failure
+        # would have been re-announced on every turn until a restart. Failures are now delivered
+        # ONCE as a [SYSTEM] prefix on the next real user turn, next to the completion note
+        # (search SUNO-REJECT-SURFACED below).
 
         # Available canvas pages (agent needs IDs for [CANVAS:page-id])
         try:
@@ -2235,6 +2227,10 @@ def _conversation_inner():
                     _suno_q.clear()
         except Exception as _e:
             logger.warning(f'Suno pending-note injection failed: {_e}')
+
+    # SUNO-REJECT-SURFACED (2026-09-29): see _suno_failure_prefix().
+    if user_message not in ('__session_start__',):
+        _suno_prefix = _suno_failure_prefix() + _suno_prefix
 
     _gateway_message_with_suno = _suno_prefix + _gateway_message if _suno_prefix else _gateway_message
     message_with_context = context_prefix + _gateway_message_with_suno if context_prefix else _gateway_message_with_suno
@@ -4615,3 +4611,42 @@ def stt_events():
         return jsonify({'ok': True})
     except Exception:
         return jsonify({'ok': False}), 500
+
+
+def _suno_failure_prefix() -> str:
+    """SUNO-REJECT-SURFACED (2026-09-29). Consume routes.suno.failed_songs_queue ONCE and
+    return a [SYSTEM] prefix for the next real user turn ('' when nothing failed).
+
+    A generation that did NOT go through — refused at submit (e.g. out of credits) or failed
+    during generation — must reach the agent so it can correct a "ready in 45 seconds" it
+    already said. Consuming here (not re-reading every turn) is the point: the old
+    context_parts block never cleared the queue.
+    """
+    try:
+        from routes import suno as _suno_mod
+        with _suno_mod._suno_lock:
+            _taken = list(_suno_mod.failed_songs_queue)[-3:]
+            del _suno_mod.failed_songs_queue[:]   # consume once
+    except Exception as _e:
+        logger.warning(f'Suno failure-note injection failed: {_e}')
+        return ''
+    if not _taken:
+        return ''
+    _fail_lines, _out_of_credits, _seen = [], False, set()
+    for f in _taken:
+        # the status poll AND the callback can both queue the same job
+        if f.get('job_id') in _seen:
+            continue
+        _seen.add(f.get('job_id'))
+        _label = f.get('title') or f.get('brand') or f"a {f.get('kind') or 'song'}"
+        _reason = str(f.get('reason') or 'unknown error')
+        _out_of_credits = _out_of_credits or 'credit' in _reason.lower()
+        _fail_lines.append(f'{_label!r} ({_reason[:160]})')
+    _hint = ("The platform's music credits are used up, so trying again right now will fail "
+             "the same way — offer to make it once that is sorted."
+             if _out_of_credits else "Offer to try again.")
+    return (
+        f'[SYSTEM: Music generation you started did NOT go through: {"; ".join(_fail_lines)}. '
+        f'If you told the user it was on its way, correct that now: say plainly that it did '
+        f'not go through, with no technical detail and no time promise. {_hint}]\n\n'
+    )
