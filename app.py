@@ -178,6 +178,8 @@ def create_app(config_override: dict = None):
                                     # All other /api/plugins routes (install/uninstall/restart/config)
                                     # are state-changing admin operations and require admin auth below.
             '/api/vault/oauth/callback/',  # OAuth callbacks — redirected from external providers
+            '/api/vault/oauth/relay/',     # single-callback OAuth relay (GET only): forwards code+state to
+                                           # an allow-listed tenant callback; reads no vault, exchanges nothing
             '/plugins/',      # Plugin static assets — face scripts, CSS, previews
             '/api/theme',     # theme config — loaded before Clerk init
             '/faces/custom/', # custom face HTML — loaded in iframe by face-box

@@ -8,7 +8,7 @@ import json
 import logging
 import os
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, redirect, request
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,34 @@ def update_credential(cred_id):
         if not fields:
             return jsonify({'ok': True, 'message': 'No change (masked values)'})
 
-    to_restart = set_credential(username, cred_id, value=value, fields=fields)
+    # Validate-before-save for credentials the provider can check (Supabase).
+    # FAIL = the provider itself rejected the values: not saved unless the user
+    # explicitly forces it. CANNOT-TELL (provider unreachable) saves, marked
+    # unverified. Either way the verdict is stored with the values, so the card
+    # can never read "working" for a key the provider rejected.
+    validation = None
+    check = None
+    if fields:
+        check = _validate_before_save(username, cred_id, fields)
+        if check is not None:
+            if check['verdict'] == 'fail' and not data.get('force'):
+                return jsonify({
+                    'ok': False,
+                    'saved': False,
+                    'verdict': 'fail',
+                    'message': check['message'],
+                    'checks': check.get('checks', []),
+                    'can_force': True,
+                }), 422
+            fields = check['fields']
+            validation = check['record']
+
+    to_restart = set_credential(username, cred_id, value=value, fields=fields,
+                                validation=validation)
+    extra = {}
+    if check is not None:
+        extra = {'verdict': check['verdict'], 'verdict_message': check['message'],
+                 'note': check.get('note', '')}
 
     if to_restart:
         containers = sorted(to_restart)
@@ -123,13 +150,44 @@ def update_credential(cred_id):
             'message': msg,
             'restarting': containers,
             'eta_seconds': 15,
+            **extra,
         })
     return jsonify({
         'ok': True,
         'message': f'Credential {cred_id} saved (no container restart needed)',
         'restarting': [],
         'eta_seconds': 0,
+        **extra,
     })
+
+
+def _validate_before_save(username: str, cred_id: str, fields: dict):
+    """Run the credential's validator on (saved values + this save). Returns
+    None when the credential has no validator, else {verdict, message, checks,
+    fields (possibly normalized), record, note}."""
+    from services.vault import (get_catalog_credential, read_vault, _has_validator,
+                                _resolved_fields, validate_credential_fields)
+    from services.connectors import validation_record
+    cat = get_catalog_credential(cred_id)
+    if not cat or not _has_validator(cat):
+        return None
+    vault_entry = read_vault(username).get('credentials', {}).get(cred_id, {}) or {}
+    merged = {**_resolved_fields(cat, vault_entry), **fields}
+    v = validate_credential_fields(cred_id, merged) or {}
+    fields = dict(fields)
+    # Save the URL the check actually used (dashboard link / trailing /rest/v1 removed)
+    if 'url' in fields and v.get('url') and v['url'] != fields['url']:
+        fields['url'] = v['url']
+        merged['url'] = v['url']
+    return {
+        'verdict': v.get('verdict', 'cannot_tell'),
+        'message': v.get('message', ''),
+        'checks': [{'field': c.get('field'), 'verdict': c.get('verdict'), 'status': c.get('status'),
+                    'message': c.get('message')} for c in v.get('checks', [])],
+        'note': v.get('note', ''),
+        'fields': fields,
+        'record': validation_record(v, merged),
+    }
 
 
 @vault_bp.route('/api/vault/credentials', methods=['POST'])
@@ -211,7 +269,7 @@ def oauth_callback(provider):
     This endpoint is hit by the OAuth provider after user consent.
     Returns HTML that closes the popup and notifies the parent window.
     """
-    from services.vault import exchange_oauth_code, verify_oauth_nonce
+    from services.vault import exchange_oauth_code, consume_oauth_nonce
 
     code = request.args.get('code', '')
     state_raw = request.args.get('state', '{}')
@@ -237,15 +295,121 @@ def oauth_callback(provider):
     # F-6 (2026-07-15): verify the single-use CSRF state nonce BEFORE exchanging the code.
     # Without this an attacker could forge this callback and connect their own account
     # into the victim's vault (OAuth login/connection CSRF).
-    if not verify_oauth_nonce(username, cred_id, state.get('nonce', '')):
+    nonce_entry = consume_oauth_nonce(username, cred_id, state.get('nonce', ''))
+    if nonce_entry is None:
         return _oauth_callback_html(False, 'Invalid or expired OAuth state (CSRF check failed) — please retry the connection.')
 
-    result = exchange_oauth_code(cred_id, code, username)
+    # PKCE: the verifier was stored with the nonce at authorize time and never
+    # left this tenant, so a code delivered anywhere else is useless.
+    result = exchange_oauth_code(cred_id, code, username,
+                                 code_verifier=nonce_entry.get('cv', ''))
 
     if result.get('ok'):
         return _oauth_callback_html(True, result.get('account', 'Connected'))
     else:
         return _oauth_callback_html(False, result.get('error', 'Unknown error'))
+
+
+@vault_bp.route('/api/vault/oauth/relay/<provider>', methods=['GET'])
+def oauth_relay(provider):
+    """Single platform callback for providers that accept one (or a few)
+    redirect URIs. Forwards the browser, with code + state untouched, to the
+    tenant named in state — only if that tenant's domain is on the
+    OAUTH_RELAY_ALLOWED_DOMAINS list. Public (like the callback): the provider
+    redirects here without a Clerk session. It holds no secret, reads no vault
+    and exchanges nothing; the tenant callback still checks its own single-use
+    nonce (F-6) and PKCE verifier.
+    """
+    from services.connectors import relay_target
+    target, why = relay_target(provider, request.args)
+    if not target:
+        body, _status, headers = _oauth_callback_html(False, why)
+        return body, 400, headers
+    resp = redirect(target, code=302)
+    resp.headers['Cache-Control'] = 'no-store'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# One-click connectors
+# ---------------------------------------------------------------------------
+
+@vault_bp.route('/api/vault/connectors', methods=['GET'])
+def list_connectors():
+    """Card data for the Connectors view: every OAuth service, its connected
+    account, and — for connectors that fill another credential (Supabase) —
+    that credential's current verdict."""
+    from services.vault import get_credentials_status
+    from services.connectors import relay_base_url
+    username = _get_username()
+    creds = get_credentials_status(username)
+    by_id = {c['id']: c for c in creds}
+    out = []
+    for c in creds:
+        if c.get('type') != 'oauth2':
+            continue
+        item = {
+            'id': c['id'],
+            'name': c.get('name', c['id']),
+            'description': c.get('description', ''),
+            'unlocks': c.get('unlocks', '') or c.get('description', ''),
+            'icon': c.get('icon', ''),
+            'provider': (c.get('oauth') or {}).get('provider', ''),
+            'connected': bool(c.get('has_value')),
+            'account': c.get('masked_value', '') if c.get('has_value') else '',
+            'account_detail': c.get('account_detail'),
+            'platform_configured': bool(c.get('platform_configured')),
+            'fills': c.get('fills', ''),
+        }
+        target = by_id.get(c.get('fills') or '')
+        if target:
+            item['target'] = {
+                'id': target['id'],
+                'name': target.get('name', target['id']),
+                'has_value': bool(target.get('has_value')),
+                'validation': target.get('validation'),
+                'oauth_project': target.get('oauth_project'),
+            }
+        out.append(item)
+    # Connected first, then available, then not yet enabled; catalog order within.
+    out.sort(key=lambda x: (0 if x['connected'] else 1 if x['platform_configured'] else 2))
+    relay = relay_base_url()
+    from urllib.parse import urlparse
+    relay_origin = ''
+    if relay:
+        p = urlparse(relay)
+        relay_origin = f'{p.scheme}://{p.netloc}'
+    return jsonify({'connectors': out, 'relay_origin': relay_origin})
+
+
+def _connector_error(exc):
+    return jsonify({'ok': False, 'code': exc.code, 'message': exc.message}), exc.status
+
+
+@vault_bp.route('/api/vault/connectors/supabase/projects', methods=['GET'])
+def supabase_projects():
+    """Organizations + projects the Supabase connection can see, and whether
+    the currently saved Project URL is one of them."""
+    from services.connectors import ConnectorError, supabase_list_projects
+    try:
+        return jsonify(supabase_list_projects(_get_username()))
+    except ConnectorError as exc:
+        return _connector_error(exc)
+
+
+@vault_bp.route('/api/vault/connectors/supabase/select', methods=['POST'])
+def supabase_select():
+    """Body {"ref": "<project ref>"}: fill the supabase credential (URL,
+    anon key, service role key) from that project via the Management API."""
+    from services.connectors import ConnectorError, supabase_select_project
+    data = request.get_json(silent=True) or {}
+    try:
+        result = supabase_select_project(_get_username(), data.get('ref', ''))
+    except ConnectorError as exc:
+        return _connector_error(exc)
+    result['eta_seconds'] = 15 if result.get('restarting') else 0
+    return jsonify(result)
 
 
 @vault_bp.route('/api/vault/oauth/<cred_id>/disconnect', methods=['POST'])
@@ -386,7 +550,90 @@ _PLATFORM_PROVIDERS = [
             'Products tab → request Sign In with LinkedIn + Share on LinkedIn.',
         ],
     },
+    # ── One-click connectors (config/connectors-catalog.json) ──────────────
+    {
+        'id': 'supabase',
+        'name': 'Supabase',
+        'description': 'Enables one-click "Connect Supabase": clients pick the project their app uses and the project URL and keys fill in automatically. No pasting.',
+        'console_url': 'https://supabase.com/dashboard/org/_/apps',
+        'console_create_url': 'https://supabase.com/dashboard/org/_/apps',
+        'docs_url': 'https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration',
+        'env_vars': {
+            'client_id': 'SUPABASE_OAUTH_CLIENT_ID',
+            'client_secret': 'SUPABASE_OAUTH_CLIENT_SECRET',
+        },
+        'enables_credentials': ['supabase_connect'],
+        'scopes_note': 'Scopes are set on the app in Supabase, not sent in the URL. Tick exactly: Organizations read, Projects read, Secrets read.',
+        'setup_steps': [
+            'In the Supabase dashboard, open your organization settings, then OAuth Apps, then Add application.',
+            'Name it, set the website URL, and add the callback URL(s) from this page. Supabase accepts several; all must be https.',
+            'Scopes: Organizations read, Projects read, Secrets read. Nothing else is needed.',
+            'Confirm, then copy the Client ID and Client Secret below and click Save.',
+        ],
+    },
+    {
+        'id': 'github',
+        'name': 'GitHub',
+        'description': 'Enables one-click "Connect GitHub" so a builder can read and push code in the client\'s repositories.',
+        'console_url': 'https://github.com/settings/developers',
+        'console_create_url': 'https://github.com/settings/applications/new',
+        'docs_url': 'https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps',
+        'env_vars': {
+            'client_id': 'GITHUB_OAUTH_CLIENT_ID',
+            'client_secret': 'GITHUB_OAUTH_CLIENT_SECRET',
+        },
+        'enables_credentials': ['github'],
+        'scopes_note': 'Requested when the client connects: repo, read:user.',
+        'setup_steps': [
+            'GitHub: Settings, Developer settings, OAuth Apps, New OAuth App (an organization can own it instead).',
+            'Homepage URL: your platform site.',
+            'Authorization callback URL: the URL from this page. GitHub allows up to 10 per app.',
+            'Leave "Expire user access tokens" on; tokens are refreshed automatically.',
+            'Generate a client secret, copy the Client ID and secret below, and click Save.',
+        ],
+    },
+    {
+        'id': 'netlify',
+        'name': 'Netlify',
+        'description': 'Enables one-click "Connect Netlify" so a builder can manage the client\'s sites, deploys and environment variables.',
+        'console_url': 'https://app.netlify.com/user/applications',
+        'console_create_url': 'https://app.netlify.com/user/applications',
+        'docs_url': 'https://docs.netlify.com/api-and-cli-guides/api-guides/get-started-with-api/',
+        'env_vars': {
+            'client_id': 'NETLIFY_OAUTH_CLIENT_ID',
+            'client_secret': 'NETLIFY_OAUTH_CLIENT_SECRET',
+        },
+        'enables_credentials': ['netlify_connect'],
+        'scopes_note': 'Netlify has no scopes: a connected token can do anything the user can do on Netlify.',
+        'setup_steps': [
+            'Netlify: User settings, Applications, OAuth applications, New OAuth app.',
+            'Redirect URI: the URL from this page.',
+            'Copy the Client ID and Secret below and click Save.',
+        ],
+    },
 ]
+
+
+def _relay_providers() -> set:
+    """OAuth providers whose catalog entries use the single-callback relay."""
+    from services.vault import get_platform_catalog
+    return {
+        (c.get('oauth') or {}).get('provider', '')
+        for c in get_platform_catalog()
+        if c.get('type') == 'oauth2' and (c.get('oauth') or {}).get('redirect') == 'relay'
+    }
+
+
+def _redirect_note(provider_id: str) -> str:
+    from services.connectors import relay_base_url
+    if provider_id not in _relay_providers():
+        return ''
+    if relay_base_url():
+        return ('One URL for every client. The platform relay forwards each sign-in back to the '
+                'client that started it (allow-list: OAUTH_RELAY_ALLOWED_DOMAINS).')
+    return ('OAUTH_RELAY_BASE_URL is not set, so this lists one URL per client. GitHub allows 10 '
+            'callback URLs and Netlify one: set OAUTH_RELAY_BASE_URL + OAUTH_RELAY_ALLOWED_DOMAINS '
+            'in .platform-oauth.env to register a single URL instead.')
 
 
 def _platform_oauth_env_path():
@@ -441,9 +688,17 @@ def _write_platform_oauth_env(updates: dict) -> bool:
 def _redirect_uris_for_provider(provider_id: str) -> list[str]:
     """Build the redirect URI list for a provider, one per live client.
     Reads /mnt/system/base/registry.json if available, falls back to
-    listing /mnt/clients/<user> dirs."""
+    listing /mnt/clients/<user> dirs.
+
+    Relay providers (catalog oauth.redirect == "relay") with
+    OAUTH_RELAY_BASE_URL set register exactly one URI: the relay."""
     import os
     from pathlib import Path
+    if provider_id in _relay_providers():
+        from services.connectors import relay_redirect_uri
+        relayed = relay_redirect_uri(provider_id)
+        if relayed:
+            return [relayed]
     registry_path = Path('/mnt/system/base/registry.json')
     domains = []
     if registry_path.is_file():
@@ -500,6 +755,8 @@ def platform_setup_get():
             'client_secret_masked': masked_secret,
             'has_secret': bool(csec_val),
             'redirect_uris': _redirect_uris_for_provider(p['id']),
+            'redirect_note': _redirect_note(p['id']),
+            'scopes_note': p.get('scopes_note', ''),
         })
 
     return jsonify({
@@ -603,7 +860,11 @@ def _oauth_callback_html(success: bool, message: str) -> str:
 <script>
 if (window.opener) {{
     window.opener.postMessage({{type:'oauth_callback',status:'{status}',message:{safe_js_message}}}, '*');
+    setTimeout(function(){{ window.close(); }}, 2000);
+}} else {{
+    // Opened as a tab (phones, popup blockers) or cut off from the opener by the
+    // provider's Cross-Origin-Opener-Policy: go back to the Connectors view.
+    setTimeout(function(){{ window.close(); location.replace('/admin#connectors'); }}, 2000);
 }}
-setTimeout(function(){{ window.close(); }}, 2000);
 </script>
 </body></html>""", 200, {'Content-Type': 'text/html'}

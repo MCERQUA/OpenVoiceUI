@@ -222,6 +222,55 @@ select{cursor:pointer}
 .af-list{overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--panel2)}
 .af-editor-wrap{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .af-editor{flex:1;background:var(--bg);border:none;outline:none;resize:none;padding:12px;font-family:var(--mono);font-size:12px;color:var(--text);line-height:1.6;min-height:250px}
+/* -- PANEL: Connectors (one-click OAuth accounts, no keys to paste) -- */
+.cx-intro{font-size:13px;color:var(--dim);margin:-6px 0 16px;line-height:1.5;max-width:720px}
+.cx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.cx-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.cx-card.cx-on{border-color:rgba(59,130,246,.55)}
+.cx-head{display:flex;align-items:center;gap:12px;min-width:0}
+.cx-logo{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--panel3);border:1px solid var(--border);font-weight:700;font-size:18px;color:#3b82f6}
+.cx-logo svg{width:24px;height:24px;display:block}
+.cx-title{flex:1;min-width:0}
+.cx-name{font-size:15px;font-weight:600;color:var(--bright);line-height:1.3}
+.cx-pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;white-space:nowrap;margin-top:3px}
+.cx-pill.on{background:var(--green-bg);color:var(--green)}
+.cx-pill.off{background:var(--panel3);color:var(--dim)}
+.cx-pill.na{background:transparent;color:var(--subtle);border:1px dashed var(--border)}
+.cx-unlocks{font-size:13px;color:var(--text);line-height:1.5}
+.cx-account{font-size:12px;color:var(--dim);overflow-wrap:anywhere;line-height:1.5}
+.cx-account b{color:var(--text);font-weight:600}
+.cx-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto}
+.cx-btn{min-height:44px;padding:0 18px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;border:1px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;transition:background .15s,border-color .15s}
+.cx-btn.primary{background:#3b82f6;color:#fff}
+.cx-btn.primary:hover{background:#2563eb}
+.cx-btn.ghost{background:transparent;color:var(--text);border-color:var(--border)}
+.cx-btn.ghost:hover{border-color:var(--dim)}
+.cx-btn:disabled,.cx-btn:disabled:hover{background:var(--panel3);color:var(--subtle);border-color:var(--border);cursor:not-allowed}
+.cx-btn:focus-visible,.cx-proj:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
+.cx-link{background:none;border:none;color:#3b82f6;cursor:pointer;font-size:12px;padding:0;min-height:0;font-family:inherit;text-align:left}
+.cx-note{font-size:12px;padding:10px 12px;border-radius:8px;line-height:1.5}
+.cx-note.ok{background:var(--green-bg);color:var(--green)}
+.cx-note.bad{background:var(--red-bg);color:var(--red)}
+.cx-note.warn{background:var(--orange-bg);color:var(--orange)}
+.cx-note.info{background:rgba(59,130,246,.1);color:#93c5fd}
+.cx-picker{display:flex;flex-direction:column;gap:8px}
+.cx-picker-title{font-size:12px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.6px}
+.cx-proj{display:flex;align-items:center;gap:10px;min-height:52px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2);cursor:pointer;text-align:left;color:var(--text);width:100%;font-family:inherit}
+.cx-proj:hover{border-color:var(--dim)}
+.cx-proj[aria-checked="true"]{border-color:#3b82f6;background:rgba(59,130,246,.12)}
+.cx-radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--dim);flex-shrink:0}
+.cx-proj[aria-checked="true"] .cx-radio{border-color:#3b82f6;box-shadow:inset 0 0 0 4px var(--panel2);background:#3b82f6}
+.cx-proj-body{flex:1;min-width:0}
+.cx-proj-name{font-weight:600;font-size:14px;overflow-wrap:anywhere}
+.cx-proj-meta{font-size:11px;color:var(--dim);overflow-wrap:anywhere}
+.cx-tag{font-size:10px;font-weight:600;padding:1px 7px;border-radius:10px;background:rgba(59,130,246,.15);color:#93c5fd;white-space:nowrap}
+.cx-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.35);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:20px}
+.cx-banner-text{flex:1;min-width:200px;font-size:13px;color:var(--text);line-height:1.5}
+.cx-verdict{font-size:12px;margin:0 12px 6px;padding:8px 10px;border-radius:6px;line-height:1.5}
+@media(max-width:480px){
+  .cx-grid{grid-template-columns:1fr}
+  .cx-actions .cx-btn{flex:1 1 auto}
+}
 /* ── Mobile: sidebar overlay + stacked layouts ── */
 @media(max-width:768px){
   /* App grid: single column, sidebar becomes overlay */
@@ -404,6 +453,7 @@ select{cursor:pointer}
     <div class="nav-item" id="nav-providers" onclick="show('providers')"><span class="nav-icon">&#x26A1;</span><span class="nav-text">Provider Config</span></div>
     <div class="nav-item" id="nav-tts" onclick="show('tts')"><span class="nav-icon">&#x1F5E3;</span><span class="nav-text">Voice: TTS</span></div>
     <div class="nav-item" id="nav-stt" onclick="show('stt')"><span class="nav-icon">&#x1F3A4;</span><span class="nav-text">Voice: STT &amp; Wake</span></div>
+    <div class="nav-item" id="nav-connectors" onclick="show('connectors')"><span class="nav-icon">&#x21C4;</span><span class="nav-text">Connectors</span></div>
     <div class="nav-item" id="nav-connections" onclick="show('connections')"><span class="nav-icon">&#x1F517;</span><span class="nav-text">Connections</span></div>
     <div class="nav-item" id="nav-platform-setup" onclick="show('platform-setup')"><span class="nav-icon">&#x2699;</span><span class="nav-text">Platform Setup</span></div>
   </div>
@@ -585,6 +635,15 @@ select{cursor:pointer}
       <div class="ph"><div class="ph-title">Voice &mdash; Speech to Text &amp; Wake</div><div class="ph-sub">STT provider for the active agent, wake-word phrases, and a live per-provider connection test. Providers are sourced from the Service Catalog.</div></div>
       <div class="ph-row"><button class="btn btn-o" onclick="STT.load()">&#8634; Refresh</button><span id="stt-active" style="font-size:12px;color:var(--dim);align-self:center;margin-left:8px"></span></div>
       <div id="stt-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- CONNECTORS — one-click OAuth accounts; the key-pasting list below stays as the fallback -->
+  <div class="panel" id="panel-connectors">
+    <div class="panel-inner">
+      <div class="ph"><div class="ph-title">Connectors</div><div class="ph-sub">Connect your accounts in one click.</div></div>
+      <p class="cx-intro">Press Connect, sign in with the service and approve access. That is it: no keys to find or paste. You can disconnect at any time.</p>
+      <div id="connectors-content"><div class="loading"><div class="spin"></div>Loading...</div></div>
     </div>
   </div>
 
@@ -797,6 +856,7 @@ const loaders = {
   providers:()=>Providers.load(),
   tts:()=>TTS.load(),
   stt:()=>STT.load(),
+  connectors:()=>Connectors.load(),
   connections:()=>Connections.load(),
   'platform-setup':()=>PlatformSetup.load(),
   system:()=>System.load(),
@@ -2608,6 +2668,261 @@ const STT={
 };
 
 
+const CX_ICONS={
+  supabase:{c:'#3FCF8E',d:'M11.9 1.036c-.015-.986-1.26-1.41-1.874-.637L.764 12.05C-.33 13.427.65 15.455 2.409 15.455h9.579l.113 7.51c.014.985 1.259 1.408 1.873.636l9.262-11.653c1.093-1.375.113-3.403-1.645-3.403h-9.642z'},
+  github:{c:'#E6EDF3',d:'M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'},
+  netlify:{c:'#00C7B7',d:'M6.49 19.04h-.23L5.13 17.9v-.23l1.73-1.71h1.2l.15.15v1.2L6.5 19.04ZM5.13 6.31V6.1l1.13-1.13h.23L8.2 6.68v1.2l-.15.15h-1.2L5.13 6.31Zm9.96 9.09h-1.65l-.14-.13v-3.83c0-.68-.27-1.2-1.1-1.23-.42 0-.9 0-1.43.02l-.07.08v4.96l-.14.14H8.9l-.13-.14V8.73l.13-.14h3.7a2.6 2.6 0 0 1 2.61 2.6v4.08l-.13.14Zm-8.37-2.44H.14L0 12.82v-1.64l.14-.14h6.58l.14.14v1.64l-.14.14Zm17.14 0h-6.58l-.14-.14v-1.64l.14-.14h6.58l.14.14v1.64l-.14.14ZM11.05 6.55V1.64l.14-.14h1.65l.14.14v4.9l-.14.14h-1.65l-.14-.13Zm0 15.81v-4.9l.14-.14h1.65l.14.13v4.91l-.14.14h-1.65l-.14-.14Z'},
+  google:{c:'#4285F4',d:'M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z'},
+  googleanalytics:{c:'#E37400',d:'M22.84 2.9982v17.9987c.0086 1.6473-1.3197 2.9897-2.967 2.9984a2.9808 2.9808 0 01-.3677-.0208c-1.528-.226-2.6477-1.5558-2.6105-3.1V3.1204c-.0369-1.5458 1.0856-2.8762 2.6157-3.1 1.6361-.1915 3.1178.9796 3.3093 2.6158.014.1201.0208.241.0202.3619zM4.1326 18.0548c-1.6417 0-2.9726 1.331-2.9726 2.9726C1.16 22.6691 2.4909 24 4.1326 24s2.9726-1.3309 2.9726-2.9726-1.331-2.9726-2.9726-2.9726zm7.8728-9.0098c-.0171 0-.0342 0-.0513.0003-1.6495.0904-2.9293 1.474-2.891 3.1256v7.9846c0 2.167.9535 3.4825 2.3505 3.763 1.6118.3266 3.1832-.7152 3.5098-2.327.04-.1974.06-.3983.0593-.5998v-8.9585c.003-1.6474-1.33-2.9852-2.9773-2.9882z'},
+  googlesearchconsole:{c:'#458CF5',d:'M8.548 1.156L6.832 2.872v1.682h1.716zm0 3.398v.035H6.832v-.035H3.386L0 7.844v3.577h2.826V8.94c0-.525.429-.954.954-.954h16.476c.525 0 .954.43.954.954v2.48h2.754V7.844l-3.386-3.29H17.3v.035h-1.717v-.035zm7.035 0H17.3V2.872l-1.717-1.716zM8.679 1.188V2.84h6.773V1.188zm11.471 7.07a.834.834 0 00-.132.01l-.543.002c-5.216.014-10.432-.008-15.648.01-.435-.063-.794.436-.716.883v2.264h17.812c-.016-.888.045-1.782-.034-2.666-.104-.342-.427-.502-.739-.502zm-15.422.634a.689.698 0 01.689.698.689.698 0 01-.689.697.689.698 0 01-.688-.697.689.698 0 01.688-.698zm2.134 0a.689.698 0 01.689.698.689.698 0 01-.689.697.689.698 0 01-.688-.697.689.698 0 01.688-.698zM.036 11.645v9.156c0 1.05.858 1.908 1.907 1.908h.883V11.645zm21.174 0v11.064h.882c1.05 0 1.908-.858 1.908-1.908v-9.156zM4.057 13.133v6.85h6.137v-6.85zm13.243.021v3.777l-1.708.977-1.708-.977v-3.758a4.006 4.006 0 000 7.23v2.441h3.457v-2.442a4.006 4.006 0 00-.041-7.248zm-13.243 8.26v1.43h7.925v-1.43z'},
+  facebook:{c:'#0866FF',d:'M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z'},
+  instagram:{c:'#FF0069',d:'M7.0301.084c-1.2768.0602-2.1487.264-2.911.5634-.7888.3075-1.4575.72-2.1228 1.3877-.6652.6677-1.075 1.3368-1.3802 2.127-.2954.7638-.4956 1.6365-.552 2.914-.0564 1.2775-.0689 1.6882-.0626 4.947.0062 3.2586.0206 3.6671.0825 4.9473.061 1.2765.264 2.1482.5635 2.9107.308.7889.72 1.4573 1.388 2.1228.6679.6655 1.3365 1.0743 2.1285 1.38.7632.295 1.6361.4961 2.9134.552 1.2773.056 1.6884.069 4.9462.0627 3.2578-.0062 3.668-.0207 4.9478-.0814 1.28-.0607 2.147-.2652 2.9098-.5633.7889-.3086 1.4578-.72 2.1228-1.3881.665-.6682 1.0745-1.3378 1.3795-2.1284.2957-.7632.4966-1.636.552-2.9124.056-1.2809.0692-1.6898.063-4.948-.0063-3.2583-.021-3.6668-.0817-4.9465-.0607-1.2797-.264-2.1487-.5633-2.9117-.3084-.7889-.72-1.4568-1.3876-2.1228C21.2982 1.33 20.628.9208 19.8378.6165 19.074.321 18.2017.1197 16.9244.0645 15.6471.0093 15.236-.005 11.977.0014 8.718.0076 8.31.0215 7.0301.0839m.1402 21.6932c-1.17-.0509-1.8053-.2453-2.2287-.408-.5606-.216-.96-.4771-1.3819-.895-.422-.4178-.6811-.8186-.9-1.378-.1644-.4234-.3624-1.058-.4171-2.228-.0595-1.2645-.072-1.6442-.079-4.848-.007-3.2037.0053-3.583.0607-4.848.05-1.169.2456-1.805.408-2.2282.216-.5613.4762-.96.895-1.3816.4188-.4217.8184-.6814 1.3783-.9003.423-.1651 1.0575-.3614 2.227-.4171 1.2655-.06 1.6447-.072 4.848-.079 3.2033-.007 3.5835.005 4.8495.0608 1.169.0508 1.8053.2445 2.228.408.5608.216.96.4754 1.3816.895.4217.4194.6816.8176.9005 1.3787.1653.4217.3617 1.056.4169 2.2263.0602 1.2655.0739 1.645.0796 4.848.0058 3.203-.0055 3.5834-.061 4.848-.051 1.17-.245 1.8055-.408 2.2294-.216.5604-.4763.96-.8954 1.3814-.419.4215-.8181.6811-1.3783.9-.4224.1649-1.0577.3617-2.2262.4174-1.2656.0595-1.6448.072-4.8493.079-3.2045.007-3.5825-.006-4.848-.0608M16.953 5.5864A1.44 1.44 0 1 0 18.39 4.144a1.44 1.44 0 0 0-1.437 1.4424M5.8385 12.012c.0067 3.4032 2.7706 6.1557 6.173 6.1493 3.4026-.0065 6.157-2.7701 6.1506-6.1733-.0065-3.4032-2.771-6.1565-6.174-6.1498-3.403.0067-6.156 2.771-6.1496 6.1738M8 12.0077a4 4 0 1 1 4.008 3.9921A3.9996 3.9996 0 0 1 8 12.0077'},
+  quickbooks:{c:'#2CA01C',d:'M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm.642 4.1335c.9554 0 1.7296.776 1.7296 1.7332v9.0667h1.6c1.614 0 2.9275-1.3156 2.9275-2.933 0-1.6173-1.3136-2.9333-2.9276-2.9333h-.6654V7.3334h.6654c2.5722 0 4.6577 2.0897 4.6577 4.667 0 2.5774-2.0855 4.6666-4.6577 4.6666H12.642zM7.9837 7.333h3.3291v12.533c-.9555 0-1.73-.7759-1.73-1.7332V9.0662H7.9837c-1.6146 0-2.9277 1.316-2.9277 2.9334 0 1.6175 1.3131 2.9333 2.9277 2.9333h.6654v1.7332h-.6654c-2.5725 0-4.6577-2.0892-4.6577-4.6665 0-2.5771 2.0852-4.6666 4.6577-4.6666Z'}
+};
+// Brand marks: Simple Icons (CC0-1.0, simpleicons.org). Unknown services get a letter tile.
+const CX_ICON_BY_ID={google_business:'google',google_analytics:'googleanalytics',google_search_console:'googlesearchconsole',facebook:'facebook',instagram:'instagram',quickbooks:'quickbooks',supabase_connect:'supabase',github:'github',netlify_connect:'netlify'};
+
+// Connectors — one-click OAuth accounts (ChatGPT / Lovable style). The key-pasting
+// Connections list stays as the fallback. All state lives on the server: this
+// object only renders what /api/vault/connectors returns.
+const Connectors={
+  data:null,
+  relayOrigin:'',
+  picker:{},          // cred id -> {loading, error, listing, sel, busy, result}
+  _pending:null,      // cred id of an OAuth popup in flight
+  _wired:false,
+  async load(){
+    const el=$('connectors-content');
+    if(!this.data) el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
+    this._wire();
+    try{
+      const r=await fetch('/api/vault/connectors');
+      if(!r.ok) throw new Error('Could not load connectors ('+r.status+')');
+      this.data=await r.json();
+      this.relayOrigin=this.data.relay_origin||'';
+      this.render();
+    }catch(e){
+      el.innerHTML='<div class="cx-note bad">'+esc(e.message)+'</div>';
+    }
+  },
+  _wire(){
+    if(this._wired) return;
+    this._wired=true;
+    window.addEventListener('message',e=>{
+      if(e.origin!==location.origin&&(!this.relayOrigin||e.origin!==this.relayOrigin)) return;
+      if(!e.data||e.data.type!=='oauth_callback'||!this._pending) return;
+      const id=this._pending; this._pending=null;
+      if(e.data.status==='success'){
+        toast('Connected'+(e.data.message?': '+e.data.message:''),'green');
+        this.load().then(()=>{
+          const c=this._find(id);
+          if(c&&c.fills==='supabase'&&c.connected) this.openPicker(id);
+        });
+      }else{
+        toast('Could not connect: '+(e.data.message||'unknown error'),'red');
+        this.load();
+      }
+    });
+    // Phones often open the sign-in as a tab: re-read state when the user comes back.
+    document.addEventListener('visibilitychange',()=>{
+      if(document.visibilityState==='visible'&&this._pending) this.load();
+    });
+  },
+  _find(id){return ((this.data&&this.data.connectors)||[]).find(c=>c.id===id)},
+  logo(c){
+    const ic=CX_ICONS[c.icon||CX_ICON_BY_ID[c.id]||''];
+    if(ic) return '<div class="cx-logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="'+ic.c+'"><path d="'+ic.d+'"/></svg></div>';
+    return '<div class="cx-logo" aria-hidden="true">'+esc((c.name||'?').charAt(0).toUpperCase())+'</div>';
+  },
+  render(){
+    const list=(this.data&&this.data.connectors)||[];
+    const el=$('connectors-content');
+    if(!list.length){el.innerHTML='<div class="empty">No connectors are available on this server yet.</div>';return}
+    el.innerHTML='<div class="cx-grid">'+list.map(c=>this.card(c)).join('')+'</div>';
+  },
+  card(c){
+    let pill,body='',actions='';
+    if(c.connected){
+      pill='<span class="cx-pill on">Connected</span>';
+      const orgs=(c.account_detail&&c.account_detail.orgs)||[];
+      body+='<div class="cx-account">'+(c.account?'Signed in as <b>'+esc(c.account)+'</b>':'Connected')+
+        (orgs.length?'<br>Organization: <b>'+esc(orgs.map(o=>o.name||o.slug).join(', '))+'</b>':'')+'</div>';
+      if(c.fills==='supabase') body+=this.supabaseBlock(c);
+      actions='<button class="cx-btn ghost" onclick="Connectors.disconnect(\''+esc(c.id)+'\')">Disconnect</button>';
+    }else if(c.platform_configured){
+      pill='<span class="cx-pill off">Not connected</span>';
+      actions='<button class="cx-btn primary" onclick="Connectors.connect(\''+esc(c.id)+'\')">Connect</button>';
+      if(c.fills==='supabase'&&c.target&&c.target.has_value) body+=this.verdictNote(c.target.validation,true,'Connect to fill in the right ones automatically.');
+    }else{
+      pill='<span class="cx-pill na">Not available yet</span>';
+      body+='<div class="cx-account">Your platform admin has not switched this one on yet. '+
+        '<button class="cx-link" onclick="show(\'platform-setup\')">Set it up</button></div>';
+      actions='<button class="cx-btn primary" disabled aria-disabled="true">Connect</button>';
+    }
+    return '<div class="cx-card'+(c.connected?' cx-on':'')+'" id="cx-card-'+esc(c.id)+'">'+
+      '<div class="cx-head">'+this.logo(c)+'<div class="cx-title"><div class="cx-name">'+esc(c.name)+'</div>'+pill+'</div></div>'+
+      '<div class="cx-unlocks">'+esc(c.unlocks||c.description||'')+'</div>'+
+      body+
+      '<div class="cx-actions">'+actions+'</div>'+
+    '</div>';
+  },
+  verdictNote(v,handEntered,hint){
+    if(!v) return '';
+    const pre=handEntered?'Your saved keys: ':'';
+    if(v.verdict==='pass') return '<div class="cx-note ok">'+esc(pre+(v.message||'Working.'))+'</div>';
+    if(v.verdict==='fail') return '<div class="cx-note bad">'+esc(pre+(v.message||'Rejected.'))+(hint?' '+esc(hint):'')+'</div>';
+    return '<div class="cx-note warn">'+esc(pre+(v.message||'Not verified yet.'))+'</div>';
+  },
+  supabaseBlock(c){
+    const t=c.target||{};
+    const p=this.picker[c.id];
+    let h='';
+    if(t.oauth_project&&t.oauth_project.name){
+      h+='<div class="cx-account">Project in use: <b>'+esc(t.oauth_project.name)+'</b>'+
+        (t.oauth_project.organization?' ('+esc(t.oauth_project.organization)+')':'')+'</div>';
+      h+=this.verdictNote(t.validation,false);
+    }else if(t.has_value){
+      h+='<div class="cx-note info">Your Supabase keys were typed in by hand. Pick the project your app uses to replace them with keys straight from Supabase.</div>';
+      h+=this.verdictNote(t.validation,true,'Choosing your project below fills in the right ones.');
+    }else{
+      h+='<div class="cx-note info">One more step: pick the project your app uses.</div>';
+    }
+    if(p) h+=this.pickerHtml(c.id,p);
+    else h+='<div><button class="cx-btn primary" onclick="Connectors.openPicker(\''+esc(c.id)+'\')">'+(t.oauth_project?'Change project':'Choose project')+'</button></div>';
+    return h;
+  },
+  pickerHtml(id,p){
+    if(p.loading) return '<div class="loading"><div class="spin"></div>Loading your projects...</div>';
+    if(p.error) return '<div class="cx-note bad">'+esc(p.error)+'</div><div><button class="cx-btn ghost" onclick="Connectors.openPicker(\''+esc(id)+'\')">Try again</button></div>';
+    const L=p.listing||{projects:[],current:{}};
+    let h='<div class="cx-picker" role="radiogroup" aria-label="Supabase projects"><div class="cx-picker-title">Which project does your app use?</div>';
+    const cur=L.current||{};
+    if(cur.ref&&!cur.in_list){
+      h+='<div class="cx-note warn">The project your saved URL points to ('+esc(cur.ref)+') is not in the Supabase organization you connected. '+
+        'If your app runs on that project, it belongs to another Supabase account, for example one a site builder created for you. '+
+        'Sign in to that account (or ask its owner to invite you), then connect again.</div>';
+    }
+    if(!L.projects.length){
+      h+='<div class="cx-note warn">There are no projects in this Supabase organization.</div>';
+    }
+    for(const pr of L.projects){
+      const on=p.sel===pr.ref;
+      const paused=pr.status&&pr.status!=='ACTIVE_HEALTHY'&&pr.status!=='COMING_UP';
+      h+='<button type="button" class="cx-proj" role="radio" aria-checked="'+(on?'true':'false')+'" onclick="Connectors.choose(\''+esc(id)+'\',\''+esc(pr.ref)+'\')">'+
+        '<span class="cx-radio" aria-hidden="true"></span>'+
+        '<span class="cx-proj-body"><span class="cx-proj-name">'+esc(pr.name)+'</span><br>'+
+        '<span class="cx-proj-meta">'+esc([pr.organization_name,pr.region,pr.ref].filter(Boolean).join(' · '))+(paused?' · '+esc(pr.status.toLowerCase().replace(/_/g,' ')):'')+'</span></span>'+
+        (cur.ref===pr.ref?'<span class="cx-tag">Saved now</span>':'')+
+      '</button>';
+    }
+    if(p.result) h+=p.result;
+    h+='<div class="cx-actions">'+
+      '<button class="cx-btn primary" '+(p.sel&&!p.busy?'':'disabled ')+'onclick="Connectors.useProject(\''+esc(id)+'\')">'+(p.busy?'Filling in keys...':'Use this project')+'</button>'+
+      '<button class="cx-btn ghost" onclick="Connectors.closePicker(\''+esc(id)+'\')">Cancel</button>'+
+    '</div></div>';
+    return h;
+  },
+  _rerenderCard(id){
+    const c=this._find(id);const el=$('cx-card-'+id);
+    if(c&&el) el.outerHTML=this.card(c);
+  },
+  async openPicker(id){
+    this.picker[id]={loading:true};
+    this._rerenderCard(id);
+    try{
+      const r=await fetch('/api/vault/connectors/supabase/projects');
+      const d=await r.json();
+      if(!r.ok||!d.ok) throw new Error(d.message||('Could not list projects ('+r.status+')'));
+      const c=this._find(id);
+      const pre=(c&&c.target&&c.target.oauth_project&&c.target.oauth_project.ref)||(d.current&&d.current.in_list?d.current.ref:'')||(d.projects.length===1?d.projects[0].ref:'');
+      this.picker[id]={listing:d,sel:pre||''};
+    }catch(e){
+      this.picker[id]={error:e.message};
+    }
+    this._rerenderCard(id);
+  },
+  choose(id,ref){
+    const p=this.picker[id];if(!p||p.busy)return;
+    p.sel=ref;p.result='';
+    this._rerenderCard(id);
+  },
+  closePicker(id){delete this.picker[id];this._rerenderCard(id)},
+  async useProject(id){
+    const p=this.picker[id];if(!p||!p.sel||p.busy)return;
+    p.busy=true;p.result='';this._rerenderCard(id);
+    try{
+      const r=await fetch('/api/vault/connectors/supabase/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ref:p.sel})});
+      const d=await r.json();
+      if(!r.ok||!d.ok) throw new Error(d.message||('Could not fill in the keys ('+r.status+')'));
+      const cls=d.verdict==='pass'?'ok':d.verdict==='fail'?'bad':'warn';
+      const restart=(d.restarting&&d.restarting.length)?' Your agent restarts in about 15 seconds to pick them up.':'';
+      toast('Supabase project saved: '+d.project.name,d.verdict==='pass'?'green':'yellow');
+      delete this.picker[id];
+      await this.load();
+      const card=$('cx-card-'+id);
+      const acts=card&&card.querySelector(':scope > .cx-actions');
+      const note='<div class="cx-note '+cls+'" role="status">Filled in the URL and keys for '+esc(d.project.name)+'. '+esc(d.message||'')+esc(restart)+'</div>';
+      if(acts) acts.insertAdjacentHTML('beforebegin',note); else if(card) card.insertAdjacentHTML('beforeend',note);
+    }catch(e){
+      p.busy=false;p.result='<div class="cx-note bad">'+esc(e.message)+'</div>';
+      this._rerenderCard(id);
+    }
+  },
+  async connect(id){
+    // Open the window inside the click so popup blockers allow it, then point it
+    // at the provider once the server has minted the state + PKCE challenge.
+    const w=window.open('about:blank','oauth_popup','width=600,height=720,scrollbars=yes');
+    try{
+      const r=await fetch('/api/vault/oauth/'+encodeURIComponent(id)+'/connect');
+      const d=await r.json();
+      if(!d.url) throw new Error(d.error||'This connector is not set up on the server yet.');
+      this._pending=id;
+      if(w&&!w.closed) w.location.href=d.url;
+      else{location.href=d.url;return}   // popups blocked: go in this tab; the callback page brings you back
+      this._poll(id);
+    }catch(e){
+      if(w&&!w.closed) w.close();
+      toast(e.message,'red');
+    }
+  },
+  // Providers may cut the popup off from this page (Cross-Origin-Opener-Policy),
+  // so the postMessage can be lost. Poll the server-side status as well.
+  _poll(id){
+    const started=Date.now();
+    const tick=async()=>{
+      if(this._pending!==id||Date.now()-started>300000) return;
+      try{
+        const r=await fetch('/api/vault/oauth/'+encodeURIComponent(id)+'/status');
+        const d=await r.json();
+        if(d.connected&&this._pending===id){
+          this._pending=null;
+          toast('Connected'+(d.account?': '+d.account:''),'green');
+          await this.load();
+          const c=this._find(id);
+          if(c&&c.fills==='supabase') this.openPicker(id);
+          return;
+        }
+      }catch(_){}
+      setTimeout(tick,3000);
+    };
+    setTimeout(tick,3000);
+  },
+  async disconnect(id){
+    const c=this._find(id)||{};
+    const extra=c.fills?' The project URL and keys already filled in stay saved.':'';
+    if(!confirm('Disconnect '+(c.name||id)+'?'+extra))return;
+    try{
+      const r=await fetch('/api/vault/oauth/'+encodeURIComponent(id)+'/disconnect',{method:'POST'});
+      const d=await r.json();
+      if(!d.ok) throw new Error(d.error||'Could not disconnect');
+      delete this.picker[id];
+      toast('Disconnected '+(c.name||id),'green');
+      this.load();
+    }catch(e){toast(e.message,'red')}
+  }
+};
+
+
 // Connections — dynamic credential vault + OAuth connections + model selection
 const Connections={
   data:null,
@@ -2627,7 +2942,22 @@ const Connections={
     const d=this.data;
     if(!d||!d.groups){$('connections-content').innerHTML='<div class="empty">No credential data</div>';return}
 
+    // Point at Connectors only when one can actually be used: an OAuth service
+    // the platform has registered an app for. Same test /api/vault/connectors
+    // applies for its platform_configured flag (it lists these same oauth2
+    // entries), so no second request. None ready = no banner, never a promise.
+    const ready=[];
+    for(const g of d.groups) for(const x of g.credentials) if(x.type==='oauth2'&&x.platform_configured===true) ready.push(x.name||x.id);
     let html='';
+    if(ready.length){
+      const names=ready.length>3?ready.slice(0,3).join(', ')+' and more'
+        :ready.length===1?ready[0]:ready.slice(0,-1).join(', ')+' and '+ready[ready.length-1];
+      html='<div class="cx-banner"><div class="cx-banner-text"><b>Easier way:</b> connect '+esc(names)+' in one click, with no keys to copy.</div>'+
+        '<button class="cx-btn primary" onclick="show(\'connectors\')">Open Connectors</button></div>';
+    }
+    // connector id that fills each credential (e.g. supabase_connect fills supabase)
+    this._fillers={};
+    for(const g of d.groups) for(const x of g.credentials) if(x.fills) this._fillers[x.fills]=x;
 
     // Model selection at top
     const models=d.models||[];
@@ -2676,9 +3006,25 @@ const Connections={
   },
   _renderCredential(c){
     const id=c.id;
-    const statusDot=c.has_value
+    let statusDot=c.has_value
       ?'<span style="color:#4ade80;font-size:10px">\u25CF</span> <span style="color:#4ade80">Connected</span>'
       :'<span style="color:#f97316;font-size:10px">\u25CF</span> <span style="color:#f97316">Not configured</span>';
+    // Credentials the provider can check (Supabase) show the VERDICT about the saved
+    // values, never just "has a value": a rejected key must not read as working.
+    let verdictLine='';
+    const v=c.has_validator?c.validation:null;
+    if(v){
+      const V={pass:['#4ade80','Working'],fail:['#ef4444','Rejected by provider'],cannot_tell:['#f97316','Saved, not verified'],unchecked:['#f97316','Saved, not checked yet']}[v.verdict]||['#f97316','Saved'];
+      statusDot='<span style="color:'+V[0]+';font-size:10px">\u25CF</span> <span style="color:'+V[0]+'">'+V[1]+'</span>';
+      if(v.verdict!=='pass'&&v.message) verdictLine='<div class="cx-verdict" style="background:'+(v.verdict==='fail'?'var(--red-bg)':'var(--orange-bg)')+';color:'+(v.verdict==='fail'?'var(--red)':'var(--orange)')+'">'+esc(v.message)+'</div>';
+    }
+    const filler=this._fillers&&this._fillers[id];
+    if(filler&&filler.platform_configured!==false){
+      verdictLine+='<div style="font-size:12px;padding:0 12px;margin-bottom:6px"><button class="cx-link" onclick="show(\'connectors\')">Skip the keys: connect '+esc(filler.name)+' and pick your project instead</button></div>';
+    }
+    if(c.type==='oauth2'&&c.fills&&c.has_value){
+      verdictLine+='<div style="font-size:12px;padding:0 12px;margin-bottom:6px"><button class="cx-link" onclick="show(\'connectors\')">Pick the project your app uses</button></div>';
+    }
     const consumers=c.consumers&&c.consumers.length
       ?'<span style="font-size:11px;color:var(--dim)">Used by: '+c.consumers.map(n=>'<span style="background:var(--panel3);padding:1px 6px;border-radius:3px;font-size:10px">'+esc(n)+'</span>').join(' ')+'</span>'
       :'';
@@ -2763,6 +3109,7 @@ const Connections={
         '<span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0">'+statusDot+'</span>'+
       '</div>'+
       (c.description?'<div style="font-size:12px;color:var(--dim);padding:0 12px;margin-bottom:4px">'+esc(c.description)+'</div>':'')+
+      verdictLine+
       '<div class="box-body">'+
         (consumers?'<div style="margin-bottom:8px">'+consumers+'</div>':'')+
         body+
@@ -2793,24 +3140,37 @@ const Connections={
       }else{toast(d.error||'Failed','red');if(st) st.textContent='Error'}
     }catch(e){toast(e.message,'red');if(st) st.textContent='Error'}
   },
-  async saveMulti(id){
+  async saveMulti(id,force){
     const fields={};
     document.querySelectorAll('[id^="vault-f-'+id+'-"]').forEach(inp=>{
       const fid=inp.id.replace('vault-f-'+id+'-','');
       if(inp.value.trim()) fields[fid]=inp.value.trim();
     });
     if(!Object.keys(fields).length)return;
-    const st=$('vault-status-'+id);
-    if(st) st.textContent='Saving...';
+    // The field row's own status span (the header row has one with the same id)
+    const box=$('vault-fields-'+id);
+    const st=(box&&box.querySelector('#vault-status-'+id))||$('vault-status-'+id);
+    if(st) st.textContent=force?'Saving...':'Checking with the provider...';
     try{
       const r=await fetch('/api/vault/credentials/'+id,{
         method:'PUT',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({fields})
+        body:JSON.stringify(force?{fields,force:true}:{fields})
       });
       const d=await r.json();
+      if(r.status===422&&d.verdict==='fail'){
+        // The provider itself rejected these values: nothing was saved.
+        if(st) st.innerHTML='<span style="color:var(--red)">Not saved. '+esc(d.message||'The provider rejected this key.')+'</span> '+
+          '<button class="btn btn-o btn-sm" style="margin-left:6px" onclick="Connections.saveMulti(\''+esc(id)+'\',true)">Save anyway</button>';
+        toast('Not saved: the provider rejected this key','red');
+        return;
+      }
       if(d.ok){
+        if(d.verdict){
+          const col=d.verdict==='pass'?'green':d.verdict==='fail'?'red':'yellow';
+          toast((d.verdict==='pass'?'Saved and working. ':d.verdict==='fail'?'Saved, but rejected. ':'Saved, not verified. ')+(d.verdict_message||''),col);
+        }
         this._handleSaveSuccess(id, d, st);
-      }else{toast(d.error||'Failed','red');if(st) st.textContent='Error'}
+      }else{toast(d.error||d.message||'Failed','red');if(st) st.textContent='Error'}
     }catch(e){toast(e.message,'red');if(st) st.textContent='Error'}
   },
   _handleSaveSuccess(id, d, st){
@@ -2876,6 +3236,8 @@ const Connections={
       const d=await r.json();
       if(d.ok){
         if(st) st.innerHTML='<span style="color:#4ade80">\u2713 '+esc(d.message||'OK')+' ('+d.latency_ms+'ms)</span>';
+      }else if(d.verdict==='cannot_tell'){
+        if(st) st.innerHTML='<span style="color:#f97316">? '+esc(d.message||'Could not tell')+'</span>';
       }else{
         if(st) st.innerHTML='<span style="color:#f97316">\u2717 '+esc(d.message||'Failed')+'</span>';
       }
@@ -2896,6 +3258,7 @@ const Connections={
   },
   _oauthCredId:null,
   _onOAuthMessage(e){
+    if(typeof Connectors!=='undefined'&&Connectors._pending)return;  // Connectors view handles its own
     if(e.data&&e.data.type==='oauth_callback'){
       if(e.data.status==='success'){
         toast('Connected: '+e.data.message,'green');
@@ -3003,9 +3366,11 @@ const PlatformSetup={
             '<ol style="margin:0;padding-left:18px;font-size:12px;color:var(--text);line-height:1.6">'+
               p.setup_steps.map(s=>'<li>'+esc(s)+'</li>').join('')+
             '</ol>'+
+            (p.scopes_note?'<div style="margin-top:10px;font-size:11px;color:var(--text)"><strong>Scopes:</strong> '+esc(p.scopes_note)+'</div>':'')+
             '<div style="margin-top:12px;font-size:11px;color:var(--dim)">'+
-              '<strong>Authorized redirect URIs</strong> (paste these in the console — one per client):'+
+              '<strong>Authorized redirect URIs</strong> (paste these in the console'+((p.redirect_uris||[]).length===1&&p.redirect_note?'':' — one per client')+'):'+
             '</div>'+
+            (p.redirect_note?'<div style="margin-top:4px;font-size:11px;color:var(--orange)">'+esc(p.redirect_note)+'</div>':'')+
             '<textarea readonly id="psu-uris-'+p.id+'" style="width:100%;margin-top:6px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:8px;color:var(--text);font-family:var(--mono);font-size:11px;height:120px;resize:vertical">'+
               esc((p.redirect_uris||[]).join('\n'))+
             '</textarea>'+
@@ -3940,7 +4305,7 @@ addEventListener('DOMContentLoaded', async function(){
     if(d.clients?.length)$('nav-section-platform').style.display=''
   }).catch(()=>{});
   const hash=location.hash.slice(1);
-  const valid=['agents','builder','tests','providers','system','canvas','plugins','workspace','music','clients','faces','connections','platform-setup','framework','tts','stt','health','sessions','updates','tools'];
+  const valid=['agents','builder','tests','providers','system','canvas','plugins','workspace','music','clients','faces','connectors','connections','platform-setup','framework','tts','stt','health','sessions','updates','tools'];
   show(valid.includes(hash)?hash:'agents');
 });
 </script>
