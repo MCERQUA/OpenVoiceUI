@@ -182,6 +182,9 @@ if DEFAULT_PAGES_DIR.is_dir():
 from routes.static_files import static_files_bp, DJ_SOUNDS, SOUNDS_DIR
 app.register_blueprint(static_files_bp)
 
+from routes.intake import intake_bp
+app.register_blueprint(intake_bp)
+
 from routes.albums import albums_bp
 app.register_blueprint(albums_bp)
 
@@ -1827,19 +1830,39 @@ def _warm_gateway_connection():
     """Open the persistent gateway WS at boot (it is otherwise lazy — first
     chat.send opens it). Without this, subagent completions that land after a
     server restart but before the first user message are invisible to the
-    orphan-continuation watcher."""
+    orphan-continuation watcher.
+
+    Docker restarts a container's dependencies without compose `depends_on`
+    ordering, so on a host reboot the openvoiceui container can come up
+    before its openclaw gateway is listening. `_ensure_connected()` only
+    makes 5 attempts before raising — without a retry here, the persistent
+    WS never opens and stays down until a user turn happens to call
+    `_ensure_connected()` lazily. So retry indefinitely in the background;
+    once a lazy connect (or a later warm-up attempt) succeeds,
+    `_ensure_connected()` short-circuits on `_connected` being True, so this
+    loop's next pass is a cheap no-op and simply returns.
+    """
     try:
         from services.gateway_manager import gateway_manager as _gm
+        from services.warmup_retry import retry_until_success
         _gw = _gm.get('openclaw')
         if _gw is None or not _gw.is_configured():
             return
         _conn = _gw._router._get_connection(None)
         _conn._ensure_started()
-        asyncio.run_coroutine_threadsafe(
-            _conn._ensure_connected(), _conn._loop).result(timeout=30)
-        logger.info("Gateway WS warmed at boot — orphan completion watcher live")
+
+        def _connect():
+            asyncio.run_coroutine_threadsafe(
+                _conn._ensure_connected(), _conn._loop).result(timeout=30)
+
+        def _log(msg):
+            logger.warning(f"Gateway boot warm-up {msg}")
+
+        attempts = retry_until_success(_connect, time.sleep, _log)
+        logger.info(f"Gateway WS warmed at boot after {attempts} attempt(s) — "
+                    f"orphan completion watcher live")
     except Exception as e:
-        logger.warning(f"Gateway boot warm-up failed (will connect lazily): {e}")
+        logger.warning(f"Gateway boot warm-up failed permanently (will connect lazily): {e}")
 
 
 threading.Thread(target=_warm_gateway_connection,
@@ -2283,7 +2306,11 @@ def browse_stream_websocket(ws):
     # The real browser auto-sends the __session cookie (same origin). The internal
     # agent key is also accepted (via ?agent_key= or X-Agent-Key) for parity with
     # the /api/browse/* HTTP proxy, which lets internal tooling attach a viewer.
-    if os.getenv("CLERK_PUBLISHABLE_KEY") or os.getenv("CLERK_SECRET_KEY"):
+    # SEC-046: gate on the SAME "Clerk configured" flag services/auth.py uses (publishable key),
+    # never on the secret. The app never needs CLERK_SECRET_KEY, so removing it from a tenant
+    # must not switch this gate off (it used to: "publishable OR secret").
+    from services.auth import _CLERK_CONFIGURED
+    if _CLERK_CONFIGURED:
         _agent_key = os.getenv("AGENT_API_KEY", "").strip()
         _presented = request.args.get("agent_key", "") or request.headers.get("X-Agent-Key", "")
         _agent_ok = bool(_agent_key) and _presented == _agent_key

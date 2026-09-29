@@ -948,6 +948,23 @@ function saveState() {
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(_doSaveState, 500);
 }
+// Set when the most recent _doSaveState() had any PATCH come back non-ok (or
+// throw) — a signal other code can check; we don't add UI beyond the console
+// warning since the page has no status indicator today.
+let lastSaveFailed = false;
+function _saveOne(url, body) {
+  return fetch(url, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  }).then(resp => {
+    if (!resp.ok) console.warn(`[desktop] save to ${url} failed: HTTP ${resp.status}`);
+    return resp.ok;
+  }).catch(err => {
+    console.warn(`[desktop] save to ${url} failed:`, err);
+    return false;
+  });
+}
 function _doSaveState() {
   // Always save full state to master desktop entry (iconPositions = desktop positions)
   const state = JSON.stringify({
@@ -955,27 +972,17 @@ function _doSaveState() {
     customFolders, desktopPages, knownPages, wallpaperUrl, savedPageCategories, recentPages,
   });
   const saves = [
-    fetch('/api/canvas/manifest/page/desktop', {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({description: state}),
-    }).catch(() => {}),
+    _saveOne('/api/canvas/manifest/page/desktop', {description: state}),
   ];
   // Save breakpoint-specific positions to their own manifest entries
   if (currentBreakpoint === 'tablet') {
-    saves.push(fetch('/api/canvas/manifest/page/desktop-tablet', {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsTablet})}),
-    }).catch(() => {}));
+    saves.push(_saveOne('/api/canvas/manifest/page/desktop-tablet', {description: JSON.stringify({iconPositions: iconPositionsTablet})}));
   } else if (currentBreakpoint === 'phone') {
-    saves.push(fetch('/api/canvas/manifest/page/desktop-phone', {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({description: JSON.stringify({iconPositions: iconPositionsPhone})}),
-    }).catch(() => {}));
+    saves.push(_saveOne('/api/canvas/manifest/page/desktop-phone', {description: JSON.stringify({iconPositions: iconPositionsPhone})}));
   }
-  Promise.all(saves).finally(() => { _stateDirty = false; });
+  Promise.all(saves).then(results => {
+    lastSaveFailed = results.some(ok => !ok);
+  }).finally(() => { _stateDirty = false; });
 }
 
 // Load state from server — fetch all three breakpoint entries in parallel
@@ -2904,9 +2911,19 @@ function showRecycleItemMenu(e, id) {
         if (!ok) return;
         // Archive server-side (renames .html to .bak, removes manifest entry) \u2014
         // see emptyRecycleBin() for why this is required, not optional.
+        let deleteConfirmed = true;
         if (PAGES[id]) {
-          await fetch(`/api/canvas/manifest/page/${id}`, {method: 'DELETE'}).catch(() => {});
+          try {
+            const resp = await fetch(`/api/canvas/manifest/page/${id}`, {method: 'DELETE'});
+            // 404 = server already has no record of it; treat as success.
+            deleteConfirmed = resp.ok || resp.status === 404;
+            if (!deleteConfirmed) console.error(`[recycle] delete failed for "${id}": HTTP ${resp.status}`);
+          } catch (err) {
+            deleteConfirmed = false;
+            console.error(`[recycle] delete failed for "${id}":`, err);
+          }
         }
+        if (!deleteConfirmed) return; // leave it in the recycle bin; nothing local changes
         recycleBin = recycleBin.filter(i => i !== id);
         if (PAGES[id]) delete PAGES[id];
         knownPages = knownPages.filter(k => k !== id);
@@ -2962,15 +2979,26 @@ async function emptyRecycleBin() {
   // page (it's no longer in knownPages), and silently re-add it to the desktop —
   // recycled items were resurrecting instead of actually going away.
   const ids = recycleBin.slice();
-  await Promise.all(ids.map(id => {
-    if (!PAGES[id]) return Promise.resolve(); // not a real canvas page (folder/system pseudo-id)
-    return fetch(`/api/canvas/manifest/page/${id}`, {method: 'DELETE'}).catch(() => {});
+  const results = await Promise.all(ids.map(async id => {
+    if (!PAGES[id]) return {id, ok: true}; // not a real canvas page (folder/system pseudo-id)
+    try {
+      const resp = await fetch(`/api/canvas/manifest/page/${id}`, {method: 'DELETE'});
+      // 404 = server already has no record of it; treat as success.
+      const ok = resp.ok || resp.status === 404;
+      if (!ok) console.error(`[recycle] empty: delete failed for "${id}": HTTP ${resp.status}`);
+      return {id, ok};
+    } catch (err) {
+      console.error(`[recycle] empty: delete failed for "${id}":`, err);
+      return {id, ok: false};
+    }
   }));
-  ids.forEach(id => {
+  results.filter(r => r.ok).forEach(({id}) => {
     if (PAGES[id]) delete PAGES[id];
     knownPages = knownPages.filter(k => k !== id);
   });
-  recycleBin = [];
+  // Keep only the items whose server-side delete did not confirm — everything
+  // else is genuinely gone, so it drops out of the recycle bin.
+  recycleBin = results.filter(r => !r.ok).map(r => r.id);
   saveState();
   buildDesktopIcons();
   refreshRecycleBin();

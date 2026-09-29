@@ -413,6 +413,58 @@ def _flush_db_writes(timeout: float = 5.0) -> None:
     _db_write_queue.join()
 
 # ---------------------------------------------------------------------------
+# Exit-path TTS flush (issue #487)
+# ---------------------------------------------------------------------------
+#
+# stream_response()'s main event loop has two exit paths that `break` WITHOUT
+# ever running the text_done flush loop that waits on `_tts_pending`:
+#   1. STREAM HARD TIMEOUT (queue.Empty branch, elapsed > _STREAM_HARD_TIMEOUT)
+#   2. a gateway-level 'error' event
+# Both leave any TTS chunks still in `_tts_pending` un-waited-on. Each chunk's
+# background _fire_tts()._run() always pings event_queue with a payload-free
+# {'type': 'tts_ready'} wake event when it finishes (regardless of whether
+# anything ever consumes it), which is what the old "STREAM EXIT with N
+# unprocessed events: ['tts_ready', ...]" warning was seeing — but that ping
+# carries no audio, so re-yielding it to the client does nothing. The actual
+# payload lives in `_tts_pending`'s (done_event, result) tuples, so THIS is
+# what must be drained before the generator returns. The text_done path
+# already drains `_tts_pending` synchronously and resets it to [] afterward,
+# so calling this there is a no-op.
+def drain_pending_tts_on_exit(tts_pending, chunks_sent, audio_event_fn, error_event_fn,
+                               cap_seconds=15, log=None):
+    """Wait up to cap_seconds (one wall-clock budget shared across every
+    remaining chunk, not per-chunk) for outstanding TTS chunks to finish,
+    returning (events, dropped_count).
+
+    events: ndjson-line strings (built via audio_event_fn/error_event_fn) for
+    every chunk that finished within the cap, in original order — caller
+    yields these to the client exactly like the normal flush does.
+    dropped_count: chunks whose done_event never fired within the cap. These
+    are genuinely lost (provider hung past the budget); the caller logs it.
+    """
+    log = log or logger
+    events = []
+    dropped = 0
+    if not tts_pending:
+        return events, dropped
+    deadline = time.time() + cap_seconds
+    for i, (done_evt, res) in enumerate(tts_pending):
+        remaining = max(0.0, deadline - time.time())
+        if done_evt.wait(timeout=remaining):
+            if res.get('error'):
+                events.append(error_event_fn(res['error']))
+            elif res.get('audio'):
+                events.append(audio_event_fn(res['audio'], chunks_sent + i))
+        else:
+            dropped += 1
+    if dropped:
+        log.warning(
+            f"### STREAM EXIT: {dropped} TTS chunk(s) still not ready after "
+            f"waiting {cap_seconds}s for exit flush — audio DROPPED"
+        )
+    return events, dropped
+
+# ---------------------------------------------------------------------------
 # In-memory session key cache (FIND-02 fix from performance audit)
 # ---------------------------------------------------------------------------
 
@@ -1586,7 +1638,17 @@ def _conversation_inner():
                             'could not be started. If the user asks about it, run the image tool on '
                             'that exact workspace path — the image tool rejects /app/runtime/uploads/.'
                         )
-                context_parts.append(f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]')
+                context_parts.append(
+                    f'[UPLOADED IMAGE ANALYSIS: {_upload_desc}]\n'
+                    '[ATTACHED-IMAGE RULE: The user attached THIS image with their message. '
+                    'If their request is about this image (use it, recreate it, reorganize it, '
+                    'build from it), the attached image is the subject of the task — work from '
+                    'the description above. Do NOT substitute other files from the uploads '
+                    'library; that fallback is only for when the user gives no direction. If '
+                    'the task needs the individual image files visible inside this image and '
+                    'they are not separately available, say so and ask the user to attach them '
+                    'or name which upload files map to them.]'
+                )
             else:
                 logger.warning('Uploaded image not found or too large: %s', image_path)
                 context_parts.append('[UPLOADED IMAGE: File could not be analyzed — may be too large or missing.]')
@@ -1820,19 +1882,11 @@ def _conversation_inner():
         except Exception:
             pass
 
-        # Recently FAILED Suno generations — agent must tell user something went wrong
-        try:
-            from routes.suno import failed_songs_queue
-            if failed_songs_queue:
-                _failed = failed_songs_queue[-3:]
-                _failed_lines = []
-                for f in _failed:
-                    label = f.get('brand') or f.get('title') or 'a track'
-                    reason = f.get('reason', 'unknown error')
-                    _failed_lines.append(f'{label!r} — {reason}')
-                context_parts.append(f'[Suno generation FAILED: {"; ".join(_failed_lines)} — apologize to user and offer to try again]')
-        except Exception:
-            pass
+        # Recently FAILED Suno generations are NOT injected here. This block used to append
+        # them to context_parts on every turn and nothing ever cleared the queue, so one failure
+        # would have been re-announced on every turn until a restart. Failures are now delivered
+        # ONCE as a [SYSTEM] prefix on the next real user turn, next to the completion note
+        # (search SUNO-REJECT-SURFACED below).
 
         # Available canvas pages (agent needs IDs for [CANVAS:page-id])
         try:
@@ -2173,6 +2227,10 @@ def _conversation_inner():
                     _suno_q.clear()
         except Exception as _e:
             logger.warning(f'Suno pending-note injection failed: {_e}')
+
+    # SUNO-REJECT-SURFACED (2026-09-29): see _suno_failure_prefix().
+    if user_message not in ('__session_start__',):
+        _suno_prefix = _suno_failure_prefix() + _suno_prefix
 
     _gateway_message_with_suno = _suno_prefix + _gateway_message if _suno_prefix else _gateway_message
     message_with_context = context_prefix + _gateway_message_with_suno if context_prefix else _gateway_message_with_suno
@@ -2596,9 +2654,16 @@ def _conversation_inner():
                                 _tts_pending.append(_fire_tts(_remaining_interim))
                                 _tts_buf = ''
 
-                            # If no sentences were extracted mid-stream, fire TTS
-                            # for the full interim text
-                            if not _tts_pending and interim_response:
+                            # Fallback: no sentences extracted mid-stream, fire TTS
+                            # for the full interim text. Guard on _chunks_sent, NOT
+                            # just _tts_pending (same double-audio bug text_done
+                            # fixed 2026-07-12): the delta path pops finished
+                            # sentences from _tts_pending as their audio is yielded,
+                            # so when the interim event arrives after a fast sentence
+                            # the list is already empty and this re-spoke the WHOLE
+                            # reply a second time (measured live on test-dev
+                            # 2026-09-15 — same 217-char sentence TTS'd twice).
+                            if not _tts_pending and _chunks_sent == 0 and interim_response:
                                 tts_text_interim = clean_for_tts(interim_response)
                                 if tts_text_interim and tts_text_interim.strip():
                                     _tts_pending.append(_fire_tts(tts_text_interim))
@@ -3031,20 +3096,15 @@ def _conversation_inner():
 
                                 # 4. Z.AI direct fallback for this message (NEVER Groq — Groq is TTS only)
                                 try:
-                                    import requests as _req
+                                    from services.zai_direct import zai_messages_post
                                     _zai_key = os.environ.get('ZAI_API_KEY', '')
+                                    _zai_fb_key = os.environ.get('ZAI_FALLBACK_API_KEY', '')
                                     # Use full context so the fallback LLM has agent personality
                                     _fallback_msg = _with_recent_history(message_with_context if message_with_context else user_message)
                                     _fallback_system = _fallback_system_prompt()
-                                    if _zai_key:
-                                        _zai_resp = _req.post(
-                                            'https://api.z.ai/api/anthropic/v1/messages',
-                                            headers={
-                                                'x-api-key': _zai_key,
-                                                'anthropic-version': '2023-06-01',
-                                                'content-type': 'application/json',
-                                            },
-                                            json={
+                                    if _zai_key or _zai_fb_key:
+                                        _zai_resp = zai_messages_post(
+                                            {
                                                 'model': 'glm-5-turbo',
                                                 'max_tokens': 1500,
                                                 'system': _fallback_system,
@@ -3415,6 +3475,10 @@ def _conversation_inner():
                                         f"audio not delivered (provider hung); paid generation logged, not discarded"
                                     )
 
+                            # Fully handled above (waited + yielded or logged) — clear so
+                            # the post-loop exit flush (#487) never re-processes these.
+                            _tts_pending = []
+
                             metrics['tts_generation_ms'] = int((time.time() - t_tts_start) * 1000)
                             metrics['tts_text_len'] = metrics['response_len']
                             metrics['total_ms'] = int((time.time() - t_request_start) * 1000)
@@ -3455,7 +3519,29 @@ def _conversation_inner():
                             }) + '\n'
                             break
 
-                    # Drain any unprocessed events (debug: detect generator exit without text_done)
+                    # Exit-path TTS flush (#487) — if we're leaving via a path that
+                    # skipped the text_done flush (STREAM HARD TIMEOUT / gateway
+                    # 'error' break), _tts_pending may still hold finished-or-finishing
+                    # TTS audio the client never got. Wait a bounded cap and deliver it
+                    # instead of silently dropping the tail of the spoken answer.
+                    _tts_exit_cap = int(os.getenv('TTS_EXIT_FLUSH_CAP', '15'))
+                    _exit_events, _exit_dropped = drain_pending_tts_on_exit(
+                        _tts_pending, _chunks_sent, _audio_event, _tts_error_event,
+                        cap_seconds=_tts_exit_cap, log=logger,
+                    )
+                    for _exit_evt in _exit_events:
+                        yield _exit_evt
+                    if _exit_events:
+                        logger.info(
+                            f"### STREAM EXIT: flushed {len(_exit_events)} TTS chunk(s) "
+                            f"that would otherwise have been dropped"
+                        )
+
+                    # Drain any remaining raw queue events (debug: detect generator exit
+                    # without text_done). tts_ready is a payload-free wake ping — its
+                    # audio (if any) was already handled above via _tts_pending, so a
+                    # leftover tts_ready here is expected noise, not a loss, and is
+                    # logged at info rather than warning.
                     _remaining_evts = []
                     while not event_queue.empty():
                         try:
@@ -3464,7 +3550,11 @@ def _conversation_inner():
                             break
                     if _remaining_evts:
                         _types = [e.get('type', '?') for e in _remaining_evts]
-                        logger.warning(f"### STREAM EXIT with {len(_remaining_evts)} unprocessed events: {_types}")
+                        _noteworthy = [t for t in _types if t != 'tts_ready']
+                        if _noteworthy or _exit_dropped:
+                            logger.warning(f"### STREAM EXIT with {len(_remaining_evts)} unprocessed events: {_types}")
+                        else:
+                            logger.info(f"### STREAM EXIT drained {len(_remaining_evts)} stale tts_ready wake-ping(s) (already flushed)")
 
                 return Response(
                     stream_response(),
@@ -4521,3 +4611,42 @@ def stt_events():
         return jsonify({'ok': True})
     except Exception:
         return jsonify({'ok': False}), 500
+
+
+def _suno_failure_prefix() -> str:
+    """SUNO-REJECT-SURFACED (2026-09-29). Consume routes.suno.failed_songs_queue ONCE and
+    return a [SYSTEM] prefix for the next real user turn ('' when nothing failed).
+
+    A generation that did NOT go through — refused at submit (e.g. out of credits) or failed
+    during generation — must reach the agent so it can correct a "ready in 45 seconds" it
+    already said. Consuming here (not re-reading every turn) is the point: the old
+    context_parts block never cleared the queue.
+    """
+    try:
+        from routes import suno as _suno_mod
+        with _suno_mod._suno_lock:
+            _taken = list(_suno_mod.failed_songs_queue)[-3:]
+            del _suno_mod.failed_songs_queue[:]   # consume once
+    except Exception as _e:
+        logger.warning(f'Suno failure-note injection failed: {_e}')
+        return ''
+    if not _taken:
+        return ''
+    _fail_lines, _out_of_credits, _seen = [], False, set()
+    for f in _taken:
+        # the status poll AND the callback can both queue the same job
+        if f.get('job_id') in _seen:
+            continue
+        _seen.add(f.get('job_id'))
+        _label = f.get('title') or f.get('brand') or f"a {f.get('kind') or 'song'}"
+        _reason = str(f.get('reason') or 'unknown error')
+        _out_of_credits = _out_of_credits or 'credit' in _reason.lower()
+        _fail_lines.append(f'{_label!r} ({_reason[:160]})')
+    _hint = ("The platform's music credits are used up, so trying again right now will fail "
+             "the same way — offer to make it once that is sorted."
+             if _out_of_credits else "Offer to try again.")
+    return (
+        f'[SYSTEM: Music generation you started did NOT go through: {"; ".join(_fail_lines)}. '
+        f'If you told the user it was on its way, correct that now: say plainly that it did '
+        f'not go through, with no technical detail and no time promise. {_hint}]\n\n'
+    )
