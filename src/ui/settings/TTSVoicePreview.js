@@ -64,10 +64,15 @@ export class TTSVoicePreview {
     // -------------------------------------------------------------------------
 
     _render(providersData) {
-        const providers = providersData.providers || {};
+        // /api/tts/providers returns providers as an ARRAY of objects (each with
+        // provider_id); older builds returned an object keyed by id. Normalize both.
+        const raw = providersData.providers || {};
+        const entries = Array.isArray(raw)
+            ? raw.map(p => [p.provider_id || p.name, p])
+            : Object.entries(raw);
         const defaultProvider = providersData.default_provider || 'supertonic';
 
-        const sections = Object.entries(providers)
+        const sections = entries
             .filter(([, p]) => p.mode !== 'full-voice' && Array.isArray(p.voices) && p.voices.length > 0)
             .map(([id, p]) => this._renderProvider(id, p, id === defaultProvider))
             .join('');
