@@ -131,6 +131,69 @@ def _task_log(event: str, **fields) -> None:
     except Exception:  # never let telemetry touch the generation path
         pass
 
+
+# ---------------------------------------------------------------------------
+# SUNO-REJECT-SURFACED (2026-09-29) — a generation refused AT SUBMIT must reach the agent.
+#
+# failed_songs_queue only ever received failures AFTER Suno accepted a task (status poll +
+# callback). A refusal at submit — `{"code":429,"msg":"The current credits are insufficient"}`
+# wrapped in HTTP 200, a missing key, a network error — returned {'action':'error'} to the
+# browser, which flashed a 5-second banner and nothing else. Measured 2026-09-28 03:50Z on
+# foambot: the agent told a client his son's song would be ready in "45 seconds", Suno refused
+# it for credits, and neither the agent nor the client was ever told. No task-log row either.
+# This hook sits on the blueprint so EVERY submit path (including ones added later) is covered
+# without each handler remembering to call it.
+# ---------------------------------------------------------------------------
+_GENERATION_ACTIONS = frozenset({
+    'generate', 'jingle', 'sfx', 'extend', 'cover', 'add_vocals',
+    'add_instrumental', 'replace_section', 'voice_generate',
+})
+_FAILED_QUEUE_MAX = 10
+
+
+def _record_submit_rejection(kind: str, reason: str, title: str = '', brand: str = '',
+                             prompt: str = '') -> None:
+    """Queue a submit-time refusal for the agent's next turn + write a durable task-log row."""
+    entry = {
+        'job_id': f'submit-{uuid.uuid4().hex[:12]}',
+        'stage': 'submit',
+        'kind': kind,
+        'brand': brand,
+        'title': title,
+        'reason': reason,
+        'failed_at': datetime.now().isoformat(),
+    }
+    with _suno_lock:
+        failed_songs_queue.append(entry)
+        del failed_songs_queue[:-_FAILED_QUEUE_MAX]
+    _task_log('rejected', op=kind, title=title, brand=brand,
+              prompt=(prompt or '')[:300], reason=(reason or '')[:300])
+    logger.warning(f'Suno {kind} refused at submit: {reason[:200]}')
+
+
+def _surface_submit_rejection(response):
+    try:
+        if request.path != '/api/suno':
+            return response
+        body = (request.get_json(silent=True) or {}) if request.method == 'POST' else {}
+        action = body.get('action') or request.args.get('action', 'list')
+        if action not in _GENERATION_ACTIONS:
+            return response
+        data = response.get_json(silent=True)
+        if not isinstance(data, dict) or data.get('action') != 'error':
+            return response
+
+        def _field(k: str) -> str:
+            return str(body.get(k) or request.args.get(k) or '')
+
+        _record_submit_rejection(action, str(data.get('response') or 'refused'),
+                                 title=_field('title'), brand=_field('brand'),
+                                 prompt=_field('prompt'))
+    except Exception as exc:  # telemetry must never break the response
+        logger.debug(f'submit-rejection surfacing skipped: {exc}')
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Jingle style presets — proven 2026-05-05. The recipe is:
 #   customMode: false
@@ -188,6 +251,7 @@ def _is_safe_download_url(url: str) -> bool:
 # ---------------------------------------------------------------------------
 
 suno_bp = Blueprint('suno', __name__)
+suno_bp.after_request(_surface_submit_rejection)   # SUNO-REJECT-SURFACED — see above
 
 # ---------------------------------------------------------------------------
 # Metadata helpers
@@ -1155,6 +1219,7 @@ def _action_status(job_id: str):
                         'action': 'failed',
                         'status': 'failed',
                         'job_id': job_id,
+                        'kind': job.get('kind', 'song'),
                         'reason': reason,
                         'response': f"Suno couldn't make the song: {reason}",
                     })

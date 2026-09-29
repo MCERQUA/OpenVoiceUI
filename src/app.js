@@ -1918,13 +1918,15 @@ connectAiradio();
                         const err = data.response || 'unknown error';
                         ActionConsole?.addEntry('error', `🎵 Jingle failed to start: ${err}`);
                         this._showStatus(`🎵 Jingle: ${err}`);
-                        setTimeout(() => this._hideStatus(), 5000);
+                        setTimeout(() => this._hideStatus(), 12000);
+                        this._announceFailure('jingle');
                     }
                 } catch (err) {
                     console.error('[Suno] jingle error:', err);
                     ActionConsole?.addEntry('error', `🎵 Jingle: connection error — ${err.message || err}`);
                     this._showStatus('🎵 Jingle: connection error');
-                    setTimeout(() => this._hideStatus(), 4000);
+                    setTimeout(() => this._hideStatus(), 8000);
+                    this._announceFailure('jingle');
                 }
             },
 
@@ -1977,12 +1979,14 @@ connectAiradio();
                         const err = data.response || 'Error starting generation';
                         ActionConsole?.addEntry('error', `🎵 Suno failed to start: ${err}`);
                         this._showStatus(`🎵 Suno: ${err}`);
-                        setTimeout(() => this._hideStatus(), 5000);
+                        setTimeout(() => this._hideStatus(), 12000);
+                        this._announceFailure('song');
                     }
                 } catch (err) {
                     console.error('[Suno] generate error:', err);
                     this._showStatus('🎵 Suno: connection error');
-                    setTimeout(() => this._hideStatus(), 4000);
+                    setTimeout(() => this._hideStatus(), 8000);
+                    this._announceFailure('song');
                 }
             },
 
@@ -2008,7 +2012,8 @@ connectAiradio();
                             const reason = data.reason || data.response || 'unknown error';
                             ActionConsole?.addEntry('error', `🎵 Suno generation failed: ${reason}`);
                             this._showStatus(`🎵 Suno failed: ${reason}`);
-                            setTimeout(() => this._hideStatus(), 8000);
+                            setTimeout(() => this._hideStatus(), 12000);
+                            this._announceFailure(data.kind === 'jingle' ? 'jingle' : 'song');
                         } else if (data.status === 'not_found' || data.status === 'no_jobs') {
                             this._stopPolling();
                             this._hideStatus();
@@ -2100,6 +2105,37 @@ connectAiradio();
                     this._playMutedAnnouncement(url);
                 } catch (e) {
                     console.warn('[Suno] TTS completion error:', e);
+                }
+            },
+
+            // A generation that does not go through must be SAID, not only shown in a banner
+            // the user may never look at (2026-09-28: a client was told "45 seconds" for his
+            // son's song; Suno refused it for credits and nothing told him or the agent). The
+            // server queues the failure for the agent's next turn (routes/suno.py
+            // SUNO-REJECT-SURFACED); this says it now — after the agent's own sentence finishes,
+            // so it never talks over it. Deliberately plain: no cause, no promise.
+            async _announceFailure(kind) {
+                const what = kind === 'jingle' ? 'jingle' : 'song';
+                const line = `Heads up, that ${what} didn't go through.`;
+                TranscriptPanel?.addMessage('system', `🎵 ${line}`);
+                const cm = (typeof ModeManager !== 'undefined') ? ModeManager?.clawdbotMode : null;
+                const deadline = Date.now() + 45000;
+                while (cm?._ttsPlaying && Date.now() < deadline) {
+                    await new Promise(r => setTimeout(r, 400));
+                }
+                try {
+                    const provider = window.voiceAgent?.selectedProvider || 'groq';
+                    const voice = window.voiceAgent?.currentVoice || 'autumn';
+                    const resp = await fetch(`${CONFIG.serverUrl}/api/tts/generate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: line, provider, voice }),
+                    });
+                    if (!resp.ok) throw new Error(`tts ${resp.status}`);
+                    const blob = await resp.blob();
+                    this._playMutedAnnouncement(URL.createObjectURL(blob));
+                } catch (e) {
+                    console.warn('[Suno] failure announce TTS failed:', e);
                 }
             },
 
@@ -10322,6 +10358,9 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     }
                 }
 
+                // No call running: this press sends one message, like the transcript text box
+                this._beginStandalone(stt);
+
                 // Start recording — pttActivate handles all state
                 stt.pttActivate();
             },
@@ -10334,6 +10373,52 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 // Stop recording and force transcription — pttRelease handles all state
                 // onstop handler will send to Groq and call onResult asynchronously
                 stt.pttRelease();
+
+                // Standalone press: if no transcript comes back (nothing was said),
+                // still give the mic back.
+                if (this._standalone) {
+                    clearTimeout(this._standalone.timer);
+                    this._standalone.timer = setTimeout(() => this._endStandalone(stt, ''), 6000);
+                }
+            },
+
+            // ── Standalone PTT (no call running) ──
+            // Borrows the shared STT for one utterance and sends it through
+            // ClawdbotMode.sendMessage — the same path as the transcript text box —
+            // then restores the callbacks and releases the mic. Same borrow pattern
+            // as Listen mode in ModeSelector.select().
+            _standalone: null,
+
+            _beginStandalone(stt) {
+                if (this._standalone) return;              // re-press while the last one finishes
+                const cm = ModeManager?.clawdbotMode;
+                if (!cm || cm._voiceActive) return;        // a call owns the STT callbacks
+                if (stt.isListening || window.ModeSelector?.currentMode === 'listen') return;  // Listen mode owns the mic
+                this._standalone = { onResult: stt.onResult, onListenFinal: stt.onListenFinal, timer: null };
+                stt.onListenFinal = null;                  // sendMessage shows the user's text itself
+                stt.onResult = (text) => this._endStandalone(stt, text);
+            },
+
+            _endStandalone(stt, text) {
+                const s = this._standalone;
+                if (!s) return;
+                const message = (text || '').trim();
+                if (stt._pttHolding) {
+                    // Pressed again before this one finished: send it and keep the
+                    // borrow for the press in progress.
+                    if (message) ModeManager.clawdbotMode.sendMessage(message);
+                    return;
+                }
+                this._standalone = null;
+                clearTimeout(s.timer);
+                stt.onResult = s.onResult;
+                stt.onListenFinal = s.onListenFinal;
+                if (!ModeManager.clawdbotMode._voiceActive) {
+                    stt.stop();                            // release the mic
+                    stt.resetProcessing?.();
+                    if (this.pttMode) stt.pttMute();       // stop() clears the provider's PTT mute
+                }
+                if (message) ModeManager.clawdbotMode.sendMessage(message);
             },
 
             // Set PTT mode to a specific target state (idempotent). Delegates to

@@ -7,6 +7,11 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
+# SEC-056 least privilege: report-only scan; checkout reads the repo, reports go out as
+# workflow artifacts (runtime token, not GITHUB_TOKEN). Nothing writes back to GitHub.
+permissions:
+  contents: read
+
 jobs:
   security-scan:
     runs-on: ubuntu-latest
