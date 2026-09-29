@@ -7,6 +7,10 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
+# SEC-056 least privilege: the job only checks out and reads the repo.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

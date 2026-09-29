@@ -6,7 +6,7 @@ flask-limiter==4.1.1
 flask-sock==0.7.0
 
 # WebSocket & HTTP
-websockets==17.0.1
+websockets==17.1
 requests==2.34.2
 PySocks==1.7.1                 # SOCKS5 proxy support for requests (residential IP routing)
 # httpx is imported directly by several providers (tts_providers/{hume,elevenlabs,resemble,
@@ -23,7 +23,7 @@ psutil==7.2.2
 
 # Image processing (icon generation, uploads)
 Pillow>=12.3.0
-pillow-heif>=1.5.0
+pillow-heif>=1.6.0
 PyYAML>=6.0.3
 
 # Speech-to-text (optional — adds ~200MB for onnxruntime + ctranslate2)
@@ -32,7 +32,7 @@ PyYAML>=6.0.3
 # faster-whisper==1.2.1
 
 # TTS providers
-groq==1.6.0                 # Groq Orpheus TTS (required if using groq provider)
+groq==1.7.0                 # Groq Orpheus TTS (required if using groq provider)
 
 # Auth (Clerk JWT — optional, only if CANVAS_REQUIRE_AUTH=true)
 PyJWT==2.13.0
