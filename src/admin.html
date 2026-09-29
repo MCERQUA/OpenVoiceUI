@@ -2942,8 +2942,19 @@ const Connections={
     const d=this.data;
     if(!d||!d.groups){$('connections-content').innerHTML='<div class="empty">No credential data</div>';return}
 
-    let html='<div class="cx-banner"><div class="cx-banner-text"><b>Easier way:</b> connect Supabase, GitHub, Google and more in one click, with no keys to copy.</div>'+
-      '<button class="cx-btn primary" onclick="show(\'connectors\')">Open Connectors</button></div>';
+    // Point at Connectors only when one can actually be used: an OAuth service
+    // the platform has registered an app for. Same test /api/vault/connectors
+    // applies for its platform_configured flag (it lists these same oauth2
+    // entries), so no second request. None ready = no banner, never a promise.
+    const ready=[];
+    for(const g of d.groups) for(const x of g.credentials) if(x.type==='oauth2'&&x.platform_configured===true) ready.push(x.name||x.id);
+    let html='';
+    if(ready.length){
+      const names=ready.length>3?ready.slice(0,3).join(', ')+' and more'
+        :ready.length===1?ready[0]:ready.slice(0,-1).join(', ')+' and '+ready[ready.length-1];
+      html='<div class="cx-banner"><div class="cx-banner-text"><b>Easier way:</b> connect '+esc(names)+' in one click, with no keys to copy.</div>'+
+        '<button class="cx-btn primary" onclick="show(\'connectors\')">Open Connectors</button></div>';
+    }
     // connector id that fills each credential (e.g. supabase_connect fills supabase)
     this._fillers={};
     for(const g of d.groups) for(const x of g.credentials) if(x.fills) this._fillers[x.fills]=x;
