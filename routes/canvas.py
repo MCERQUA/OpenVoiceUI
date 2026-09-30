@@ -616,6 +616,33 @@ def _sync_canvas_manifest_locked() -> dict:
     return manifest
 
 
+def _write_page_replacing(filepath: Path, html_content: str) -> None:
+    """Write a canvas page by temp-file + rename instead of overwriting in place.
+
+    Pages are also written by other uids (the tenant's openclaw agent as uid 1000,
+    host-side rollouts), usually mode 644. An in-place overwrite then fails with
+    EACCES for this container's uid and the agent sees a bare 500, so a page it
+    made last week can no longer be refreshed. The canvas-pages dir is writable
+    by every writer, so a rename succeeds whoever owns the old file. It is also
+    atomic: a reader never gets a half-written page. The new file is left
+    group/world-writable so the other writers can still update it in place.
+    """
+    tmp = filepath.with_name(f'.{filepath.name}.{os.getpid()}.{threading.get_ident()}.tmp')
+    try:
+        tmp.write_text(html_content, encoding='utf-8')
+        try:
+            os.chmod(tmp, 0o666)
+        except OSError:
+            pass
+        os.replace(tmp, filepath)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def add_page_to_manifest(filename: str, title: str, description: str = '', content: str = '') -> dict:
     """Add or update a page in the manifest (called after page creation/update).
     When updating an existing page, all user-customised fields are preserved —
@@ -1543,7 +1570,7 @@ def create_canvas_page():
         CANVAS_PAGES_DIR.mkdir(parents=True, exist_ok=True)
         filepath = CANVAS_PAGES_DIR / filename
 
-        filepath.write_text(html_content, encoding='utf-8')
+        _write_page_replacing(filepath, html_content)
         logger.info(f'Canvas page saved: {filename} ({len(html_content)} bytes)')
 
         page_meta = add_page_to_manifest(filename, title, content=html_content[:500])
