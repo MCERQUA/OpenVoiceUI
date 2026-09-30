@@ -4,12 +4,24 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Release tag to publish, e.g. v2026.9.29 (empty = the ref this run was dispatched on)"
+        required: false
+        default: ""
 
-# SEC-056 least privilege: GITHUB_TOKEN is only used by checkout. The publish authenticates
-# with secrets.NPM_TOKEN (no --provenance / trusted publishing), so no id-token or packages
-# scope is needed. Add `id-token: write` only if this ever switches to npm provenance/OIDC.
+# TRUSTED PUBLISHING (npm OIDC), 2026-09-30 — no publish token anywhere.
+# `id-token: write` lets this job mint the short-lived OIDC token npm exchanges for a
+# one-publish credential; npm attaches provenance automatically. Configured on npmjs.com →
+# openvoiceui → Settings → Trusted publisher: GitHub Actions / MCERQUA / OpenVoiceUI /
+# npm-publish.yml / environment npm-release.
+# Why: bypass-2FA granular tokens lose direct publishing ~Jan 2027 (github.blog changelog
+# 2026-07-08), and every token publish since the 2026-07-28 secret change had already failed
+# E404 (npm stayed on 2026.7.15 through the 2026.9.7 and 2026.9.29 releases).
+# SEC-056 least privilege still holds: contents read-only; the only addition is id-token.
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish:
@@ -20,18 +32,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"          # trusted publishing needs Node >= 22.14.0
           registry-url: "https://registry.npmjs.org"
 
+      - name: npm >= 11.5.1 (trusted publishing)
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+
       - name: Sync version from release tag
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.ref != ''
+        env:
+          TAG_REF: ${{ inputs.ref || github.ref_name }}
         run: |
           # Strip leading 'v' if present (e.g. v2026.3.28 -> 2026.3.28)
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${TAG_REF#v}"
           CURRENT=$(node -p "require('./package.json').version")
           if [ "$TAG" != "$CURRENT" ]; then
             echo "Updating package.json version: $CURRENT -> $TAG"
@@ -42,5 +63,3 @@ jobs:
 
       - name: Publish
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
