@@ -3253,12 +3253,24 @@ function optimizeWallpaperImage(file) {
   });
 }
 
+// WebKit bug 319985 (Safari/iOS 26.5+): a picker File handed to fetch/XHR can go out as
+// Content-Length: 0 with no error (iPhone uploads on ica 2026-09-30 all arrived empty).
+// The page can still read the bytes, so send a copy of them, never the File itself.
+// optimizeWallpaperImage hands back the picker's File whenever it cannot re-encode it.
+async function readIntoMemory(file) {
+  const name = file.name || 'upload';
+  let buf;
+  try { buf = await file.arrayBuffer(); } catch (e) { throw new Error(name + ' could not be read — re-attach it and try again'); }
+  if (!buf.byteLength) throw new Error(name + ' came back empty — re-attach it and try again');
+  return new Blob([buf], { type: file.type || 'application/octet-stream' });
+}
+
 async function uploadWallpaper(file) {
   if (!file) return;
   const optimized = await optimizeWallpaperImage(file);
-  const fd = new FormData();
-  fd.append('file', optimized);
   try {
+    const fd = new FormData();
+    fd.append('file', await readIntoMemory(optimized), optimized.name || 'wallpaper.jpg');
     const opts = { method: 'POST', body: fd };
     if(window._canvasAuthToken) opts.headers = { 'Authorization': 'Bearer ' + window._canvasAuthToken };
     const resp = await fetch('/api/upload', opts);
