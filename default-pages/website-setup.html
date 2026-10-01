@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: creator-2026.06.24 -->
+<!-- openvoiceui-version: creator-2026.10.01 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="page-icon" content="website-setup">
+<meta name="page-icon" content="/api/icons/generated/curated-website-creator.svg">
 <title>Website Creator</title>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
@@ -1881,10 +1881,19 @@ function resetColors(){
 }
 
 // ── File uploads ──
+// WebKit bug 319985 (Safari/iOS 26.5+): a picker File handed to fetch/XHR can go out as
+// Content-Length: 0 with no error (iPhone uploads on ica 2026-09-30 all arrived empty).
+// The page can still read the bytes, so send a copy of them, never the File itself.
+async function readIntoMemory(file){
+  const name=file.name||'upload';let buf;
+  try{buf=await file.arrayBuffer()}catch(e){throw new Error(name+' could not be read — re-attach it and try again')}
+  if(!buf.byteLength)throw new Error(name+' came back empty — re-attach it and try again');
+  return new Blob([buf],{type:file.type||'application/octet-stream'});
+}
 async function handleUpload(type,file){
   if(!file)return;
-  const fd=new FormData();fd.append('file',file);
   try{
+    const fd=new FormData();fd.append('file',await readIntoMemory(file),file.name);
     const resp=await authUpload('/api/upload',fd);
     const r=await resp.json();
     if(!resp.ok||r.error){toast('Upload failed: '+(r.error||''));return}
@@ -1910,8 +1919,8 @@ function showUploadPreview(zoneId,url){
 
 async function handleBulkUpload(files){
   for(const file of files){
-    const fd=new FormData();fd.append('file',file);
     try{
+      const fd=new FormData();fd.append('file',await readIntoMemory(file),file.name);
       const resp=await authUpload('/api/upload',fd);
       const r=await resp.json();
       if(resp.ok&&r.url){
@@ -1919,7 +1928,7 @@ async function handleBulkUpload(files){
         renderGallery();
         scheduleSave();
       }
-    }catch(e){}
+    }catch(e){toast('Upload error: '+e.message)}
   }
 }
 

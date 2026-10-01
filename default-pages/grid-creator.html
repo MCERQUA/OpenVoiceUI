@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026-07-30-splitter-handoff -->
+<!-- openvoiceui-version: 2026-10-01-upload-in-memory -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -197,17 +197,30 @@ function addRef(name, url) {
 }
 function removeRef(i) { chosenRefs.splice(i, 1); renderRefs(); }
 
+// WebKit bug 319985 (Safari/iOS 26.5+): a picker File handed to fetch/XHR can go out as
+// Content-Length: 0 with no error (iPhone uploads on ica 2026-09-30 all arrived empty).
+// The page can still read the bytes, so send a copy of them, never the File itself.
+async function readIntoMemory(file) {
+  const name = file.name || 'upload';
+  let buf;
+  try { buf = await file.arrayBuffer(); } catch (e) { throw new Error(name + ' could not be read — re-attach it and try again'); }
+  if (!buf.byteLength) throw new Error(name + ' came back empty — re-attach it and try again');
+  return new Blob([buf], { type: file.type || 'application/octet-stream' });
+}
+
 async function uploadRefs(files) {
   if (!files || !files.length) return;
   $('refHint').textContent = 'Uploading…';
+  const failed = [];
   for (const f of files) {
-    const fd = new FormData(); fd.append('file', f);
     try {
+      const fd = new FormData(); fd.append('file', await readIntoMemory(f), f.name);
       const r = await fetch('/api/upload', { method: 'POST', body: fd });
       if (r.ok) { const d = await r.json(); if (d.filename) addRef(d.filename, d.url); }
-    } catch (e) {}
+    } catch (e) { failed.push(e.message); }
   }
   $('refUpload').value = ''; renderRefs();
+  if (failed.length) $('refHint').textContent = failed.join(' · ');
 }
 
 async function openPicker() {
