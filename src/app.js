@@ -9453,12 +9453,33 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 if (fileInput) fileInput.value = '';
             },
 
+            // WebKit bug 319985 (Safari/iOS 26.5+, still open 2026-09-29): a disk-backed File
+            // from the picker, handed to fetch/XHR, can go out as Content-Length: 0 with no
+            // error anywhere. The networking process is refused read access to the picker's
+            // temp copy; the page itself can still read every byte. A Blob built from
+            // file.arrayBuffer() uploads intact (the workaround verified on device in that
+            // bug). Measured on ica 2026-09-30: an iPhone bulk upload sent every photo empty.
+            // Uploads run one at a time, so only one file's bytes are held at once.
+            async _readIntoMemory(file, fname) {
+                if (!file || typeof file.arrayBuffer !== 'function') return file;
+                let buf;
+                try {
+                    buf = await file.arrayBuffer();
+                } catch (e) {
+                    console.error('upload: could not read file bytes:', fname, e);
+                    throw new Error(`${fname} could not be read — re-attach it and try again`);
+                }
+                return new Blob([buf], { type: file.type || 'application/octet-stream' });
+            },
+
             async uploadFile(file, staged) {
                 const formData = new FormData();
-                // Prefer the byte snapshot taken at stage time (see _stageFile). Falls back
-                // to the live handle when there is no snapshot (drag-drop, desktop picker).
-                const body = (staged && staged.blob) ? staged.blob : file;
                 const fname = (staged && staged.name) || file.name || 'upload';
+                // Send bytes the page has read, never the picker's live File (see
+                // _readIntoMemory). Prefer the snapshot taken at stage time (see _stageFile);
+                // otherwise read it now. The bulk path never had a snapshot, and a single file
+                // sent before its stage-time read finished fell back to the live handle.
+                const body = (staged && staged.blob) ? staged.blob : await this._readIntoMemory(file, fname);
                 if (body && body.size === 0) {
                     throw new Error(`${fname} came back empty — re-attach the photo and try again`);
                 }
