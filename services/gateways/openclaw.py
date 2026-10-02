@@ -1263,9 +1263,23 @@ class GatewayConnection:
                     }
                     if phase == 'result':
                         action['result'] = str(tool_data.get('result', tool_data.get('meta', '')))[:200]
-                    captured_actions.append(action)
-                    event_queue.put({'type': 'action', 'action': action})
-                    if phase == 'start':
+                    # The `item` fallback below may already hold this call's start.
+                    # Upgrade it in place (args arrive only on the `tool` stream)
+                    # instead of appending a second start, which would double
+                    # tool_count.
+                    _item_start = next(
+                        (a for a in captured_actions
+                         if phase == 'start' and a.get('source') == 'item'
+                         and a.get('toolCallId') and a.get('toolCallId') == action['toolCallId']),
+                        None,
+                    )
+                    if _item_start is not None:
+                        _item_start.update(action)
+                        _item_start.pop('source', None)
+                    else:
+                        captured_actions.append(action)
+                        event_queue.put({'type': 'action', 'action': action})
+                    if phase == 'start' and _item_start is None:
                         tool_name = tool_data.get('name', '?')
                         logger.info(f"### TOOL START: {tool_name}")
                         if is_subagent_spawn_tool(tool_name):
@@ -1277,6 +1291,49 @@ class GatewayConnection:
                             }})
                     elif phase == 'result':
                         logger.info(f"### TOOL RESULT: {tool_data.get('name', '?')}")
+
+                # ── Tool calls reported ONLY on the `item` stream ────────────
+                # openclaw reports every tool call twice: `stream: "tool"` and
+                # `stream: "item"` (data.kind == "tool"). Some runs deliver only
+                # the `item` copy. Measured 2026-10-02 on foambot: the
+                # auto-continue run 77808579 ran exec, exec, read with zero
+                # `tool`-stream events, so tool_count read 0, the log said the
+                # promise-completion nudge did nothing, and the detector itself
+                # would fire on turns that DID work. Count an item tool start
+                # only for THIS turn's run (a sub-agent's run on the same socket
+                # has its own runId/sessionKey and must not be credited here),
+                # and only once per toolCallId.
+                if payload.get('stream') == 'item':
+                    _item = payload.get('data', {}) or {}
+                    _tcid = _item.get('toolCallId', '')
+                    _rid = payload.get('runId')
+                    _our_runs = {r for r in (sub.run_id, getattr(continuation_sub, 'run_id', None)) if r}
+                    _ours = (_rid in _our_runs) if _rid and _our_runs else (
+                        payload.get('sessionKey', '') == session_key)
+                    if (_item.get('kind') == 'tool' and _item.get('phase') == 'start'
+                            and _tcid and _ours
+                            and not any(a.get('type') == 'tool' and a.get('toolCallId') == _tcid
+                                        for a in captured_actions)):
+                        action = {
+                            'type': 'tool',
+                            'phase': 'start',
+                            'name': _item.get('name', 'unknown'),
+                            'toolCallId': _tcid,
+                            'sessionKey': payload.get('sessionKey', ''),
+                            'input': {},
+                            'source': 'item',
+                            'ts': time.time(),
+                        }
+                        captured_actions.append(action)
+                        event_queue.put({'type': 'action', 'action': action})
+                        logger.info(f"### TOOL START (item stream): {action['name']}")
+                        if is_subagent_spawn_tool(action['name']):
+                            subagent_active = True
+                            logger.info(f"### SUBAGENT SPAWN DETECTED via item stream: {action['name']}")
+                            event_queue.put({'type': 'action', 'action': {
+                                'type': 'subagent', 'phase': 'spawning',
+                                'tool': action['name'], 'ts': time.time()
+                            }})
 
                 if canonical_stream == 'lifecycle':
                     phase = payload.get('data', {}).get('phase', '')
