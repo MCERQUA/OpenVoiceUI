@@ -136,6 +136,46 @@ def _sign_device_connect(identity: dict, client_id: str, client_mode: str,
 # ---------------------------------------------------------------------------
 
 
+def item_stream_tool_start(payload, our_run_ids, session_key, captured_actions):
+    """Return a tool-start action for an `item`-stream tool call, or None.
+
+    openclaw reports every tool call twice: `stream: "tool"` and `stream: "item"`
+    (data.kind == "tool"). Some runs deliver ONLY the item copy. Measured
+    2026-10-02 on foambot: the auto-continue run 77808579 ran exec, exec, read
+    with zero `tool`-stream events, so tool_count read 0 and the logs claimed the
+    promise-completion nudge did nothing.
+
+    Counts only THIS turn's run: a sub-agent's run on the same socket carries its
+    own runId and sessionKey and must not be credited to the user's turn. When no
+    run id is known yet, falls back to the turn's session key. Never returns a
+    second start for a toolCallId already captured from either stream.
+    """
+    if payload.get('stream') != 'item':
+        return None
+    item = payload.get('data') or {}
+    tcid = item.get('toolCallId', '')
+    if item.get('kind') != 'tool' or item.get('phase') != 'start' or not tcid:
+        return None
+    rid = payload.get('runId')
+    if rid and our_run_ids:
+        if rid not in our_run_ids:
+            return None
+    elif payload.get('sessionKey', '') != session_key:
+        return None
+    if any(a.get('type') == 'tool' and a.get('toolCallId') == tcid for a in captured_actions):
+        return None
+    return {
+        'type': 'tool',
+        'phase': 'start',
+        'name': item.get('name', 'unknown'),
+        'toolCallId': tcid,
+        'sessionKey': payload.get('sessionKey', ''),
+        'input': {},
+        'source': 'item',
+        'ts': time.time(),
+    }
+
+
 class _WSClosedError(Exception):
     """Raised when the WebSocket connection is lost during streaming."""
     pass
@@ -1303,37 +1343,23 @@ class GatewayConnection:
                 # only for THIS turn's run (a sub-agent's run on the same socket
                 # has its own runId/sessionKey and must not be credited here),
                 # and only once per toolCallId.
-                if payload.get('stream') == 'item':
-                    _item = payload.get('data', {}) or {}
-                    _tcid = _item.get('toolCallId', '')
-                    _rid = payload.get('runId')
-                    _our_runs = {r for r in (sub.run_id, getattr(continuation_sub, 'run_id', None)) if r}
-                    _ours = (_rid in _our_runs) if _rid and _our_runs else (
-                        payload.get('sessionKey', '') == session_key)
-                    if (_item.get('kind') == 'tool' and _item.get('phase') == 'start'
-                            and _tcid and _ours
-                            and not any(a.get('type') == 'tool' and a.get('toolCallId') == _tcid
-                                        for a in captured_actions)):
-                        action = {
-                            'type': 'tool',
-                            'phase': 'start',
-                            'name': _item.get('name', 'unknown'),
-                            'toolCallId': _tcid,
-                            'sessionKey': payload.get('sessionKey', ''),
-                            'input': {},
-                            'source': 'item',
-                            'ts': time.time(),
-                        }
-                        captured_actions.append(action)
-                        event_queue.put({'type': 'action', 'action': action})
-                        logger.info(f"### TOOL START (item stream): {action['name']}")
-                        if is_subagent_spawn_tool(action['name']):
-                            subagent_active = True
-                            logger.info(f"### SUBAGENT SPAWN DETECTED via item stream: {action['name']}")
-                            event_queue.put({'type': 'action', 'action': {
-                                'type': 'subagent', 'phase': 'spawning',
-                                'tool': action['name'], 'ts': time.time()
-                            }})
+                _item_action = item_stream_tool_start(
+                    payload,
+                    {r for r in (sub.run_id, getattr(continuation_sub, 'run_id', None)) if r},
+                    session_key,
+                    captured_actions,
+                )
+                if _item_action is not None:
+                    captured_actions.append(_item_action)
+                    event_queue.put({'type': 'action', 'action': _item_action})
+                    logger.info(f"### TOOL START (item stream): {_item_action['name']}")
+                    if is_subagent_spawn_tool(_item_action['name']):
+                        subagent_active = True
+                        logger.info(f"### SUBAGENT SPAWN DETECTED via item stream: {_item_action['name']}")
+                        event_queue.put({'type': 'action', 'action': {
+                            'type': 'subagent', 'phase': 'spawning',
+                            'tool': _item_action['name'], 'ts': time.time()
+                        }})
 
                 if canonical_stream == 'lifecycle':
                     phase = payload.get('data', {}).get('phase', '')
