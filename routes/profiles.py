@@ -186,7 +186,11 @@ def update_profile(profile_id):
     # Prevent changing the id via update body
     data.pop("id", None)
 
-    updated = manager.apply_partial_update(profile_id, data)
+    try:
+        updated = manager.apply_partial_update(profile_id, data)
+    except ValueError as exc:
+        msg = f"voice.voice_id: {exc}"
+        return jsonify({"error": msg, "errors": [msg]}), 400   # admin.html reads `error`
     if updated is None:
         return jsonify({"error": "Failed to update profile"}), 500
 

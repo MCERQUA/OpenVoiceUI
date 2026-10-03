@@ -199,6 +199,7 @@ def generate_tts_chunked(provider, text: str, voice: str, max_chars: int = 800) 
 # (WO-3.1) and are read THROUGH services.tts_fallback at call time so an admin
 # edit takes effect on the next utterance with no restart. The inline defaults
 # in services.tts_fallback._DEFAULT_FALLBACK are the guaranteed fallback.
+from services.voice_catalog import owner_of, voice_mismatch
 from services.tts_fallback import (  # noqa: E402
     get_fallback_chain, get_voice_gender_map,
 )
@@ -315,6 +316,20 @@ def generate_tts_b64(
         tts_provider = fallback_state['provider']
         voice = fallback_state['voice']
         logger.info(f"TTS using sticky fallback: provider={tts_provider}, voice={voice}")
+
+    # ── Voice not on this engine? Map it before the first attempt ─────────────
+    # A profile can pair a voice with an engine that does not have it (foambot
+    # 2026-10-02: "troy", a Groq voice, on supertonic). Supertonic is the END of the
+    # fallback chain, so the old path failed every sentence and spoke nothing for ten
+    # days. Use the engine's same-gender voice and say so loudly in the log; the save-
+    # time check in profiles/manager.py stops new mismatches being written.
+    _mm = voice_mismatch(tts_provider, voice)
+    if _mm:
+        _mapped = _map_voice_to_fallback(voice, owner_of(voice) or 'unknown', tts_provider)
+        if _mapped != voice:
+            logger.warning(f"### TTS VOICE MISMATCH: {_mm} — speaking with {tts_provider}/{_mapped} "
+                           f"(same gender); fix the profile's voice")
+            voice = _mapped
 
     # ── Try primary provider ──────────────────────────────────────────────────
     last_err = None
