@@ -334,6 +334,11 @@ class ProfileManager:
         voice = data.get("voice", {})
         if not voice.get("tts_provider"):
             errors.append("voice.tts_provider is required")
+        else:
+            from services.voice_catalog import voice_mismatch
+            mismatch = voice_mismatch(voice.get("tts_provider"), voice.get("voice_id"))
+            if mismatch:
+                errors.append(f"voice.voice_id: {mismatch}")
 
         return errors
 
@@ -353,6 +358,15 @@ class ProfileManager:
                 base[key] = {**base[key], **value}
             else:
                 base[key] = value
+
+        # A voice/engine pair is only valid TOGETHER: an update that changes just one of
+        # them can strand the other (foambot 2026-09-23..10-02: groq+"M1", then
+        # supertonic+"troy" -> ten days of silent replies). Judge the MERGED result.
+        from services.voice_catalog import voice_mismatch
+        merged_voice = base.get("voice") or {}
+        mismatch = voice_mismatch(merged_voice.get("tts_provider"), merged_voice.get("voice_id"))
+        if mismatch:
+            raise ValueError(mismatch)
 
         updated = Profile.from_dict(base)
         self.save_profile(updated)

@@ -1093,6 +1093,58 @@ def normalize_action_tags(text: str) -> str:
     return text
 
 
+# Tags that DO work: the frontend executes them. A reply carrying one acted this
+# turn even with zero tool calls, and nudging it as a broken promise can re-run the
+# action (a second paid Suno generation). Measured 2026-10-01 01:55Z on foambot: a
+# reply with [SUNO_GENERATE:...] and no tool call was nudged. Expressive tags
+# ([MOOD:], [WAIT:], [SLEEP]) are not work and do not count.
+WORK_ACTION_TAG_RE = re.compile(
+    r'\[(?:SUNO_GENERATE|CANVAS|CANVAS_URL|CANVAS_ACTION|CANVAS_STYLE|CANVAS_MENU|CANVAS_CLOSE|'
+    r'MUSIC_PLAY|MUSIC_STOP|START_TASK|TASK_COMPLETE|SOUNDCLOUD|SOUNDCLOUD_PAGE|BANDCAMP_PAGE|'
+    r'OPEN_TAB|NAVIGATE|CLICK|FILL|SCROLL|BROWSE_ACTION|DOWNLOAD_IMAGE|REGISTER_FACE|HIGHLIGHT)'
+    r'(?::[^\]]*)?\]'
+)
+
+# "I'll / let me ... <verb>" with the committing verb anywhere within 80 chars of
+# the opener, so compound phrasing like "I'll mark the ones and add a button"
+# still catches `add`.
+PROMISE_RE = re.compile(
+    r"\b(?:let me|i'?ll|i am going to|i'?m going to|i will|i'?m about to|gonna|going to)\b"
+    r".{0,80}?"
+    r"\b(?:write|build|create|update|save|add|edit|run|fetch|generate|make|"
+    r"set up|put together|pull|grab|load|open|check|look|query|send|post|commit|push|"
+    r"refactor|deploy|install|rebuild|restart|scaffold|configure|"
+    r"mark|highlight|tag|label|link|embed|include|list|draft|prepare|"
+    r"implement|modify|append|remove|delete|clean|organize|sort|render|"
+    r"test|publish|upload|download|compile|parse|extract|apply|assign|"
+    r"wire|hook|bind|attach|register|inject|populate|fill|insert|replace|"
+    r"rename|move|copy|merge|split|style|design|format|export|import|"
+    r"patch|fix|revert|rollback|scaffold|bootstrap|finalize|finish)"
+    r"\b",
+    re.IGNORECASE,
+)
+
+
+def is_uncommitted_promise(text, tool_count, llm_ms):
+    """True when a reply promised work it did not do: it says "I'll / let me <verb>",
+    called ZERO tools, carried no work-doing action tag, took >1s (instant
+    degenerate empties go to the empty-retry branch), and does not END with a
+    question. A closing question is the agent asking the user for a decision
+    (phatty 2026-07-02); forcing "do it now" bypasses the answer AND lands a
+    chat.send in the finalization window, where it coalesces into a bare final."""
+    if not text or not text.strip():
+        return False
+    if tool_count:
+        return False
+    if (llm_ms or 0) <= 1000:
+        return False
+    if WORK_ACTION_TAG_RE.search(text):
+        return False
+    if text.strip().rstrip('*_ \n').endswith('?'):
+        return False
+    return bool(PROMISE_RE.search(text))
+
+
 def strip_canvas_action_tags(text: str) -> str:
     """Strip [CANVAS_ACTION:{...JSON...}] tags via a brace walker.
 
@@ -2826,38 +2878,33 @@ def _conversation_inner():
                             # chars of the "I'll / let me" opener, so compound
                             # phrasing like "I'll mark the ones and add a button"
                             # still catches `add` (the mid-sentence verb).
-                            _promise_re = re.compile(
-                                r"\b(?:let me|i'?ll|i am going to|i'?m going to|i will|i'?m about to|gonna|going to)\b"
-                                r".{0,80}?"
-                                r"\b(?:write|build|create|update|save|add|edit|run|fetch|generate|make|"
-                                r"set up|put together|pull|grab|load|open|check|look|query|send|post|commit|push|"
-                                r"refactor|deploy|install|rebuild|restart|scaffold|configure|"
-                                r"mark|highlight|tag|label|link|embed|include|list|draft|prepare|"
-                                r"implement|modify|append|remove|delete|clean|organize|sort|render|"
-                                r"test|publish|upload|download|compile|parse|extract|apply|assign|"
-                                r"wire|hook|bind|attach|register|inject|populate|fill|insert|replace|"
-                                r"rename|move|copy|merge|split|style|design|format|export|import|"
-                                r"patch|fix|revert|rollback|scaffold|bootstrap|finalize|finish)"
-                                r"\b",
-                                re.IGNORECASE,
-                            )
+                            # Verdict on the nudge sent last pass: did the agent act?
+                            # Without this a nudge that does not land is
+                            # indistinguishable from one that did.
+                            if getattr(stream_response, '_continue_pending', False):
+                                stream_response._continue_pending = False
+                                if (metrics.get('tool_count', 0) == 0
+                                        and not WORK_ACTION_TAG_RE.search(full_response or '')):
+                                    logger.warning(
+                                        f'### PROMISE STILL UNFULFILLED after auto-continue: '
+                                        f'{(full_response or "").strip()[:100]!r} '
+                                        f'(tool_count=0, ms={metrics.get("llm_inference_ms")})'
+                                    )
+                                else:
+                                    logger.info(
+                                        f'### AUTO-CONTINUE FULFILLED: '
+                                        f'tools={metrics.get("tool_count", 0)}'
+                                    )
                             if (
-                                full_response
-                                and full_response.strip()
-                                and metrics.get('tool_count', 0) == 0
-                                and metrics.get('llm_inference_ms', 0) > 1000
-                                and not getattr(stream_response, '_continued', False)
-                                and _promise_re.search(full_response)
-                                # Question guard (phatty 2026-07-02): a reply that
-                                # ENDS with a question is the agent asking the user
-                                # for a decision ("Want me to send this for approval
-                                # first, or just fire it?"). Forcing "actually do it
-                                # now" both bypasses the user's answer AND lands a
-                                # chat.send in the turn-finalization window where it
-                                # gets coalesced → bare final → recovery cascade.
-                                and not full_response.strip().rstrip('*_ \n').endswith('?')
+                                not getattr(stream_response, '_continued', False)
+                                and is_uncommitted_promise(
+                                    full_response,
+                                    metrics.get('tool_count', 0),
+                                    metrics.get('llm_inference_ms', 0),
+                                )
                             ):
                                 stream_response._continued = True
+                                stream_response._continue_pending = True
                                 logger.warning(
                                     f'### UNCOMMITTED PROMISE detected: '
                                     f'{full_response.strip()[:100]!r} '

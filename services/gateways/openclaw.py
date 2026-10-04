@@ -136,6 +136,46 @@ def _sign_device_connect(identity: dict, client_id: str, client_mode: str,
 # ---------------------------------------------------------------------------
 
 
+def item_stream_tool_start(payload, our_run_ids, session_key, captured_actions):
+    """Return a tool-start action for an `item`-stream tool call, or None.
+
+    openclaw reports every tool call twice: `stream: "tool"` and `stream: "item"`
+    (data.kind == "tool"). Some runs deliver ONLY the item copy. Measured
+    2026-10-02 on foambot: the auto-continue run 77808579 ran exec, exec, read
+    with zero `tool`-stream events, so tool_count read 0 and the logs claimed the
+    promise-completion nudge did nothing.
+
+    Counts only THIS turn's run: a sub-agent's run on the same socket carries its
+    own runId and sessionKey and must not be credited to the user's turn. When no
+    run id is known yet, falls back to the turn's session key. Never returns a
+    second start for a toolCallId already captured from either stream.
+    """
+    if payload.get('stream') != 'item':
+        return None
+    item = payload.get('data') or {}
+    tcid = item.get('toolCallId', '')
+    if item.get('kind') != 'tool' or item.get('phase') != 'start' or not tcid:
+        return None
+    rid = payload.get('runId')
+    if rid and our_run_ids:
+        if rid not in our_run_ids:
+            return None
+    elif payload.get('sessionKey', '') != session_key:
+        return None
+    if any(a.get('type') == 'tool' and a.get('toolCallId') == tcid for a in captured_actions):
+        return None
+    return {
+        'type': 'tool',
+        'phase': 'start',
+        'name': item.get('name', 'unknown'),
+        'toolCallId': tcid,
+        'sessionKey': payload.get('sessionKey', ''),
+        'input': {},
+        'source': 'item',
+        'ts': time.time(),
+    }
+
+
 class _WSClosedError(Exception):
     """Raised when the WebSocket connection is lost during streaming."""
     pass
@@ -1263,9 +1303,23 @@ class GatewayConnection:
                     }
                     if phase == 'result':
                         action['result'] = str(tool_data.get('result', tool_data.get('meta', '')))[:200]
-                    captured_actions.append(action)
-                    event_queue.put({'type': 'action', 'action': action})
-                    if phase == 'start':
+                    # The `item` fallback below may already hold this call's start.
+                    # Upgrade it in place (args arrive only on the `tool` stream)
+                    # instead of appending a second start, which would double
+                    # tool_count.
+                    _item_start = next(
+                        (a for a in captured_actions
+                         if phase == 'start' and a.get('source') == 'item'
+                         and a.get('toolCallId') and a.get('toolCallId') == action['toolCallId']),
+                        None,
+                    )
+                    if _item_start is not None:
+                        _item_start.update(action)
+                        _item_start.pop('source', None)
+                    else:
+                        captured_actions.append(action)
+                        event_queue.put({'type': 'action', 'action': action})
+                    if phase == 'start' and _item_start is None:
                         tool_name = tool_data.get('name', '?')
                         logger.info(f"### TOOL START: {tool_name}")
                         if is_subagent_spawn_tool(tool_name):
@@ -1277,6 +1331,35 @@ class GatewayConnection:
                             }})
                     elif phase == 'result':
                         logger.info(f"### TOOL RESULT: {tool_data.get('name', '?')}")
+
+                # ── Tool calls reported ONLY on the `item` stream ────────────
+                # openclaw reports every tool call twice: `stream: "tool"` and
+                # `stream: "item"` (data.kind == "tool"). Some runs deliver only
+                # the `item` copy. Measured 2026-10-02 on foambot: the
+                # auto-continue run 77808579 ran exec, exec, read with zero
+                # `tool`-stream events, so tool_count read 0, the log said the
+                # promise-completion nudge did nothing, and the detector itself
+                # would fire on turns that DID work. Count an item tool start
+                # only for THIS turn's run (a sub-agent's run on the same socket
+                # has its own runId/sessionKey and must not be credited here),
+                # and only once per toolCallId.
+                _item_action = item_stream_tool_start(
+                    payload,
+                    {r for r in (sub.run_id, getattr(continuation_sub, 'run_id', None)) if r},
+                    session_key,
+                    captured_actions,
+                )
+                if _item_action is not None:
+                    captured_actions.append(_item_action)
+                    event_queue.put({'type': 'action', 'action': _item_action})
+                    logger.info(f"### TOOL START (item stream): {_item_action['name']}")
+                    if is_subagent_spawn_tool(_item_action['name']):
+                        subagent_active = True
+                        logger.info(f"### SUBAGENT SPAWN DETECTED via item stream: {_item_action['name']}")
+                        event_queue.put({'type': 'action', 'action': {
+                            'type': 'subagent', 'phase': 'spawning',
+                            'tool': _item_action['name'], 'ts': time.time()
+                        }})
 
                 if canonical_stream == 'lifecycle':
                     phase = payload.get('data', {}).get('phase', '')
