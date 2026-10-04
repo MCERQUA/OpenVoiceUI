@@ -33,7 +33,7 @@ from routes.static_files import _safe_path
 # Paths
 # ---------------------------------------------------------------------------
 
-from services.paths import MUSIC_DIR, GENERATED_MUSIC_DIR
+from services.paths import DB_PATH, MUSIC_DIR, GENERATED_MUSIC_DIR
 
 MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_MUSIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,6 +98,74 @@ def clear_reservation():
         current_music_state["reserved_track"] = None
         current_music_state["reserved_at"] = None
         current_music_state["reservation_id"] = None
+
+# ---------------------------------------------------------------------------
+# Shuffle bag — every track in a playlist plays once before any repeats
+# ---------------------------------------------------------------------------
+# Picking with random.choice() means some tracks come up again and again while
+# others are never heard. Instead, remember which tracks have played in the
+# current cycle (per playlist) and pick only from the rest; when every track has
+# played, a new cycle starts. Kept on the server volume next to the usage DB so
+# it survives restarts — never in the browser.
+
+SHUFFLE_BAG_PATH = DB_PATH.parent / "music-shuffle-bags.json"
+_shuffle_lock = threading.Lock()
+
+
+def _load_shuffle_bags():
+    try:
+        data = json.loads(SHUFFLE_BAG_PATH.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_shuffle_bags(bags):
+    try:
+        SHUFFLE_BAG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SHUFFLE_BAG_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(bags))
+        tmp.replace(SHUFFLE_BAG_PATH)
+    except OSError as e:
+        print(f"🎵 Shuffle bag not saved: {e}")
+
+
+def shuffle_pick(playlist, music_files, exclude_name=None, consume=True):
+    """Pick the next track from the playlist's shuffle bag.
+
+    exclude_name: the track playing now, never picked twice in a row unless it
+    is the only track. consume=False peeks (next_up / DJ transition announce a
+    track without playing it; the play that follows marks it).
+    """
+    if not music_files:
+        return None
+    with _shuffle_lock:
+        bags = _load_shuffle_bags()
+        names = {t["name"] for t in music_files}
+        played = set(bags.get(playlist, [])) & names   # deleted tracks drop out
+        remaining = [t for t in music_files if t["name"] not in played]
+        if not remaining:                              # cycle complete
+            played = set()
+            remaining = list(music_files)
+        choices = [t for t in remaining if t["name"] != exclude_name] or remaining
+        selected = random.choice(choices)
+        if consume:
+            played.add(selected["name"])
+            bags[playlist] = sorted(played)
+            _save_shuffle_bags(bags)
+    return selected
+
+
+def shuffle_mark_played(playlist, track):
+    """Count a track asked for by name as played in the current cycle."""
+    if not track:
+        return
+    with _shuffle_lock:
+        bags = _load_shuffle_bags()
+        played = set(bags.get(playlist, []))
+        played.add(track["name"])
+        bags[playlist] = sorted(played)
+        _save_shuffle_bags(bags)
 
 # ---------------------------------------------------------------------------
 # Metadata helpers
@@ -502,8 +570,10 @@ def handle_music():
                         "response": f"Can't find a track matching '{track_param}'. Try 'list music' to see what I have.",
                     })
                 print(f"🎵 PLAY matched: query='{track_param}' → file='{selected['filename']}' title='{selected.get('title', '')}'")
+                shuffle_mark_played(playlist, selected)
             else:
-                selected = random.choice(music_files)
+                current_name = (current_music_state.get("current_track") or {}).get("name")
+                selected = shuffle_pick(playlist, music_files, exclude_name=current_name)
 
             current_music_state["playing"] = True
             current_music_state["current_track"] = selected
@@ -549,8 +619,7 @@ def handle_music():
                 return jsonify({"action": "error", "response": "No music to skip to!"})
 
             current_name = (current_music_state.get("current_track") or {}).get("name")
-            available = [t for t in music_files if t["name"] != current_name] or music_files
-            selected = random.choice(available)
+            selected = shuffle_pick(playlist, music_files, exclude_name=current_name)
 
             current_music_state["playing"] = True
             current_music_state["current_track"] = selected
@@ -578,8 +647,7 @@ def handle_music():
                 return jsonify({"action": "error", "response": "No tracks available!"})
 
             current_name = (current_music_state.get("current_track") or {}).get("name")
-            available = [t for t in music_files if t["name"] != current_name] or music_files
-            selected = random.choice(available)
+            selected = shuffle_pick(playlist, music_files, exclude_name=current_name, consume=False)
             current_music_state["next_track"] = selected
 
             title = selected.get("title", selected["name"])
@@ -749,10 +817,9 @@ def handle_dj_transition():
 
         music_files = get_music_files()
         current_name = (current_music_state.get("current_track") or {}).get("name")
-        available = [t for t in music_files if t["name"] != current_name] or music_files
+        selected = shuffle_pick("library", music_files, exclude_name=current_name, consume=False)
 
-        if available:
-            selected = random.choice(available)
+        if selected:
             current_music_state["next_track"] = selected
             current_music_state["dj_transition_pending"] = True
 
