@@ -38,9 +38,15 @@ def _b64(d: dict) -> str:
     return base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip('=')
 
 
+# Fixed ONCE at import. Two jwt() calls for the same ref/role must give the SAME token: tests compare
+# a stored credential against an expected one built later, and an exp taken from time.time() per call
+# made them differ whenever a clock second ticked between the two calls (flaked CI on PR #523).
+_DEFAULT_EXP = int(time.time()) + 10 * 365 * 86400
+
+
 def jwt(ref: str, role: str, exp: int = None) -> str:
     claims = {'iss': 'supabase', 'ref': ref, 'role': role, 'iat': 1700000000,
-              'exp': exp if exp is not None else int(time.time()) + 10 * 365 * 86400}
+              'exp': exp if exp is not None else _DEFAULT_EXP}
     return f"{_b64({'alg': 'HS256', 'typ': 'JWT'})}.{_b64(claims)}.c2lnbmF0dXJl"
 
 
