@@ -131,6 +131,64 @@ def _sign_device_connect(identity: dict, client_id: str, client_mode: str,
     }
 
 
+def extract_default_agent_id(hello_data: dict) -> str | None:
+    """Return the gateway's announced default agent id from a connect response.
+
+    The hello-ok body rides in the `res` frame's `payload` (older shapes used
+    `result`) as `snapshot.sessionDefaults.defaultAgentId` — verified present in
+    openclaw 2026.5.7 and 2026.8.35. Returns None when the gateway does not
+    announce one, which keeps wire_session_key() a no-op for that gateway.
+    """
+    if not isinstance(hello_data, dict):
+        return None
+    body = hello_data.get('payload') or hello_data.get('result') or {}
+    snapshot = body.get('snapshot') if isinstance(body, dict) else None
+    defaults = snapshot.get('sessionDefaults') if isinstance(snapshot, dict) else None
+    agent_id = defaults.get('defaultAgentId') if isinstance(defaults, dict) else None
+    if isinstance(agent_id, str) and agent_id.strip():
+        return agent_id.strip()
+    return None
+
+
+def wire_session_key(key, default_agent_id):
+    """Map an internal session alias to the agent-scoped key sent on the wire.
+
+    openclaw 2026.8.35 rejects a bare sessionKey ("main") once more than one
+    agent is configured ("...has no explicit owner. Use an agent-prefixed session
+    key"); every JamBot tenant has two (openvoiceui + openvoiceui-fast). 2026.5.7
+    canonicalizes a bare key to agent:<defaultAgentId>:<key> itself, so sending
+    that prefixed form addresses the SAME session on both versions.
+
+    Unchanged: falsy keys, keys already agent-scoped, the unscoped "global" /
+    "unknown" keys (both versions keep those bare — prefixing would select a
+    different session), and every key when the gateway announced no default.
+    Only the wire form changes; subscriptions, steer maps and caches keep the
+    short alias, and inbound matching (_sk_match) already accepts canonical
+    agent:<id>:<alias> event keys.
+    """
+    if not key or not isinstance(key, str):
+        return key
+    lowered = key.strip().lower()
+    if lowered.startswith('agent:') or lowered in ('global', 'unknown'):
+        return key
+    if not default_agent_id:
+        return key
+    return f"agent:{default_agent_id}:{key}"
+
+
+def res_error_message(data: dict) -> str | None:
+    """Error text when `data` is a `res` frame the gateway REJECTED
+    (`ok: false` and/or an `error`), else None. openclaw's error shape is
+    {code, message, details?}; a plain string is accepted too."""
+    if not isinstance(data, dict) or data.get('type') != 'res':
+        return None
+    err = data.get('error')
+    if data.get('ok') is not False and not err:
+        return None
+    msg = (err.get('message') or err.get('code')) if isinstance(err, dict) else err
+    return str(msg) if msg else 'request rejected by gateway'
+
+
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -476,6 +534,13 @@ class EventDispatcher:
             if req_id.startswith('chat-'):
                 chat_id = req_id[5:]
                 sub = self._subscriptions.get(chat_id)
+                if sub and res_error_message(data) is not None:
+                    # Rejected send: not a queue placement. Leave the state
+                    # alone (marking it QUEUED would let it claim another
+                    # turn's followup run); _stream_events ends the turn.
+                    logger.info(f"### chat-{chat_id[:8]} rejected by gateway")
+                    await sub.event_queue.put(data)
+                    return
                 if sub:
                     result = data.get('result') or data.get('payload') or {}
                     run_id = result.get('runId') or data.get('runId')
@@ -683,6 +748,11 @@ class GatewayConnection:
         self._last_disconnect_time = 0.0
         self._server_version: str | None = None
         self._reconnected_at: float = 0.0  # timestamp of last successful reconnect after failure
+        # Default agent announced in the connect hello
+        # (snapshot.sessionDefaults.defaultAgentId). Refreshed on EVERY
+        # successful handshake so a reconnect to a reconfigured gateway is
+        # picked up; None when the gateway does not announce one.
+        self._default_agent_id: str | None = None
 
     @staticmethod
     def _jittered_delay(base_delay):
@@ -792,6 +862,8 @@ class GatewayConnection:
         server_version = extract_server_version(result)
         negotiated_protocol = result.get('protocol', PROTOCOL_MIN)
         self._negotiated_protocol = negotiated_protocol
+        self._default_agent_id = extract_default_agent_id(hello_data)
+        logger.info(f"### Gateway default agent: {self._default_agent_id or '(not announced)'}")
         return hello_data, server_version
 
     async def _connect(self):
@@ -970,6 +1042,19 @@ class GatewayConnection:
 
             raise RuntimeError(f"Failed to connect to Gateway after {max_attempts} attempts")
 
+    def _wire_session_key(self, key):
+        """The sessionKey to put in an outbound RPC — see wire_session_key().
+
+        Scoped to the default agent THIS connection's gateway announced. Note:
+        the `agent_id` threaded through stream_to_queue()/_send_and_stream()
+        (e.g. 'openvoiceui-fast' for the fast lane) is a CONNECTION selector
+        (GatewayRouter picks a gateway URL by it), not the session's owning
+        agent — it never reached the gateway, so the fast lane has always run on
+        the default agent. Deliberately not used here: honouring it would switch
+        that lane's agent/model.
+        """
+        return wire_session_key(key, self._default_agent_id)
+
     async def _run_orphan_continuation(self, session_key):
         """Nudge the idle main agent after an orphaned subagent completion,
         collect its reply, and hand it to the registered proactive handler.
@@ -995,7 +1080,7 @@ class GatewayConnection:
                     "method": "chat.send",
                     "params": {
                         "message": _PROMPT_ARMOR + _SUBAGENT_NUDGE_MSG,
-                        "sessionKey": session_key,
+                        "sessionKey": self._wire_session_key(session_key),
                         "idempotencyKey": cont_chat_id,
                     },
                 })
@@ -1070,7 +1155,7 @@ class GatewayConnection:
                 "type": "req",
                 "id": f"abort-{run_id}",
                 "method": "chat.abort",
-                "params": {"sessionKey": session_key, "runId": run_id}
+                "params": {"sessionKey": self._wire_session_key(session_key), "runId": run_id}
             }
             await self._dispatcher.send(self._ws, abort_req)
             logger.info(f"### ABORT sent for run {run_id[:12]}... reason={reason}")
@@ -1137,7 +1222,7 @@ class GatewayConnection:
             "method": "chat.send",
             "params": {
                 "message": full_message,
-                "sessionKey": session_key,
+                "sessionKey": self._wire_session_key(session_key),
                 "idempotencyKey": chat_id,
             }
         }
@@ -1247,6 +1332,17 @@ class GatewayConnection:
 
             # ACK for our chat.send
             if data.get('type') == 'res' and data.get('id') == f'chat-{chat_id}':
+                # A REJECTED chat.send is terminal, not an ACK: no run exists,
+                # so no event will ever follow. Treated as an ACK it left the
+                # turn heartbeating to the 300s hard timeout and then ending
+                # as a null text_done with the reason lost (the heartbeats
+                # also keep the outer idle watchdog fed, so it never fires).
+                rejected = res_error_message(data)
+                if rejected is not None:
+                    logger.error(f"### chat.send REJECTED by gateway: {rejected}")
+                    event_queue.put({'type': 'text_done', 'response': None,
+                                     'actions': captured_actions, 'error': rejected})
+                    return
                 result = data.get('result') or data.get('payload') or {}
                 run_id = result.get('runId') or data.get('runId')
                 logger.info(f"### chat.send ACK runId={run_id[:8] if run_id else 'none'}")
@@ -1412,7 +1508,7 @@ class GatewayConnection:
                                 "method": "chat.send",
                                 "params": {
                                     "message": cont_msg,
-                                    "sessionKey": session_key,
+                                    "sessionKey": self._wire_session_key(session_key),
                                     "idempotencyKey": cont_chat_id,
                                 }
                             }
@@ -1472,7 +1568,7 @@ class GatewayConnection:
                                     "method": "chat.send",
                                     "params": {
                                         "message": cont_msg,
-                                        "sessionKey": session_key,
+                                        "sessionKey": self._wire_session_key(session_key),
                                         "idempotencyKey": cont_chat_id,
                                     }
                                 }
@@ -1734,7 +1830,7 @@ class GatewayConnection:
                 "method": "chat.send",
                 "params": {
                     "message": full_message,
-                    "sessionKey": session_key,
+                    "sessionKey": self._wire_session_key(session_key),
                     "idempotencyKey": chat_id
                 }
             }
@@ -1759,7 +1855,7 @@ class GatewayConnection:
                         "method": "chat.send",
                         "params": {
                             "message": full_message,
-                            "sessionKey": session_key,
+                            "sessionKey": self._wire_session_key(session_key),
                             "idempotencyKey": retry_chat_id,
                         },
                     }
