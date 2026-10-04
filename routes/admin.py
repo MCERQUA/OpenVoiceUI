@@ -549,7 +549,11 @@ def install_start():
                     if hello.get('type') != 'res' or hello.get('error'):
                         raise RuntimeError(f"Gateway auth failed: {hello.get('error')}")
                     req_id = str(uuid.uuid4())
-                    await ws.send(_json.dumps({'type':'req','id':req_id,'method':'chat.send','params':{'sessionKey':'admin-install','message':message,'idempotencyKey':req_id}}))
+                    # Agent-scope the key (openclaw >=2026.8 rejects a bare key
+                    # when several agents are configured) — see wire_session_key.
+                    from services.gateways.openclaw import wire_session_key, extract_default_agent_id
+                    _sk = wire_session_key('admin-install', extract_default_agent_id(hello))
+                    await ws.send(_json.dumps({'type':'req','id':req_id,'method':'chat.send','params':{'sessionKey':_sk,'message':message,'idempotencyKey':req_id}}))
                     collected = ''
                     for _ in range(120):
                         try:
