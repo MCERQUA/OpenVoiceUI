@@ -10,6 +10,7 @@ Registers routes:
   GET  /api/dj-sound                   — DJ soundboard API (list/play)
 """
 
+import hmac
 import json
 import logging
 import os
@@ -502,7 +503,12 @@ def serve_emulator(filepath):
 # providers fetching media), so this ships in phases, controlled by UPLOADS_AUTH_MODE:
 #   off     — no check (self-hosted default when CANVAS_REQUIRE_AUTH is off)
 #   shadow  — serve as before, but log every request that WOULD be denied (the default)
-#   enforce — deny without a Clerk session (401, or a login redirect for browsers)
+#   enforce — deny unless the request carries a grant (401, or a login redirect for browsers)
+# A request is granted by ANY of:
+#   session    — a valid Clerk token (the same check canvas pages use)
+#   signature  — ?exp=&sig= minted by services/upload_links.py with this instance's UPLOADS_SIGNING_KEY
+#   agent_key  — the internal X-Agent-Key header matching AGENT_API_KEY (same check as app.require_auth)
+# Each would-deny row records the state of all three grants, so enforcement can be decided per consumer.
 # The would-deny log is a dotfile, so serve_upload never exposes it.
 # ---------------------------------------------------------------------------
 UPLOADS_AUTH_MODE = os.getenv('UPLOADS_AUTH_MODE', 'shadow').strip().lower()
@@ -520,7 +526,55 @@ def _upload_has_session():
         return False
 
 
-def _upload_shadow_record(filename, exists):
+def _upload_session_state():
+    from services.auth import get_token_from_request
+    if _upload_has_session():
+        return 'ok'
+    try:
+        return 'invalid' if get_token_from_request() else 'absent'
+    except Exception:
+        return 'invalid'
+
+
+def _upload_agent_key_state():
+    """The internal agent key, checked exactly as app.require_auth does (X-Agent-Key vs
+    AGENT_API_KEY, no grant when the key is unset), with a constant-time comparison."""
+    presented = request.headers.get('X-Agent-Key')
+    if not presented:
+        return 'absent'
+    expected = os.getenv('AGENT_API_KEY', '').strip()
+    if not expected:
+        return 'unconfigured'
+    return 'ok' if hmac.compare_digest(presented.encode('utf-8'), expected.encode('utf-8')) else 'invalid'
+
+
+def _upload_signature_state(filename):
+    from services import upload_links
+    return upload_links.verify('/uploads/' + filename, request.args.get('exp'), request.args.get('sig'))
+
+
+def _upload_grants(filename):
+    """Evaluate grants cheapest-first, stopping at the first that holds. Returns
+    (granted_by or None, {grant: state}) — states are only complete when nothing granted."""
+    states = {}
+    for name, check in (('agent_key', _upload_agent_key_state),
+                        ('signature', lambda: _upload_signature_state(filename)),
+                        ('session', _upload_session_state)):
+        states[name] = check()
+        if states[name] == 'ok':
+            return name, states
+    return None, states
+
+
+def _upload_deny_reason(states):
+    """The most specific reason: the first PRESENTED credential that failed, else no credential."""
+    for name in ('signature', 'agent_key', 'session'):
+        if states.get(name) not in (None, 'absent'):
+            return f'{name}-{states[name]}'
+    return 'no-credential'
+
+
+def _upload_shadow_record(filename, exists, states=None, reason=None):
     try:
         if UPLOADS_SHADOW_LOG.exists() and UPLOADS_SHADOW_LOG.stat().st_size > _UPLOADS_SHADOW_MAX_BYTES:
             return
@@ -531,6 +585,8 @@ def _upload_shadow_record(filename, exists):
             'ua': request.headers.get('User-Agent', '')[:160],
             'ref_host': re.sub(r'^https?://([^/]+).*$', r'\1', ref)[:120] if ref else '',
             'accept': request.headers.get('Accept', '')[:60],
+            'reason': reason or 'no-credential',
+            'grants': states or {},
         }
         fd = os.open(str(UPLOADS_SHADOW_LOG), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o640)
         try:
@@ -545,12 +601,14 @@ def _upload_access_denied(filename, exists):
     """None = serve. Otherwise the deny response (enforce mode only)."""
     if UPLOADS_AUTH_MODE not in ('shadow', 'enforce') or not UPLOADS_REQUIRE_AUTH:
         return None
-    if _upload_has_session():
+    granted_by, states = _upload_grants(filename)
+    if granted_by:
         return None
-    _upload_shadow_record(filename, exists)
+    reason = _upload_deny_reason(states)
+    _upload_shadow_record(filename, exists, states, reason)
     if UPLOADS_AUTH_MODE != 'enforce':
         return None
-    logger.warning('[uploads-auth] DENIED %s (no valid session)', filename[:200])
+    logger.warning('[uploads-auth] DENIED %s (%s)', filename[:200], reason)
     if request.headers.get('Accept', '').startswith('text/html'):
         return redirect('/?redirect=/uploads/' + filename)
     return 'Unauthorized', 401
