@@ -98,11 +98,17 @@ def canonical_path(path: str) -> str:
 
 
 def _path_from_input(value: str) -> str:
-    """CLI/mint input -> decoded path. A full URL (or anything carrying a query
-    string) is parsed and percent-decoded; a bare path is taken literally."""
+    """CLI/mint input -> decoded path. Parsed as a URL (and percent-decoded) ONLY
+    when it is an http(s) URL, or an '/uploads/...' path carrying a signed-link
+    query (exp=/sig=). Anything else is a literal filename, so a name containing
+    '?' or '%' is signed exactly as written."""
     s = (value or '').strip()
-    if '://' in s or '?' in s:
+    if re.match(r'(?i)https?://', s):
         return unquote(urlsplit(s).path)
+    if s.startswith(UPLOADS_PREFIX) and '?' in s:
+        query = s.split('?', 1)[1]
+        if 'exp' in parse_qs(query) or 'sig' in parse_qs(query):
+            return unquote(urlsplit(s).path)
     return s
 
 

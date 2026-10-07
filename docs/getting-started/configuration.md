@@ -72,7 +72,7 @@ Supertonic (local TTS) is included in the Docker Compose stack and works without
 | `CANVAS_REQUIRE_AUTH` | Set to `true` to require login for canvas pages. |
 | `ALLOWED_USER_IDS` | Comma-separated Clerk user IDs. Restricts access to specific users. Find your user ID in server logs after first login. |
 | `UPLOADS_AUTH_MODE` | `/uploads/` access when `CANVAS_REQUIRE_AUTH=true`: `shadow` (default; serve everything, log would-be denials to `uploads/.uploads-auth-shadow.jsonl`), `enforce` (require a Clerk session, a signed link, or the `X-Agent-Key` header), or `off`. |
-| `UPLOADS_SIGNING_KEY` | Secret for signed `/uploads/` links (`?exp=&sig=`, at least 16 chars; generate with `python3 -c "import secrets; print(secrets.token_hex(32))"`). Unset = signed links are not accepted. Mint one with `python -m services.upload_links sign <file> --ttl 7d` (max 30 days). |
+| `UPLOADS_SIGNING_KEY` | Secret for signed `/uploads/` links (`?exp=&sig=`, at least 16 chars; generate with `python3 -c "import secrets; print(secrets.token_hex(32))"`). Unset = signed links are not accepted. **Use a unique key per instance:** the signature covers only the path and expiry, so two instances sharing a key would accept each other's links for the same filename. Mint one with `python -m services.upload_links sign <file> --ttl 7d` (max 30 days). |
 
 Without Clerk keys, the app runs open -- no login required. This is fine for single-user and local installs.
 
@@ -126,7 +126,7 @@ Complete list of all recognized environment variables:
 | `CANVAS_REQUIRE_AUTH` | No | -- | Set `true` to require Clerk auth for canvas pages. |
 | `ALLOWED_USER_IDS` | No | -- | Comma-separated Clerk user IDs for access control. |
 | `UPLOADS_AUTH_MODE` | No | `shadow` | `/uploads/` access mode: `shadow`, `enforce` or `off` (only with `CANVAS_REQUIRE_AUTH=true`). |
-| `UPLOADS_SIGNING_KEY` | No | -- | HMAC secret for signed `/uploads/` links. Unset = signed links disabled. |
+| `UPLOADS_SIGNING_KEY` | No | -- | HMAC secret for signed `/uploads/` links; must be unique per instance. Unset = signed links disabled. |
 | `CODING_CLI` | No | `none` | Coding CLI to install in OpenClaw container. |
 | `RATELIMIT_DEFAULT` | No | -- | Rate limit override. Format: `"200 per day;50 per hour"`. |
 

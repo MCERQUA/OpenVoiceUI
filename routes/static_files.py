@@ -658,7 +658,7 @@ def serve_upload(filename):
     # CSP by type (2026-08-02): the strict `sandbox; default-src 'none'` neutralizes stored
     # XSS in html/svg/js, but `sandbox` with no allowlist ALSO stops the browser's built-in
     # media/pdf viewer from loading — so direct links to an uploaded .mp4/.mp3/.pdf served 200
-    # but played nothing (koolfoam video, mac-claude directive). Inert media served inline with
+    # but played nothing. Inert media served inline with
     # its real mime + nosniff has no script surface, so it gets a CSP that permits only
     # self-origin media/images/pdf to render while still blocking all script + framing, and
     # crucially drops `sandbox`. Non-safe types (already downgraded to a text/plain attachment

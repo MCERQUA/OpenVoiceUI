@@ -271,3 +271,17 @@ def test_cli_runs_as_module(enforce):
                          cwd=repo, env=env, capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     assert out.stdout.startswith("/uploads/logo.png?exp=")
+
+
+def test_mint_literal_filename_with_question_mark(client, enforce, up):
+    """A bare name containing '?' is a filename, never a URL: it signs that exact name."""
+    links = _links()
+    (up.UPLOADS_DIR / "report?.pdf").write_bytes(b"%PDF-1.4")
+    for given in ("report?.pdf", "/uploads/report?.pdf"):
+        s = links.sign(given, "1h")
+        assert s["path"] == "/uploads/report?.pdf"
+        assert s["url"].startswith("/uploads/report%3F.pdf?exp=")
+    assert client.get(links.signed_url("report?.pdf", "1h")).status_code == 200
+    # a signed URL handed back in (re-mint) is still parsed as a URL
+    assert links.sign("https://example.test/uploads/logo.png?exp=1&sig=x", "1h")["path"] == "/uploads/logo.png"
+    assert links.sign("/uploads/logo.png?exp=1&sig=x", "1h")["path"] == "/uploads/logo.png"
