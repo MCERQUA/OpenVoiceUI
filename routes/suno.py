@@ -36,6 +36,7 @@ from flask import Blueprint, jsonify, request
 # ---------------------------------------------------------------------------
 
 from services.paths import GENERATED_MUSIC_DIR
+from services import suno_lyrics
 
 GENERATED_MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_METADATA_FILE = GENERATED_MUSIC_DIR / 'generated_metadata.json'
@@ -130,6 +131,20 @@ def _task_log(event: str, **fields) -> None:
             f.write(json.dumps(row) + '\n')
     except Exception:  # never let telemetry touch the generation path
         pass
+
+
+def _schedule_lyrics_fetch(task_id: str, audio_id: str, filename: str, lyrics: str = '',
+                           instrumental: bool = False, kind: str = 'song') -> None:
+    """LYRICS-AT-GENERATION (2026-10-12): pull Suno word timings ONCE, the moment a song
+    completes, in the background. Called from BOTH completion legs (status poll + webhook);
+    services/suno_lyrics.py's per-audioId marker makes the second leg a no-op. Every
+    get-timestamped-lyrics call is paid — see that module's header."""
+    try:
+        suno_lyrics.schedule(task_id=task_id, audio_id=audio_id, filename=filename,
+                             lyrics=lyrics or '', instrumental=bool(instrumental), kind=kind,
+                             api_key=SUNO_API_KEY, receipt=_provider_receipt)
+    except Exception as exc:  # never let this touch song delivery
+        logger.warning(f'suno lyrics scheduling failed for {filename}: {exc}')
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +562,8 @@ def _action_generate(_q, body: dict):
     style = _q('style') or body.get('style', '')
     title = _q('title') or body.get('title', '')
     lyrics = _q('lyrics') or body.get('lyrics', '')
-    instrumental = (_q('instrumental') or str(body.get('instrumental', 'false'))).lower() == 'true'
+    # str(): a JSON POST carries a real bool, and True.lower() raised AttributeError (-> 500).
+    instrumental = str(_q('instrumental') or body.get('instrumental', 'false')).lower() in ('true', '1', 'yes')
     vocal_gender = _q('vocal_gender') or body.get('vocal_gender', 'm')
     # Persona / custom-voice passthrough (2026-07-14). personaId can be a STYLE
     # persona (from generate-persona) or a cloned VOICE id (from the Suno Voice
@@ -658,6 +674,8 @@ def _action_generate(_q, body: dict):
                     'style': style,
                     'task_id': task_id,
                     'created_at': time.time(),
+                    # Read at completion: an instrumental gets NO paid lyrics call.
+                    'instrumental': instrumental,
                 }
                 _provider_receipt('song')   # live Watch pulse — task accepted, credits committed
                 _task_log('submitted', op='song', task_id=task_id, title=title,
@@ -1158,6 +1176,11 @@ def _action_status(job_id: str):
                                 extra=extra,
                                 task_id=task_id,
                             )
+                            # audioId is the clip's own id — never the task_id fallback.
+                            _schedule_lyrics_fetch(task_id, song.get('id', ''), filename,
+                                                   lyrics=song_lyrics,
+                                                   instrumental=job.get('instrumental', False),
+                                                   kind=kind)
 
                         # Update job
                         job['status'] = 'complete'
@@ -1367,6 +1390,7 @@ def _submit_suno_job(endpoint: str, request_body: dict, kind: str,
             'task_id': task_id,
             'created_at': time.time(),
             'kind': kind,
+            'instrumental': bool(request_body.get('instrumental', False)),
         }
         if job_extra:
             job.update(job_extra)
@@ -1614,20 +1638,34 @@ def _action_timestamped_lyrics(_q, body: dict):
     if not (task_id and audio_id):
         return jsonify({'action': 'error', 'response': 'Timestamped lyrics need both Suno task id and audio id for the track.'})
 
-    request_body = {'taskId': task_id, 'audioId': audio_id}
+    # PAID CALL. An instrumental has nothing to time, and the generation-time fetch
+    # (or the host sync) already recorded that — don't buy the same empty answer again
+    # every time someone opens the track in the sing-along page.
+    if suno_lyrics.known_instrumental(src['filename'], audio_id):
+        return jsonify({'action': 'error', 'instrumental': True,
+                        'response': 'This track is instrumental — there are no lyrics to time.'})
+
+    _log = {'via': 'action', 'task_id': task_id, 'audio_id': audio_id,
+            'filename': src['filename'] or None}
     try:
-        resp = http_requests.post(
-            f'{SUNO_API_BASE}/api/v1/generate/get-timestamped-lyrics',
-            headers=_suno_headers(),
-            json=request_body,
-            timeout=30,
-        )
+        resp = suno_lyrics.post_timestamped_lyrics(task_id, audio_id, SUNO_API_KEY)
         logger.info(f'Suno timestamped_lyrics response: {resp.status_code} {resp.text[:300]}')
         if resp.status_code != 200:
+            suno_lyrics.log_call({**_log, 'result': 'failed', 'http_status': resp.status_code})
             return jsonify({'action': 'error', 'response': f'Suno API HTTP {resp.status_code}: {resp.text[:200]}'})
         data = resp.json()
         if data.get('code') != 200:
+            suno_lyrics.log_call({**_log, 'result': 'failed', 'http_status': 200,
+                                  'suno_code': data.get('code'),
+                                  'credits': suno_lyrics.credits_from(data),
+                                  'error': f"suno code={data.get('code')} msg={data.get('msg')!r}"[:200]})
             return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
+        _d = data.get('data') or {}
+        _aw = _d.get('alignedWords') or _d.get('aligned_words') or []
+        suno_lyrics.log_call({**_log, 'result': 'ok' if _aw else 'instrumental',
+                              'http_status': 200, 'suno_code': 200,
+                              'aligned_words': len(_aw) or None,
+                              'credits': suno_lyrics.credits_from(data)})
         _provider_receipt('timestamped_lyrics')
         return jsonify({
             'action': 'timestamped_lyrics',
@@ -1635,6 +1673,7 @@ def _action_timestamped_lyrics(_q, body: dict):
             'response': 'Got timestamped lyrics.',
         })
     except http_requests.RequestException as exc:
+        suno_lyrics.log_call({**_log, 'result': 'failed', 'error': f'{type(exc).__name__}: {exc}'[:200]})
         return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
 
 
@@ -2601,6 +2640,7 @@ def suno_callback():
                                 job_id = None
                                 kind = 'song'
                                 extra = {}
+                                job_instrumental = False
                                 for jid, job in suno_jobs.items():
                                     if job.get('task_id') == task_id:
                                         job['status'] = 'complete'
@@ -2610,6 +2650,7 @@ def suno_callback():
                                         style = job.get('style', '')
                                         job_id = jid
                                         kind = job.get('kind', 'song')
+                                        job_instrumental = bool(job.get('instrumental', False))
                                         if kind == 'jingle':
                                             extra = {
                                                 'brand': job.get('brand', ''),
@@ -2628,6 +2669,11 @@ def suno_callback():
                                 _add_song_to_metadata(filename, song_title, prompt, style,
                                                       duration, song_id, kind=kind, extra=extra,
                                                       task_id=task_id)
+                                # The job may live in another worker's memory; then the
+                                # "[Instrumental]" lyrics are the instrumental signal.
+                                _schedule_lyrics_fetch(task_id, song.get('id', ''), filename,
+                                                       lyrics=song_lyrics,
+                                                       instrumental=job_instrumental, kind=kind)
 
                                 completed_songs_queue.append({
                                     'song_id': song_id,
