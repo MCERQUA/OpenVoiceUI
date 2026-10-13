@@ -9,6 +9,7 @@
 import { inject } from './ui/AppShell.js';
 import { initUpdateChecker } from './ui/UpdateBanner.js';
 import { connectAiradio } from './shell/airadio-bridge.js';
+import { safeRedirectTarget } from './core/safeRedirect.js';
 
 // Inject the application DOM structure before any module accesses the DOM
 inject();
@@ -3203,9 +3204,12 @@ connectAiradio();
                         // and direct page URLs are authenticated (browser only sends
                         // cookies with navigation requests, not Authorization headers).
                         this._syncSessionCookie();
-                        // If redirected here from a canvas page (or other protected route), go back there
-                        const redirectTo = new URLSearchParams(window.location.search).get('redirect');
-                        if (redirectTo && redirectTo.startsWith('/')) {
+                        // If redirected here from a canvas page (or other protected route), go back there.
+                        // Same-origin targets only: see src/core/safeRedirect.js.
+                        const redirectTo = safeRedirectTarget(
+                            new URLSearchParams(window.location.search).get('redirect'),
+                            window.location.origin);
+                        if (redirectTo) {
                             window.location.href = redirectTo;
                         }
                     };

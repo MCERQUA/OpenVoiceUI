@@ -15,6 +15,10 @@ Safari 26.6.2 reached the server as multipart with content_length=0 (WebKit bugs
 static/sw.js re-issued every POST through respondWith(fetch(...)), and the bulk upload path sent
 the picker's disk-backed File instead of bytes the page had read. The test fails on both.
 
+tests/js/safe-redirect.test.js covers the post-login ?redirect= target. The login shell sends a
+browser back there after it refreshes a stale session, and a bare startsWith('/') check let
+protocol-relative targets ('//host', '/\\host', '/<tab>/host') send it to another origin.
+
 Skips only when node is absent, and the skip is visible in pytest output. CI (ubuntu-latest)
 always has node.
 """
@@ -33,6 +37,7 @@ JS_TESTS = Path(__file__).resolve().parent / "js"
     "deepgram-streaming-ptt.test.js",
     "ptt-button-standalone.test.js",
     "upload-body-ios.test.js",
+    "safe-redirect.test.js",
 ])
 def test_js_regression_suite(name: str) -> None:
     node = shutil.which("node")

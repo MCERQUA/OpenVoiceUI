@@ -1613,32 +1613,8 @@ def upload_file():
     return jsonify(result)
 
 
-@app.route("/api/uploads", methods=["GET"])
-def list_uploads():
-    """List uploaded files. Optional ?type=image|text filter."""
-    file_type = request.args.get("type")  # "image", "text", or None for all
-    image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-    text_exts = {".pdf", ".txt", ".md", ".json", ".csv", ".html", ".js", ".py", ".ts", ".css"}
-
-    files = []
-    for f in sorted(UPLOADS_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if f.is_dir() or f.name.startswith("."):
-            continue
-        ext = f.suffix.lower()
-        is_image = ext in image_exts
-        kind = "image" if is_image else ("text" if ext in text_exts else "other")
-        if file_type and kind != file_type:
-            continue
-        stat = f.stat()
-        files.append({
-            "filename": f.name,
-            "url": f"/uploads/{f.name}",
-            "type": kind,
-            "size": stat.st_size,
-            "modified": stat.st_mtime,
-        })
-
-    return jsonify({"files": files, "count": len(files)})
+# GET /api/uploads (the uploads listing) lives in routes/static_files.py::list_uploads, behind
+# the same uploads gate as the files themselves.
 
 
 # ---------------------------------------------------------------------------

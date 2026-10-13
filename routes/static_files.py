@@ -527,13 +527,26 @@ def _upload_has_session():
 
 
 def _upload_session_state():
+    """'ok' | 'absent' | why a presented token failed. The grant is decided by verify_clerk_token
+    alone; the failure reason is a diagnostic. 'expired' is the common one: the __session cookie
+    lives 30 days but carries a ~60 s Clerk token that only the app shell refreshes, so a browser
+    that navigated away from the shell sends a stale token."""
     from services.auth import get_token_from_request
     if _upload_has_session():
         return 'ok'
     try:
-        return 'invalid' if get_token_from_request() else 'absent'
+        token = get_token_from_request()
     except Exception:
         return 'invalid'
+    if not token:
+        return 'absent'
+    try:
+        from services.auth import token_failure_reason
+        why = token_failure_reason(token)
+    except Exception:
+        return 'invalid'
+    # 'ok' here means it verified a moment after verify_clerk_token said no; the decision stands.
+    return why if why in ('expired', 'not-allowed', 'no-keys') else 'invalid'
 
 
 def _upload_agent_key_state():
@@ -553,13 +566,16 @@ def _upload_signature_state(filename):
     return upload_links.verify('/uploads/' + filename, request.args.get('exp'), request.args.get('sig'))
 
 
-def _upload_grants(filename):
+def _upload_grants(filename, listing=False):
     """Evaluate grants cheapest-first, stopping at the first that holds. Returns
-    (granted_by or None, {grant: state}) — states are only complete when nothing granted."""
+    (granted_by or None, {grant: state}) — states are only complete when nothing granted.
+    A listing (/api/uploads) has no signed-link grant: a signature opens one file, never the index."""
     states = {}
-    for name, check in (('agent_key', _upload_agent_key_state),
-                        ('signature', lambda: _upload_signature_state(filename)),
-                        ('session', _upload_session_state)):
+    checks = [('agent_key', _upload_agent_key_state)]
+    if not listing:
+        checks.append(('signature', lambda: _upload_signature_state(filename)))
+    checks.append(('session', _upload_session_state))
+    for name, check in checks:
         states[name] = check()
         if states[name] == 'ok':
             return name, states
@@ -574,7 +590,18 @@ def _upload_deny_reason(states):
     return 'no-credential'
 
 
-def _upload_shadow_record(filename, exists, states=None, reason=None):
+def _upload_wants_html():
+    return request.headers.get('Accept', '').startswith('text/html')
+
+
+def _upload_enforce_action(listing=False):
+    """What enforce would answer this request: a browser navigation is sent through the login
+    shell, which refreshes a stale session and comes straight back (the canvas-page bounce);
+    anything else gets a bare 401 and does not recover on its own."""
+    return 'login-redirect' if (not listing and _upload_wants_html()) else '401'
+
+
+def _upload_shadow_record(filename, exists, states=None, reason=None, listing=False):
     try:
         if UPLOADS_SHADOW_LOG.exists() and UPLOADS_SHADOW_LOG.stat().st_size > _UPLOADS_SHADOW_MAX_BYTES:
             return
@@ -587,6 +614,7 @@ def _upload_shadow_record(filename, exists, states=None, reason=None):
             'accept': request.headers.get('Accept', '')[:60],
             'reason': reason or 'no-credential',
             'grants': states or {},
+            'enforce_action': _upload_enforce_action(listing),
         }
         fd = os.open(str(UPLOADS_SHADOW_LOG), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o640)
         try:
@@ -597,21 +625,66 @@ def _upload_shadow_record(filename, exists, states=None, reason=None):
         logger.warning('[uploads-auth] shadow record failed: %s', e)
 
 
-def _upload_access_denied(filename, exists):
-    """None = serve. Otherwise the deny response (enforce mode only)."""
+def _upload_access_denied(filename, exists, listing=False):
+    """None = serve. Otherwise the deny response (enforce mode only).
+
+    Every route that serves bytes from UPLOADS_DIR calls this BEFORE checking existence:
+    serve_upload, routes/albums.py serve_album_photo, and the /api/uploads listing (listing=True,
+    which takes no signed-link grant and always answers JSON)."""
     if UPLOADS_AUTH_MODE not in ('shadow', 'enforce') or not UPLOADS_REQUIRE_AUTH:
         return None
-    granted_by, states = _upload_grants(filename)
+    granted_by, states = _upload_grants(filename, listing=listing)
     if granted_by:
         return None
     reason = _upload_deny_reason(states)
-    _upload_shadow_record(filename, exists, states, reason)
+    _upload_shadow_record(filename, exists, states, reason, listing=listing)
     if UPLOADS_AUTH_MODE != 'enforce':
         return None
     logger.warning('[uploads-auth] DENIED %s (%s)', filename[:200], reason)
-    if request.headers.get('Accept', '').startswith('text/html'):
+    if _upload_enforce_action(listing) == 'login-redirect':
         return redirect('/?redirect=/uploads/' + filename)
+    if listing:
+        return jsonify({'error': 'Unauthorized', 'code': 'auth_required'}), 401
     return 'Unauthorized', 401
+
+
+_UPLOADS_LISTING = '(listing) /api/uploads'
+
+
+@static_files_bp.route('/api/uploads', methods=['GET'])
+def list_uploads():
+    """List uploaded files. Optional ?type=image|text filter.
+
+    Moved here from server.py (uploads auth phase 3): app.require_auth treats every path that starts with
+    '/api/upload' as public (the POST upload route), so the listing has to gate itself. It goes
+    through the same uploads gate as the files, as a listing: shadow logs, enforce answers 401.
+    """
+    denied = _upload_access_denied(_UPLOADS_LISTING, True, listing=True)
+    if denied is not None:
+        return denied
+    file_type = request.args.get("type")  # "image", "text", or None for all
+    image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    text_exts = {".pdf", ".txt", ".md", ".json", ".csv", ".html", ".js", ".py", ".ts", ".css"}
+
+    files = []
+    for f in sorted(UPLOADS_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if f.is_dir() or f.name.startswith("."):
+            continue
+        ext = f.suffix.lower()
+        is_image = ext in image_exts
+        kind = "image" if is_image else ("text" if ext in text_exts else "other")
+        if file_type and kind != file_type:
+            continue
+        stat = f.stat()
+        files.append({
+            "filename": f.name,
+            "url": f"/uploads/{f.name}",
+            "type": kind,
+            "size": stat.st_size,
+            "modified": stat.st_mtime,
+        })
+
+    return jsonify({"files": files, "count": len(files)})
 
 
 @static_files_bp.route('/uploads/<path:filename>')
