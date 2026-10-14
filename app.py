@@ -320,7 +320,20 @@ def create_app(config_override: dict = None):
             if not user_id:
                 # For API calls return JSON 401; for page navigations redirect to /
                 if path.startswith('/api/') or request.headers.get('X-Requested-With'):
-                    return jsonify({'error': 'Unauthorized', 'code': 'auth_required'}), 401
+                    # Name what IS accepted (#477): an agent that got here spent hours
+                    # cycling gateway tokens / X-API-Key / X-Auth-Token, none of which
+                    # this gate reads. auth_required means "no accepted credential was
+                    # presented" — never an authorization state like a page lock
+                    # (those come back 403 from the route with their own code).
+                    return jsonify({
+                        'error': 'Unauthorized',
+                        'code': 'auth_required',
+                        'accepted_credentials': [
+                            'Authorization: Bearer <Clerk session JWT>',
+                            '__session cookie (Clerk)',
+                            'X-Agent-Key: <AGENT_API_KEY> (tenant agent, non-admin paths only)',
+                        ],
+                    }), 401
                 # HTML page request — redirect to root (login gate)
                 return redirect('/')
 

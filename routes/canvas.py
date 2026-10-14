@@ -506,6 +506,55 @@ def _generate_pending_icons_inner(page_ids) -> None:
             logger.warning(f'Auto icon-gen error for {page_id}: {e}')
 
 
+def _normalize_manifest_page_keys(manifest: dict) -> list[str]:
+    """Fold manifest page entries keyed '<id>.html' into '<id>' (#477 defect 3).
+
+    The /pages/ gate and every API route key on ``Path(filename).stem``. An entry
+    registered under the full filename (seen live 2026-09-04: a page under BOTH
+    '<client>-songs' and '<client>-songs.html') renders a second tile whose link
+    resolves to '/pages/<id>.html.html' -> 404, and is never consulted by the
+    gate. When the stem entry also exists the duplicate is MERGED into it (the
+    stem entry wins on every field it already has); otherwise the key is
+    renamed. Category / uncategorized / recently_viewed references follow.
+    Returns the keys that were fixed, so the caller can log them.
+    """
+    pages = manifest.get('pages') or {}
+    fixed: list[str] = []
+    for key in [k for k in list(pages) if k.endswith('.html') and len(k) > 5]:
+        stem = key[:-5]
+        dup = pages.pop(key)
+        if stem in pages:
+            canon = pages[stem]
+            for k, v in dup.items():
+                canon.setdefault(k, v)
+            # Security flags merge to the MORE RESTRICTIVE value, never by
+            # precedence: an admin lock held on the phantom tile must survive,
+            # and a duplicate must not be able to publish the gated entry.
+            if dup.get('is_locked') is True or canon.get('is_locked') is True:
+                canon['is_locked'] = True
+            if canon.get('is_public') is not True or dup.get('is_public') is not True:
+                canon['is_public'] = False
+        else:
+            pages[stem] = dup
+        for cat in (manifest.get('categories') or {}).values():
+            cat_pages = cat.get('pages')
+            if isinstance(cat_pages, list) and key in cat_pages:
+                cat_pages.remove(key)
+                if stem not in cat_pages:
+                    cat_pages.append(stem)
+        for list_name in ('uncategorized', 'recently_viewed'):
+            lst = manifest.get(list_name)
+            if isinstance(lst, list) and key in lst:
+                seen: list[str] = []
+                for item in lst:
+                    item = stem if item == key else item
+                    if item not in seen:
+                        seen.append(item)
+                lst[:] = seen
+        fixed.append(key)
+    return fixed
+
+
 def _sync_canvas_manifest_locked() -> dict:
     """Inner implementation — caller must hold _manifest_lock."""
     global _last_sync_time
@@ -516,6 +565,9 @@ def _sync_canvas_manifest_locked() -> dict:
     if not CANVAS_PAGES_DIR.exists():
         logger.warning(f'Canvas pages directory not found: {CANVAS_PAGES_DIR}')
         return manifest
+
+    for _bad_key in _normalize_manifest_page_keys(manifest):
+        logger.info(f'Canvas manifest: folded duplicate page key {_bad_key!r} into {_bad_key[:-5]!r}')
 
     existing_files = {p.name for p in CANVAS_PAGES_DIR.glob('*.html')}
     # Only consider pages that have a proper 'filename' field — entries using
@@ -550,6 +602,24 @@ def _sync_canvas_manifest_locked() -> dict:
             'voice_aliases': existing.get('voice_aliases') or generate_voice_aliases(title),
             'access_count': existing.get('access_count', 0),
         }
+        # is_locked / is_public are written EXPLICITLY, but ONLY for entries this
+        # sync CREATES (#477). The PATCH visibility guard reads an ABSENT
+        # is_locked key as LOCKED (fail closed), so a discovered page with no key
+        # could never be published by the tenant agent — measured 2026-10-14 on
+        # hr-blog-search-tuneup. Discovery is how every page an agent writes
+        # straight to canvas-pages/ gets registered; those are the agent's own
+        # deliverables: unlocked, private until published. An admin lock is an
+        # explicit opt-in from the admin dashboard.
+        #
+        # An entry that ALREADY EXISTS (legacy 'file'/'title' keys being
+        # normalised here) keeps exactly the flags it had — an absent key stays
+        # absent. This sync runs on an UNAUTHENTICATED manifest GET (public-read
+        # prefix), so if it wrote is_locked:false onto a pre-existing key-absent
+        # entry, any anonymous GET would turn a fail-closed page into an
+        # agent-publishable one (reviewer-measured on PR #540: 403 -> GET -> 200).
+        if not existing:
+            manifest['pages'][page_id]['is_public'] = False
+            manifest['pages'][page_id]['is_locked'] = False
         if page_icon:
             manifest['pages'][page_id]['icon'] = page_icon
         # Agents write page files directly (not via the pages API), so newly
@@ -699,11 +769,16 @@ def _add_page_to_manifest_locked(filename: str, title: str, description: str = '
             'modified': datetime.now().isoformat(),
             'starred': False,
             'is_public': False,
-            # LOCKED BY DEFAULT (2026-08-29). The admin-only visibility guard below only
-            # fires on locked pages; with this False it never fired on ANY page ever created
-            # (measured: 0 locked / 72 unlocked / 2127 key-absent fleet-wide), leaving a 30s
-            # cooldown as the only thing between an agent and a public page.
-            'is_locked': True,
+            # UNLOCKED, EXPLICITLY (#477, 2026-10-14). This reverses the 2026-08-29
+            # lock-by-default (e3b9c5e): that made every page an agent created need
+            # an admin click before the agent could deliver it, and a finished,
+            # paid-for deliverable sat undeliverable for hours. Publishing a page
+            # is the tenant agent's own self-service action: the page stays
+            # PRIVATE until the agent flips is_public (30s cooldown below), and an
+            # admin can still LOCK any page from the admin dashboard — the lock
+            # is an explicit opt-in, not the default. The key is always written so
+            # the guard never has to guess (an ABSENT key still reads as locked).
+            'is_locked': False,
             'voice_aliases': generate_voice_aliases(title),
             'access_count': 0,
         }
@@ -1321,21 +1396,82 @@ def sync_manifest():
     })
 
 
+def _resolve_page_entry_locked(page_id: str) -> tuple[dict, str | None, bool]:
+    """Find the manifest entry for ``page_id`` — caller must hold _manifest_lock.
+
+    Returns ``(manifest, resolved_key_or_None, file_on_disk)``.
+
+    - '<id>.html' is accepted as well as '<id>' (#477 defect 3 — keys are stems).
+    - If there is no entry yet but '<id>.html' exists in canvas-pages/, the
+      discovery sync runs FIRST and the lookup is retried. Before this, a page
+      written straight to disk was only registered by the next throttled
+      ``GET /api/canvas/manifest``, so the agent's first PATCH after writing the
+      file returned "Page not found" (measured on test-dev 2026-10-14:
+      PATCH -> 404, GET manifest, PATCH -> 200). Discovery must happen before
+      the request is judged, not after a poller happens to run.
+    """
+    manifest = load_canvas_manifest()
+    stem = page_id[:-5] if page_id.endswith('.html') and len(page_id) > 5 else page_id
+    # page_id comes from a non-path URL segment (no '/'), so it cannot escape the
+    # pages dir; a NUL byte would make is_file() raise, and '.'/'..'/'' are not
+    # page ids. All of those are simply "no file".
+    if not stem or stem in ('.', '..') or any(c in stem for c in '/\\\0'):
+        file_on_disk = False
+    else:
+        try:
+            file_on_disk = (CANVAS_PAGES_DIR / Path(f'{stem}.html').name).is_file()
+        except (OSError, ValueError):
+            file_on_disk = False
+    # STEM FIRST, always. The /pages/ gate keys on Path(path).stem and consults
+    # ONLY that entry, so when a pre-normalisation manifest holds both 'foo'
+    # (locked) and 'foo.html' (unlocked), resolving 'foo.html' to the phantom
+    # would tell the agent "published" (200) while the gate kept serving 401 and
+    # the next sync's merge discarded the flag — a lie, not a publish. The
+    # phantom key is only consulted when no stem entry exists at all.
+    for key in (stem, page_id):
+        if key in manifest['pages']:
+            return manifest, key, file_on_disk
+    if file_on_disk:
+        manifest = _sync_canvas_manifest_locked()
+        for key in (stem, page_id):
+            if key in manifest['pages']:
+                return manifest, key, file_on_disk
+    return manifest, None, file_on_disk
+
+
+def _page_not_found(page_id: str, file_on_disk: bool):
+    """404 that says WHY (#477: the error must name the real cause)."""
+    if file_on_disk:
+        hint = ('The file exists in canvas-pages/ but could not be registered in the manifest '
+                '(manifest write failed — see server log).')
+    else:
+        hint = ('No such file in canvas-pages/. Write the page first (POST /api/canvas/pages or '
+                'write <page_id>.html into canvas-pages/), then retry.')
+    return jsonify({
+        'error': 'Page not found',
+        'code': 'page_not_found',
+        'page_id': page_id,
+        'file_on_disk': file_on_disk,
+        'hint': hint,
+    }), 404
+
+
 @canvas_bp.route('/api/canvas/manifest/page/<page_id>', methods=['GET', 'PATCH', 'DELETE'])
 def handle_page_metadata(page_id):
     """Get, update, or delete page metadata."""
     if request.method == 'GET':
-        manifest = load_canvas_manifest()
-        if page_id not in manifest['pages']:
-            return jsonify({'error': 'Page not found'}), 404
-        return jsonify(manifest['pages'][page_id])
+        with _manifest_lock:
+            manifest, key, file_on_disk = _resolve_page_entry_locked(page_id)
+        if key is None:
+            return _page_not_found(page_id, file_on_disk)
+        return jsonify(manifest['pages'][key])
 
     # PATCH/DELETE — hold lock to prevent concurrent manifest clobbering
     with _manifest_lock:
-        manifest = load_canvas_manifest()
-
-        if page_id not in manifest['pages']:
-            return jsonify({'error': 'Page not found'}), 404
+        manifest, key, file_on_disk = _resolve_page_entry_locked(page_id)
+        if key is None:
+            return _page_not_found(page_id, file_on_disk)
+        page_id = key
 
         if request.method == 'DELETE':
             page = manifest['pages'][page_id]
@@ -1405,8 +1541,24 @@ def handle_page_metadata(page_id):
             return jsonify({'status': 'ok', 'message': 'Page archived', 'page_id': page_id, 'title': page_title})
 
         # PATCH — update metadata
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Request body must be a JSON object', 'code': 'bad_request'}), 400
         page = manifest['pages'][page_id]
+
+        # TYPE GATE, before any guard (#477 review, pre-existing on main). The
+        # lock and cooldown guards below test `data.get('is_public') is True`,
+        # but the field loop stored ANY value and the /pages/ gate reads it
+        # truthy — so {"is_public": 1}, "true", "no" or [1] from the agent key
+        # PUBLISHED A LOCKED PAGE with no cooldown. Security flags are booleans
+        # or the request is rejected; nothing below may see a non-bool.
+        for _flag in ('is_public', 'is_locked'):
+            if _flag in data and not isinstance(data[_flag], bool):
+                return jsonify({
+                    'error': f'{_flag} must be a JSON boolean (true/false), got {type(data[_flag]).__name__}',
+                    'code': 'invalid_type',
+                    'field': _flag,
+                }), 400
 
         # Detect agent requests (X-Agent-Key header) vs admin requests (Clerk JWT)
         _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
@@ -1424,17 +1576,49 @@ def handle_page_metadata(page_id):
         # Only the UNSAFE direction is blocked: making a page PUBLIC needs an admin.
         # Making a page PRIVATE is always allowed — an agent that realises it exposed
         # something must never be prevented from closing it.
-        # Default is True: a page with no is_locked key is treated as LOCKED (fail closed).
+        #
+        # ABSENT KEY = LOCKED (fail closed) — kept from e3b9c5e (2026-08-29), on
+        # purpose. Every path in THIS app now writes is_locked explicitly
+        # (creation + discovery, #477), so an absent key can only come from an
+        # entry registered by something outside the app (a host-side script, a
+        # hand edit) or from before the key existed; those are not this
+        # container's agent's deliverables and no admin ever chose to unlock
+        # them. Flipping the default would silently unlock every such entry
+        # (measured 2026-10-14 across 24 tenants: 196 key-absent of 2131, 0 of
+        # them lacking a filename). What #477 DOES require is that the refusal
+        # names the real cause — lock vs absent key, never "auth" — and how to
+        # clear it.
         if data.get('is_public') is True and page.get('is_locked', True) and not is_admin:
+            lock_recorded = page.get('is_locked')  # True, or None when absent
+            if 'is_locked' in page:
+                return jsonify({
+                    'error': 'This page is admin-locked. It can only be made public by an admin '
+                             '(admin dashboard → Canvas → unlock). This is an authorization '
+                             'state, not a credential problem — no token or key will open it; '
+                             'ask the admin to unlock the page.',
+                    'code': 'page_locked',
+                    'is_locked': lock_recorded,
+                    'lock_source': 'explicit',
+                    'how_to_unlock': 'admin: PATCH {"is_locked": false} with a Clerk admin session, '
+                                     'or toggle the lock in the admin dashboard',
+                }), 403
             return jsonify({
-                'error': 'This page is locked. Visibility can only be changed from the admin dashboard.',
-                'is_locked': True,
+                'error': 'This page has no is_locked key in the manifest (it was registered '
+                         'outside the app) and is treated as LOCKED until an admin sets it. '
+                         'This is an authorization state, not a credential problem — no token '
+                         'or key will open it; ask the admin to unlock the page.',
+                'code': 'page_lock_unset',
+                'is_locked': None,
+                'lock_source': 'absent_key',
+                'how_to_unlock': 'admin: PATCH {"is_locked": false} with a Clerk admin session, '
+                                 'or set "is_locked": false on the manifest entry',
             }), 403
 
         # Guard: only an admin may lock/unlock pages (never the agent).
         if 'is_locked' in data and not is_admin:
             return jsonify({
                 'error': 'Page lock status can only be changed from the admin dashboard.',
+                'code': 'admin_only',
             }), 403
 
         # Guard: reject is_public=True if page was created less than 30 seconds ago.
@@ -1449,12 +1633,18 @@ def handle_page_metadata(page_id):
                         return jsonify({
                             'error': 'Cannot make a page public within 30 seconds of creation. '
                                      'Wait a moment and try again.',
+                            'code': 'publish_cooldown',
                             'age_seconds': round(age_seconds, 1),
+                            'retry_after_seconds': round(30 - age_seconds, 1),
                         }), 429
                 except (ValueError, TypeError):
                     # FAIL CLOSED: an unparseable 'created' must not become a free pass
                     # past the cooldown. Previously this allowed the change through.
-                    return jsonify({'error': 'Cannot verify page age; refusing to make public.'}), 409
+                    return jsonify({
+                        'error': 'Cannot verify page age; refusing to make public.',
+                        'code': 'created_unverifiable',
+                        'created': created_str,
+                    }), 409
 
         for field in ['display_name', 'description', 'category', 'tags', 'starred', 'is_public', 'is_locked', 'icon', 'style']:
             if field in data:
