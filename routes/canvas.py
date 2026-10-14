@@ -524,8 +524,16 @@ def _normalize_manifest_page_keys(manifest: dict) -> list[str]:
         stem = key[:-5]
         dup = pages.pop(key)
         if stem in pages:
+            canon = pages[stem]
             for k, v in dup.items():
-                pages[stem].setdefault(k, v)
+                canon.setdefault(k, v)
+            # Security flags merge to the MORE RESTRICTIVE value, never by
+            # precedence: an admin lock held on the phantom tile must survive,
+            # and a duplicate must not be able to publish the gated entry.
+            if dup.get('is_locked') is True or canon.get('is_locked') is True:
+                canon['is_locked'] = True
+            if canon.get('is_public') is not True or dup.get('is_public') is not True:
+                canon['is_public'] = False
         else:
             pages[stem] = dup
         for cat in (manifest.get('categories') or {}).values():
@@ -591,18 +599,27 @@ def _sync_canvas_manifest_locked() -> dict:
             'created': existing.get('created') or existing.get('created_at') or datetime.fromtimestamp(filepath.stat().st_ctime).isoformat(),
             'modified': datetime.fromtimestamp(filepath.stat().st_mtime).isoformat(),
             'starred': existing.get('starred', False),
-            # Written EXPLICITLY (#477). The PATCH visibility guard reads an ABSENT
-            # is_locked key as LOCKED (fail closed), so a discovered page with no
-            # key could never be published by the tenant agent — measured
-            # 2026-10-14 on hr-blog-search-tuneup. Discovery is how every page an
-            # agent writes straight to canvas-pages/ gets registered, and those
-            # are the agent's own deliverables: unlocked, private until published.
-            # An admin lock is an explicit opt-in from the admin dashboard.
-            'is_public': existing.get('is_public', False),
-            'is_locked': existing.get('is_locked', False),
             'voice_aliases': existing.get('voice_aliases') or generate_voice_aliases(title),
             'access_count': existing.get('access_count', 0),
         }
+        # is_locked / is_public are written EXPLICITLY, but ONLY for entries this
+        # sync CREATES (#477). The PATCH visibility guard reads an ABSENT
+        # is_locked key as LOCKED (fail closed), so a discovered page with no key
+        # could never be published by the tenant agent — measured 2026-10-14 on
+        # hr-blog-search-tuneup. Discovery is how every page an agent writes
+        # straight to canvas-pages/ gets registered; those are the agent's own
+        # deliverables: unlocked, private until published. An admin lock is an
+        # explicit opt-in from the admin dashboard.
+        #
+        # An entry that ALREADY EXISTS (legacy 'file'/'title' keys being
+        # normalised here) keeps exactly the flags it had — an absent key stays
+        # absent. This sync runs on an UNAUTHENTICATED manifest GET (public-read
+        # prefix), so if it wrote is_locked:false onto a pre-existing key-absent
+        # entry, any anonymous GET would turn a fail-closed page into an
+        # agent-publishable one (reviewer-measured on PR #540: 403 -> GET -> 200).
+        if not existing:
+            manifest['pages'][page_id]['is_public'] = False
+            manifest['pages'][page_id]['is_locked'] = False
         if page_icon:
             manifest['pages'][page_id]['icon'] = page_icon
         # Agents write page files directly (not via the pages API), so newly
@@ -1395,15 +1412,28 @@ def _resolve_page_entry_locked(page_id: str) -> tuple[dict, str | None, bool]:
     """
     manifest = load_canvas_manifest()
     stem = page_id[:-5] if page_id.endswith('.html') and len(page_id) > 5 else page_id
-    # page_id comes from a non-path URL segment (no '/'), so this cannot escape
-    # the pages dir; Path().name is belt-and-braces.
-    file_on_disk = (CANVAS_PAGES_DIR / Path(f'{stem}.html').name).is_file()
-    for key in (page_id, stem):
+    # page_id comes from a non-path URL segment (no '/'), so it cannot escape the
+    # pages dir; a NUL byte would make is_file() raise, and '.'/'..'/'' are not
+    # page ids. All of those are simply "no file".
+    if not stem or stem in ('.', '..') or any(c in stem for c in '/\\\0'):
+        file_on_disk = False
+    else:
+        try:
+            file_on_disk = (CANVAS_PAGES_DIR / Path(f'{stem}.html').name).is_file()
+        except (OSError, ValueError):
+            file_on_disk = False
+    # STEM FIRST, always. The /pages/ gate keys on Path(path).stem and consults
+    # ONLY that entry, so when a pre-normalisation manifest holds both 'foo'
+    # (locked) and 'foo.html' (unlocked), resolving 'foo.html' to the phantom
+    # would tell the agent "published" (200) while the gate kept serving 401 and
+    # the next sync's merge discarded the flag — a lie, not a publish. The
+    # phantom key is only consulted when no stem entry exists at all.
+    for key in (stem, page_id):
         if key in manifest['pages']:
             return manifest, key, file_on_disk
     if file_on_disk:
         manifest = _sync_canvas_manifest_locked()
-        for key in (page_id, stem):
+        for key in (stem, page_id):
             if key in manifest['pages']:
                 return manifest, key, file_on_disk
     return manifest, None, file_on_disk
@@ -1511,8 +1541,24 @@ def handle_page_metadata(page_id):
             return jsonify({'status': 'ok', 'message': 'Page archived', 'page_id': page_id, 'title': page_title})
 
         # PATCH — update metadata
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Request body must be a JSON object', 'code': 'bad_request'}), 400
         page = manifest['pages'][page_id]
+
+        # TYPE GATE, before any guard (#477 review, pre-existing on main). The
+        # lock and cooldown guards below test `data.get('is_public') is True`,
+        # but the field loop stored ANY value and the /pages/ gate reads it
+        # truthy — so {"is_public": 1}, "true", "no" or [1] from the agent key
+        # PUBLISHED A LOCKED PAGE with no cooldown. Security flags are booleans
+        # or the request is rejected; nothing below may see a non-bool.
+        for _flag in ('is_public', 'is_locked'):
+            if _flag in data and not isinstance(data[_flag], bool):
+                return jsonify({
+                    'error': f'{_flag} must be a JSON boolean (true/false), got {type(data[_flag]).__name__}',
+                    'code': 'invalid_type',
+                    'field': _flag,
+                }), 400
 
         # Detect agent requests (X-Agent-Key header) vs admin requests (Clerk JWT)
         _agent_api_key = os.getenv('AGENT_API_KEY', '').strip()
@@ -1537,9 +1583,11 @@ def handle_page_metadata(page_id):
         # entry registered by something outside the app (a host-side script, a
         # hand edit) or from before the key existed; those are not this
         # container's agent's deliverables and no admin ever chose to unlock
-        # them. Flipping the default would silently unlock ~2k legacy entries
-        # fleet-wide. What #477 DOES require is that the refusal names the real
-        # cause — lock vs absent key, never "auth" — and how to clear it.
+        # them. Flipping the default would silently unlock every such entry
+        # (measured 2026-10-14 across 24 tenants: 196 key-absent of 2131, 0 of
+        # them lacking a filename). What #477 DOES require is that the refusal
+        # names the real cause — lock vs absent key, never "auth" — and how to
+        # clear it.
         if data.get('is_public') is True and page.get('is_locked', True) and not is_admin:
             lock_recorded = page.get('is_locked')  # True, or None when absent
             if 'is_locked' in page:

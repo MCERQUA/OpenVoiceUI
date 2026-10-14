@@ -283,6 +283,105 @@ class TestDuplicateKeyNormalisation:
 
 
 # ---------------------------------------------------------------------------
+# PR #540 review findings — each was a way to publish a page that must stay private
+# ---------------------------------------------------------------------------
+
+def _unauth_pages_get(canvas, app_client, monkeypatch, filename):
+    """What the /pages/ gate serves to an anonymous reader right now."""
+    monkeypatch.setattr(canvas, 'CANVAS_REQUIRE_AUTH', True)
+    monkeypatch.setattr(canvas, '_manifest_cache', {'data': None, 'mtime': 0})
+    with patch('services.auth.get_token_from_request', return_value=None):
+        return app_client.get(f'/pages/{filename}')
+
+
+class TestNonBooleanFlagsAreRejected:
+    # Pre-existing on main: guards tested `is True`, the field loop stored any
+    # value, and the /pages/ gate reads it truthy — so each of these published a
+    # LOCKED page inside the cooldown with the agent key.
+    @pytest.mark.parametrize('val', [1, 'true', 'no', [1]])
+    def test_non_bool_is_public_is_400_and_nothing_is_stored(self, canvas_env, app_client, monkeypatch, val):
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'deliverable.html').write_text('<p>secret</p>')
+        _write_manifest(manifest_path, {'deliverable': _entry(is_locked=True, created=datetime.now().isoformat())})
+        resp = _agent_patch(app_client, 'deliverable', {'is_public': val})
+        assert resp.status_code == 400
+        assert resp.get_json()['code'] == 'invalid_type'
+        assert json.loads(manifest_path.read_text())['pages']['deliverable']['is_public'] is False
+        assert _unauth_pages_get(canvas, app_client, monkeypatch, 'deliverable.html').status_code != 200
+
+    def test_non_bool_is_locked_is_400_even_for_admin(self, canvas_env, app_client):
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'deliverable.html').write_text('<p>x</p>')
+        _write_manifest(manifest_path, {'deliverable': _entry(is_locked=True)})
+        with _as_admin():
+            resp = app_client.patch('/api/canvas/manifest/page/deliverable', json={'is_locked': 'false'})
+        assert resp.status_code == 400
+        assert json.loads(manifest_path.read_text())['pages']['deliverable']['is_locked'] is True
+
+    def test_non_object_body_is_400(self, canvas_env, app_client):
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'deliverable.html').write_text('<p>x</p>')
+        _write_manifest(manifest_path, {'deliverable': _entry(is_locked=False)})
+        resp = _agent_patch(app_client, 'deliverable', [{'is_public': True}])
+        assert resp.status_code == 400
+
+
+class TestAliasResolvesToTheGatedEntry:
+    def test_alias_hits_stem_not_phantom_when_both_exist(self, canvas_env, app_client, monkeypatch):
+        # Pre-normalisation manifest: 'foo' (locked, the entry the gate reads)
+        # and a phantom 'foo.html' (unlocked). The alias must answer for 'foo'.
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'foo.html').write_text('<p>x</p>')
+        _write_manifest(manifest_path, {'foo': _entry(filename='foo.html', is_locked=True),
+                                        'foo.html': _entry(filename='foo.html', is_locked=False)})
+        resp = _agent_patch(app_client, 'foo.html', {'is_public': True})
+        assert resp.status_code == 403
+        assert resp.get_json()['code'] == 'page_locked'
+        pages = json.loads(manifest_path.read_text())['pages']
+        assert pages['foo']['is_public'] is False
+        assert pages.get('foo.html', {}).get('is_public') is not True
+        assert _unauth_pages_get(canvas, app_client, monkeypatch, 'foo.html').status_code != 200
+
+
+class TestMergeKeepsTheMoreRestrictiveFlags:
+    def test_lock_held_on_the_duplicate_survives_merge(self, canvas_env):
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'foo.html').write_text('<p>x</p>')
+        _write_manifest(manifest_path, {'foo': _entry(filename='foo.html', is_locked=False),
+                                        'foo.html': _entry(filename='foo.html', is_locked=True)})
+        manifest = canvas.sync_canvas_manifest()
+        assert manifest['pages']['foo']['is_locked'] is True
+
+    def test_public_flag_on_the_duplicate_does_not_publish_the_stem(self, canvas_env):
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'foo.html').write_text('<p>x</p>')
+        _write_manifest(manifest_path, {'foo': _entry(filename='foo.html', is_locked=True, is_public=False),
+                                        'foo.html': _entry(filename='foo.html', is_locked=False, is_public=True)})
+        manifest = canvas.sync_canvas_manifest()
+        assert manifest['pages']['foo']['is_public'] is False
+        assert manifest['pages']['foo']['is_locked'] is True
+
+
+class TestSyncNeverFlipsAnExistingEntry:
+    def test_legacy_file_keyed_entry_keeps_its_absent_lock_across_an_unauth_manifest_get(self, canvas_env, app_client):
+        # The sync runs on an UNAUTHENTICATED manifest GET. A pre-existing entry
+        # with no is_locked key must come out of it still key-absent (locked),
+        # not rewritten to is_locked:false — reviewer-measured 403 -> GET -> 200.
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'legacy.html').write_text('<p>x</p>')
+        _write_manifest(manifest_path, {'legacy': {'file': 'legacy.html', 'title': 'Legacy',
+                                                   'created': OLD, 'is_public': False}})
+        before = _agent_patch(app_client, 'legacy', {'is_public': True})
+        assert before.status_code == 403 and before.get_json()['code'] == 'page_lock_unset'
+        assert app_client.get('/api/canvas/manifest').status_code == 200   # anonymous, public-read prefix
+        after = _agent_patch(app_client, 'legacy', {'is_public': True})
+        assert after.status_code == 403 and after.get_json()['code'] == 'page_lock_unset'
+        entry = json.loads(manifest_path.read_text())['pages']['legacy']
+        assert 'is_locked' not in entry
+        assert entry['filename'] == 'legacy.html'   # it WAS normalised, just not unlocked
+
+
+# ---------------------------------------------------------------------------
 # 401 names what it accepts — never confusable with a lock
 # ---------------------------------------------------------------------------
 
