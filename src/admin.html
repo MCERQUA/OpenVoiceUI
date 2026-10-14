@@ -3317,6 +3317,13 @@ const PlatformSetup={
     el.innerHTML='<div class="loading"><div class="spin"></div>Loading...</div>';
     try{
       const r=await fetch('/api/vault/platform-setup');
+      if(r.status===403){
+        // SEC-069: platform OAuth setup is platform-operator only; a tenant admin
+        // gets {code:'platform_admin_only'} — show the reason, not a bare 403.
+        const b=await r.json().catch(()=>({}));
+        el.innerHTML='<div class="empty" style="padding:20px;color:var(--dim)">'+esc(b.error||'Platform OAuth setup is managed by the platform operator.')+'</div>';
+        return;
+      }
       if(!r.ok)throw new Error('Failed to load: '+r.status);
       const d=await r.json();
       this.render(d);
