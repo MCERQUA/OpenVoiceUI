@@ -7,12 +7,49 @@ plugin-aware credential system.
 import json
 import logging
 import os
+from functools import wraps
 
-from flask import Blueprint, jsonify, redirect, request
+from flask import Blueprint, current_app, g, jsonify, redirect, request
 
 logger = logging.getLogger(__name__)
 
 vault_bp = Blueprint('vault', __name__)
+
+
+def _platform_admin_only(view):
+    """SEC-069: the platform-setup surface edits .platform-oauth.env — the
+    PLATFORM's shared OAuth app credentials, consumed by every tenant's OVU.
+
+    The app-level gate (app.py _ADMIN_ONLY_PREFIXES → is_admin_user) admits
+    anyone in the TENANT's ADMIN_USER_IDS, i.e. the tenant owner. That is the
+    right gate for the owner's own vault, and the wrong gate here: a tenant
+    owner must not be able to rewrite platform-wide OAuth client secrets from
+    their own admin UI. This decorator adds the stricter test. It runs AFTER
+    app.py's gate, so an anonymous caller still gets 401 and a non-admin
+    tenant user still gets 403 admin_required exactly as before.
+
+    Local / self-hosted mode (no Clerk key): the whole app is open by design
+    and the operator IS the platform, so the decorator is a no-op there — the
+    same rule app.py applies to every other admin surface. The switch is read
+    from app.config['CLERK_AUTH_ENABLED'] (set by create_app from the SAME env
+    read as the app gate); an app that never set it falls back to the
+    import-time view, which fails closed when a Clerk key is present.
+    """
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        import services.auth as _auth
+        gate_on = current_app.config.get('CLERK_AUTH_ENABLED', _auth._CLERK_CONFIGURED)
+        if gate_on:
+            user_id = getattr(g, 'clerk_user_id', None)
+            if not _auth.is_platform_admin(user_id):
+                logger.warning('Platform-setup denied: user_id=%s path=%s (tenant admin is not platform admin)',
+                               user_id, request.path)
+                return jsonify({
+                    'error': 'Platform OAuth setup is managed by the platform operator, not per tenant.',
+                    'code': 'platform_admin_only',
+                }), 403
+        return view(*args, **kwargs)
+    return wrapped
 
 
 def _get_username() -> str:
@@ -661,14 +698,46 @@ def _read_platform_oauth_env() -> dict:
     return result
 
 
-def _write_platform_oauth_env(updates: dict) -> bool:
+class PlatformOAuthEnvWriteError(Exception):
+    """Raised by _write_platform_oauth_env when the write cannot be made or
+    cannot be PROVEN to have landed. `code` is the machine-readable reason the
+    route returns to the caller."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def _platform_env_writable(path) -> bool:
+    """True iff the process can write `path` (existing file) — os.access
+    reports False both for mode bits and for a read-only mount (EROFS), which
+    is exactly the SEC-069 `:ro` case."""
+    return os.access(path, os.W_OK)
+
+
+def _write_platform_oauth_env(updates: dict) -> None:
     """Update .platform-oauth.env with the given key/value pairs.
     Preserves comments, blank lines, and ordering. Atomic write.
-    Returns True on success.
+
+    Raises PlatformOAuthEnvWriteError (never returns False) when:
+      - the file (or, if it must be created, its directory) is read-only
+        → code `platform_env_read_only`. SEC-069 mounts the file `:ro` inside
+        tenant containers; this must surface as an honest error, never as
+        "saved".
+      - the write ran but a re-read of the file does not show every requested
+        value → code `platform_env_write_failed`. The writer's own return
+        value is not the evidence; the file is.
+    A no-op write (values already present) is a success.
     """
     from services.vault import _update_env_file
     path = _platform_oauth_env_path()
     if not path.is_file():
+        if not os.access(path.parent, os.W_OK):
+            raise PlatformOAuthEnvWriteError(
+                'platform_env_read_only',
+                f'{path} does not exist and its directory is read-only here; '
+                'create it on the host.')
         # Create from template if missing
         try:
             template = path.parent / 'OpenVoiceUI' / '.platform-oauth.env.example'
@@ -681,8 +750,26 @@ def _write_platform_oauth_env(updates: dict) -> bool:
                 path.write_text(seed)
         except Exception as exc:
             logger.error(f"Cannot create platform-oauth env: {exc}")
-            return False
-    return _update_env_file(path, updates)
+            raise PlatformOAuthEnvWriteError('platform_env_write_failed',
+                                             f'Cannot create {path}: {exc}')
+    elif not _platform_env_writable(path):
+        logger.error(f"platform-oauth env is read-only in this container: {path}")
+        raise PlatformOAuthEnvWriteError(
+            'platform_env_read_only',
+            f'{path} is read-only in this container; platform OAuth credentials are set on the host.')
+
+    _update_env_file(path, updates)
+
+    # Verify from the file, not from the writer's return value (which is also
+    # False for "nothing changed").
+    landed = _read_platform_oauth_env()   # strips surrounding quotes; compare like-for-like
+    missing = {k: v for k, v in updates.items()
+               if landed.get(k, '') != v.strip().strip('"').strip("'")}
+    if missing:
+        logger.error(f"platform-oauth env write did not land for keys: {sorted(missing)}")
+        raise PlatformOAuthEnvWriteError(
+            'platform_env_write_failed',
+            f'Write to {path} did not land for: {", ".join(sorted(missing))}.')
 
 
 def _redirect_uris_for_provider(provider_id: str) -> list[str]:
@@ -721,6 +808,7 @@ def _redirect_uris_for_provider(provider_id: str) -> list[str]:
 
 
 @vault_bp.route('/api/vault/platform-setup', methods=['GET'])
+@_platform_admin_only
 def platform_setup_get():
     """Return the current Platform Setup state — list of OAuth providers
     with configuration status, env vars, and redirect URIs."""
@@ -766,6 +854,7 @@ def platform_setup_get():
 
 
 @vault_bp.route('/api/vault/platform-setup/<provider_id>', methods=['PUT'])
+@_platform_admin_only
 def platform_setup_put(provider_id):
     """Update an OAuth provider's client_id and client_secret. Body:
     {"client_id": "...", "client_secret": "..."}.
@@ -793,8 +882,12 @@ def platform_setup_put(provider_id):
         p['env_vars']['client_id']: cid,
         p['env_vars']['client_secret']: csec,
     }
-    if not _write_platform_oauth_env(updates):
-        return jsonify({'error': 'Failed to write platform-oauth env file'}), 500
+    try:
+        _write_platform_oauth_env(updates)
+    except PlatformOAuthEnvWriteError as exc:
+        # Loud, coded, and BEFORE os.environ is touched: a read-only file must
+        # never produce a value that is "live" in this process only.
+        return jsonify({'error': exc.message, 'code': exc.code}), 500
 
     # Update os.environ in the running process so the new values are live
     # immediately. No container restart, no debounce, no rename collision.
@@ -814,6 +907,7 @@ def platform_setup_put(provider_id):
 
 
 @vault_bp.route('/api/vault/platform-setup/<provider_id>', methods=['DELETE'])
+@_platform_admin_only
 def platform_setup_delete(provider_id):
     """Clear an OAuth provider's credentials."""
     import os as _os
@@ -824,8 +918,10 @@ def platform_setup_delete(provider_id):
         p['env_vars']['client_id']: '',
         p['env_vars']['client_secret']: '',
     }
-    if not _write_platform_oauth_env(updates):
-        return jsonify({'error': 'Failed to write platform-oauth env file'}), 500
+    try:
+        _write_platform_oauth_env(updates)
+    except PlatformOAuthEnvWriteError as exc:
+        return jsonify({'error': exc.message, 'code': exc.code}), 500
     # Live update — no restart needed
     for k in updates.keys():
         _os.environ.pop(k, None)

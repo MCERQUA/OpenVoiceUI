@@ -98,6 +98,10 @@ def create_app(config_override: dict = None):
     # Without it, the app runs fully open (single-user / local mode).
     _clerk_key = (os.getenv('CLERK_PUBLISHABLE_KEY') or os.getenv('VITE_CLERK_PUBLISHABLE_KEY', '')).strip()
     _auth_enabled = bool(_clerk_key)
+    # Route-level guards that must agree with THIS gate (not with the import-time
+    # view in services.auth) read it from here — e.g. routes/vault.py
+    # _platform_admin_only (SEC-069).
+    app.config['CLERK_AUTH_ENABLED'] = _auth_enabled
 
     # Privileged surfaces — require an admin user (services.auth.ADMIN_USER_IDS),
     # not just any allowlisted tenant user. ALLOWED_USER_IDS gates the voice app;
