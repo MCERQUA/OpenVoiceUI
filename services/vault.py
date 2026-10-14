@@ -345,12 +345,12 @@ def _restart_via_broker(service: str, username: str, container_name: str) -> boo
     try:
         res = host_broker.restart_container(service, username)
     except host_broker.BrokerError as exc:
-        if exc.status == 0 and service == 'openvoiceui':
+        if exc.status == 0 and (service == 'openvoiceui' or getattr(exc, 'outcome_unknown', False)):
             # Recreating openvoiceui-<t> recreates THIS process; the broker's answer can
             # only reach the new one. Unknown is not success — say so, and point at the
             # instrument that can tell (docker inspect .Created on the host).
-            msg = (f"connection dropped while the broker was recreating {container_name} "
-                   f"(this container); outcome UNKNOWN — verify with `docker inspect -f "
+            msg = (f"no answer from the broker while it was recreating {container_name}; "
+                   f"outcome UNKNOWN — verify with `docker inspect -f "
                    f"'{{{{.Created}}}}' {container_name}` on the host: {exc}")
             logger.warning(f"[vault] {msg}")
             _record_restart_outcome(container_name, False, msg, 'broker')
@@ -481,7 +481,6 @@ def restart_container_now(container_name: str) -> bool:
             existing.cancel()
             _restart_timers.pop(container_name, None)
     return _do_restart_container(container_name)
-    return True
 
 
 # ---------------------------------------------------------------------------

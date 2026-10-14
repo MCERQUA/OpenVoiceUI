@@ -49,10 +49,14 @@ BODY_MAX = 4000
 class BrokerError(RuntimeError):
     """The broker did not do it. .status is the HTTP status (0 = unreachable)."""
 
-    def __init__(self, message: str, status: int = 0, detail: str = ""):
+    def __init__(self, message: str, status: int = 0, detail: str = "", outcome_unknown: bool = False):
         super().__init__(message)
         self.status = status
         self.detail = detail
+        # True when the request REACHED the broker but no answer came back in time (read
+        # timeout). The broker may have done the work; the caller must say UNKNOWN, never
+        # "did not happen" (PR #541 review D1: client 120 s < broker compose 180 s).
+        self.outcome_unknown = outcome_unknown
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +132,12 @@ def _post(tenant: str, path: str, body: dict, timeout: float) -> dict:
     url = f"{broker_url()}{path}"
     try:
         resp = requests.post(url, json=body, headers=auth_headers(tenant), timeout=timeout)
+    except requests.ReadTimeout as exc:
+        # Connected and sent; no answer in `timeout`. The broker may still be (or have
+        # finished) doing it. Not success, not failure: UNKNOWN.
+        logger.warning("[host-broker] NO ANSWER in %ss from %s (request was delivered): %s", timeout, url, exc)
+        raise BrokerError(f"broker gave no answer within {timeout}s at {url} (request delivered; outcome unknown)",
+                          status=0, outcome_unknown=True) from exc
     except requests.RequestException as exc:
         logger.error("[host-broker] UNREACHABLE %s: %s", url, exc)
         raise BrokerError(f"broker unreachable at {url}: {exc}", status=0) from exc
@@ -150,7 +160,9 @@ def restart_container(service: str, tenant: str, dry_run: bool = False) -> dict:
     connection on that service as 'unknown', not as success."""
     if service not in ("openclaw", "openvoiceui"):
         raise BrokerError(f"service must be openclaw|openvoiceui, got {service!r}", status=400)
-    return _post(tenant, f"/restart/{service}/{tenant}", {"dry_run": bool(dry_run)}, timeout=120)
+    # 240 s > the broker's own compose timeout (180 s), so a slow-but-successful recreate
+    # answers before we give up (review D1).
+    return _post(tenant, f"/restart/{service}/{tenant}", {"dry_run": bool(dry_run)}, timeout=240)
 
 
 def safe_subject(stem: str, prefix: str = "analyze-", limit: int = 40) -> str:

@@ -300,3 +300,38 @@ def test_plugins_module_sends_tenant_token_on_every_broker_call(monkeypatch, bro
     assert len(seen) == 3
     for method, url, headers in seen:
         assert headers.get("X-Tenant-Token") == TOKEN, (method, url, headers)
+
+
+# ── PR #541 review D1: a delivered request with no answer is UNKNOWN, never "did not happen" ──
+def test_read_timeout_on_openclaw_restart_is_unknown_not_failure(monkeypatch, caplog):
+    import requests
+    from services import host_broker, vault
+    monkeypatch.setattr(host_broker, "tenant_token", lambda t: "x" * 64)
+    def boom(*a, **k):
+        raise requests.ReadTimeout("read timed out")
+    monkeypatch.setattr(host_broker.requests, "post", boom)
+    with caplog.at_level("WARNING"):
+        ok = vault._restart_via_broker("openclaw", "acme", "openclaw-acme")
+    assert ok is False
+    out = vault.last_restart_outcome("openclaw-acme")
+    assert "UNKNOWN" in out["detail"] and "DID NOT HAPPEN" not in out["detail"]
+    assert not any("RESTART DID NOT HAPPEN" in r.getMessage() for r in caplog.records)
+
+
+def test_connect_failure_on_openclaw_restart_still_says_did_not_happen(monkeypatch):
+    import requests
+    from services import host_broker, vault
+    monkeypatch.setattr(host_broker, "tenant_token", lambda t: "x" * 64)
+    def boom(*a, **k):
+        raise requests.ConnectionError("refused")
+    monkeypatch.setattr(host_broker.requests, "post", boom)
+    assert vault._restart_via_broker("openclaw", "acme", "openclaw-acme") is False
+    assert "DID NOT HAPPEN" in vault.last_restart_outcome("openclaw-acme")["detail"]
+
+
+def test_restart_client_timeout_exceeds_broker_compose_timeout(monkeypatch):
+    from services import host_broker
+    seen = {}
+    monkeypatch.setattr(host_broker, "_post", lambda t, p, b, timeout: seen.setdefault("t", timeout) or {"ok": True})
+    host_broker.restart_container("openclaw", "acme", dry_run=True)
+    assert seen["t"] > 180
