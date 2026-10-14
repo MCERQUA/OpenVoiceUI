@@ -650,8 +650,21 @@ def serve_upload(filename):
         '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.avif',
         '.mp4', '.webm', '.ogg', '.mov', '.mp3', '.wav', '.m4a', '.pdf',
     }
+    # Office/archive/csv files never render in a browser, so they keep their REAL type (a phone
+    # needs it to offer the spreadsheet/doc app; text/plain + nosniff can show raw bytes) while
+    # staying an attachment with the locked CSP below. html/svg/xml/js are NOT here: they render.
+    _DOWNLOAD_REAL_TYPE = {
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.xls': 'application/vnd.ms-excel',
+        '.doc': 'application/msword',
+        '.ppt': 'application/vnd.ms-powerpoint',
+        '.csv': 'text/csv; charset=utf-8',
+        '.zip': 'application/zip',
+    }
     if _ext not in _SAFE_INLINE:
-        resp.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        resp.headers['Content-Type'] = _DOWNLOAD_REAL_TYPE.get(_ext, 'text/plain; charset=utf-8')
         resp.headers['Content-Disposition'] = (
             'attachment; filename="%s"' % Path(filename).name.replace('"', ''))
     resp.headers['X-Content-Type-Options'] = 'nosniff'
