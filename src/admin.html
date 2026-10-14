@@ -4175,7 +4175,11 @@ const CanvasPages = {
       ids.map(id => {
         const p = this.pages[id];
         const pub = p.is_public || false;
-        const locked = p.is_locked || false;
+        // An ABSENT is_locked key is treated as LOCKED by the API (fail closed, #477).
+        // Rendering it as "unlocked" here showed the admin the opposite of what the
+        // agent was being told. Absent -> locked, flagged so the admin can set it.
+        const lockUnset = !('is_locked' in p);
+        const locked = lockUnset ? true : !!p.is_locked;
         return '<tr style="border-bottom:1px solid var(--border2)">' +
           '<td style="padding:10px 12px">' +
           '<div style="font-weight:500;color:var(--bright)">'+esc(p.display_name||id)+'</div>' +
@@ -4189,12 +4193,12 @@ const CanvasPages = {
           '📋</button></div></td>' +
           '<td style="padding:10px 12px;color:var(--dim);font-size:12px">'+esc(p.category||'—')+'</td>' +
           '<td style="padding:10px 12px;text-align:center">' +
-          '<button onclick="CanvasPages.toggleLock(\''+esc(id)+'\')" title="'+(locked?'Locked — agent cannot change visibility':'Unlocked — agent can change visibility')+'" style="' +
+          '<button onclick="CanvasPages.toggleLock(\''+esc(id)+'\')" title="'+(lockUnset?'No lock recorded — treated as LOCKED by the API; click to unlock explicitly':(locked?'Locked — agent cannot change visibility':'Unlocked — agent can change visibility'))+'" style="' +
           'border:1px solid '+(locked?'var(--yellow, #f5a623)':'var(--border)')+';' +
           'background:'+(locked?'rgba(245,166,35,0.1)':'transparent')+';' +
           'color:'+(locked?'var(--yellow, #f5a623)':'var(--dim)')+';' +
           'padding:4px 10px;border-radius:20px;cursor:pointer;font-size:12px;transition:all .15s">' +
-          (locked ? '🔐' : '🔓') +
+          (lockUnset ? '🔐?' : (locked ? '🔐' : '🔓')) +
           '</button></td>' +
           '<td style="padding:10px 12px;text-align:right">' +
           '<button onclick="CanvasPages.toggle(\''+esc(id)+'\')" style="' +
@@ -4243,7 +4247,9 @@ const CanvasPages = {
   async toggleLock(id) {
     const page = this.pages[id];
     if (!page) return;
-    const newLocked = !(page.is_locked || false);
+    // Absent key reads as LOCKED server-side, so the first click on an unset
+    // page must UNLOCK it (write false), not "lock" something already locked.
+    const newLocked = !(('is_locked' in page) ? !!page.is_locked : true);
     try {
       const r = await fetch('/api/canvas/manifest/page/'+id, {
         method: 'PATCH',
