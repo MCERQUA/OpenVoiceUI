@@ -11,7 +11,7 @@ holding the host's docker.sock (root-equivalent on the host):
 
 Both are now requests to the host broker, which binds the CALLER to the tenant two ways
 (source address inside the tenant's docker network, and the per-tenant token at
-/mnt/clients/<t>/compose/.sec059-broker-token that only this tenant's compose dir carries).
+/mnt/clients/<t>/vault/.sec059-broker-token, visible in-container at /app/runtime/vault).
 The broker runs exactly the commands the container used to run; the container holds no
 docker capability at all.
 
@@ -102,9 +102,20 @@ def broker_url() -> str:
     return f"http://{host}:{port}"
 
 
+_RUNTIME_VAULT_DIR = Path(os.getenv("SEC059_RUNTIME_VAULT_DIR", "/app/runtime/vault"))
+
+
 def tenant_token_path(tenant: str) -> Path:
+    """The tenant's broker token lives in its VAULT dir (host /mnt/clients/<t>/vault, mounted
+    at /app/runtime/vault in the tenant's own OVU container). Measured 2026-10-14: the vault
+    mount is present in 23/24 OVU containers and in 0/25 openclaw containers, so the tenant's
+    agent cannot read it; the compose dir (the first design) was visible to only 12 OVUs."""
     override = os.getenv("SEC059_TOKEN_FILE", "").strip()
-    return Path(override) if override else _CLIENTS_DIR / tenant / "compose" / TOKEN_NAME
+    if override:
+        return Path(override)
+    if _RUNTIME_VAULT_DIR.is_dir():
+        return _RUNTIME_VAULT_DIR / TOKEN_NAME
+    return _CLIENTS_DIR / tenant / "vault" / TOKEN_NAME
 
 
 def tenant_token(tenant: str) -> Optional[str]:

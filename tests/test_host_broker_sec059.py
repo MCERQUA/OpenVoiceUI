@@ -335,3 +335,22 @@ def test_restart_client_timeout_exceeds_broker_compose_timeout(monkeypatch):
     monkeypatch.setattr(host_broker, "_post", lambda t, p, b, timeout: seen.setdefault("t", timeout) or {"ok": True})
     host_broker.restart_container("openclaw", "acme", dry_run=True)
     assert seen["t"] > 180
+
+
+# ── token location: the tenant VAULT dir (visible to 23/24 OVUs, 0 openclaw), not compose/ ──
+def test_token_path_prefers_in_container_vault(monkeypatch, tmp_path):
+    from services import host_broker
+    monkeypatch.delenv("SEC059_TOKEN_FILE", raising=False)
+    vault = tmp_path / "runtime-vault"; vault.mkdir()
+    monkeypatch.setattr(host_broker, "_RUNTIME_VAULT_DIR", vault)
+    assert host_broker.tenant_token_path("acme") == vault / ".sec059-broker-token"
+
+
+def test_token_path_host_fallback_is_vault_not_compose(monkeypatch, tmp_path):
+    from services import host_broker
+    monkeypatch.delenv("SEC059_TOKEN_FILE", raising=False)
+    monkeypatch.setattr(host_broker, "_RUNTIME_VAULT_DIR", tmp_path / "absent")
+    monkeypatch.setattr(host_broker, "_CLIENTS_DIR", tmp_path / "clients")
+    p = host_broker.tenant_token_path("acme")
+    assert p == tmp_path / "clients" / "acme" / "vault" / ".sec059-broker-token"
+    assert "compose" not in p.parts
