@@ -261,10 +261,24 @@ def get_photo(album_id: str, photo_id: str):
 # Serve album photos directly (albums are subdirs of uploads)
 @albums_bp.route('/uploads/albums/<album_id>/<filename>')
 def serve_album_photo(album_id: str, filename: str):
-    """Serve photo files from album directories."""
+    """Serve photo files from album directories.
+
+    This rule is more specific than /uploads/<path:filename>, so it wins the route match and
+    serve_upload never sees album requests. It therefore runs the uploads gate itself
+    (uploads auth phase 3), BEFORE answering whether the file exists, with the path as requested so a
+    signed link minted for '/uploads/albums/<id>/<file>' verifies here exactly as elsewhere.
+    """
+    from routes.static_files import _upload_access_denied
     safe_id = ''.join(c for c in album_id if c.isalnum())
     safe_file = Path(filename).name
     dest = ALBUMS_DIR / safe_id / safe_file
-    if not dest.exists() or not dest.is_file():
+    exists = dest.exists() and dest.is_file()
+    denied = _upload_access_denied(f'albums/{album_id}/{filename}', exists)
+    if denied is not None:
+        return denied
+    if not exists:
         return 'Not found', 404
-    return send_file(str(dest))
+    resp = send_file(str(dest))
+    resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    return resp
