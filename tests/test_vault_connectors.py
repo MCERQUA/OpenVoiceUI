@@ -191,6 +191,10 @@ def client(env):
     from routes.vault import vault_bp
     app = Flask(__name__)
     app.config['TESTING'] = True
+    # This harness has no Clerk gate at all (no create_app). Say so, or the
+    # platform-setup guard (SEC-069) falls back to the import-time view and
+    # fails closed whenever a Clerk key was in the env at first import.
+    app.config['CLERK_AUTH_ENABLED'] = False
     app.register_blueprint(vault_bp)
     return app.test_client()
 
