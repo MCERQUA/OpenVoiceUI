@@ -37,6 +37,8 @@ def client(tmp_path, monkeypatch):
         "evil.xml": b"<x/>",
         "notes.weird": b"???",
         "logo.png": b"\x89PNG\r\n\x1a\n",
+        "report.pdf": b"%PDF-1.4",
+        "PERMITS-UPPER.XLSX": b"PK\x03\x04xlsx",
     }
     for name, data in files.items():
         p = tmp_path / name
@@ -54,6 +56,7 @@ def client(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("path,mime", [
     ("reports/weekly-report-2026-10-12.xlsx", XLSX),
+    ("PERMITS-UPPER.XLSX", XLSX),                     # extension match is case-insensitive
     ("brief.docx", DOCX),
     ("deck.pptx", PPTX),
     ("legacy.xls", "application/vnd.ms-excel"),
@@ -80,9 +83,10 @@ def test_executable_and_unknown_types_still_downgraded(client, path):
     assert "sandbox" in r.headers["Content-Security-Policy"]
 
 
-def test_inline_media_unchanged(client):
-    r = client.get("/uploads/logo.png")
+@pytest.mark.parametrize("path,mime", [("logo.png", "image/png"), ("report.pdf", "application/pdf")])
+def test_inline_media_unchanged(client, path, mime):
+    r = client.get("/uploads/" + path)
     assert r.status_code == 200
-    assert r.headers["Content-Type"] == "image/png"
+    assert r.headers["Content-Type"].split(";")[0] == mime
     assert not r.headers.get("Content-Disposition", "").startswith("attachment")
     assert "sandbox" not in r.headers["Content-Security-Policy"]
