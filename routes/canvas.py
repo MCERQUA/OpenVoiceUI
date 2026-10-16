@@ -1092,13 +1092,23 @@ def canvas_pages_proxy(path):
                     b"});"
                     b'</script>'
                 )
-                # Inject nav() and speak() helpers into every page
+                # Inject nav() and speak() helpers into every page.
+                # speak() marks the message userInitiated when it runs during a real user
+                # gesture in this frame (transient user activation, or a trusted input event
+                # where the browser lacks navigator.userActivation). The shell drops untagged
+                # speaks within 15 s of a page load and allows one per minute after that, so
+                # without the flag a button calling speak() was throttled like a page that
+                # announces itself on open. Calls with no gesture (page load, timers that
+                # outlive the activation) stay untagged and keep that throttle.
                 _nav_helpers = (
                     b'<script id="canvas-nav-helpers">'
                     b'if(!window.nav){window.nav=function(p){'
                     b'window.parent.postMessage({type:"canvas-action",action:"navigate",page:p},"*");};}'
                     b'if(!window.speak){window.speak=function(t){'
-                    b'window.parent.postMessage({type:"canvas-action",action:"speak",text:t},"*");};}'
+                    b'var a=navigator.userActivation,e=window.event;'
+                    b'var u=!!((a&&a.isActive)||(!a&&e&&e.isTrusted&&'
+                    b'/^(click|pointerup|mouseup|touchend|keydown|keyup|submit|change)$/.test(e.type)));'
+                    b'window.parent.postMessage({type:"canvas-action",action:"speak",text:t,userInitiated:u},"*");};}'
                     b'</script>'
                 )
                 # Inject auth token bridge — parent pushes fresh Clerk JWT,
@@ -1142,28 +1152,32 @@ def canvas_pages_proxy(path):
                 # Canvas CSP: allow scripts and styles inline, allow API connections
                 # for interactive apps (Awesome App Library etc.) that call AI APIs
                 # directly from the browser with user's own API keys.
+                # Deployment hosts come from CSP_TRUSTED_HOSTS (services/csp.py); a stock
+                # install trusts none. Never hard-code a deployment's domain here.
+                from services import csp as _csp
+                _trusted = _csp.sources()
+                _trusted_ws = _csp.sources(websockets=True)
                 resp.headers['Content-Security-Policy'] = (
                     "default-src 'none'; "
                     # maps.googleapis.com + maps.gstatic.com: required by the `maps` skill's
                     # Google Maps JS canvas pages. Omitting them silently blanks every map
                     # (console-only CSP violation). Found 2026-07-24. Do NOT re-strip.
                     # cdn.jsdelivr.net in style-src: Monaco/xterm stylesheets (Code Blocks).
-                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://games.jam-bot.com https://maps.googleapis.com https://maps.gstatic.com blob:; "
-                    "style-src 'unsafe-inline' https://games.jam-bot.com https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+                    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://maps.googleapis.com https://maps.gstatic.com blob:" + _trusted + "; "
+                    "style-src 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net" + _trusted + "; "
                     "img-src 'self' data: blob: https:; "
                     "media-src 'self' blob: https:; "
                     "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-                    "connect-src 'self' blob: https://games.jam-bot.com "
-                        "https://*.jam-bot.com wss://*.jam-bot.com "
+                    "connect-src 'self' blob: "
                         "https://api.openai.com https://generativelanguage.googleapis.com "
                         "https://api.x.ai https://api.groq.com "
                         "https://api.together.xyz https://openrouter.ai "
                         "https://api.anthropic.com https://api.cohere.ai "
                         "https://api.dataforseo.com https://sandbox.dataforseo.com "
-                        "https://maps.googleapis.com; "
+                        "https://maps.googleapis.com" + _trusted_ws + "; "
                     "worker-src blob:; "
-                    "frame-src 'self' https://*.jam-bot.com https://*.netlify.app https://midiviz.com "
-                        "https://w.soundcloud.com https://bandcamp.com https://*.bandcamp.com"
+                    "frame-src 'self' https://*.netlify.app https://midiviz.com "
+                        "https://w.soundcloud.com https://bandcamp.com https://*.bandcamp.com" + _trusted
                 )
                 return resp
             else:

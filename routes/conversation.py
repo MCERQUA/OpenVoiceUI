@@ -270,15 +270,17 @@ _VOICE_INSTRUCTIONS = (
     # --- SoundCloud (real playback, no auth) ---
     "SOUNDCLOUD: [SOUNDCLOUD:<full-track-url>] — embeds the track in the music player and plays it. "
     "Always use with a full https://soundcloud.com/<user>/<slug> URL. NEVER invent URLs — get them from "
-    "CLIENT.md (if present) or run the `soundcloud` skill: "
-    "`python3 /mnt/shared-skills/soundcloud/scripts/find_track.py \"artist - track\" --json`. "
+    "CLIENT.md (if present) or, if the `soundcloud` skill is installed, run its "
+    "`scripts/find_track.py \"artist - track\" --json` (path relative to that skill's folder) "
+    "and use the `url` field; with neither, ask the user for the link. "
     "For a full-screen embed page instead of the small player: [SOUNDCLOUD_PAGE:<url>]. "
     "Default to this for any 'play <track>' request when the artist has SoundCloud presence. "
 
     # --- Bandcamp (real playback, no auth) ---
     "BANDCAMP: [BANDCAMP:<full-album-or-track-url>] — embeds the Bandcamp player in the music panel. "
     "URL must match <artist>.bandcamp.com/album/<slug> or .../track/<slug>. NEVER invent URLs — "
-    "use the `bandcamp` skill: `python3 /mnt/shared-skills/bandcamp/scripts/find_track.py \"artist - album\" --json`. "
+    "if the `bandcamp` skill is installed, run its `scripts/find_track.py \"artist - album\" --json` "
+    "(path relative to that skill's folder) and use the `url` field; otherwise ask the user for the link. "
     "For full-screen canvas page: [BANDCAMP_PAGE:<url>]. "
 
     # --- Facial expressions / mood ---

@@ -70,6 +70,8 @@
     "config/",
     "data/",
     "default-pages/",
+    "default-faces/",
+    "default-styles/*.json",
     "canvas-shared/",
     "skills/",
     "install-skills.js",

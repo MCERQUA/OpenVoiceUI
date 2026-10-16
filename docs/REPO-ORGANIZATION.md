@@ -282,7 +282,8 @@ needing the same rewrite and verification: `maps`, `audio-clips`, `icon-generati
 
 When #543 merged, a few source files still named hosted-only skill paths: the soundcloud/bandcamp
 lookups in `routes/conversation.py` and `prompts/voice-system-prompt.md`, and the mesh notifier in
-`services/host_broker.py`.
+`services/host_broker.py`. The soundcloud/bandcamp lookups now name the skill and fall back to
+asking the user for a link; the mesh notifier still uses its hosted path.
 
 ---
 
