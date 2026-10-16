@@ -25,6 +25,7 @@ const sidebars: SidebarsConfig = {
         'features/voice-stt-flow',
         'features/faces',
         'features/admin-dashboard',
+        'features/one-click-connectors',
       ],
     },
     {

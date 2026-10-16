@@ -68,6 +68,6 @@ The system prompt and user input are currently concatenated in the same message 
 
 Before submitting security-related PRs, please review:
 - [Architecture](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/ARCHITECTURE.md) -- understand the full system
-- [PR Review Checklist](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/PR-REVIEW-CHECKLIST.md) -- security checks for every PR
+- [PR Review Checklist](pr-checklist.md) -- security checks for every PR
 
 **Important:** Security fixes must not break existing functionality. If a fix requires changing how a system works (e.g., the tag system, display pipeline), the PR must also include fixes for all affected systems. See the PR Review Checklist for the list of systems that must stay in sync.

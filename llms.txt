@@ -7,14 +7,14 @@ OpenVoiceUI is the shell, not the agent brain: the reasoning runs behind a gatew
 ## Start here
 
 - [README](https://github.com/MCERQUA/OpenVoiceUI/blob/main/README.md): What OpenVoiceUI is, feature list, and the Pinokio / npm / Docker install paths.
-- [Vision](https://github.com/MCERQUA/OpenVoiceUI/blob/main/VISION.md): Positioning, first principles, explicit non-goals, and how to tell if a contribution fits.
-- [Architecture](https://github.com/MCERQUA/OpenVoiceUI/blob/main/ARCHITECTURE.md): Full technical map — backend blueprints, service layer, frontend modules, gateway layer, provider registry, plugins, canvas system, config.
+- [Vision](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/VISION.md): Positioning, first principles, explicit non-goals, and how to tell if a contribution fits.
+- [Architecture](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/ARCHITECTURE.md): Full technical map — backend blueprints, service layer, frontend modules, gateway layer, provider registry, plugins, canvas system, config.
 - [AGENTS.md](https://github.com/MCERQUA/OpenVoiceUI/blob/main/AGENTS.md): Orientation for AI coding agents — repo map, run/test commands, extension points, conventions, and hard constraints.
-- [Setup guide](https://github.com/MCERQUA/OpenVoiceUI/blob/main/SETUP.md): Detailed installation and first-run configuration.
+- [Setup guide](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/SETUP.md): Detailed installation and first-run configuration.
 
 ## Extending it
 
-- [Adding a provider](https://github.com/MCERQUA/OpenVoiceUI/blob/main/ARCHITECTURE.md#how-to-add-a-new-provider): Step-by-step recipes for a new TTS provider, STT provider, or LLM backend.
+- [Adding a provider](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/ARCHITECTURE.md#how-to-add-a-new-provider): Step-by-step recipes for a new TTS provider, STT provider, or LLM backend.
 - [Gateway plugin guide](https://github.com/MCERQUA/OpenVoiceUI/blob/main/plugins/README.md): Author a plugin that connects OpenVoiceUI to any agent or LLM backend via GatewayBase.
 - [Plugin system](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/extending/plugin-system.md): How plugin.json manifests declare pages, routes, faces, and profiles.
 - [Building canvas pages](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/extending/building-canvas-pages.md): Writing HTML pages the agent can render and drive.
@@ -33,7 +33,7 @@ OpenVoiceUI is the shell, not the agent brain: the reasoning runs behind a gatew
 
 ## Contributing
 
-- [Contributing guide](https://github.com/MCERQUA/OpenVoiceUI/blob/main/CONTRIBUTING.md): Branch workflow (PRs target `dev`), dev setup, code style, and review process.
+- [Contributing guide](https://github.com/MCERQUA/OpenVoiceUI/blob/main/CONTRIBUTING.md): Branch workflow (trunk-based: PRs target `main`, squash-merged), dev setup, code style, and review process.
 - [PR review checklist](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/contributing/pr-checklist.md): What reviewers check before merging.
 - [Security policy](https://github.com/MCERQUA/OpenVoiceUI/blob/main/SECURITY.md): Vulnerability reporting process.
 

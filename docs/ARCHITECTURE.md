@@ -5,8 +5,8 @@ and extend the system without reverse-engineering it first.
 
 It is written against the code in this repository. Where a subsystem has a deeper reference
 doc, it is linked. For the conceptual positioning of the project, see [VISION.md](VISION.md).
-For AI-coding-agent orientation, see [AGENTS.md](AGENTS.md). For contribution mechanics, see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+For AI-coding-agent orientation, see [AGENTS.md](../AGENTS.md). For contribution mechanics, see
+[CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ---
 
@@ -694,7 +694,7 @@ The agent triggers UI behaviour by emitting bracket tags in its text
 extracts and strips them before display, then dispatches the action. There is also a
 structured `[CANVAS_ACTION:{...}]` form for driving forms inside a canvas page, extracted
 by brace-walking rather than regex because the payload nests. Full list:
-[`docs/reference/agent-tags.md`](docs/reference/agent-tags.md).
+[`docs/reference/agent-tags.md`](reference/agent-tags.md).
 
 ---
 
@@ -796,14 +796,14 @@ gateway that answers without any external service.
 
 ## Further reading
 
-- [`docs/reference/architecture.md`](docs/reference/architecture.md) — request-flow-level
+- [`docs/reference/architecture.md`](reference/architecture.md) — request-flow-level
   reference including the agent tag system and the display pipeline
-- [`docs/reference/agent-tags.md`](docs/reference/agent-tags.md) — full tag list
-- [`docs/reference/api.md`](docs/reference/api.md) — HTTP API reference
-- [`docs/extending/plugin-system.md`](docs/extending/plugin-system.md),
-  [`building-canvas-pages.md`](docs/extending/building-canvas-pages.md),
-  [`building-face-plugins.md`](docs/extending/building-face-plugins.md)
-- [`docs/customization/tts-providers.md`](docs/customization/tts-providers.md),
-  [`profiles.md`](docs/customization/profiles.md), [`themes.md`](docs/customization/themes.md)
-- [`plugins/README.md`](plugins/README.md) — gateway plugin authoring guide
-- [`SECURITY.md`](SECURITY.md) — vulnerability reporting
+- [`docs/reference/agent-tags.md`](reference/agent-tags.md) — full tag list
+- [`docs/reference/api.md`](reference/api.md) — HTTP API reference
+- [`docs/extending/plugin-system.md`](extending/plugin-system.md),
+  [`building-canvas-pages.md`](extending/building-canvas-pages.md),
+  [`building-face-plugins.md`](extending/building-face-plugins.md)
+- [`docs/customization/tts-providers.md`](customization/tts-providers.md),
+  [`profiles.md`](customization/profiles.md), [`themes.md`](customization/themes.md)
+- [`plugins/README.md`](../plugins/README.md) — gateway plugin authoring guide
+- [`SECURITY.md`](../SECURITY.md) — vulnerability reporting

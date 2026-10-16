@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/MCERQUA/OpenVoiceUI/blob/main/SECURITY.md
+    about: Please do not open a public issue for security problems. Follow the private reporting steps in SECURITY.md.
+  - name: Questions and ideas
+    url: https://github.com/MCERQUA/OpenVoiceUI/discussions
+    about: Ask a question or share an idea in GitHub Discussions.
+  - name: Plugin submissions
+    url: https://github.com/MCERQUA/openvoiceui-plugins
+    about: Community face packs, canvas pages and gateway plugins live in the plugins repo.

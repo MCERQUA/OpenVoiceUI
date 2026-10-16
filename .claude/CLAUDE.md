@@ -104,16 +104,18 @@ not a hardcoded key.
 
 ## Branch model
 
+The repo is **trunk-based**. There is no `dev` branch.
+
 ```
-feature/xyz ──PR──► dev ──PR──► main
-                      │          │
-                      │          └── production
-                      └── staging / integration
+feat/xyz ──PR (squash)──► main ──tag vYYYY.M.D──► release
 ```
 
-- **`main`** — production. Protected. Only ever updated via PR from `dev`.
-- **`dev`** — integration branch. Features land here first and soak.
-- **feature branches** — your work. Always branched off `dev`, never off `main`.
+- **`main`** — the trunk. Protected: changes land only through a PR with the
+  `test` check green, and every PR is **squash-merged** (merge commits and
+  rebase merges are disabled; the branch is deleted on merge).
+- **short-lived branches** — your work. Branched off the latest `main`.
+- **Releases are tags** on `main` (`vYYYY.M.D`, CalVer). See
+  [`docs/RELEASING.md`](../docs/RELEASING.md).
 
 ## Branch naming
 
@@ -147,9 +149,9 @@ transcript clean via gateway-side truncation.
 
 ## Workflow
 
-1. **Start from a clean `dev`**
+1. **Start from a clean `main`**
    ```bash
-   git checkout dev && git pull origin dev
+   git checkout main && git pull origin main
    git checkout -b feat/my-feature
    ```
 
@@ -170,17 +172,14 @@ transcript clean via gateway-side truncation.
    git push -u origin feat/my-feature
    ```
 
-4. **Open PR → `dev`** (not main)
+4. **Open a PR → `main`**
    ```bash
-   gh pr create --base dev --head feat/my-feature --title "..." --body "..."
+   gh pr create --base main --head feat/my-feature --title "..." --body "..."
    ```
-   PRs into `dev` should be **squash-merged** so `dev` stays one-commit-per-
-   feature.
+   PRs are **squash-merged**, so `main` stays one-commit-per-change.
 
-5. **Release `dev` → `main` as a batch PR**
-   When `dev` has accumulated enough work to cut a release, open a PR from
-   `dev` → `main`. This one should be a **merge commit** (not squash) so the
-   per-feature commits are preserved in `main` history.
+5. **Releases are cut from `main`** with a version-bump PR and a tag —
+   see [`docs/RELEASING.md`](../docs/RELEASING.md).
 
 ## Rules
 
@@ -188,10 +187,10 @@ transcript clean via gateway-side truncation.
   dirty, isolate yours first. Mixed commits are the #1 source of regressions.
 - **Never push without confirming that specific push.** Approval for the work
   is not approval for the push.
-- **Never force-push `main` or `dev`.** Force-push is only safe on your own
+- **Never force-push `main`.** Force-push is only safe on your own
   feature branches (e.g. after a rebase).
 - **Rebase, don't merge, when updating your feature branch.** Keeps history
-  linear. `git fetch origin dev && git rebase origin/dev`.
+  linear. `git fetch origin main && git rebase origin/main`.
 
 ## PR format
 
@@ -205,7 +204,7 @@ transcript clean via gateway-side truncation.
 
 ## Before opening a PR
 
-- [ ] Branch is off latest `dev`
+- [ ] Branch is off latest `main`
 - [ ] Commits are atomic and conventionally-named
 - [ ] No unrelated files in the diff
 - [ ] Tested the change in a browser (for UI work) or ran the affected code
@@ -391,17 +390,16 @@ the commit out of history before pushing.
 ## Parked / quarantined plugins
 
 Sometimes a plugin has known issues but we don't want to lose the code
-— we just want it out of `main`/`dev` until someone stabilizes it. The
+— we just want it out of `main` until someone stabilizes it. The
 pattern we use:
 
-1. **`parked/<plugin-name>`** branch — a long-lived branch off `dev` (or
-   `main` for the plugin catalog repo) that keeps the plugin files
-   intact.
+1. **`parked/<plugin-name>`** branch — a long-lived branch off `main`
+   that keeps the plugin files intact.
 2. **GitHub issue** on the repo documenting what breaks, what was tried,
    and the acceptance criteria for un-parking.
 3. **Removal PR** — a small `chore/remove-<plugin>` PR deletes the
-   plugin from `dev`/`main` so the loader no longer sees it.
-4. **Draft PR** from `parked/<plugin>` back to `dev`/`main`, titled
+   plugin from `main` so the loader no longer sees it.
+4. **Draft PR** from `parked/<plugin>` back to `main`, titled
    `[PARKED] Re-add <plugin> when stable`, linking the issue. GitHub
    blocks merge on draft PRs, so this can't be shipped by accident.
 5. Optional `do-not-merge` label on the draft PR as a second signal.
@@ -418,13 +416,13 @@ pattern we use:
 
 ## Anti-patterns
 
-- Pushing straight to `dev` without a feature branch — no review, no
+- Pushing straight to `main` without a PR — no review, no
   revert unit, history gets messy.
 - Giant PRs mixing 5 unrelated things — impossible to review, impossible
   to revert one piece.
 - "Fix" commits that disable the broken thing instead of fixing it.
 - Committing secrets, `.env` files, or large binaries.
-- Rewriting shared history (`git push --force` on `main` or `dev`).
+- Rewriting shared history (`git push --force` on `main`).
 - Bundling "drive-by cleanup" into an unrelated fix — if you see
   something else that needs fixing, open a separate PR.
 - Adding `localStorage` "just for this one thing".

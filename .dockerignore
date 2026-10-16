@@ -24,3 +24,6 @@ generated_music/
 music/
 canvas-pages/
 plugins/bhb-animated-characters/
+# Repository-only material: never needed at runtime
+archive/
+docs/plans/

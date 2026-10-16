@@ -78,7 +78,7 @@
     "sounds/",
     "README.md",
     "LICENSE",
-    "SETUP.md",
+    "docs/SETUP.md",
     "!**/__pycache__",
     "!**/*.pyc"
   ]

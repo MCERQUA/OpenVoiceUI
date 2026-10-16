@@ -194,3 +194,22 @@ routes/song_tagger.py
 # does NOT match these: `vision.py.bak-pre-gemini-20260906T023605Z` has a suffix
 # AFTER .bak, so it showed as untracked and looked like pending work.
 *.bak-*
+
+# Generated / local junk (added 2026-10-16, organization pass)
+# Python tooling caches and build metadata
+.venv/
+htmlcov/
+coverage.xml
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+# Written into the image by the Dockerfile at build time
+/version.json
+# Editor swap files and patch leftovers
+*.swp
+*~
+*.orig
+*.rej
+# Dated pre-change backups named <file>.pre-<what>-<YYYYMMDD>... (e.g. the one now in archive/)
+# (files moved into archive/ on purpose are already tracked, so this rule does not affect them)
+*.pre-*-20[0-9][0-9][01][0-9][0-3][0-9]*

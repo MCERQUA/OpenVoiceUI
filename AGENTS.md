@@ -4,7 +4,7 @@ Instructions for AI coding agents working in the OpenVoiceUI repository.
 
 This file is the vendor-neutral orientation doc. It does not replace
 [CONTRIBUTING.md](CONTRIBUTING.md) (process, branches, PR rules) or
-[ARCHITECTURE.md](ARCHITECTURE.md) (how the system is built) — read those too. If anything
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) (how the system is built) — read those too. If anything
 here conflicts with CONTRIBUTING.md, CONTRIBUTING.md wins.
 
 ---
@@ -14,7 +14,7 @@ here conflicts with CONTRIBUTING.md, CONTRIBUTING.md wins.
 OpenVoiceUI is the **voice and canvas shell** in front of an agent. It is a Flask backend
 plus a vanilla-JavaScript ES-module frontend. The agent itself is not in this repo — it
 runs behind a gateway (OpenClaw by default, or any plugin gateway). See
-[VISION.md](VISION.md) for positioning and non-goals.
+[VISION.md](docs/VISION.md) for positioning and non-goals.
 
 Practical consequence: if a task sounds like "make the model smarter", it is almost
 certainly out of scope here. If it sounds like "make the shell hear, speak, show, or
@@ -26,7 +26,7 @@ extend better", it belongs here.
 
 Before writing code, read in this order:
 
-1. `ARCHITECTURE.md` — the section covering the subsystem you are touching.
+1. `docs/ARCHITECTURE.md` — the section covering the subsystem you are touching.
 2. The module docstring of the file you are about to edit. Almost every Python module in
    this repo opens with a docstring stating its responsibility, its usage pattern, and
    often the reason a design decision was made. Those docstrings are authoritative.
@@ -107,7 +107,7 @@ These are the places designed for new code. Prefer them over editing core files.
 | An agent persona | `profiles/my-profile.json` | validate against `profiles/schema.json` |
 
 Step-by-step provider recipes with code live in
-[ARCHITECTURE.md — How to add a new provider](ARCHITECTURE.md#how-to-add-a-new-provider).
+[ARCHITECTURE.md — How to add a new provider](docs/ARCHITECTURE.md#how-to-add-a-new-provider).
 Gateway plugin protocol details live in [`plugins/README.md`](plugins/README.md).
 
 ---
@@ -223,8 +223,8 @@ Before you report a task complete:
 - [ ] No new frontend build step, framework, or bundler.
 - [ ] Nothing deleted that you were not explicitly asked to delete.
 - [ ] Relevant docs updated: `README.md` provider tables, `docs/` pages, and
-      `ARCHITECTURE.md` if you changed structure.
-- [ ] PR targets `dev`, not `main`, and is scoped to one change.
+      `docs/ARCHITECTURE.md` if you changed structure.
+- [ ] PR targets `main` (trunk-based, squash-merged) and is scoped to one change.
 
 State plainly what you verified and what you did not. Do not describe an untested change
 as working.
