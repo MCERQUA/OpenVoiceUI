@@ -650,8 +650,25 @@ def serve_upload(filename):
         '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.avif',
         '.mp4', '.webm', '.ogg', '.mov', '.mp3', '.wav', '.m4a', '.pdf',
     }
+    # Inert DOWNLOAD formats (2026-10-12): office documents, CSV and zip never execute in a
+    # browser, so they keep their REAL mime — still an attachment, still nosniff + the
+    # sandbox CSP below. Downgrading them to text/plain made iOS Safari show a client's .xlsx
+    # as mojibake and save it as "<name>.xlsx.txt". Anything not listed (html, svg, js, xml,
+    # unknown) still falls back to text/plain, so the F-5 guard fails closed as before.
+    _DOWNLOAD_MIME = {
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.xls': 'application/vnd.ms-excel',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.doc': 'application/msword',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.ppt': 'application/vnd.ms-powerpoint',
+        '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+        '.odt': 'application/vnd.oasis.opendocument.text',
+        '.csv': 'text/csv; charset=utf-8',
+        '.zip': 'application/zip',
+    }
     if _ext not in _SAFE_INLINE:
-        resp.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        resp.headers['Content-Type'] = _DOWNLOAD_MIME.get(_ext, 'text/plain; charset=utf-8')
         resp.headers['Content-Disposition'] = (
             'attachment; filename="%s"' % Path(filename).name.replace('"', ''))
     resp.headers['X-Content-Type-Options'] = 'nosniff'
