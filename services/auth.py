@@ -180,6 +180,50 @@ def verify_clerk_token(token: str) -> Optional[str]:
     return None
 
 
+# Why a token was NOT accepted, for diagnostics only. verify_clerk_token() stays the one grant
+# decision; this is asked only after it returned None, so a caller can tell a stale session from a
+# forged one. Clerk session tokens live about 60 s and the app shell re-writes the __session cookie
+# every 50 s while it is open (src/app.js _syncSessionCookie), but the cookie itself lives 30 days.
+# A browser that left the shell (a top-level canvas page, a texted link) keeps sending the last
+# token after it expired. PyJWT checks the signature BEFORE exp, so TOKEN_EXPIRED means a token this
+# Clerk instance really signed; a forged or foreign token is TOKEN_INVALID, never TOKEN_EXPIRED.
+TOKEN_OK = 'ok'                    # verifies now (it raced a refresh)
+TOKEN_ABSENT = 'absent'            # nothing presented
+TOKEN_EXPIRED = 'expired'          # genuine signature, exp in the past: a stale session cookie
+TOKEN_NOT_ALLOWED = 'not-allowed'  # genuine and current, but the user is not in ALLOWED_USER_IDS
+TOKEN_NO_KEYS = 'no-keys'          # this instance could not load its JWKS
+TOKEN_INVALID = 'invalid'          # malformed, forged, or signed by another Clerk instance
+
+
+def token_failure_reason(token: Optional[str]) -> str:
+    """Classify a token for logs. Never a grant: callers decide with verify_clerk_token()."""
+    if not token:
+        return TOKEN_ABSENT
+    try:
+        keys = _get_jwks()
+    except Exception:
+        return TOKEN_NO_KEYS
+    if not keys:
+        return TOKEN_NO_KEYS
+    for key_data in keys:
+        try:
+            public_key = jwt.algorithms.RSAAlgorithm.from_jwk(key_data)
+            payload = jwt.decode(token, public_key, algorithms=['RS256'],
+                                 options={'verify_aud': False})
+        except jwt.ExpiredSignatureError:
+            return TOKEN_EXPIRED
+        except Exception:
+            continue  # wrong key, malformed, forged: try the next key
+        user_id = payload.get('sub')
+        if not user_id:
+            return TOKEN_INVALID
+        if (_CLERK_CONFIGURED and not _ALLOWED_USER_IDS) or (
+                _ALLOWED_USER_IDS and user_id not in _ALLOWED_USER_IDS):
+            return TOKEN_NOT_ALLOWED
+        return TOKEN_OK
+    return TOKEN_INVALID
+
+
 def get_token_from_request() -> Optional[str]:
     """
     Extract Clerk session token from the current Flask request.
