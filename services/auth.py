@@ -73,6 +73,33 @@ def is_admin_user(user_id: Optional[str]) -> bool:
     """True if this Clerk user may use the admin dashboard + privileged APIs."""
     return bool(user_id) and user_id in _ADMIN_USER_IDS
 
+
+# Platform admins — a STRICTLY SMALLER set than tenant admins (SEC-069).
+# ADMIN_USER_IDS is written into every tenant's own .env and grants the tenant
+# OWNER the admin dashboard. A few surfaces are not the tenant's to touch at all:
+# /api/vault/platform-setup reads/writes .platform-oauth.env, the PLATFORM's
+# shared OAuth app client_id/client_secret used by every tenant's OpenVoiceUI.
+# Those surfaces gate on this set instead. It is NEVER derived from
+# ADMIN_USER_IDS: the hard-coded platform admin id, plus any ids in the
+# host-controlled PLATFORM_ADMIN_USER_IDS env var (comma-separated).
+def _parse_platform_admin_ids(raw: Optional[str]) -> set[str]:
+    ids = {uid.strip() for uid in (raw or '').split(',') if uid.strip()}
+    ids.add(_PLATFORM_ADMIN_ID)
+    return ids
+
+
+_PLATFORM_ADMIN_USER_IDS: set[str] = _parse_platform_admin_ids(os.getenv('PLATFORM_ADMIN_USER_IDS', ''))
+
+
+def is_platform_admin(user_id: Optional[str]) -> bool:
+    """True only for the platform operator — never for a tenant admin as such.
+
+    Tenant admin (ADMIN_USER_IDS) and platform admin are independent sets; a
+    user may be in both (the platform admin usually is) but membership in one
+    never implies the other.
+    """
+    return bool(user_id) and user_id in _PLATFORM_ADMIN_USER_IDS
+
 # ---------------------------------------------------------------------------
 # JWKS cache
 # ---------------------------------------------------------------------------

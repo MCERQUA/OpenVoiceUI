@@ -121,7 +121,7 @@ Every canvas page is tracked in `canvas-manifest.json`, a JSON file that serves 
 | `modified` | string | ISO 8601 timestamp of last modification |
 | `starred` | boolean | Whether the user has favorited this page |
 | `is_public` | boolean | Whether the page can be viewed without authentication |
-| `is_locked` | boolean | Admin-only lock that prevents agent from changing visibility |
+| `is_locked` | boolean | Admin-only lock that prevents the agent from making the page public. Written explicitly as `false` on every creation and discovery path (pages are the agent's deliverables; the lock is an admin opt-in). An ABSENT key is treated as locked (fail closed) — only entries registered outside the app lack it. |
 | `voice_aliases` | array | Auto-generated spoken names for voice navigation (max 5) |
 | `access_count` | integer | Number of times the page has been accessed |
 

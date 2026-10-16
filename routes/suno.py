@@ -1261,14 +1261,20 @@ def _action_status(job_id: str):
 def _action_credits():
     """Check remaining Suno API credits."""
     try:
+        # sunoapi.org's credits endpoint is /api/v1/generate/credit and answers
+        # {"code": 200, "data": <number>}. The old /api/v1/account/credits path is a 404,
+        # so this check always reported an error (measured 2026-10-12).
         resp = http_requests.get(
-            f'{SUNO_API_BASE}/api/v1/account/credits',
+            f'{SUNO_API_BASE}/api/v1/generate/credit',
             headers={'Authorization': f'Bearer {SUNO_API_KEY}'},
             timeout=10,
         )
         if resp.status_code == 200:
             data = resp.json()
-            credits = data.get('data', {}).get('credits', data.get('credits', '?'))
+            if isinstance(data, dict) and data.get('code') not in (None, 200):
+                return jsonify({'action': 'error', 'response': f"Credits check failed: {data.get('msg') or data.get('code')}"})
+            d = data.get('data') if isinstance(data, dict) else None
+            credits = d.get('credits', '?') if isinstance(d, dict) else (d if d is not None else '?')
             return jsonify({'action': 'credits', 'credits': credits, 'response': f'Suno credits remaining: {credits}'})
         return jsonify({'action': 'error', 'response': f'Credits check failed: HTTP {resp.status_code}'})
     except Exception as exc:
