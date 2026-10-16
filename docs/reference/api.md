@@ -514,6 +514,11 @@ Generate songs using the Suno API. Generated songs are saved to the `generated_m
 
 Unified Suno endpoint. Action is specified via query param or POST body.
 
+When login is required (Clerk configured), only the read actions `list`, `list_jingles`,
+`jingle_styles`, `status` and `credits` are public on GET. Every other action spends Suno credits
+or changes state, and needs a signed-in session or the agent key (`X-Agent-Key`) on GET and POST
+alike.
+
 **Actions:**
 
 | Action | Description |
