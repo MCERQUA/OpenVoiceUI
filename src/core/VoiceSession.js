@@ -435,6 +435,7 @@ export class VoiceSession {
             .replace(/\[MUSIC_NEXT\]/gi, '')
             .replace(/\[SESSION_RESET\]/gi, '')
             .replace(/\[SUNO_GENERATE:[^\]]*\]/gi, '')
+            .replace(/\[JINGLE_GENERATE:[^\]]*\]/gi, '')
             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
             .replace(/\[SLEEP\]/gi, '')
             .replace(/\[REGISTER_FACE:[^\]]*\]/gi, '')

@@ -1099,7 +1099,7 @@ def normalize_action_tags(text: str) -> str:
 # reply with [SUNO_GENERATE:...] and no tool call was nudged. Expressive tags
 # ([MOOD:], [WAIT:], [SLEEP]) are not work and do not count.
 WORK_ACTION_TAG_RE = re.compile(
-    r'\[(?:SUNO_GENERATE|CANVAS|CANVAS_URL|CANVAS_ACTION|CANVAS_STYLE|CANVAS_MENU|CANVAS_CLOSE|'
+    r'\[(?:SUNO_GENERATE|JINGLE_GENERATE|CANVAS|CANVAS_URL|CANVAS_ACTION|CANVAS_STYLE|CANVAS_MENU|CANVAS_CLOSE|'
     r'MUSIC_PLAY|MUSIC_STOP|START_TASK|TASK_COMPLETE|SOUNDCLOUD|SOUNDCLOUD_PAGE|BANDCAMP_PAGE|'
     r'OPEN_TAB|NAVIGATE|CLICK|FILL|SCROLL|BROWSE_ACTION|DOWNLOAD_IMAGE|REGISTER_FACE|HIGHLIGHT)'
     r'(?::[^\]]*)?\]'
@@ -1228,6 +1228,7 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'\[MUSIC_STOP\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[MUSIC_NEXT\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SUNO_GENERATE:[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[JINGLE_GENERATE:[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[SLEEP\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[AIRADIO_[A-Z_]+(?::[^\]]*)?\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[MOOD:[^\]]*\]', '', text, flags=re.IGNORECASE)
