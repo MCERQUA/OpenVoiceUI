@@ -318,7 +318,7 @@ def generate_tts_b64(
         logger.info(f"TTS using sticky fallback: provider={tts_provider}, voice={voice}")
 
     # ── Voice not on this engine? Map it before the first attempt ─────────────
-    # A profile can pair a voice with an engine that does not have it (foambot
+    # A profile can pair a voice with an engine that does not have it (tenant-g
     # 2026-10-02: "troy", a Groq voice, on supertonic). Supertonic is the END of the
     # fallback chain, so the old path failed every sentence and spoke nothing for ten
     # days. Use the engine's same-gender voice and say so loudly in the log; the save-
@@ -371,9 +371,9 @@ def generate_tts_b64(
     # ── Fallback through the chain (transitive, cycle-protected — TTS-7) ──────
     # e.g. resemble → groq → supertonic. If groq is also down, we keep walking
     # to supertonic (free, always-on) instead of going silent.
-    # Custom CLONED voices (Resemble — e.g. bhb's Kyle) must NEVER be substituted
+    # Custom CLONED voices (Resemble — e.g. a tenant's cloned character voice) must NEVER be substituted
     # with a different voice. For tenants with RESEMBLE_NO_FALLBACK=1, a brief
-    # silence beats a wrong/switching voice. (Mike 2026-06-07, bhb)
+    # silence beats a wrong/switching voice. (Mike 2026-06-07, persona-tenant)
     resemble_no_fallback = (
         tts_provider == 'resemble'
         and os.getenv('RESEMBLE_NO_FALLBACK', '').strip().lower() in ('1', 'true', 'yes', 'on')

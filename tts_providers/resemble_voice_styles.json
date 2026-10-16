@@ -4,7 +4,7 @@
     "temperature": 1.1,
     "prompt": "deep stoner voice, lost, dazed and confused, laughs a lot",
     "wrap": [],
-    "_note": "Mike's dashboard-validated recipe 2026-07-14 (pace 1.09 in dashboard ~= normal, so no slow wrap). Dial-in via /pages/kyle-voice-lab.html on test-dev; 'apply the winner' reads kyle-voice-takes.json"
+    "_note": "Mike's dashboard-validated recipe 2026-07-14 (pace 1.09 in dashboard ~= normal, so no slow wrap). Dial-in via a voice-lab canvas page"
   },
   "cabc1397": {
     "exaggeration": 0.7,

@@ -81,7 +81,7 @@ _STALE_MODEL_MARKERS = frozenset({
 # must route to the graceful-suppression path (text_done response=None), NOT the
 # empty-final retry + apology cascade. Before this, is_system_response() omitted
 # them, so a pure `NO_REPLY` reply was stripped to empty downstream and surfaced
-# as a soft-error apology + a wasted re-run of the turn (BHB, 2026-07-13).
+# as a soft-error apology + a wasted re-run of the turn (persona-tenant, 2026-07-13).
 _SYSTEM_RESPONSE_RE = re.compile(
     r'^\s*(HEARTBEAT[_ ]?OK|heartbeat[_ ]?ok|ACK|PONG|system[_-]ok'
     r'|NO_REPLY|ANNOUNCE_SKIP|REPLY_SKIP)\s*$',

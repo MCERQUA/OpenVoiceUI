@@ -13,8 +13,8 @@ SYSTEM_ITEMS (My Computer, Documents, Settings, Recycle Bin), so the desktop ren
 completely blank rather than degrading to fewer icons. That total-failure mode is what makes
 this class worth a gate: a bad icon entry does not cost you one icon, it costs the whole page.
 
-It shipped to every tenant provisioned after 2026-08-01 (ttt on 08-02, gcu on 08-07) and both
-desktops were dead -- gcu's for hours, ttt's for six days with nobody noticing.
+It shipped to every tenant provisioned after 2026-08-01 (tenant-o on 08-02, tenant-q on 08-07) and both
+desktops were dead -- tenant-q's for hours, tenant-o's for six days with nobody noticing.
 
 The other 26 tenants escaped only because #439 forgot to bump desktop.html's
 `openvoiceui-version` stamp, so jambot-deploy-verifier.sh (cron */30) never healed the page

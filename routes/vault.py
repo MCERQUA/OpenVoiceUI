@@ -55,7 +55,7 @@ def _platform_admin_only(view):
 def _get_username() -> str:
     """
     Determine the current client username.
-    In multi-tenant JamBot, this comes from the DOMAIN env var (e.g., nick.jam-bot.com → nick).
+    In multi-tenant JamBot, this comes from the DOMAIN env var (e.g., tenant-l.jam-bot.com → tenant-l).
     In single-user mode, defaults to 'default'.
     """
     domain = os.getenv('DOMAIN', '')

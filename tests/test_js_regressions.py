@@ -10,7 +10,7 @@ tests/js/ptt-button-standalone.test.js covers PTT with no call running: it must 
 words the same way the transcript text box does, then give the mic back. Before, such a press
 only changed the button colour.
 
-tests/js/upload-body-ios.test.js covers uploads from iPhones. On ica 2026-09-30, 19 uploads from
+tests/js/upload-body-ios.test.js covers uploads from iPhones. On tenant-i 2026-09-30, 19 uploads from
 Safari 26.6.2 reached the server as multipart with content_length=0 (WebKit bugs 319396/319985):
 static/sw.js re-issued every POST through respondWith(fetch(...)), and the bulk upload path sent
 the picker's disk-backed File instead of bytes the page had read. The test fails on both.

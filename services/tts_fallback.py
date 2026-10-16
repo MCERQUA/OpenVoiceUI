@@ -55,7 +55,7 @@ _DEFAULT_FALLBACK: Dict[str, Any] = {
         # Supertonic voices
         "M1": "M", "M2": "M", "M3": "M", "M4": "M", "M5": "M",
         "F1": "F", "F2": "F", "F3": "F", "F4": "F", "F5": "F",
-        # Resemble custom clones (bhb Kyle Valhalla + friends) — TTS-12 partial
+        # Resemble custom clones (a tenant's character clones) — TTS-12 partial
         "kyle": "M", "valhalla": "M", "bhb": "M",
         # Qwen3 preset voices (Fal.ai) — TTS-12 partial
         "ethan": "M", "chelsie": "F", "cherry": "F", "serena": "F",

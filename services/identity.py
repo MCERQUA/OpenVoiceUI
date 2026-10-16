@@ -64,14 +64,13 @@ def _resolve_person_file(name: str, clerk_user_id: Optional[str] = None) -> Opti
     There is deliberately NO first-name fallback. Matching on `name.split()[0]`
     made the reader disagree with the writer and produced two silent failures:
 
-      * WRONG FILE — src has both `rory.md` (clerk user_3AiTy0…/user_3D5jEJ…) and
-        `rory-knight.md` (clerk user_3AiTJc…, a different account). Rory Knight
-        resolved to "rory" and was briefed from the other account's file — its
+      * WRONG FILE — tenant-r has both `first-user.md` (clerk user_EXAMPLE…/user_EXAMPLE…) and
+        `second-user.md` (clerk user_EXAMPLE…, a different account). Second User
+        resolved to "first-user" and was briefed from the other account's file — its
         open matters, commitments and history — with nothing to signal the swap.
-      * SILENT MISS — koolfoam's registry name is "Cory Boehs — 18 years
-        insulating Oklahoma, still does field work", written to
-        `cory-boehs-18-years-insulating-oklahoma-still-does-field-wor.md`. The
-        reader looked for `cory.md`, never found it, and the briefing has simply
+      * SILENT MISS — tenant-b's registry name is "Example Owner — a long free-text registry name", written to
+        `example-owner-with-a-long-free-text-registry-nam.md`. The
+        reader looked for `owner.md`, never found it, and the briefing has simply
         never loaded for that tenant.
 
     Returning None (no briefing) is the correct outcome when identity is
@@ -229,9 +228,9 @@ def resolve(clerk_user_id: Optional[str]) -> Optional[dict]:
 
 # Appended only when the signed-in person has a KNOWN home tenant that is not this one (the
 # same measured condition as the "not their own" text). A "granted" row has no home tenant and
-# can be the real owner (Josh Cotner is granted on josh), so it never gets this line.
-# 2026-10-01: Danielle asked hrsf's agent for a Facebook/Instagram stats pull; the agent filed it as "Request from hrsf tenant (Edith)",
-# and when the results came back on a mesh wake it texted them to Edith, the owner, who never
+# can be the real owner (Example Partner is granted on tenant-k), so it never gets this line.
+# 2026-10-01: a sub-admin asked tenant-c's agent for a Facebook/Instagram stats pull; the agent filed it as "Request from tenant-c tenant (Owner C)",
+# and when the results came back on a mesh wake it texted them to Owner C, the owner, who never
 # asked. The tag already said "not their own" tenant; it never said where the results go.
 NOT_OWNER_DELIVERY = (
     ' They are not the owner of this account. Whatever they ask for is THEIR request: give the'

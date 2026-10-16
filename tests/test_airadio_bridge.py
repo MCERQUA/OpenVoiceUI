@@ -133,7 +133,7 @@ class TestUnconfiguredReturns503:
     def test_send_to_friend_503(self, unconfigured_client):
         resp = unconfigured_client.post(
             "/api/airadio/send-to-friend",
-            json={"song_id": "x", "receiver_handle": "@nick"},
+            json={"song_id": "x", "receiver_handle": "@example"},
         )
         assert resp.status_code == 503
         assert resp.get_json()["error"]["code"] == "BRIDGE_NOT_CONFIGURED"
@@ -149,7 +149,7 @@ class TestUnconfiguredReturns503:
     def test_friend_request_503(self, unconfigured_client):
         resp = unconfigured_client.post(
             "/api/airadio/friend-request",
-            json={"handle": "@nick"},
+            json={"handle": "@example"},
         )
         assert resp.status_code == 503
         assert resp.get_json()["error"]["code"] == "BRIDGE_NOT_CONFIGURED"
@@ -157,14 +157,14 @@ class TestUnconfiguredReturns503:
     def test_friend_accept_503(self, unconfigured_client):
         resp = unconfigured_client.post(
             "/api/airadio/friend-accept",
-            json={"handle": "@nick"},
+            json={"handle": "@example"},
         )
         assert resp.status_code == 503
 
     def test_friend_decline_503(self, unconfigured_client):
         resp = unconfigured_client.post(
             "/api/airadio/friend-decline",
-            json={"handle": "@nick"},
+            json={"handle": "@example"},
         )
         assert resp.status_code == 503
 

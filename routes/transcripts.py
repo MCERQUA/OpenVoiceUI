@@ -191,8 +191,8 @@ def _parse_sms_file(text: str) -> dict:
     Format:
         # SMS — in — 2026-05-18T18:28:49.793999+00:00
         - tenant: test-dev
-        - from: +14374559131
-        - to: +16476991930
+        - from: +15555550100
+        - to: +15555550199
         - twilio_sid: (local)
 
         ## Body
@@ -404,7 +404,7 @@ def save_conversation_turn(
     except Exception as exc:
         # WAS logger.debug (invisible in normal operation). A transcript writer that
         # silently stops is indistinguishable from a tenant who simply had no
-        # conversations -- which is exactly how tenant `ica` lost every dialogue turn
+        # conversations -- which is exactly how tenant `tenant-i` lost every dialogue turn
         # from 2026-08-18 onward while its conversation_request events kept arriving.
         # Nobody could see it, and the nightly reflection just reported an empty day.
         # The write itself stays non-fatal (a failed transcript must never break a live

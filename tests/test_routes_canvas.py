@@ -62,10 +62,10 @@ class TestCanvasHelpers:
     def test_suggest_category_market_substring_in_marketing(self):
         """Regression: 'market' (finance keyword) must not match inside
         'marketing' — found 2026-09-18 by the jev shadow lane canvas-category
-        replay (nick/printguys-marketing-strategy.html scored 'finance' with
+        replay (tenant-l/example-marketing-strategy.html scored 'finance' with
         zero finance content)."""
         from routes.canvas import suggest_category
-        cat = suggest_category("Printguys Marketing Strategy")
+        cat = suggest_category("Example Marketing Strategy")
         assert cat != "finance"
 
     def test_suggest_category_market_still_matches_finance(self):

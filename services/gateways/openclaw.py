@@ -199,7 +199,7 @@ def item_stream_tool_start(payload, our_run_ids, session_key, captured_actions):
 
     openclaw reports every tool call twice: `stream: "tool"` and `stream: "item"`
     (data.kind == "tool"). Some runs deliver ONLY the item copy. Measured
-    2026-10-02 on foambot: the auto-continue run 77808579 ran exec, exec, read
+    2026-10-02 on tenant-g: the auto-continue run 77808579 ran exec, exec, read
     with zero `tool`-stream events, so tool_count read 0 and the logs claimed the
     promise-completion nudge did nothing.
 
@@ -366,7 +366,7 @@ class EventDispatcher:
         # but gateway events carry the CANONICAL key
         # ('agent:openvoiceui:main'). Strict == comparisons therefore NEVER
         # matched, silently disabling followup-run routing and session-scoped
-        # fallback delivery (found 2026-07-02, phatty bare-final incident).
+        # fallback delivery (found 2026-07-02, tenant-e bare-final incident).
         # Learned from runId-routed events, which pair a sub (alias) with the
         # event's canonical key authoritatively.
         self._canonical_keys: dict[str, str] = {}
@@ -717,7 +717,7 @@ class GatewayConnection:
 
     DEFAULT_URL = 'ws://127.0.0.1:18791'
     # Sized against the MEASURED gateway restart-to-listen time, not a guess.
-    # gcu-voice supplied 4 timestamped occurrences (2026-08-28, 09-05, 09-06 x2), each
+    # tenant-q-voice supplied 4 timestamped occurrences (2026-08-28, 09-05, 09-06 x2), each
     # with the same shape: claw_sigterm at t=0, then Errno 111 refusals until the
     # gateway listens again at t≈70-72s. The old ladder [1,2,4,8,16,30,60] with
     # max_attempts=5 spent its gaps 2+4+8+16 = 30s and exhausted at t≈35s — less than
@@ -1001,8 +1001,8 @@ class GatewayConnection:
             # RECONCILES TWO MEASUREMENTS THAT DISAGREED (merge of #482 with WS-9 on main).
             # Both were real; they measured different restarts:
             #   WS-9 (pledge 50bef735, 2026-09-10): openclaw restart-to-ready 37.0s / 37.8s
-            #     (container StartedAt -> "[gateway] ready"; openclaw-danielle, openclaw-azrim).
-            #   #482 (gcu-voice, 4 timestamped cases 2026-08-28 / 09-05 / 09-06 x2): claw_sigterm
+            #     (container StartedAt -> "[gateway] ready"; openclaw-tenant-j, openclaw-tenant-d).
+            #   #482 (tenant-q-voice, 4 timestamped cases 2026-08-28 / 09-05 / 09-06 x2): claw_sigterm
             #     at t=0, Errno 111 refusals until the gateway listens again at t=70-72s.
             # A restart is therefore not one duration but a RANGE, ~37s to ~72s, and the schedule
             # has to clear the top of it.
@@ -1012,7 +1012,7 @@ class GatewayConnection:
             # 2+4+8+16+30 = 60s. #482 caps the ladder at 15s, and that change merged cleanly —
             # so under the ladder now in this file, 6 attempts buys only 2+4+8+15+15 = 44s.
             # Keeping 6 would silently cut WS-9's own budget from 60s to 44s and miss every
-            # 70s restart gcu measured. 10 attempts restores the intent: 2+4+8+15*6 = 104s.
+            # 70s restart tenant-q measured. 10 attempts restores the intent: 2+4+8+15*6 = 104s.
             #
             # Attempt 4 still lands at t=14s, so a fast restart is caught exactly as quickly as
             # before; attempts 5-10 probe every 15s (t=29,44,59,74,89,104s nominal), ~44% clear of
@@ -1020,7 +1020,7 @@ class GatewayConnection:
             # between ~88s and ~120s. A genuinely dead gateway still raises inside ~2 minutes.
             #
             # Corroborated by the 2026-09-19 nightly review, which is what this schedule is for:
-            # hrsf-voice recovered on attempt 5 (261ms) and gcu-voice saw a ~35s refusal window
+            # tenant-c-voice recovered on attempt 5 (261ms) and tenant-q-voice saw a ~35s refusal window
             # the same night. Exhausting the budget is not cosmetic — after the final failure the
             # client stops probing until a fresh cycle, so a gateway that came back EARLY went
             # unnoticed anyway (measured: exhausted 19:45:57, reconnected 19:46:32).
@@ -1431,7 +1431,7 @@ class GatewayConnection:
                 # ── Tool calls reported ONLY on the `item` stream ────────────
                 # openclaw reports every tool call twice: `stream: "tool"` and
                 # `stream: "item"` (data.kind == "tool"). Some runs deliver only
-                # the `item` copy. Measured 2026-10-02 on foambot: the
+                # the `item` copy. Measured 2026-10-02 on tenant-g: the
                 # auto-continue run 77808579 ran exec, exec, read with zero
                 # `tool`-stream events, so tool_count read 0, the log said the
                 # promise-completion nudge did nothing, and the detector itself
@@ -1732,7 +1732,7 @@ class GatewayConnection:
                     else:
                         # ── Bare final, ZERO events for our run: message was
                         # QUEUED, not answered (root cause of the 2026-07-02
-                        # phatty amnesia + 2026-06-30 src collapse family).
+                        # tenant-e amnesia + 2026-06-30 tenant-r collapse family).
                         # When chat.send lands on a session that is busy (or
                         # still finalizing the previous turn), openclaw queue
                         # mode "collect" coalesces the payload into a followup

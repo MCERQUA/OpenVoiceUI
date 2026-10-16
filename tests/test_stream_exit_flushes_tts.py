@@ -1,7 +1,7 @@
 """
 Tests for routes.conversation.drain_pending_tts_on_exit (issue #487).
 
-Measured live 2026-09-10 (tenant danielle): TEXT_DONE received with
+Measured live 2026-09-10 (tenant tenant-j): TEXT_DONE received with
 _tts_pending=4, four Groq TTS completions logged, tts_ok=1 metrics, then
 "### STREAM EXIT with 4 unprocessed events: ['tts_ready']*4" — the generator
 returned while TTS audio was still sitting unconsumed.

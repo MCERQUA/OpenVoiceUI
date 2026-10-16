@@ -425,7 +425,7 @@ def _kick_off_pending_icon_generation(manifest: dict) -> None:
     their independent 6h cooldowns expired. Only one batch may run at a time,
     fleet-wide within this process."""
     # GATED OFF by default (2026-07-29): auto-icon gen on Gemini was 100% 429-failing
-    # (josh 588/0, danielle 286/0 — zero icons produced, permanent retry storm because
+    # (tenant-k 588/0, tenant-j 286/0 — zero icons produced, permanent retry storm because
     # failed pages stay pending and re-fire every sync). Mike confirmed pages show only
     # default icons. Re-enable ONLY once icon-gen is repointed off Gemini to the Mac's
     # ComfyUI (env AUTO_ICON_GEN=on). Root fix = the Mac creative node, not this path.
@@ -1897,7 +1897,7 @@ def canvas_data_static(filename):
     ANY file type with a correct mimetype so the Suno Studio audio editor can load
     vocal/stem .mp3 files and processed-song fixtures from a stable /canvas-data/ path.
     The dir is mounted in both openclaw + openvoiceui, so it's the shared media bridge.
-    Added 2026-06-25 for the suno-audio-editor Phase 1 bridge (bun submesh)."""
+    Added 2026-06-25 for the suno-audio-editor Phase 1 bridge (tenant-n submesh)."""
     denied = _canvas_data_denied(filename)
     if denied:
         return denied

@@ -105,7 +105,7 @@ connectAiradio();
                 // Shell-level verbs act on the SHELL, never the page. Posting these
                 // into the iframe was a structural no-op: the page has no handler,
                 // and the shell's own 'close' case only fires on messages FROM pages.
-                // (2026-08-18: phatty/Hart — agent emitted close, canvas stayed open.)
+                // (2026-08-18: tenant-e — agent emitted close, canvas stayed open.)
                 if (action === 'close') { CanvasControl.hide(); return; }
                 if (action === 'menu') { CanvasControl.showMenu(); return; }
                 if (action === 'navigate' && (payload?.page || payload?.pageId)) {
@@ -194,7 +194,7 @@ connectAiradio();
         // Rewrites external dev-domain URLs to same-domain /devsite-*/ proxies,
         // bypassing Cloudflare's cross-subdomain iframe blocking.
         // Map is injected by Flask from DEVSITE_MAP env var (set per user in compose/.env).
-        // Example: {"dev-nick.jam-bot.com": "https://nick.jam-bot.com/devsite-printguys-web-2/"}
+        // Example: {"dev-tenant-l.jam-bot.com": "https://tenant-l.jam-bot.com/devsite-example-web-2/"}
         function resolveCanvasUrl(url) {
             // Block private/internal IPs — browser can never reach Docker internals
             // Matches 10.x, 172.16-31.x, 192.168.x, localhost, 127.x
@@ -7712,7 +7712,7 @@ connectAiradio();
             // Server profile is AUTHORITATIVE (VPS = source of truth) — never let a stale
             // per-tab localStorage voice_mode strand the UI in Hume mode, which hides the
             // TTS Voice picker (Hume EVI controls voice itself, so #voice-select-group is
-            // hidden). BHB 2026-07-11: localStorage voice_mode='hume' left over from a past
+            // hidden). persona-tenant 2026-07-11: localStorage voice_mode='hume' left over from a past
             // Hume session hid the Voice field despite the server profile being supertonic/
             // resemble. Mirror line ~7178's server-first resolution.
             const activeMode = window._serverProfile?.ui?.voice_mode || localStorage.getItem('voice_mode') || 'supertonic';
@@ -9467,7 +9467,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
             // error anywhere. The networking process is refused read access to the picker's
             // temp copy; the page itself can still read every byte. A Blob built from
             // file.arrayBuffer() uploads intact (the workaround verified on device in that
-            // bug). Measured on ica 2026-09-30: an iPhone bulk upload sent every photo empty.
+            // bug). Measured on tenant-i 2026-09-30: an iPhone bulk upload sent every photo empty.
             // Uploads run one at a time, so only one file's bytes are held at once.
             async _readIntoMemory(file, fname) {
                 if (!file || typeof file.arrayBuffer !== 'function') return file;

@@ -147,7 +147,7 @@ A voice agent that can dispatch arbitrary coding work to a CLI agent on this box
 
 - Memory `mac-listener-task-kind-auto-executes` — `KIND=task` to a Mac listener auto-ran in
   permissionless headless Claude (paid-API + arbitrary-execution risk).
-- SEC item filed 2026-08-01 by `bun-desktop@mesh` — `ovui_mcp.py` binds `0.0.0.0:8091`
+- SEC item filed 2026-08-01 by `a desktop agent` — `ovui_mcp.py` binds `0.0.0.0:8091`
   with **no inbound auth** and serves `terminal_execute` to anything that can reach it.
 
 So gating is in the schema from the first commit, not bolted on:

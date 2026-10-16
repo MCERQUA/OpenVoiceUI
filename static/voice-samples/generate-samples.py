@@ -33,9 +33,7 @@ PRIORITY_VOICES = [
     ("groq", "austin", "Austin"),
     ("groq", "daniel", "Daniel"),
     ("groq", "troy", "Troy"),
-    # Resemble (cloned + best stock)
-    ("resemble", "Kyle Valhalla", "Kyle Valhalla"),
-    ("resemble", "Bryce BigHead", "Bryce BigHead"),
+    # Resemble (best stock; a deployment's own cloned voices are never sampled into the repo)
     ("resemble", "Aaron", "Aaron"),
     ("resemble", "Jessica", "Jessica"),
     ("resemble", "Ethan", "Ethan"),

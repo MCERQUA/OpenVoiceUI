@@ -4,7 +4,7 @@
 //   SW_SRC=/path/to/sw.js APP_SRC=/path/to/app.js PAGES_DIR=/path/to/default-pages \
 //     node tests/js/upload-body-ios.test.js                                  # another copy
 //
-// Measured on ica 2026-09-30: 19 POST /api/upload from an iPhone (Safari 26.6.2) reached Flask
+// Measured on tenant-i 2026-09-30: 19 POST /api/upload from an iPhone (Safari 26.6.2) reached Flask
 // as multipart/form-data with content_length=0, every one a 400 "No file provided". Two causes
 // documented upstream, both covered here:
 //
@@ -58,7 +58,7 @@ function loadSW() {
 }
 
 function fireFetch(sw, method) {
-  const request = { method, url: 'https://ica.jam-bot.com/api/upload' };
+  const request = { method, url: 'https://tenant-i.jam-bot.com/api/upload' };
   const event = { request, responded: 0, respondWith() { this.responded++; } };
   sw.listeners.fetch(event);
   return event;

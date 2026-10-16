@@ -5,7 +5,7 @@ Which voice names belong to which TTS engine — the shared check behind two gua
   2. services/tts.py, at speak time, maps a voice that is not on its engine to that
      engine's same-gender voice instead of failing every sentence.
 
-Why both (measured 2026-10-02, foambot): the profile held voice "troy" (a Groq voice) on
+Why both (measured 2026-10-02, tenant-g): the profile held voice "troy" (a Groq voice) on
 the supertonic engine, which only has M1-M5 / F1-F5. Supertonic rejected every sentence,
 supertonic is the END of the fallback chain, so every reply was silent: 276 failures in
 six hours, about ten days of no audio. The same profile had held groq + "M1" (a supertonic

@@ -991,7 +991,7 @@ def send_to_friend():
     Send a song to a friend.
 
     Body: { "song_id": optional, "song_title": optional,
-            "receiver_handle": "@nick", "note": optional }
+            "receiver_handle": "@example", "note": optional }
     """
     if not _bridge_has_auth():
         return _bridge_not_configured_response(for_write=True)
@@ -1411,7 +1411,7 @@ def queue_mood(mood):
 
 @airadio_bp.route("/api/airadio/queue/artist/<username>", methods=["GET"])
 def queue_artist(username):
-    # Accept "@nick" as well as "nick"
+    # Accept "@example" as well as "example"
     handle = (username or "").lstrip("@")
     if not handle:
         return jsonify({

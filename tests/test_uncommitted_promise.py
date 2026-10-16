@@ -1,19 +1,19 @@
 """Uncommitted-promise detector + item-stream tool counting.
 
-Cases are taken from production firings (2026-10-01/02, foambot + hrsf), not
+Cases are taken from production firings (2026-10-01/02, tenant-g + tenant-c), not
 invented, so the tests pin the behaviour that was actually observed.
 """
 from routes.conversation import PROMISE_RE, WORK_ACTION_TAG_RE, is_uncommitted_promise
 from services.gateways.openclaw import item_stream_tool_start
 
-# hrsf 2026-10-01 15:32Z: claimed "Done" with zero tools; the nudge made it send.
-HRSF_FALSE_DONE = (
+# tenant-c 2026-10-01 15:32Z: claimed "Done" with zero tools; the nudge made it send.
+ZERO_TOOL_FALSE_DONE = (
     "Done — the request is on the Mac's desk. I asked it to grab everything publicly "
     "visible on both pages. As soon as it replies back through the mesh I'll compile "
     "the full picture for you."
 )
-# foambot 2026-10-01 01:55Z: the work WAS done via an action tag.
-FOAMBOT_SUNO = (
+# tenant-g 2026-10-01 01:55Z: the work WAS done via an action tag.
+ACTION_TAG_SUNO = (
     "Oh yeah, let's make something fun for the little man. I'll get it cooking now — "
     "catchy, bouncy, kid-song energy about being dad's little helper on the foam rig. "
     "Should be ready in about 45 seconds, and I'll double-check the file actually lands "
@@ -27,7 +27,7 @@ class TestIsUncommittedPromise:
         assert is_uncommitted_promise("Got it — I'll build that page now.", 0, 5000)
 
     def test_real_false_done_claim_fires(self):
-        assert is_uncommitted_promise(HRSF_FALSE_DONE, 0, 8000)
+        assert is_uncommitted_promise(ZERO_TOOL_FALSE_DONE, 0, 8000)
 
     def test_tools_used_does_not_fire(self):
         assert not is_uncommitted_promise("I'll build that page now.", 1, 5000)
@@ -35,8 +35,8 @@ class TestIsUncommittedPromise:
     def test_work_action_tag_counts_as_done(self):
         # precondition: the promise phrase IS present ("I'll double-check"),
         # so only the [SUNO_GENERATE] tag can be what suppresses the nudge
-        assert PROMISE_RE.search(FOAMBOT_SUNO)
-        assert not is_uncommitted_promise(FOAMBOT_SUNO, 0, 17797)
+        assert PROMISE_RE.search(ACTION_TAG_SUNO)
+        assert not is_uncommitted_promise(ACTION_TAG_SUNO, 0, 17797)
 
     def test_canvas_tag_counts_as_done(self):
         assert not is_uncommitted_promise("Let me open it for you. [CANVAS:leads-board]", 0, 3000)
@@ -63,7 +63,7 @@ def test_work_tag_regex_matches_tag_with_and_without_value():
     assert not WORK_ACTION_TAG_RE.search("[MOOD:calm]")
 
 
-# Shapes copied from openvoiceui-foambot logs, 2026-10-02 17:49Z.
+# Shapes copied from openvoiceui-tenant-g logs, 2026-10-02 17:49Z.
 MAIN = "agent:openvoiceui:main"
 SUBAGENT = "agent:openvoiceui:subagent:682ff7df-6e8f-470d-9b44-cdea639b3d43"
 

@@ -81,7 +81,7 @@ logger = logging.getLogger(__name__)
 # Host-side provider calls emit one JSONL row per call via provider-call-log.sh
 # so the Watch map lights the provider node the instant a call happens. This
 # container can't reach the host's canonical provider-calls dir, but the
-# monitoring-events mount (host: /home/mike/monitoring/events) is RW — receipts
+# monitoring-events mount (host: /home/user/monitoring/events) is RW — receipts
 # drop into a provider-calls/ subdir there, same one-line schema, and the Watch
 # tailer scans that drop dir too. Best-effort: NEVER blocks or fails a
 # generation; on containers without the mount the write is invisible/harmless.
@@ -154,7 +154,7 @@ def _schedule_lyrics_fetch(task_id: str, audio_id: str, filename: str, lyrics: s
 # callback). A refusal at submit — `{"code":429,"msg":"The current credits are insufficient"}`
 # wrapped in HTTP 200, a missing key, a network error — returned {'action':'error'} to the
 # browser, which flashed a 5-second banner and nothing else. Measured 2026-09-28 03:50Z on
-# foambot: the agent told a client his son's song would be ready in "45 seconds", Suno refused
+# tenant-g: the agent told a client his son's song would be ready in "45 seconds", Suno refused
 # it for credits, and neither the agent nor the client was ever told. No task-log row either.
 # This hook sits on the blueprint so EVERY submit path (including ones added later) is covered
 # without each handler remembering to call it.
@@ -801,7 +801,7 @@ def _action_sfx(_q, body: dict):
         return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
 
 
-# ── JINGLE LENGTH HONESTY (host@mesh 2026-09-06, Mike's request) ──────────────
+# ── JINGLE LENGTH HONESTY (the host agent 2026-09-06, Mike's request) ──────────────
 # Suno's jingle recipe is NOT length-deterministic. Measured over the whole task
 # log: 13 jingle requests -> 72 generations, only 16 came back <=20s. That is a
 # 22% hit rate, with the SAME parameters returning 9.2s and 167.8s on adjacent
@@ -2781,7 +2781,7 @@ def suno_callback():
             # BOTH CASINGS (2026-08-24). Suno's webhook delivers this field as snake_case
             # `task_id` on some callback types and camelCase `taskId` on others. This line read
             # ONLY camelCase, so every snake_case callback wrote its song to metadata with an
-            # EMPTY task_id — measured by host-clone@mesh: 62 callback rows, ZERO task_ids,
+            # EMPTY task_id — measured by a host agent: 62 callback rows, ZERO task_ids,
             # while the poller leg was 36/36 clean.
             #
             # Why that is expensive rather than untidy: a Suno taskId+audioId pair is the key to

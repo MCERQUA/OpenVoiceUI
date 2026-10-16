@@ -3,7 +3,7 @@
 WHY THIS EXISTS (2026-10-12)
 Every call to sunoapi.org's get-timestamped-lyrics is CHARGED. Before this module the
 per-word timings were pulled late and repeatedly: by the host cron
-(MIKE-AI scripts/singalong-suno-sync.py, hourly) and by the sing-along page whenever a
+(ops-repo scripts/singalong-suno-sync.py, hourly) and by the sing-along page whenever a
 track without a cache was opened. The cron re-bought the same 17 instrumental songs
 every hour because an instrumental never produced a cache file. Mike's rule: pull the
 lyrics in the same moment the song is generated, once, and never again.
@@ -126,7 +126,7 @@ def log_call(row: dict) -> None:
 
 
 # ── faithful port of sing-along.html linesFromAligned() ──────────────────────
-# Identical to MIKE-AI scripts/singalong-suno-sync.py lines_from_aligned().
+# Identical to ops-repo scripts/singalong-suno-sync.py lines_from_aligned().
 
 def lines_from_aligned(aligned: list) -> list:
     text = ''

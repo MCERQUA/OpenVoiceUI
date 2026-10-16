@@ -1,4 +1,4 @@
---- /tmp/claude-1000/-home-mike-MIKE-AI/47617f0a-a5f5-41b1-b645-0e453631c4cf/scratchpad/hermes-gateway-orig.py	2026-07-11 16:52:53.236574287 +0000
+--- /tmp/scratch/hermes-gateway-orig.py	2026-07-11 16:52:53.236574287 +0000
 +++ plugins/hermes-agent/gateway.py	2026-07-11 16:44:39.912934661 +0000
 @@ -135,6 +135,40 @@
          )

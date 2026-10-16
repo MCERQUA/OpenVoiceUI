@@ -10,7 +10,7 @@
     // reads Authorization before the __session cookie. Clerk tokens live ~60s. The main app
     // re-syncs __session every 50s (app.js _syncSessionCookie) but this page never did, so
     // any call more than a minute after arriving, or after switching away to copy a key on a
-    // phone, went out with an expired cookie and got 401. Measured on foambot 2026-09-26:
+    // phone, went out with an expired cookie and got 401. Measured on tenant-g 2026-09-26:
     // four PUT /api/vault/credentials/supabase -> 401. getToken() returns the cached token
     // while valid and refreshes it when not. Until Clerk has loaded there is no session,
     // and requests pass through unchanged (cookie auth, as before).

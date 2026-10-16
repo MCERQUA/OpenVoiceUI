@@ -360,7 +360,7 @@ class ProfileManager:
                 base[key] = value
 
         # A voice/engine pair is only valid TOGETHER: an update that changes just one of
-        # them can strand the other (foambot 2026-09-23..10-02: groq+"M1", then
+        # them can strand the other (tenant-g 2026-09-23..10-02: groq+"M1", then
         # supertonic+"troy" -> ten days of silent replies). Judge the MERGED result.
         from services.voice_catalog import voice_mismatch
         merged_voice = base.get("voice") or {}

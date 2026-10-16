@@ -1,6 +1,6 @@
-"""Voice/engine mismatch guards (foambot 2026-09-23..10-02: "troy" on supertonic = silent replies).
+"""Voice/engine mismatch guards (tenant-g 2026-09-23..10-02: "troy" on supertonic = silent replies).
 
-Cases are the two real mismatches the foambot profile held, plus controls.
+Cases are the two real mismatches the tenant-g profile held, plus controls.
 """
 import json
 
@@ -19,11 +19,11 @@ BASE = {
 
 
 class TestVoiceMismatch:
-    def test_groq_voice_on_supertonic_is_refused(self):      # foambot 10-02
+    def test_groq_voice_on_supertonic_is_refused(self):      # tenant-g 10-02
         msg = voice_mismatch("supertonic", "troy")
         assert msg and "groq" in msg
 
-    def test_supertonic_voice_on_groq_is_refused(self):      # foambot 09-23
+    def test_supertonic_voice_on_groq_is_refused(self):      # tenant-g 09-23
         msg = voice_mismatch("groq", "M1")
         assert msg and "supertonic" in msg
 
@@ -81,6 +81,6 @@ def test_speak_time_maps_off_engine_voice_instead_of_failing(monkeypatch):
         return b"RIFF-fake-audio"
 
     monkeypatch.setattr(tts, "_generate_with_provider", fake_generate)
-    out = tts.generate_tts_b64("Hey Jordan.", voice="troy", tts_provider="supertonic")
+    out = tts.generate_tts_b64("Hey there.", voice="troy", tts_provider="supertonic")
     assert out, "must speak, not go silent"
     assert calls[0] == ("supertonic", "M1"), calls   # troy (male) -> supertonic M1

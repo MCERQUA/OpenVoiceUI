@@ -60,11 +60,11 @@ OpenVoiceUI face-box (iframe ~380×380px)
 
 **Approach:**
 - Face reads `?avatar=<filename>` query param from its src URL
-- OVU loads face with: `faces/talkinghead-3d.html?avatar=danielle.vrm`
+- OVU loads face with: `faces/talkinghead-3d.html?avatar=tenant-j.vrm`
 - VRM files served from `/api/faces/assets/<filename>` (new static endpoint) or existing `/uploads/`
 - Per-tenant face config in `openclaw/workspace/face-config.json`:
   ```json
-  { "face": "talkinghead-3d", "avatar": "danielle.vrm", "scale": 1.2, "cameraY": 0.1 }
+  { "face": "talkinghead-3d", "avatar": "tenant-j.vrm", "scale": 1.2, "cameraY": 0.1 }
   ```
 - Server reads face-config.json and passes params when building the face iframe src
 

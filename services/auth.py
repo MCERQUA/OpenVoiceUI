@@ -59,19 +59,9 @@ if _CLERK_CONFIGURED and not _ALLOWED_USER_IDS:
         'FAILING CLOSED: no users will be permitted. Set ALLOWED_USER_IDS in .env.'
     )
 
-# Admin users — server-side authorization for the admin dashboard and privileged
-# APIs (/admin, /api/admin/*, /api/vault/*, /api/workspace/*, /api/plugins/*, ...).
-# Set ADMIN_USER_IDS=user_abc,user_xyz in .env to grant tenant owners access.
-# Defaults to the platform admin so multi-user tenants never expose the dashboard
-# to every allowlisted voice user (ALLOWED_USER_IDS gates the app, not admin ops).
-_PLATFORM_ADMIN_ID = 'user_3AJGqe2Fgn1qD580pg6tt2ysplR'
-_raw_admins = os.getenv('ADMIN_USER_IDS', '')
-_ADMIN_USER_IDS: set[str] = {uid.strip() for uid in _raw_admins.split(',') if uid.strip()} or {_PLATFORM_ADMIN_ID}
 
-
-def is_admin_user(user_id: Optional[str]) -> bool:
-    """True if this Clerk user may use the admin dashboard + privileged APIs."""
-    return bool(user_id) and user_id in _ADMIN_USER_IDS
+def _parse_ids(raw: Optional[str]) -> set[str]:
+    return {uid.strip() for uid in (raw or '').split(',') if uid.strip()}
 
 
 # Platform admins — a STRICTLY SMALLER set than tenant admins (SEC-069).
@@ -80,15 +70,26 @@ def is_admin_user(user_id: Optional[str]) -> bool:
 # /api/vault/platform-setup reads/writes .platform-oauth.env, the PLATFORM's
 # shared OAuth app client_id/client_secret used by every tenant's OpenVoiceUI.
 # Those surfaces gate on this set instead. It is NEVER derived from
-# ADMIN_USER_IDS: the hard-coded platform admin id, plus any ids in the
-# host-controlled PLATFORM_ADMIN_USER_IDS env var (comma-separated).
+# ADMIN_USER_IDS: it comes only from the host-controlled PLATFORM_ADMIN_USER_IDS
+# env var (comma-separated Clerk user ids). No id is built into the source:
+# unset means NO platform admin (fail closed), never a default operator.
 def _parse_platform_admin_ids(raw: Optional[str]) -> set[str]:
-    ids = {uid.strip() for uid in (raw or '').split(',') if uid.strip()}
-    ids.add(_PLATFORM_ADMIN_ID)
-    return ids
+    return _parse_ids(raw)
 
 
 _PLATFORM_ADMIN_USER_IDS: set[str] = _parse_platform_admin_ids(os.getenv('PLATFORM_ADMIN_USER_IDS', ''))
+
+# Admin users — server-side authorization for the admin dashboard and privileged
+# APIs (/admin, /api/admin/*, /api/vault/*, /api/workspace/*, /api/plugins/*, ...).
+# Set ADMIN_USER_IDS=user_abc,user_xyz in .env to grant tenant owners access.
+# Defaults to the platform admins so multi-user tenants never expose the dashboard
+# to every allowlisted voice user (ALLOWED_USER_IDS gates the app, not admin ops).
+_ADMIN_USER_IDS: set[str] = _parse_ids(os.getenv('ADMIN_USER_IDS', '')) or set(_PLATFORM_ADMIN_USER_IDS)
+
+
+def is_admin_user(user_id: Optional[str]) -> bool:
+    """True if this Clerk user may use the admin dashboard + privileged APIs."""
+    return bool(user_id) and user_id in _ADMIN_USER_IDS
 
 
 def is_platform_admin(user_id: Optional[str]) -> bool:

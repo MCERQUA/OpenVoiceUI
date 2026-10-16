@@ -36,7 +36,7 @@ VERSIONS_DIRNAME = '.versions'      # Subdirectory name inside canvas-pages
 # Which asset types get version history. HTML pages + small text/vector assets
 # (svg icons, json, css, js, md). Large binaries (png/jpg/glb/mp4/pdf) are
 # deliberately EXCLUDED — versioning them would bloat .versions/ and the disk
-# (2026-07-08: a non-HTML svg icon vanished on wilson with NO version safety net —
+# (2026-07-08: a non-HTML svg icon vanished on tenant-m with NO version safety net —
 # versioning was *.html-only; this closes that gap without the binary-bloat risk).
 # Files above MAX_VERSION_BYTES are skipped regardless of type.
 VERSIONED_SUFFIXES = {'.html', '.svg', '.json', '.css', '.js', '.md', '.txt', '.xml', '.csv', '.yaml', '.yml'}

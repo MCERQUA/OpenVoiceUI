@@ -1,5 +1,5 @@
 """
-Qwen3-TTS Local Provider — GPU inference on residential-laptop via reverse SSH tunnel.
+Qwen3-TTS Local Provider — GPU inference on gpu-laptop via reverse SSH tunnel.
 
 Hits 127.0.0.1:8096 (raw Qwen3-TTS Mesh API) for synthesis and voice creation.
 Checks 127.0.0.1:18791/health for availability — auto-disabled when laptop is off.
@@ -67,7 +67,7 @@ def _is_available() -> bool:
 
 class Qwen3LocalProvider(TTSProvider):
     """
-    Qwen3-TTS running on the residential-laptop RTX 3070 GPU.
+    Qwen3-TTS running on the gpu-laptop RTX 3070 GPU.
     Free, zero API cost. Only available when laptop is on and tunnel is up.
     """
 

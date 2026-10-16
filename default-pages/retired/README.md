@@ -45,7 +45,7 @@ seeing that too"*. He was right, and the count was 29/29 for both.
 Retiring a page now has a second, host-side step:
 
 1. Move the file here (this repo) — stops NEW tenants getting it.
-2. Add the slug to `/home/mike/MIKE-AI/data/canvas-retired-pages.txt` — stops the canvas
+2. Add the slug to `<ops-repo>/data/canvas-retired-pages.txt` — stops the canvas
    manifest reconciler (cron `7-59/10`) re-registering it from disk, which it otherwise
    WILL do, because that reconciler adds any `.html` it finds and the files are never
    deleted. Without this step, deregistering a page is undone within ten minutes.

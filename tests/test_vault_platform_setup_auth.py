@@ -103,12 +103,49 @@ class TestIdentityRule:
         assert env.auth.is_platform_admin(None) is False
         assert env.auth.is_platform_admin('') is False
 
-    def test_env_var_adds_ids_but_builtin_platform_admin_stays(self):
+    def test_platform_admin_ids_come_only_from_the_env_var(self):
         import services.auth as auth
-        ids = auth._parse_platform_admin_ids(' user_a , user_b,, ')
-        assert ids == {'user_a', 'user_b', auth._PLATFORM_ADMIN_ID}
-        assert auth._parse_platform_admin_ids('') == {auth._PLATFORM_ADMIN_ID}
-        assert auth._parse_platform_admin_ids(None) == {auth._PLATFORM_ADMIN_ID}
+        assert auth._parse_platform_admin_ids(' user_a , user_b,, ') == {'user_a', 'user_b'}
+        assert auth._parse_platform_admin_ids('') == set()
+        assert auth._parse_platform_admin_ids(None) == set()
+
+
+# ---------------------------------------------------------------------------
+# A2. module-level defaults, measured in a fresh interpreter per case so the
+#     env the module reads at import time is exactly the one under test.
+#     No operator id is built into the source: unset = NO platform admin.
+# ---------------------------------------------------------------------------
+def _auth_sets(**env):
+    import json
+    import subprocess
+    import sys
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    clean = {k: v for k, v in os.environ.items()
+             if k not in ('ADMIN_USER_IDS', 'PLATFORM_ADMIN_USER_IDS', 'CLERK_PUBLISHABLE_KEY')}
+    clean.update(env)
+    code = ('import json, services.auth as a; print(json.dumps({'
+            '"platform": sorted(a._PLATFORM_ADMIN_USER_IDS), "admin": sorted(a._ADMIN_USER_IDS), '
+            '"is_platform_x": a.is_platform_admin("user_x")}))')
+    out = subprocess.run([sys.executable, '-c', code], cwd=repo, env=clean,
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+class TestModuleDefaults:
+    def test_unset_means_no_platform_admin_and_no_admin(self):
+        got = _auth_sets()
+        assert got == {'platform': [], 'admin': [], 'is_platform_x': False}
+
+    def test_platform_admins_from_env_and_admin_defaults_to_them(self):
+        got = _auth_sets(PLATFORM_ADMIN_USER_IDS='user_op, user_op2')
+        assert got['platform'] == ['user_op', 'user_op2']
+        assert got['admin'] == ['user_op', 'user_op2']
+
+    def test_tenant_admin_list_never_widens_platform_admins(self):
+        got = _auth_sets(PLATFORM_ADMIN_USER_IDS='user_op', ADMIN_USER_IDS='user_owner,user_op')
+        assert got['platform'] == ['user_op']
+        assert got['admin'] == ['user_op', 'user_owner']
 
 
 # ---------------------------------------------------------------------------

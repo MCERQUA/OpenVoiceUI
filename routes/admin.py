@@ -679,7 +679,7 @@ _OPENCLAW_CONFIG_PATH = Path('/app/runtime/openclaw.json')
 _OPENCLAW_CONFIG_RO_FALLBACK = Path('/app/runtime/openclaw-client.json')
 
 # Known providers and their config shape.
-# Canonical source: /home/mike/MIKE-AI/docs/jambot/llm-provider-registry.md
+# Canonical source: <ops-repo>/docs/jambot/llm-provider-registry.md
 # Active chain is Z.AI account A ('zai') + account B ('zai_fb') — both route to
 # api.z.ai/api/anthropic. MiniMax ('mx'), bigmodel-GLM, and Groq-for-LLM are
 # DROPPED providers and must never be offered here (Groq stays TTS-only).

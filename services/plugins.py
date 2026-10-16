@@ -234,7 +234,7 @@ def _get_username() -> str:
     username = os.getenv("JAMBOT_USERNAME", "")
     if username:
         return username
-    # CLIENT_NAME is set in every client's compose .env (e.g. "Test-dev", "Nick")
+    # CLIENT_NAME is set in every client's compose .env (e.g. "Test-dev", "Example")
     client_name = os.getenv("CLIENT_NAME", "")
     if client_name:
         return client_name.lower().replace(" ", "-")

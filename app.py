@@ -416,7 +416,7 @@ def create_app(config_override: dict = None):
             # script-src but NOT style-src, so a canvas page could load a library's JS
             # and have its CSS silently blocked — which renders as "the widget is
             # missing and everything overlaps", not as an obvious error. Found 2026-07-27
-            # on allstate's Leaflet map page.
+            # on tenant-f's Leaflet map page.
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
             "font-src 'self' data: https://fonts.gstatic.com; "
             # Map tiles/markers come from maps.gstatic.com, *.googleapis.com (khms tile

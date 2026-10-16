@@ -341,7 +341,7 @@ class TestProjectUrlGuard:
         ('rfc1918.example.com', ['10.0.0.5']),
         ('home.example.com', ['192.168.1.20']),
         ('metadata.example.com', ['169.254.169.254']),
-        ('tailnet.example.com', ['100.117.10.28']),       # CGNAT / Tailscale: is_private is False here
+        ('tailnet.example.com', ['100.64.12.34']),       # CGNAT / Tailscale: is_private is False here
         ('v6loop.example.com', ['::1']),
         ('mapped.example.com', ['::ffff:127.0.0.1']),
         ('reserved.example.com', ['240.0.0.1']),

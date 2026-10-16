@@ -12,7 +12,7 @@ Two ways to use it in the JamBot stack:
      Hume Voice Library voice) + optional per-utterance acting direction.
   2. Performance donor — render an acted take here, then speech-to-speech convert
      it into a Resemble custom clone (<resemble:convert src=...>). The donor's
-     comedic timing survives conversion beat-for-beat. (Kyle/BHB pipeline,
+     comedic timing survives conversion beat-for-beat. (persona-tenant pipeline,
      proven 2026-07-14.)
 
 API (verified live 2026-07-15):

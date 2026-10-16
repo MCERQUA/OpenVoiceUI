@@ -7,12 +7,12 @@ The loop has to outlast an openclaw gateway restart, and the budget has been
 sized twice against two different measurements:
 
 - WS-9 (pledge 50bef735, 2026-09-10): restart-to-ready measured at ~37-38s
-  (container StartedAt -> "[gateway] ready"; openclaw-danielle, openclaw-azrim).
+  (container StartedAt -> "[gateway] ready"; openclaw-tenant-j, openclaw-tenant-d).
   The original max_attempts=5 on the ladder [1,2,4,8,16,30,60] exhausted at
   t=30s, so max_attempts went to 6 (t=60s nominal) and every sleep gained
   +/-15% jitter (GatewayConnection._jittered_delay) so tenants whose gateways
   restart together don't retry in lockstep.
-- #482 (gcu-voice, 4 timestamped restarts 2026-08-28 / 09-05 / 09-06 x2):
+- #482 (tenant-q-voice, 4 timestamped restarts 2026-08-28 / 09-05 / 09-06 x2):
   claw_sigterm at t=0, Errno 111 refusals until the gateway listens again at
   t=70-72s. main's 6 attempts end at t=60s nominal (51-69s with jitter), so a
   restart that long always exhausts; openvoiceui-mike on 2026-09-29 only got
@@ -110,7 +110,7 @@ class TestEnsureConnectedGatewayDown:
         assert calls["n"] == final
 
     def test_gateway_back_on_attempt_7_connects_without_exhausting(self):
-        # The first attempt past main's 6-attempt budget: the ~70s restart gcu
+        # The first attempt past main's 6-attempt budget: the ~70s restart tenant-q
         # measured, which main can never reach — it raises "after 6 attempts"
         # first (openvoiceui-mike, 2026-09-29, got in on its 6th and last try).
         gw = _make_gateway()
@@ -169,7 +169,7 @@ class TestEnsureConnectedGatewayDown:
 
 class TestBudgetCoversMeasuredRestart:
     """Binds the schedule to the measurement in TIME, not attempt count: the
-    gateway refuses until t=72s (the worst gcu restart) on a fake clock driven
+    gateway refuses until t=72s (the worst tenant-q restart) on a fake clock driven
     by the loop's own sleeps. Run at both jitter bounds, because the jitter makes
     the budget a range rather than a constant and the low bound is the one that
     runs out first."""

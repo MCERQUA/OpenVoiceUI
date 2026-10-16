@@ -160,7 +160,7 @@ if DEFAULT_PAGES_DIR.is_dir():
         # A single non-writable tenant page (e.g. a canvas-pages copy owned by a
         # different uid with restrictive perms) must NOT crash the whole server boot.
         # Log-and-skip so seeding stays best-effort. (host 2026-06-28 — fleet-roll fix:
-        # josh crash-looped here when website-creator.html was uid-1000/664 vs appuser 1001.)
+        # tenant-k crash-looped here when website-creator.html was uid-1000/664 vs appuser 1001.)
         try:
             if not dest.exists():
                 shutil.copy2(src, dest)

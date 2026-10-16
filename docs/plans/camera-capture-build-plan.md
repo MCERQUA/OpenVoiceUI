@@ -376,7 +376,7 @@ ghost-overlay ❌ (3 stub refs only).
 Phase 3: share-token mint ✅ · portal route ❌ (see A.9.2).
 Phase 4: nothing.
 
-**Open SMS action items** (`MIKE-AI/docs/reflections/ACTIONS.jsonl`, opened 2026-07-29, still open,
+**Open SMS action items** (`ops-repo/docs/reflections/ACTIONS.jsonl`, opened 2026-07-29, still open,
 owner `host`):
 - `sms-ea5afc95` — "Make the capture screen canvas"
 - `sms-b5d65f11` — "Images taken with the camera should automatically go into an album like company cam"
@@ -680,7 +680,7 @@ link that leads nowhere. It is a known Phase 3 item, not an oversight — but th
 without the view half is exactly the `ack-must-come-from-receiver` pattern. Either land both halves
 together or have the mint endpoint refuse until the viewer exists.
 
-**A.9.3 — Video is blocked by media size caps.** `MIKE-AI/docs/TECH-DEBT-REGISTRY.md:83` — default
+**A.9.3 — Video is blocked by media size caps.** `ops-repo/docs/TECH-DEBT-REGISTRY.md:83` — default
 caps (image 10MB, audio 20MB, video 50MB) are *below* typical phone-camera and screen-recording
 output. Raise before Phase 4, or video capture fails on real devices.
 

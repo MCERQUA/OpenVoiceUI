@@ -27,18 +27,18 @@ logger = logging.getLogger(__name__)
 image_gen_bp = Blueprint('image_gen', __name__)
 
 
-# ── A 200 IS NOT AN IMAGE (host@mesh 2026-08-26) ─────────────────────────────
+# ── A 200 IS NOT AN IMAGE (the host agent 2026-08-26) ─────────────────────────────
 # Providers return HTTP 200 with a JSON/text error body and an image-ish Content-Type.
 # raise_for_status() cannot see that, and Content-Type is a LABEL the provider chose,
 # not a measurement of the bytes. So the only honest check is the bytes themselves.
 #
 # MEASURED, this is not hypothetical — a fleet sweep of 64,131 files found 70 non-images
 # saved under image extensions, including:
-#   nick/openvoiceui/uploads/revlab-jersey-{1..6}.jpg — 94 B of
+#   tenant-l/openvoiceui/uploads/example-jersey-{1..6}.jpg — 94 B of
 #     {"error":"The requested model is deprecated and no longer supported by provider
-#      hf-inference"} — served at HTTP 200 from nick.jam-bot.com for 18 days
-#   4 URLs on 3 live josh client domains returning 200 with text/empty bodies
-# nick's own image-intel sidecar had diagnosed one of them on 2026-08-18 and nothing read it.
+#      hf-inference"} — served at HTTP 200 from tenant-l.jam-bot.com for 18 days
+#   4 URLs on 3 live tenant-k client domains returning 200 with text/empty bodies
+# tenant-l's own image-intel sidecar had diagnosed one of them on 2026-08-18 and nothing read it.
 #
 # This function FAILS LOUD. Writing the error body to disk is the failure mode we are
 # removing; silently returning a placeholder would preserve it in a new costume.

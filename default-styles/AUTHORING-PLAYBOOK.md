@@ -2,7 +2,7 @@
 
 Read `SPEC.md` first (file format + hard rules). This file is the OPERATIONAL
 loop proven on 2026-07-10 when meridian/atelier/obsidian were built.
-System overview: `/home/mike/MIKE-AI/docs/jambot/canvas-style-system.md`.
+System overview: `<ops-repo>/docs/jambot/canvas-style-system.md`.
 
 ## Session bootstrap (fresh context)
 

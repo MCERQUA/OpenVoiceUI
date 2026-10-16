@@ -994,7 +994,7 @@ details[open] summary .arrow{transform:rotate(90deg)}
 const $=id=>document.getElementById(id);
 
 // Derive this tenant's dev URL from the canvas hostname.
-// e.g. src.jam-bot.com → https://dev-src.jam-bot.com
+// e.g. tenant-r.jam-bot.com → https://dev-tenant-r.jam-bot.com
 //      test-dev.jam-bot.com → https://dev-test-dev.jam-bot.com
 //      <tenant>.jam-bot.com → https://dev-<tenant>.jam-bot.com
 // This replaces a previously-hardcoded "dev-test-dev" URL that bled across
@@ -1002,7 +1002,7 @@ const $=id=>document.getElementById(id);
 // of the client whose canvas he was on.
 function getDevUrl(){
   try{
-    const host = window.location.hostname; // e.g. "src.jam-bot.com"
+    const host = window.location.hostname; // e.g. "tenant-r.jam-bot.com"
     const sub = host.split('.')[0];
     if(!sub || sub === 'jam-bot' || sub === 'localhost') return '';
     return 'https://dev-' + sub + '.jam-bot.com';
@@ -1882,7 +1882,7 @@ function resetColors(){
 
 // ── File uploads ──
 // WebKit bug 319985 (Safari/iOS 26.5+): a picker File handed to fetch/XHR can go out as
-// Content-Length: 0 with no error (iPhone uploads on ica 2026-09-30 all arrived empty).
+// Content-Length: 0 with no error (iPhone uploads on tenant-i 2026-09-30 all arrived empty).
 // The page can still read the bytes, so send a copy of them, never the File itself.
 async function readIntoMemory(file){
   const name=file.name||'upload';let buf;

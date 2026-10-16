@@ -1,6 +1,6 @@
 """A canvas page another uid wrote (mode 644) must still be refreshable.
 
-Regression: ica's agent re-POSTed its 'Job Profits' page and got HTTP 500
+Regression: tenant-i's agent re-POSTed its 'Job Profits' page and got HTTP 500
 ('Canvas page creation failed') because the old file belonged to another uid
 and the save overwrote it in place -> EACCES. A 0444 file reproduces that for
 any non-root uid; the directory stays writable, as canvas-pages is in prod.

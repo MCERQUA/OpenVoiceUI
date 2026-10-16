@@ -372,7 +372,7 @@ function drainQueue(){
 
 // ── Upload ──
 // WebKit bug 319985 (Safari/iOS 26.5+): a picker File handed to fetch/XHR can go out as
-// Content-Length: 0 with no error (iPhone uploads on ica 2026-09-30 all arrived empty).
+// Content-Length: 0 with no error (iPhone uploads on tenant-i 2026-09-30 all arrived empty).
 // The page can still read the bytes, so send a copy of them, never the File itself.
 async function readIntoMemory(file){
   const name=file.name||'upload';let buf;
@@ -467,7 +467,7 @@ $('srch').oninput=()=>render();
 // render() rebuilds the ENTIRE grid innerHTML. With a large existing library
 // (100+ files) plus 3 concurrent uploads finishing rapidly, that is a full
 // 100+-card DOM teardown several times a second — it froze the tab on a bulk
-// upload to a tenant that already had 100+ images (koolfoam, 2026-07-23). Coalesce
+// upload to a tenant that already had 100+ images (tenant-b, 2026-07-23). Coalesce
 // the burst: at most one rebuild per ~150ms, and always render the final state.
 let _renderT=null;
 function renderThrottled(){

@@ -93,7 +93,7 @@ def _load_voice_system_prompt() -> str:
 
 
 # ── DEGRADED-MODE ADDENDUM for the Z.AI-direct fallback ─────────────────────
-# WHY (danielle, 2026-08-31 + 2026-09-01, escalated by danielle-sms@mesh):
+# WHY (tenant-j, 2026-08-31 + 2026-09-01, escalated by a tenant SMS agent):
 # when the openclaw turn stalls (llm_inference 500-600s with ZERO output tokens,
 # then "STREAM EXIT ... unprocessed"), we answer the user from a DIRECT Z.AI call.
 # That call:
@@ -525,13 +525,13 @@ _double_empty_window_start: float = 0
 _DOUBLE_EMPTY_MAX_RESTARTS: int = 2       # max restart flags per window
 _DOUBLE_EMPTY_WINDOW_SECONDS: float = 300  # 5-minute sliding window
 
-#: ── Context-bloat guard (2026-07-13, bhb session overflow; #94 2026-07-19) ─
+#: ── Context-bloat guard (2026-07-13, persona-tenant session overflow; #94 2026-07-19) ─
 #: The STATIC instruction blocks (voice action-tag instructions, canvas page
 #: list, track list, DJ sounds, profile instructions, canvas style,
 #: CURRENT_USER/office briefing, latest generated song) used to be re-sent
 #: verbatim on EVERY turn (~17KB/turn). The gateway session keeps full
 #: history, so after a day of voice chat the duplicated blocks alone overflowed
-#: GLM-5's context window (bhb 2026-07-13: 199-message session, repeated
+#: GLM-5's context window (persona-tenant 2026-07-13: 199-message session, repeated
 #: 'Context overflow' + a wedged ReplyRunAlreadyActive run → UI stuck in
 #: 'Connection lost — retrying'). The full static block is sent only when
 #: its CONTENT CHANGES (hash), on __session_start__, or as a periodic refresh;
@@ -777,7 +777,7 @@ def _with_recent_history(fallback_msg: str) -> str:
     The direct fallback bypasses the openclaw session entirely, so without
     this the fallback model answers with ZERO conversation memory — the
     client-facing "amnesia" replies ("no indication of what 'one' refers
-    to", phatty 2026-07-02). Reuses the recovery-prime builder (last turns
+    to", tenant-e 2026-07-02). Reuses the recovery-prime builder (last turns
     from conversation_log). Fail-open: on any problem, return the message
     unchanged.
     """
@@ -815,7 +815,7 @@ def restore_recovery_prime(prime: str | None) -> None:
     recovery session dies (common — the same upstream brownout that poisoned
     the session is usually still in progress), the conversation context is
     lost forever and the user meets an amnesiac agent. Verified live on
-    bricks 2026-06-11 19:58 ("Injecting session-recovery prime (2758 chars)"
+    tenant-p 2026-06-11 19:58 ("Injecting session-recovery prime (2758 chars)"
     immediately followed by "EMPTY-FINAL RETRY FAILED: both attempts empty").
 
     Only restores while still in recovery mode and only if no newer prime has
@@ -952,7 +952,7 @@ def _check_recovery_timeout():
     the next conversation back onto the possibly-still-poisoned main key:
     every >10-minute pause cost the user two dead turns (empty + retry-empty)
     and a context switch into yet another recovery session. Verified live on
-    bricks 2026-06-11: TIMEOUT-clear of a healthy recovery → next interaction
+    tenant-p 2026-06-11: TIMEOUT-clear of a healthy recovery → next interaction
     on main → DOUBLE EMPTY → new recovery.
     """
     global _session_recovery_key, _recovery_context_prime
@@ -1097,7 +1097,7 @@ def normalize_action_tags(text: str) -> str:
 
 # Tags that DO work: the frontend executes them. A reply carrying one acted this
 # turn even with zero tool calls, and nudging it as a broken promise can re-run the
-# action (a second paid Suno generation). Measured 2026-10-01 01:55Z on foambot: a
+# action (a second paid Suno generation). Measured 2026-10-01 01:55Z on tenant-g: a
 # reply with [SUNO_GENERATE:...] and no tool call was nudged. Expressive tags
 # ([MOOD:], [WAIT:], [SLEEP]) are not work and do not count.
 WORK_ACTION_TAG_RE = re.compile(
@@ -1132,7 +1132,7 @@ def is_uncommitted_promise(text, tool_count, llm_ms):
     called ZERO tools, carried no work-doing action tag, took >1s (instant
     degenerate empties go to the empty-retry branch), and does not END with a
     question. A closing question is the agent asking the user for a decision
-    (phatty 2026-07-02); forcing "do it now" bypasses the answer AND lands a
+    (tenant-e 2026-07-02); forcing "do it now" bypasses the answer AND lands a
     chat.send in the finalization window, where it coalesces into a bare final."""
     if not text or not text.strip():
         return False
@@ -1973,7 +1973,7 @@ def _conversation_inner():
     # the text_done capture hook in stream_response evaluates _grot_active on
     # EVERY turn (closure), and the assignments below only run in the
     # __session_start__ branch. Without these defaults every non-greeting turn
-    # raised NameError mid-stream → 'Connection lost — retrying' (bhb 2026-07-13).
+    # raised NameError mid-stream → 'Connection lost — retrying' (persona-tenant 2026-07-13).
     _grot_active = False
     _grot_state_path = ''
     _persona_greeting_prompt = ''
@@ -2028,8 +2028,10 @@ def _conversation_inner():
         # a non-admin customer get NO mesh access; admin sessions get full
         # both-direction access. host/test-dev/webtops bypass the gate.
         # See /mnt/system/base/skills/agent-mesh/bin/mesh-gate-check.
-        ADMIN_CLERK_ID = 'user_3AJGqe2Fgn1qD580pg6tt2ysplR'
-        if _clerk_uid == ADMIN_CLERK_ID:
+        # The platform operator comes from PLATFORM_ADMIN_USER_IDS (services/auth.py);
+        # no id is built into the source.
+        from services.auth import is_platform_admin as _is_platform_admin
+        if _is_platform_admin(_clerk_uid):
             try:
                 _gate_path = '/app/runtime/uploads/.mesh-admin-session'
                 _ts_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
@@ -2149,7 +2151,7 @@ def _conversation_inner():
                 _profile_greeting = (getattr(_prof.conversation, 'greeting', '') or '').strip()
         except Exception:
             _profile_greeting = ''
-        # ENTERTAINMENT-PERSONA greeting (opt-in per profile, e.g. Kyle/BHB).
+        # ENTERTAINMENT-PERSONA greeting (opt-in per profile, e.g. persona-tenant).
         # A profile that defines conversation.greeting_angles wants a FRESH, in-character
         # greeting every single wake-up — never one canned line, and never the same TOPIC
         # twice in a row. We ROTATE through the profile's angles (a persisted index that
@@ -2158,7 +2160,7 @@ def _conversation_inner():
         # last few openers. The greeting is produced by the gateway agent that loads the
         # real persona — so the humour comes from the character, not a thin caricature here.
         # Gated entirely on greeting_angles → any tenant without it is completely unaffected.
-        # (BHB/Kyle 2026-07-13 — replaces the wrong 'King of Entrepreneurship' caricature.)
+        # (persona-tenant 2026-07-13 — replaces the wrong 'King of Entrepreneurship' caricature.)
         _grot_active = False
         _grot_state_path = ''
         _persona_greeting_prompt = ''
@@ -2207,7 +2209,7 @@ def _conversation_inner():
                                     f"naturally, or not.")
                 # Per-profile bit style: a profile can define conversation.greeting_bit_style
                 # to control the SHAPE of the opener (length, pacing, sound tags). Without it,
-                # the default stays the short punchy 40-word greeting. (Kyle/BHB wants the
+                # the default stays the short punchy 40-word greeting. (persona-tenant wants the
                 # full episode-style cold-open ramble — 2026-07-14.)
                 _bit_style = (_pconf.get('greeting_bit_style') or '').strip()
                 if not _bit_style:
@@ -3179,7 +3181,7 @@ def _conversation_inner():
                             # That leaves a 5-30s gap: a single non-retried slow empty
                             # would fall straight to text_done(None) → "No response from agent
                             # after recovery" → user sees agent died (observed 2026-05-23
-                            # on bhb: 16882ms + 17370ms empties, both fell through).
+                            # on persona-tenant: 16882ms + 17370ms empties, both fell through).
                             #
                             # Try Z.AI direct (bypasses gateway and any poisoned openclaw
                             # session state) — same code path the double-empty branch uses.
@@ -3230,7 +3232,7 @@ def _conversation_inner():
                                 # greeting (or intentional silence, feedback_no_hardcoded_responses).
                                 # Setting one here left full_response non-empty, so that block's
                                 # `if not _gs...` skipped — the canned "give me a moment" filler
-                                # then won over the tenant's persona greeting (BHB/Kyle, 2026-07-13).
+                                # then won over the tenant's persona greeting (persona-tenant, 2026-07-13).
                                 if not full_response or not full_response.strip():
                                     if user_message != '__session_start__':
                                         full_response = (
@@ -3267,7 +3269,7 @@ def _conversation_inner():
                                 _gs_tag_only = bool(_gs) and re.match(r'^\s*(\[[^\]]+\]\s*)+$', _gs)
                                 if (not _gs) or _gs_norm in ('NO', 'YES') or _gs_tag_only:
                                     # Empty/degenerate wake-up turn — substitute a greeting.
-                                    # ENTERTAINMENT-PERSONA path (opt-in per profile, e.g. Kyle/BHB):
+                                    # ENTERTAINMENT-PERSONA path (opt-in per profile, e.g. persona-tenant):
                                     # the gateway emptied, so take ONE more shot using the SAME rotated
                                     # persona prompt we built for the gateway turn above
                                     # (_persona_greeting_prompt — faithful voice + fresh angle + avoid-recent).
@@ -3275,7 +3277,7 @@ def _conversation_inner():
                                     # also empties, rotate a VARIED real-voice line from fallback_greetings.
                                     # Gated on the persona config, so tenants without it are unaffected —
                                     # they keep the plain profile-greeting-or-silence behaviour below.
-                                    # (BHB/Kyle 2026-07-13; feedback_no_hardcoded_responses honoured — all
+                                    # (persona-tenant 2026-07-13; feedback_no_hardcoded_responses honoured — all
                                     # copy lives in the tenant's own profile, nothing hardcoded here.)
                                     _fb_greeting = ''
                                     try:
@@ -3342,7 +3344,7 @@ def _conversation_inner():
                                 _tts_buf = ''
                                 _tts_pending.clear()
 
-                            # Persona greeting rotation (Kyle/BHB): remember what he ACTUALLY
+                            # Persona greeting rotation (persona-tenant): remember what he ACTUALLY
                             # opened with, so the next wake-up's prompt can avoid echoing it.
                             # Best-effort — the rotation index already advanced at prompt-build
                             # time, so a miss here never repeats an angle. Persona path only.

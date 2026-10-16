@@ -16,13 +16,13 @@
       ],
       "requires_api_key": false,
       "status": "inactive",
-      "description": "Pocket TTS (Kyutai) \u2014 $0 local voice cloning on the macdaddy video/voice node. Clones a per-client brand voice from a ~10-20s reference clip into a reusable .safetensors state, then generates VO clips (~2-3s each). Client-facing via this Voice Cloning Studio canvas; jobs route to mac-claude@mesh over the Syncthing Dropzone bridge.",
+      "description": "Pocket TTS (Kyutai) \u2014 $0 local voice cloning on the mac-node video/voice node. Clones a per-client brand voice from a ~10-20s reference clip into a reusable .safetensors state, then generates VO clips (~2-3s each). Client-facing via this Voice Cloning Studio canvas; jobs route to the mac agent over the Syncthing Dropzone bridge.",
       "documentation_url": "https://github.com/kyutai-labs/pocket-tts",
       "languages": [
         "en"
       ],
       "max_characters": 600,
-      "notes": "Self-hosted on the macdaddy node (handle_voice_clone). status=inactive until the OVU->mesh Dropzone bridge (POST /api/voice-clone/submit + result ingest) is wired; the studio card stays hidden while inactive, then auto-reveals like qwen3-local. Guardrail: dedicated deterministic handler, source-allowlisted host@mesh, NOT the permissionless claude path.",
+      "notes": "Self-hosted on the mac-node node (handle_voice_clone). status=inactive until the OVU->mesh Dropzone bridge (POST /api/voice-clone/submit + result ingest) is wired; the studio card stays hidden while inactive, then auto-reveals like qwen3-local. Guardrail: dedicated deterministic handler, source-allowlisted the host agent, NOT the permissionless claude path.",
       "requires_microphone": false,
       "requires_websocket": false,
       "mode": "tts-only"

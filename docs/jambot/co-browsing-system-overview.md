@@ -148,7 +148,7 @@ Verify with `GET /api/browse/ip` (or the viewer pill) — a residential IP means
 
 **Provider pick (research below):** start with **DataImpulse** (~$1/GB, non-expiring) or **IPRoyal** (~$1.75/GB), PAYG, sticky sessions. Only add a stealth fork (**Patchright** — drop-in undetected Playwright/Chromium) if a target still blocks with a clean residential IP.
 
-**Verified end-to-end 2026-07-19:** baseline probe returns the Hetzner IP (178.156.162.212, `proxied:false`); with a proxy configured, `proxied:true` and the proxy log shows **every** browser CONNECT (`example.com:443`, `api.ipify.org:443`, `ipwho.is:443`) tunneling through it — so a real provider URL yields a residential exit IP with no code change. Real residential-IP confirmation needs provider creds (operator step).
+**Verified end-to-end 2026-07-19:** baseline probe returns the Hetzner IP (203.0.113.10, `proxied:false`); with a proxy configured, `proxied:true` and the proxy log shows **every** browser CONNECT (`example.com:443`, `api.ipify.org:443`, `ipwho.is:443`) tunneling through it — so a real provider URL yields a residential exit IP with no code change. Real residential-IP confirmation needs provider creds (operator step).
 
 **Guards that still apply:**
 - **Directory/citation policy** (memory `feedback_never_touch_google_business_profiles`): masking is for *browsing/rendering*, never for touching banned identity platforms (GMB, Facebook, Yelp, BBB…). The SSRF guard stays on regardless of proxy.

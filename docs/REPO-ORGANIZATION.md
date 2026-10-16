@@ -54,8 +54,8 @@ Findings:
 - **Duplicate data:** `greetings.json` is byte-identical to `data/greetings.json`; only the root
   copy is read (`routes/greetings.py`).
 - **Planning docs at the root:** `dev-tasks/` (5 files) and `future-dev-plans/` (1 file).
-- **A deployment-specific helper at the root:** `kyle-clip-gen.py` generates clips for one
-  hosted deployment's character voice.
+- **A deployment-specific helper at the root:** a clip generator for one hosted deployment's
+  character voice. Removed (2026-10-16); it now lives in that deployment's private tooling.
 - **A tracked file inside an ignored directory:** `scripts/` is in `.gitignore`, but
   `scripts/jambot-capture-migrate.py` is tracked (force-added). The ignore rule also blocks a
   conventional `scripts/` directory for repository tooling.
@@ -140,12 +140,19 @@ are being handled in a separate, privately tracked clean-up rather than listed h
 | A hard-coded administrator account identifier used for authorization | 2 source files; should come from configuration |
 | An infrastructure IP address and private-network addresses in docs/tests | 2 files |
 | Server filesystem paths and internal hostnames of the hosted deployment | about 25 files |
-| Deployment-specific documents and helpers | `docs/jambot/`, `kyle-clip-gen.py`, two character voice samples in `static/voice-samples/` |
+| Deployment-specific documents and helpers | `docs/jambot/`, a root clip-generator helper, two character voice samples in `static/voice-samples/` |
 | Internal host names in plugin/provider descriptions | `plugins/booking/plugin.json`, `tts_providers/providers_config.json` |
 
 These are identifiers and context, not credentials, so nothing needs rotating. Removing them from
 the current tree is a normal PR; removing them from history would need a history rewrite and a
 force-push, which is a separate decision.
+
+**Status (2026-10-16):** removed from the tree and from the full history (rewritten and
+force-pushed; old commit hashes no longer resolve on the default branch). The administrator
+identifier now comes from `PLATFORM_ADMIN_USER_IDS`; the helper and the two cloned-voice samples
+are gone. Still open as separate decisions: `docs/jambot/` (the notes stay, scrubbed of
+identifiers), and the booking plugin's built-in default for its shared booking instance, which
+installed copies rely on until each deployment sets `CAL_API_URL`.
 
 ---
 
@@ -220,7 +227,7 @@ new ignore rules. `archive/README.md` indexes every archived file and how to res
 | Root `supertonic_tts.py` (duplicate) | needs path updates (code) | Change `tts_providers/supertonic_provider.py` to import `tts_providers.supertonic_tts`, update `.coveragerc`, then archive the root copy. |
 | `memory_client.py` + `services/memory_client.py` (identical, unimported) | needs decision (code) | Confirm no plugin imports `memory_client`, then archive one or both and drop the `config/default.yaml` flag. |
 | `data/greetings.json` vs root `greetings.json` | needs path updates (code) | Pick one location (`data/` is tidier), update `routes/greetings.py` and `package.json` `files`, archive the other. |
-| `kyle-clip-gen.py` | risky (external caller) | Deployment-specific: move it to the hosted deployment's private tooling, and update the external script that copies it from the source checkout in the same change. |
+| Root clip-generator helper | done (2026-10-16) | Moved to the hosted deployment's private tooling; the external script that copied it now reads the private copy. |
 | `scripts/` ignore rule and `scripts/jambot-capture-migrate.py` | needs decision | Replace the blanket `scripts/` ignore with a narrower one so repository tooling can live in `scripts/`; keep or archive the one-time migration (it is cited by `docs/plans/camera-capture-build-plan.md` and run in-container from `/app/scripts/`). |
 | `docs/jambot/` | needs decision | Internal deployment notes. Excluded from the site in this pass; move them to private docs. External tooling cites the folder path. |
 | Rename `requirements-docs.txt` (e.g. `requirements-documents.txt`) | needs path updates | The file's own install hint and any docs that name it; confirm Dependabot's pip scan of `/` still picks up the renamed file. |
@@ -295,4 +302,4 @@ script references any of them. One internal task-list entry points at the old
 Paths that external tooling does depend on (`deploy/supertonic`, `deploy/parakeet-stt`,
 `deploy/skill-runner`, `deploy/browse-service`, `default-pages/`, `default-styles/`,
 `canvas-shared/`, `profiles/`, `static/`, `src/`, `routes/`, `services/`, `Dockerfile`,
-`kyle-clip-gen.py`, `docs/jambot/`, `setup-sudo.sh`) were deliberately left in place.
+`docs/jambot/`, `setup-sudo.sh`) were deliberately left in place.
