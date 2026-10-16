@@ -339,7 +339,7 @@ def get_face_template():
 # ── Performance attestation gate (Mike, 2026-08-18) ─────────────────────────
 # A face runs PERMANENTLY beside voice/STT/TTS. "Done" is not done until it is
 # measured running efficiently AT FULL LOAD on a real browser. The probe (see
-# /mnt/shared-skills/custom-faces/SKILL.md) forces the speaking state, samples
+# the bundled custom-faces skill, skills/custom-faces/SKILL.md) forces the speaking state, samples
 # per-second fps for >=30s in the viewer's browser, and POSTs the result here.
 # promote_canvas_to_face() then REFUSES (HTTP 428) unless a report exists that:
 #   - matches the CURRENT page content (sha256 — edit the page, re-test),
@@ -405,7 +405,7 @@ def perf_report():
 def _check_perf_attestation(page_id, src_path):
     """Return (ok, http_status, payload) for the promote gate."""
     rp = _perf_dir() / (page_id + ".json")
-    how = ("Run the full-load probe from /mnt/shared-skills/custom-faces/SKILL.md while the page "
+    how = ("Run the full-load probe from the custom-faces skill (skills/custom-faces/SKILL.md) while the page "
            "is open in the user's browser (it POSTs to /api/custom-faces/perf-report), then retry.")
     if not rp.exists():
         return False, 428, {"error": "perf attestation required — this face has never been measured",

@@ -19,6 +19,15 @@ module.exports = {
       },
     },
 
+    // Bundled agent skills update with the pull (they are mounted read-only from ./skills).
+    // Validate them and make sure the mountpoint exists for installs made before skills shipped.
+    {
+      method: "shell.run",
+      params: {
+        message: "node install-skills.js --check --mountpoint openclaw-data/skills/openvoiceui",
+      },
+    },
+
     // Rebuild images with latest changes (GIT_HASH baked in for check-in)
     {
       method: "shell.run",

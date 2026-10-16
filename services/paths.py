@@ -38,3 +38,5 @@ CAPTURES_DIR = Path(os.getenv("CAPTURES_DIR", str(RUNTIME_DIR / "captures")))
 SOUNDS_DIR = APP_ROOT / "sounds"
 STATIC_DIR = APP_ROOT / "static"
 DEFAULT_PAGES_DIR = APP_ROOT / "default-pages"
+# Shared JS modules for canvas pages, seeded into <canvas-pages>/_shared/ on startup
+CANVAS_SHARED_DIR = APP_ROOT / "canvas-shared"

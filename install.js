@@ -346,7 +346,17 @@ module.exports = {
       },
     },
 
-    // Step 4: Record git SHA for registry check-in, then build Docker images
+    // Step 4: Validate the bundled agent skills (./skills). docker-compose mounts them
+    // read-only into OpenClaw's managed skills dir (/root/.openclaw/skills/openvoiceui),
+    // so there is nothing to copy; this fails loudly if the bundle is missing or broken.
+    {
+      method: "shell.run",
+      params: {
+        message: "node install-skills.js --check --mountpoint openclaw-data/skills/openvoiceui",
+      },
+    },
+
+    // Step 5: Record git SHA for registry check-in, then build Docker images
     {
       method: "shell.run",
       params: {
@@ -357,7 +367,7 @@ module.exports = {
       },
     },
 
-    // Step 5: Mark as installed and store port
+    // Step 6: Mark as installed and store port
     {
       method: "local.set",
       params: {
