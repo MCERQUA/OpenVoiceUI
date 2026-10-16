@@ -239,11 +239,11 @@ Page to app: `window.parent.postMessage({ type: 'canvas-action', action, ... }, 
 
 Each `speak` is a paid agent turn, so the app filters them. Messages with `userInitiated: true`
 always pass. Others are dropped within 15 seconds of the page loading and limited to one per
-60 seconds. The injected `speak()` helper does **not** set `userInitiated`, so for a button use:
+60 seconds. The injected `speak()` helper sets `userInitiated` when it is called during a tap or
+click (transient user activation), so a button can call it directly:
 
 ```javascript
-askBtn.onclick = () => window.parent.postMessage({ type: 'canvas-action', action: 'speak',
-  text: `I just scored ${score}. Can you beat that?`, userInitiated: true }, '*');
+askBtn.onclick = () => speak(`I just scored ${score}. Can you beat that?`);
 ```
 
 Set `userInitiated` only on a real user action such as a button on the game-over screen, never

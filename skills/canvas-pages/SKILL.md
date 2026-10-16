@@ -164,8 +164,8 @@ function menu() {        // open the page menu
 ```
 
 The canvas injects default `nav()` and `speak()` helpers into every page that does not define
-its own, but the injected `speak()` does not set `userInitiated`, so define your own as above for
-buttons. Other actions: `open-url` (with `url`) loads a URL in the canvas, `close` hides the canvas.
+its own. The injected `speak()` sets `userInitiated` when it runs during a tap or click in the
+page, so a plain `onclick="speak(...)"` works without defining your own. Other actions: `open-url` (with `url`) loads a URL in the canvas, `close` hides the canvas.
 Every `speak` is a paid assistant turn: call it only from a user action. Speaks without
 `userInitiated: true` are dropped within 15 seconds of a page load and limited to one per minute.
 External links: `<a href="..." target="_blank">`.

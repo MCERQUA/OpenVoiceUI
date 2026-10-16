@@ -129,6 +129,7 @@ Complete list of all recognized environment variables:
 | `UPLOADS_SIGNING_KEY` | No | -- | HMAC secret for signed `/uploads/` links; must be unique per instance. Unset = signed links disabled. |
 | `CODING_CLI` | No | `none` | Coding CLI to install in OpenClaw container. |
 | `RATELIMIT_DEFAULT` | No | -- | Rate limit override. Format: `"200 per day;50 per hour"`. |
+| `CSP_TRUSTED_HOSTS` | No | -- | Extra hosts for the Content-Security-Policy of the app and canvas pages (script, style, connect, frame), space- or comma-separated, e.g. `https://*.example.com`. `https://` entries also allow `wss://`. Unset = no extra hosts. |
 
 ## First Run Walkthrough
 
