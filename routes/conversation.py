@@ -1615,10 +1615,12 @@ def _conversation_inner():
                             logger.warning('Sync Gemini vision failed (%s) — falling back to '
                                            'vision@mesh queue for %s', _ge, _img_file.name)
                 if _upload_desc is None:
-                    # No cache yet — route to vision@mesh via openclaw container (has mesh-send + mesh mount)
-                    # Non-blocking: mesh task, vision agent writes .image-intel sidecar async
-                    # OVU runs inside Docker; mesh-send isn't in this image but openclaw-<tenant> has it.
-                    import subprocess as _sp
+                    # No cache yet — queue a vision@mesh task for this tenant.
+                    # Non-blocking: mesh task, vision agent writes .image-intel sidecar async.
+                    # SEC-059: with RESTART_VIA_BROKER=1 this is POST /mesh-task/<tenant> on the
+                    # host broker (mesh-send runs on the host side, bound to this tenant); the
+                    # legacy path lives in services/host_broker.py.queue_vision_task_legacy.
+                    from services import host_broker as _hb
                     # Initialised BEFORE the `if _tenant` guard on purpose: it is read after that
                     # block, so a tenant-less request would otherwise raise NameError. Defaulting
                     # to False also makes the no-tenant path honest — nothing was queued there
@@ -1633,35 +1635,30 @@ def _conversation_inner():
                             f'tenant: {_tenant}\n'
                             f'filename: {_img_file.name}'
                         )
-                        _mesh_cmd = (
-                            f'AGENT_URI=openvoiceui@mesh '
-                            f'/mnt/shared-skills/agent-mesh/bin/mesh-send '
-                            f'--to vision@mesh --kind task '
-                            f'--subject analyze-{_img_file.stem[:40]}'
-                        )
-                        # CHECK THE RETURN CODE. This previously ran with capture_output=True, no
-                        # check=, and no inspection of returncode — then logged "Image analysis
-                        # queued" unconditionally. A mesh-send that exited non-zero (unknown kind,
-                        # missing mailbox, rate limit) was reported as SUCCESS BY THE SENDER while
-                        # nothing was ever queued, and the user was told "being analyzed now" for
-                        # an image nothing would ever look at. Success must come from the receiver,
-                        # or at minimum from the exit code — never from having reached the call.
+                        _subject = _hb.safe_subject(_img_file.stem)
+                        # SUCCESS COMES FROM THE RESPONSE. This previously logged "Image analysis
+                        # queued" unconditionally after reaching the call. A mesh-send that exited
+                        # non-zero (unknown kind, missing mailbox, rate limit) was reported as
+                        # SUCCESS BY THE SENDER while nothing was ever queued, and the user was told
+                        # "being analyzed now" for an image nothing would ever look at. The broker
+                        # answers ok only on mesh-send exit 0 with the delivered path; the legacy
+                        # helper returns True only on exit 0.
                         _queued = False
                         try:
-                            _r = _sp.run(
-                                ['docker', 'exec', '-i', f'openclaw-{_tenant}',
-                                 'bash', '-c', _mesh_cmd],
-                                input=_msg_body.encode(),
-                                timeout=8, capture_output=True,
-                            )
-                            if _r.returncode == 0:
+                            if _hb.via_broker():
+                                _res = _hb.queue_vision_task(_tenant, _subject, _msg_body)
                                 _queued = True
-                                logger.info('Image analysis queued to vision@mesh via openclaw-%s: %s',
-                                            _tenant, _img_file.name)
+                                logger.info('Image analysis queued to vision@mesh via host broker '
+                                            'for %s: %s (%s)', _tenant, _img_file.name,
+                                            _res.get('delivered', ''))
                             else:
-                                logger.error('vision@mesh queue FAILED rc=%s tenant=%s file=%s stderr=%s',
-                                             _r.returncode, _tenant, _img_file.name,
-                                             (_r.stderr or b'').decode('utf-8', 'replace')[:300])
+                                _queued = _hb.queue_vision_task_legacy(_tenant, _subject, _msg_body)
+                                if _queued:
+                                    logger.info('Image analysis queued to vision@mesh via openclaw-%s: %s',
+                                                _tenant, _img_file.name)
+                        except _hb.BrokerError as _be:
+                            logger.error('vision@mesh queue FAILED via host broker tenant=%s file=%s: %s',
+                                         _tenant, _img_file.name, _be)
                         except Exception as _se:
                             logger.warning('Failed to queue vision task to vision@mesh: %s', _se)
                     # Do not promise an analysis that was never queued.
