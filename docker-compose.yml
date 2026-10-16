@@ -7,6 +7,11 @@ services:
         CODING_CLI: ${CODING_CLI:-pi}
     volumes:
       - openclaw-data:/root/.openclaw
+      # Bundled OpenVoiceUI agent skills (./skills) in OpenClaw's managed skills dir.
+      # Read-only; `git pull` updates them (live via OpenClaw's skills watcher, or on restart).
+      # Your own skills go in /root/.openclaw/skills/<name>/ or the workspace skills/ dir.
+      # See docs/SKILLS.md.
+      - ./skills:/root/.openclaw/skills/openvoiceui:ro
       # Dual-mount pattern: both paths resolve to the same volume so agents
       # can't put files in the wrong place — both paths are the right place.
       - canvas-pages:/app/runtime/canvas-pages

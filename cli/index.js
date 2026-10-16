@@ -245,6 +245,10 @@ function cmdStart() {
   fs.mkdirSync(path.join(PROJECT_DIR, "openclaw-data", "devices"), {
     recursive: true,
   });
+  // Same reason for the bundled-skills mountpoint (docker-compose mounts ./skills there).
+  fs.mkdirSync(path.join(PROJECT_DIR, "openclaw-data", "skills", "openvoiceui"), {
+    recursive: true,
+  });
 
   console.log("  Starting OpenVoiceUI...\n");
   run(`${COMPOSE} up -d`);

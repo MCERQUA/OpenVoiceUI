@@ -179,6 +179,12 @@ if DEFAULT_PAGES_DIR.is_dir():
         except (PermissionError, OSError) as _seed_exc:
             logger.warning("Skipped seeding default page %s (non-fatal): %s", src.name, _seed_exc)
 
+# Seed shared canvas modules (canvas-shared/*) into canvas-pages/_shared/ so pages can import
+# them from /pages/_shared/<file> (e.g. html-surfaces.js for the bundled threejs-html-surfaces skill).
+from services.paths import CANVAS_SHARED_DIR
+from services.canvas_shared import seed_canvas_shared
+seed_canvas_shared(CANVAS_SHARED_DIR, CANVAS_PAGES_DIR)
+
 from routes.static_files import static_files_bp, DJ_SOUNDS, SOUNDS_DIR
 app.register_blueprint(static_files_bp)
 

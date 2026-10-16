@@ -277,11 +277,18 @@ OpenVoiceUI has a plugin system for community-built extensions. Plugins can incl
 
 ---
 
+## Bundled agent skills
+
+OpenVoiceUI ships OpenClaw skills in [`skills/`](skills/) that teach the agent its own features: canvas pages and their visibility, canvas design, custom faces, Suno music, Three.js pages, and voice conversation rules. Every installer puts them where OpenClaw loads them (`~/.openclaw/skills/openvoiceui/`): Docker, Pinokio and npm mount them read-only, native installs copy them. See [docs/SKILLS.md](docs/SKILLS.md) for what each one does, how updates work, and where your own skills go.
+
+---
+
 ## Documentation
 
 - [Introduction](docs/intro.md)
 - [Environment Variables](.env.example)
 - [Plugin Development](plugins/README.md)
+- [Bundled Agent Skills](docs/SKILLS.md)
 - [Contributing](CONTRIBUTING.md)
 - [Website](https://openvoiceui.com)
 

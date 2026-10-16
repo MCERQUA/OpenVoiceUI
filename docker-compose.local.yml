@@ -9,6 +9,8 @@ services:
       - .env
     volumes:
       - ./openclaw-data:/root/.openclaw
+      # Bundled agent skills, read-only (same mount as docker-compose.yml; see docs/SKILLS.md).
+      - ./skills:/root/.openclaw/skills/openvoiceui:ro
       - canvas-pages:/app/runtime/canvas-pages
       - canvas-pages:/root/.openclaw/workspace/canvas-pages
       - uploads:/app/runtime/uploads
