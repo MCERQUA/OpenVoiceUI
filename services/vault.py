@@ -21,6 +21,8 @@ from typing import Any, Optional
 
 import requests
 
+from services import host_broker
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -309,65 +311,146 @@ _restart_timers: dict[str, threading.Timer] = {}
 _restart_lock = threading.Lock()
 
 
-def _do_restart_container(container_name: str):
+# SEC-059 (2026-10-14): restarts go through the host broker (:5200) instead of a
+# docker.sock mounted into this container. Frozen at import on purpose: the container's
+# env is fixed at exec, and the migration script's P2 gate reads this attribute to decide
+# whether THIS running container will use the broker before it takes the socket away.
+#   RESTART_VIA_BROKER=1        -> broker (services/host_broker.py)
+#   VAULT_RESTART_VIA_DOCKER=1  -> legacy in-container docker subprocess (explicit opt-in)
+#   neither                     -> legacy path + a loud warning naming both flags
+RESTART_VIA_BROKER = host_broker.via_broker()
+
+# Last outcome per container, so a status endpoint can show whether the restart that a
+# credential save scheduled actually happened (the save's HTTP response returns before
+# the 5 s debounce fires, so the save itself cannot carry the verdict).
+_restart_outcomes: dict[str, dict] = {}
+
+
+def _record_restart_outcome(container_name: str, ok: bool, detail: str, mode: str):
+    _restart_outcomes[container_name] = {
+        'ok': ok, 'detail': detail, 'mode': mode,
+        'at': datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def last_restart_outcome(container_name: str) -> Optional[dict]:
+    return _restart_outcomes.get(container_name)
+
+
+def _restart_via_broker(service: str, username: str, container_name: str) -> bool:
+    """POST /restart/<service>/<tenant> on the host broker. True only when the broker
+    answered ok. Every failure is logged at ERROR with the reason — a credential save
+    whose restart did not happen must never look like one that did."""
+    logger.info(f"[vault] Asking host broker to recreate {container_name} (new credentials)...")
+    try:
+        res = host_broker.restart_container(service, username)
+    except host_broker.BrokerError as exc:
+        if exc.status == 0 and (service == 'openvoiceui' or getattr(exc, 'outcome_unknown', False)):
+            # Recreating openvoiceui-<t> recreates THIS process; the broker's answer can
+            # only reach the new one. Unknown is not success — say so, and point at the
+            # instrument that can tell (docker inspect .Created on the host).
+            msg = (f"no answer from the broker while it was recreating {container_name}; "
+                   f"outcome UNKNOWN — verify with `docker inspect -f "
+                   f"'{{{{.Created}}}}' {container_name}` on the host: {exc}")
+            logger.warning(f"[vault] {msg}")
+            _record_restart_outcome(container_name, False, msg, 'broker')
+            return False
+        msg = (f"RESTART DID NOT HAPPEN for {container_name}: {exc} — the saved credential "
+               f"is on disk but the agent is still running with the old values")
+        logger.error(f"[vault] {msg}")
+        _record_restart_outcome(container_name, False, msg, 'broker')
+        return False
+    logger.info(f"[vault] {container_name} recreated via host broker: created={res.get('created')} "
+                f"jambot-shared={res.get('jambot_shared')}")
+    _record_restart_outcome(container_name, True, f"created={res.get('created')}", 'broker')
+    return True
+
+
+def _restart_via_docker_subprocess(service: str, username: str, container_name: str) -> bool:
+    """Legacy Phase 1.5 path: this container holds /var/run/docker.sock and runs compose
+    itself. Kept ONLY behind VAULT_RESTART_VIA_DOCKER=1 (and as the un-flagged default
+    until the fleet is on the broker). On JamBot the socket is being removed (SEC-059)."""
+    import subprocess
+    compose_file = _CLIENTS_DIR / username / 'compose' / 'docker-compose.yml'
+    env_file = _CLIENTS_DIR / username / 'compose' / '.env'
+    if not compose_file.is_file():
+        msg = f"compose file not found: {compose_file}"
+        logger.error(f"[vault] {msg}")
+        _record_restart_outcome(container_name, False, msg, 'docker')
+        return False
+
+    cmd = [
+        'docker', 'compose',
+        '-f', str(compose_file),
+        '--env-file', str(env_file),
+        'up', '-d', '--force-recreate', '--no-deps',
+        service,
+    ]
+    logger.info(f"[vault] Recreating {container_name} to apply new credentials...")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode == 0:
+            logger.info(f"[vault] {container_name} recreated successfully")
+            # Reconnect shared network (compose up -d disconnects cross-project networks)
+            try:
+                subprocess.run(
+                    ['docker', 'network', 'connect', 'jambot-shared', container_name],
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception:
+                pass
+            _record_restart_outcome(container_name, True, 'compose up rc=0', 'docker')
+            return True
+        msg = (f"docker compose up failed for {container_name}: "
+               f"stdout={result.stdout} stderr={result.stderr}")
+    except subprocess.TimeoutExpired:
+        msg = f"docker compose up timed out for {container_name}"
+    except Exception as exc:
+        msg = f"Failed to recreate {container_name}: {exc}"
+    logger.error(f"[vault] {msg}")
+    _record_restart_outcome(container_name, False, msg, 'docker')
+    return False
+
+
+def _do_restart_container(container_name: str) -> bool:
     """Recreate a compose-managed container (openclaw / openvoiceui) to pick
     up new env_file values. Must be a RECREATE, not a plain restart — Docker
     only loads env_file: values at container creation time.
+
+    SEC-059: with RESTART_VIA_BROKER=1 this is a request to the host broker,
+    which binds the caller to its own tenant and runs the same compose command on
+    the host; the container holds no docker socket. VAULT_RESTART_VIA_DOCKER=1
+    keeps the legacy in-container subprocess. See services/host_broker.py.
 
     Plugin containers (e.g. hermes-<user>) are NOT handled here — the vault
     syncs to them via the provisioning service (_sync_to_plugin_via_provision_service)
     which owns plugin file writes + restart in one HTTP call.
 
-    Called by the debounce timer; do not call directly.
+    Called by the debounce timer; do not call directly. Returns True only when
+    the recreate is known to have happened.
     """
-    import subprocess
     if '-' not in container_name:
         logger.error(f"[vault] Unexpected container name format: {container_name}")
-        return
+        return False
     service, username = container_name.split('-', 1)
     if service not in ('openclaw', 'openvoiceui'):
         logger.error(
             f"[vault] _do_restart_container only handles openclaw/openvoiceui, "
             f"got {container_name}"
         )
-        return
+        return False
 
     try:
-        compose_file = _CLIENTS_DIR / username / 'compose' / 'docker-compose.yml'
-        env_file = _CLIENTS_DIR / username / 'compose' / '.env'
-        if not compose_file.is_file():
-            logger.error(f"[vault] compose file not found: {compose_file}")
-            return
-
-        cmd = [
-            'docker', 'compose',
-            '-f', str(compose_file),
-            '--env-file', str(env_file),
-            'up', '-d', '--force-recreate', '--no-deps',
-            service,
-        ]
-        logger.info(f"[vault] Recreating {container_name} to apply new credentials...")
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if result.returncode == 0:
-                logger.info(f"[vault] {container_name} recreated successfully")
-                # Reconnect shared network (compose up -d disconnects cross-project networks)
-                try:
-                    subprocess.run(
-                        ['docker', 'network', 'connect', 'jambot-shared', container_name],
-                        capture_output=True, text=True, timeout=10,
-                    )
-                except Exception:
-                    pass
-            else:
-                logger.error(
-                    f"[vault] docker compose up failed for {container_name}: "
-                    f"stdout={result.stdout} stderr={result.stderr}"
-                )
-        except subprocess.TimeoutExpired:
-            logger.error(f"[vault] docker compose up timed out for {container_name}")
-        except Exception as exc:
-            logger.error(f"[vault] Failed to recreate {container_name}: {exc}")
+        mode = host_broker.restart_mode()
+        if mode == 'broker':
+            return _restart_via_broker(service, username, container_name)
+        if mode == 'legacy-docker':
+            logger.warning(
+                f"[vault] SEC-059: neither RESTART_VIA_BROKER=1 nor VAULT_RESTART_VIA_DOCKER=1 "
+                f"is set — recreating {container_name} through the legacy in-container docker "
+                f"path. Set RESTART_VIA_BROKER=1 once the host broker token is minted."
+            )
+        return _restart_via_docker_subprocess(service, username, container_name)
     finally:
         with _restart_lock:
             _restart_timers.pop(container_name, None)
@@ -397,8 +480,7 @@ def restart_container_now(container_name: str) -> bool:
         if existing is not None:
             existing.cancel()
             _restart_timers.pop(container_name, None)
-    _do_restart_container(container_name)
-    return True
+    return _do_restart_container(container_name)
 
 
 # ---------------------------------------------------------------------------
@@ -1103,7 +1185,8 @@ def _sync_to_plugin_via_provision_service(
         url,
         data=data,
         method='PUT',
-        headers={'Content-Type': 'application/json'},
+        # SEC-059: the broker binds this route to the tenant; send its token.
+        headers={'Content-Type': 'application/json', **host_broker.auth_headers(username)},
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
