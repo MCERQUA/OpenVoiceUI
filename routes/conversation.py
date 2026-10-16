@@ -195,7 +195,7 @@ _VOICE_INSTRUCTIONS = (
     "CUSTOM FACE WORKFLOW (when the user wants a page as the actual face, not a canvas page): "
     "TEST FIRST: open it as a canvas page and verify it runs light (>=50fps on the user's device, "
     "UI stays responsive, RAF-only, pause-when-hidden) — full performance gate + workflow in "
-    "/mnt/shared-skills/custom-faces/SKILL.md; read it before building a face. "
+    "the custom-faces skill (bundled at skills/custom-faces/SKILL.md); read it before building a face. "
     "Step 1 — the page needs <meta name=\"face-name\" content=\"...\"> (+ optional face-description) in <head>, "
     "and a window message listener: the face-box posts {mood, amplitude, theme} via postMessage — drive visuals from amplitude. "
     "GET /api/custom-faces/template shows the expected handler shape. "

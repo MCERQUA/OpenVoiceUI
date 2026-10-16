@@ -44,6 +44,7 @@ const sidebars: SidebarsConfig = {
         'extending/plugin-system',
         'extending/building-canvas-pages',
         'extending/building-face-plugins',
+        'SKILLS',
       ],
     },
     {

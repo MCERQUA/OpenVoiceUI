@@ -209,6 +209,7 @@ technical map is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | `static/`, `index.html`, `sounds/` | Static assets, page shell, soundboard clips |
 | `default-pages/`, `default-faces/`, `default-styles/` | Canvas pages, face template and style presets shipped with the app |
 | `canvas-shared/` | Shared scripts for canvas pages |
+| `skills/`, `install-skills.js` | Agent skills bundled for OpenClaw and their installer ([docs/SKILLS.md](docs/SKILLS.md)) |
 | `plugins/` | Plugin catalog stubs and the example gateway |
 | `profiles/`, `prompts/`, `config/` | Agent profiles, the voice system prompt, server configuration |
 | `deploy/` | Container builds for OpenClaw, Supertonic and optional services |
@@ -268,6 +269,10 @@ plugin code lives in the [plugins repository](https://github.com/MCERQUA/openvoi
 Build your own with the [plugin guide](plugins/README.md) and the
 [plugin system docs](docs/extending/plugin-system.md).
 
+## Bundled agent skills
+
+OpenVoiceUI ships OpenClaw skills in [`skills/`](skills/) that teach the agent its own features: canvas pages and their visibility, canvas design, custom faces, Suno music, Three.js pages, and voice conversation rules. Every installer puts them where OpenClaw loads them (`~/.openclaw/skills/openvoiceui/`): Docker, Pinokio and npm mount them read-only, native installs copy them. See [docs/SKILLS.md](docs/SKILLS.md) for what each one does, how updates work, and where your own skills go.
+
 ## Development
 
 ```bash
@@ -292,7 +297,8 @@ style and how to add providers, adapters and gateway plugins. AI coding agents s
   [features](docs/features/), [customization](docs/customization/),
   [extending](docs/extending/), [API reference](docs/reference/api.md).
 - **Repository docs:** [Architecture](docs/ARCHITECTURE.md) · [Vision](docs/VISION.md) ·
-  [Setup guide](docs/SETUP.md) · [Releasing](docs/RELEASING.md) ·
+  [Setup guide](docs/SETUP.md) · [Bundled agent skills](docs/SKILLS.md) ·
+  [Releasing](docs/RELEASING.md) ·
   [Repository organization](docs/REPO-ORGANIZATION.md) · [Design plans](docs/plans/)
 - **Project:** [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) ·
   [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) ·

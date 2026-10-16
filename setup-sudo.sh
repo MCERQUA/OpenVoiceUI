@@ -413,6 +413,26 @@ elif [ ! -d "${OPENCLAW_DIR}" ]; then
     echo "  Run setup again after configuring OpenClaw, or manually copy setup/openvoiceui-agent/"
 fi
 
+# 0c. Bundled agent skills (./skills) -> OpenClaw's managed skills dir, in a subfolder the
+# installer owns: ~/.openclaw/skills/openvoiceui/<skill>/SKILL.md. OpenClaw scans that dir by
+# default (no openclaw.json change). Re-running is safe: unchanged files update, files you
+# edited are kept, nothing is deleted. After `git pull`, refresh with:
+#   node install-skills.js
+# Copied, not symlinked: OpenClaw skips skill paths that resolve outside their skills root.
+SKILLS_TARGET="${OPENCLAW_DIR}/skills/openvoiceui"
+if [ ! -d "${OPENCLAW_DIR}" ]; then
+    echo "  OpenClaw not configured yet — skipping bundled skills."
+    echo "  Install them later (as ${RUN_USER}): node ${INSTALL_DIR}/install-skills.js"
+elif ! command -v node >/dev/null 2>&1; then
+    echo "  ⚠  node not found — skipping bundled skills."
+    echo "     Install them later (as ${RUN_USER}): node ${INSTALL_DIR}/install-skills.js"
+else
+    echo "  Installing bundled agent skills into ${SKILLS_TARGET}..."
+    if ! sudo -u "${RUN_USER}" -H node "${INSTALL_DIR}/install-skills.js" --target "${SKILLS_TARGET}"; then
+        echo "  ⚠  Skill install failed (non-fatal). Retry as ${RUN_USER}: node ${INSTALL_DIR}/install-skills.js"
+    fi
+fi
+
 # 1. Prestart script (kills stale process on port before service starts)
 echo "[1/6] Creating prestart script..."
 cat > /usr/local/bin/prestart-${SERVICE_NAME}.sh << PRESTART

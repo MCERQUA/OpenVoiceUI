@@ -89,6 +89,7 @@ src/                Frontend: vanilla JS ES modules, no build step
   ui/, face/        App shell, settings, themes, face renderers
 default-pages/      Canvas pages shipped with the app (desktop, file explorer, ...)
 plugins/            Plugin catalog stubs + the example gateway
+skills/             Agent skills bundled for OpenClaw (installed by install-skills.js; docs/SKILLS.md)
 profiles/           Agent profile schema + default profile
 prompts/            Voice system prompt (hot-reloaded)
 config/             Server config YAML/JSON

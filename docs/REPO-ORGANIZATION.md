@@ -162,7 +162,7 @@ OpenVoiceUI/
 ├── src/  static/  index.html  sounds/
 ├── default-pages/  default-faces/  default-styles/  canvas-shared/
 ├── plugins/                             # catalog stubs + example gateway
-├── skills/                              # PROPOSED: bundled OpenVoiceUI agent skills (section 5)
+├── skills/  install-skills.js           # bundled OpenVoiceUI agent skills + installer (section 5)
 ├── deploy/
 │   ├── openclaw/  supertonic/  parakeet-stt/  skill-runner/  browse-service/
 │   └── native/                          # PROPOSED: setup-sudo.sh, setup-nginx.sh, openvoiceui.service
@@ -235,65 +235,54 @@ new ignore rules. `archive/README.md` indexes every archived file and how to res
 
 ---
 
-## 5. Bundled agent skills (proposed, not done)
+## 5. Bundled agent skills (shipped in #543)
 
-> Written as the audit and proposal. PR #543 (opened the same day) implements a bundled
-> `skills/` directory and installer wiring. If it merges, treat this section as the background
-> and checklist it was reviewed against.
+The first draft of this section proposed bundling OpenVoiceUI's own agent skills and loading them
+through OpenClaw's `skills.load.extraDirs` key (a mount at `/opt/openvoiceui/skills` plus a config
+change in every installer). PR #543 shipped the bundle with a different mechanism that needs **no
+`openclaw.json` change for any install**, so that proposal is superseded. User-facing details are
+in [SKILLS.md](SKILLS.md).
 
-**The gap.** The repository ships no agent skills (no `SKILL.md`, no `skills/` directory), and no
-installer (Docker Compose, the npm wizard, Pinokio or `setup-sudo.sh`) installs any. The README
-only says the agent can use "any Claude Code or OpenClaw skill". The voice system prompt and the
-[agent tags](reference/agent-tags.md) teach the basic UI tags, but a public install's agent has no
-skill that explains how to drive OpenVoiceUI's own features in depth (building canvas pages,
-custom faces, music). On the maintainers' hosted deployment those skills come from a shared
-skills directory mounted into every gateway container, and several source files assume that
-mount exists: `routes/conversation.py`, `routes/custom_faces.py`, `services/host_broker.py` and
-`plugins/booking/routes/booking.py` reference `/mnt/shared-skills/...` paths that do not exist
-on a public install.
+**What ships.** Eight skills in `skills/<name>/SKILL.md`, each rewritten for a stock install and
+checked against the code: `canvas-pages`, `canvas-page-visibility`, `canvas-web-design`,
+`custom-faces`, `suno-music`, `threejs-canvas-integration`, `threejs-html-surfaces`, `voice-flow`.
+`tests/test_bundled_skills.py` enforces the format (frontmatter name equals the folder, short
+description, real files only, no symlinks, size limit).
 
-### 5.1 Candidates
+**Where they go.** OpenClaw's managed skills directory, in a grouping folder OpenVoiceUI owns:
+`~/.openclaw/skills/openvoiceui/<skill>/SKILL.md`. OpenClaw scans the managed directory by
+default, including one level of grouping folders.
 
-| Skill | Class | Public-repo scrub needed |
-|---|---|---|
-| `voice-flow` | OpenVoiceUI core | None found. Smallest and cleanest; ship first. |
-| `custom-faces` | OpenVoiceUI core | Essentially clean; every endpoint it uses exists in `routes/custom_faces.py`. |
-| `threejs-html-surfaces` | OpenVoiceUI core | Server filesystem paths (3) and example page names to genericize. |
-| `threejs-canvas-integration` | OpenVoiceUI core | Hosted-deployment hostnames (2) to genericize; ship `SKILL.md` only (not the `.old` copy). |
-| `canvas-page-visibility` | OpenVoiceUI core | Hostnames (2), hosted-auth wording (Clerk, 4 lines) to make conditional on `CANVAS_REQUIRE_AUTH`, one customer reference. |
-| `canvas-web-design` | OpenVoiceUI core | Product naming of the hosted service and shared-skill paths (5) that point at skills that would not ship. |
-| `canvas-pages` | mixed | Needs a rewrite, not a scrub: it embeds incident stories from hosted customers, a hosted-only sign-in checker script, and hostnames. |
-| `suno-music` | mixed | Needs a fresh, trimmed public version: the hosted skill carries licensing and business sections, host-specific paths and examples, and its directory holds private configuration that must never be copied. Never copy this directory wholesale. |
-| `canvas-design` | not OpenVoiceUI | A general poster/art skill whose name collides with a common skill; exclude. |
-
-Further candidates found while auditing: `notify-tags` and `dj-soundboard` (strong; they document
-OpenVoiceUI tags), `icon-generation`, `chart-builder`, `audio-clips`, `song-tagger`. Skills tied
-to the hosted business (CRM, SEO, social, mesh/notification tooling) stay out.
-
-Rules for whoever does the copy: copy `SKILL.md` and reviewed assets only, never whole
-directories; grep every file for hostnames, server paths, customer names, account identifiers
-and key-shaped strings before committing; prefer relative API paths (`/api/...`) and
-`<your-domain>` placeholders.
-
-### 5.2 Where OpenClaw reads skills
-
-OpenClaw loads skills from, highest precedence first: `<workspace>/skills`,
-`~/.openclaw/skills`, its bundled skills, then any directories listed in the
-`skills.load.extraDirs` config key. Putting OpenVoiceUI's skills in an `extraDirs` entry gives
-them the lowest precedence, so a user's own skill with the same name always wins, and does not
-touch the user's `~/.openclaw/skills`.
-
-### 5.3 How each installer would install them
-
-| Installer | Proposed change |
+| Installer | Mechanism |
 |---|---|
-| Docker Compose | Mount the repo's `skills/` read-only into the `openclaw` service (for example `./skills:/opt/openvoiceui/skills:ro`) in both compose files, and add `/opt/openvoiceui/skills` to `skills.load.extraDirs`. |
-| npm wizard / Pinokio | Same compose mount; `setup-config.js` writes `skills.load.extraDirs` into the `openclaw.json` it generates. |
-| Native (`setup-sudo.sh`) | Run `openclaw config set skills.load.extraDirs '["<repo>/skills"]' --json` (use the gateway's own config command rather than editing the file). |
-| OpenVoiceUI server | Replace the hard-coded `/mnt/shared-skills/...` references with a configurable skills path (an env var whose default matches the mount above), so the prompts that tell the agent to read a skill point at a file that exists. |
+| Docker Compose | `./skills:/root/.openclaw/skills/openvoiceui:ro` in `docker-compose.yml` and `docker-compose.local.yml`. `git pull` updates them (OpenClaw's skills watcher, or restart `openclaw`). |
+| Pinokio / npm CLI | The same mount. `setup-config.js` (and `openvoiceui start`) pre-create `openclaw-data/skills/openvoiceui` so Docker does not create it root-owned; Pinokio's install and update steps run `node install-skills.js --check`. `package.json` `files` includes `skills/` and `install-skills.js`. |
+| Native (`setup-sudo.sh`) | Step 0c runs `install-skills.js` as the service user, which **copies** the bundle into `~/.openclaw/skills/openvoiceui/` (OpenClaw skips skill paths that resolve outside their root, so a symlink would not load). |
 
-The copy into `skills/` should be its own reviewed pull request, after the list above is
-approved.
+`install-skills.js` resolves the target the way OpenClaw resolves its state directory
+(`OPENCLAW_STATE_DIR`, `OPENCLAW_CONFIG_PATH`, `OPENCLAW_HOME`, then `~`), adds new files, updates
+files unchanged since the last install, keeps locally edited files (`--force` replaces them and
+saves a `.local-<timestamp>` copy), never deletes anything, and supports `--dry-run` and
+`--check`.
+
+**Precedence.** The managed tier outranks OpenClaw's own bundled skills and `extraDirs`, and yields
+to workspace skills. User skills go in `<workspace>/skills/` (which outranks the bundle, so a
+same-named copy there overrides a bundled skill) or next to `openvoiceui/` in the managed
+directory, never inside the `openvoiceui/` folder itself.
+
+JamBot's hosted fleet keeps its own shared skills folder (updated centrally, includes learning
+loops); the bundle is for public installs.
+
+**Not bundled, and follow-ups.** `canvas-design` (a general art skill, not an OpenVoiceUI
+feature), `notify-tags` (its tags have no handler in this repository), `dj-soundboard` (the voice
+prompt already injects the DJ rule and the live sound list), `chart-builder` (its page does not
+ship here), `website-setup` and `airadio` (hosted services). Candidates for a later bundle, each
+needing the same rewrite and verification: `maps`, `audio-clips`, `icon-generation`,
+`storytelling`. Rules for adding one are in [SKILLS.md](SKILLS.md#contributing-a-skill-to-the-bundle).
+
+When #543 merged, a few source files still named hosted-only skill paths: the soundcloud/bandcamp
+lookups in `routes/conversation.py` and `prompts/voice-system-prompt.md`, and the mesh notifier in
+`services/host_broker.py`.
 
 ---
 

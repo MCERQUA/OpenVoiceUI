@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PAGE_TITLE</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+/* ═══════════════════════════════════════════════════════════
+   OPENVOICEUI CLASSIC CANVAS DESIGN SYSTEM v2.0
+   ═══════════════════════════════════════════════════════════
+   RULES:
+   - NEVER add external CDN scripts (Tailwind, Bootstrap, etc.)
+   - NEVER use href="#" — use onclick with nav() or speak()
+   - NEVER use purple, pink, or magenta colors
+   - NEVER use emoji as icons — use SVG or Unicode symbols
+   - Google Fonts @import in <style> is OK
+   - All interactivity via postMessage (see script at bottom)
+   - Mobile-first. Test at 375px width.
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Surface Scale ────────────────────────────────────── */
+  --bg:            #0d0f17;
+  --surface:       #141620;
+  --surface-2:     #1a1d2e;
+  --surface-hover: #1f2235;
+  --surface-3:     #252840;
+
+  /* ── Borders ──────────────────────────────────────────── */
+  --border:        #252836;
+  --border-light:  #2f3245;
+  --border-heavy:  #3d4060;
+
+  /* ── Brand (blue) ─────────────────────────────────────── */
+  --brand:         #3b82f6;
+  --brand-light:   #60a5fa;
+  --brand-dim:     rgba(59,130,246,0.12);
+  --brand-glow:    rgba(59,130,246,0.22);
+  --brand-border:  rgba(59,130,246,0.30);
+
+  /* ── Semantic ─────────────────────────────────────────── */
+  --success:        #34d399;
+  --success-dim:    rgba(52,211,153,0.10);
+  --success-border: rgba(52,211,153,0.25);
+  --warning:        #fbbf24;
+  --warning-dim:    rgba(251,191,36,0.10);
+  --warning-border: rgba(251,191,36,0.25);
+  --danger:         #f87171;
+  --danger-dim:     rgba(248,113,113,0.10);
+  --danger-border:  rgba(248,113,113,0.25);
+  --cyan:           #22d3ee;
+  --cyan-dim:       rgba(34,211,238,0.10);
+  --cyan-border:    rgba(34,211,238,0.25);
+  --amber:          #f59e0b;
+  --amber-dim:      rgba(245,158,11,0.10);
+  --amber-border:   rgba(245,158,11,0.25);
+
+  /* ── Text ─────────────────────────────────────────────── */
+  --text:           #e8eaf0;
+  --text-secondary: #9498ab;
+  --text-muted:     #5f6380;
+
+  /* ── Radii ────────────────────────────────────────────── */
+  --radius:    14px;
+  --radius-sm: 10px;
+  --radius-xs: 6px;
+  --radius-lg: 20px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 20px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* ── Mobile overflow safety ──
+   Default-safe set that kills horizontal overflow at authoring time: html overflow-x (body alone
+   lets absolutely-positioned children scroll), media never wider than their box, long words/URLs
+   wrap. The table-as-scroll-block rule is MOBILE-ONLY: on desktop, display:block shrinks a
+   width:100% table to its content. */
+html { overflow-x: hidden; }
+img, video, canvas, svg, iframe, embed, object { max-width: 100%; }
+td, th { overflow-wrap: anywhere; word-break: break-word; }
+@media (max-width: 640px) {
+  table { display: block; max-width: 100%; overflow-x: auto; }
+}
+
+/* ── Keyframe Animations ─────────────────────────────────── */
+@keyframes fadeIn    { from { opacity: 0; }                              to { opacity: 1; } }
+@keyframes slideUp   { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideLeft { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes scaleIn   { from { opacity: 0; transform: scale(0.94); }      to { opacity: 1; transform: scale(1); } }
+@keyframes floatY    { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes glowPulse { 0%,100% { box-shadow: 0 0 15px var(--brand-glow); } 50% { box-shadow: 0 0 35px rgba(59,130,246,0.40), 0 0 60px rgba(59,130,246,0.15); } }
+@keyframes shimmer   { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes orbFloat  { 0%,100% { transform: translate(0,0) scale(1); } 33% { transform: translate(15px,-12px) scale(1.05); } 66% { transform: translate(-10px,8px) scale(0.97); } }
+@keyframes dotPulse  { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.82); } }
+@keyframes progressFill { from { width: 0; } to { width: var(--fill-w, 100%); } }
+@keyframes borderGlow   { 0%,100% { border-color: var(--brand-border); } 50% { border-color: var(--brand); } }
+@keyframes spinSlow     { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* ── Animation Utility Classes ───────────────────────────── */
+.anim-fade       { animation: fadeIn  0.5s ease both; }
+.anim-slide-up   { animation: slideUp 0.5s ease both; }
+.anim-slide-left { animation: slideLeft 0.5s ease both; }
+.anim-scale      { animation: scaleIn 0.4s ease both; }
+.anim-float      { animation: floatY 4s ease-in-out infinite; }
+.anim-glow       { animation: glowPulse 3s ease-in-out infinite; }
+.anim-spin-slow  { animation: spinSlow 8s linear infinite; }
+.anim-border     { animation: borderGlow 3s ease-in-out infinite; }
+
+/* Stagger delays */
+.delay-1 { animation-delay: 0.10s; }
+.delay-2 { animation-delay: 0.20s; }
+.delay-3 { animation-delay: 0.30s; }
+.delay-4 { animation-delay: 0.40s; }
+.delay-5 { animation-delay: 0.50s; }
+.delay-6 { animation-delay: 0.60s; }
+.delay-7 { animation-delay: 0.70s; }
+.delay-8 { animation-delay: 0.80s; }
+
+/* ── Background Orb Layer ────────────────────────────────── */
+/* Wrap page content: <div class="bg-orbs">...</div>         */
+/* Adds animated ambient glow orbs behind all content.       */
+.bg-orbs { position: relative; }
+.bg-orbs::before, .bg-orbs::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(90px);
+  opacity: 0.11;
+  animation: orbFloat 14s ease-in-out infinite;
+}
+.bg-orbs::before {
+  width: 420px; height: 420px;
+  background: var(--brand);
+  top: -120px; right: -100px;
+}
+.bg-orbs::after {
+  width: 320px; height: 320px;
+  background: var(--cyan);
+  bottom: -60px; left: -90px;
+  animation-delay: -7s;
+}
+.bg-orbs > * { position: relative; z-index: 1; }
+
+/* ── Gradient Text ────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #60a5fa 0%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.gradient-text-warm {
+  background: linear-gradient(135deg, #fbbf24 0%, #f87171 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.gradient-text-success {
+  background: linear-gradient(135deg, #34d399 0%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Shimmer Skeleton ─────────────────────────────────────── */
+.shimmer {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ── Page Header ─────────────────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+.page-header h1 { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.page-header .subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.back-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+.back-btn:hover { border-color: var(--border-light); color: var(--text-secondary); }
+
+/* ── Agent Header ─────────────────────────────────────────── */
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+.agent-avatar {
+  width: 52px; height: 52px;
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 800; flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.agent-avatar:hover { transform: scale(1.06); }
+.av-brand   { background: var(--brand-dim);   border: 1px solid var(--brand-border);   color: var(--brand-light); }
+/* Status backgrounds composite the translucent tint over an OPAQUE --surface base so
+   badges/pills stay readable on any parent background (transparent rgba tints alone
+   fail contrast over busy/light surfaces). */
+.av-success { background: linear-gradient(var(--success-dim), var(--success-dim)), var(--surface); border: 1px solid var(--success-border); color: var(--success); }
+.av-warning { background: linear-gradient(var(--warning-dim), var(--warning-dim)), var(--surface); border: 1px solid var(--warning-border); color: var(--warning); }
+.av-danger  { background: linear-gradient(var(--danger-dim),  var(--danger-dim)),  var(--surface); border: 1px solid var(--danger-border);  color: var(--danger); }
+.av-cyan    { background: var(--cyan-dim);    border: 1px solid var(--cyan-border);    color: var(--cyan); }
+
+/* ── Section Label ───────────────────────────────────────── */
+.section-label {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1.8px;
+  color: var(--text-muted);
+  padding: 20px 0 10px;
+}
+
+/* ── Cards ────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  transition: all 0.25s ease;
+}
+.card:hover { border-color: var(--border-light); transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+.card p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+
+.card-gradient {
+  background: linear-gradient(145deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  position: relative; overflow: hidden;
+  transition: all 0.25s ease;
+}
+.card-gradient::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(59,130,246,0.4), transparent);
+}
+.card-gradient:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(0,0,0,0.35); }
+
+.card-glow {
+  background: var(--surface);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  box-shadow: 0 0 22px var(--brand-glow), inset 0 0 20px rgba(59,130,246,0.03);
+  transition: all 0.25s ease;
+}
+.card-glow:hover { box-shadow: 0 0 40px rgba(59,130,246,0.32), inset 0 0 30px rgba(59,130,246,0.06); transform: translateY(-1px); }
+
+.card-accent {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  transition: all 0.25s ease;
+}
+.card-accent:hover { border-left-color: var(--brand-light); transform: translateX(3px); }
+
+/* Glassmorphism — use inside .bg-orbs wrappers */
+.card-glass {
+  background: rgba(20, 22, 32, 0.55);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 10px;
+  transition: all 0.25s ease;
+}
+.card-glass:hover {
+  background: rgba(20, 22, 32, 0.80);
+  border-color: rgba(255,255,255,0.13);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+}
+
+/* Hero card — large feature card for primary metrics */
+.card-hero {
+  background: linear-gradient(160deg, var(--surface-2) 0%, var(--surface) 100%);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 26px;
+  margin-bottom: 14px;
+  position: relative; overflow: hidden;
+  transition: all 0.3s ease;
+}
+.card-hero::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, var(--brand), var(--cyan));
+}
+.card-hero:hover { transform: translateY(-2px); box-shadow: 0 10px 35px rgba(0,0,0,0.4); }
+
+/* ── KPI Grid ────────────────────────────────────────────── */
+/* minmax(0,1fr) — plain 1fr lets wide children (long words, tables, pre) blow the track past the viewport on mobile */
+.kpi-grid   { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.kpi-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  transition: all 0.25s ease;
+  position: relative; overflow: hidden;
+}
+.kpi:hover { border-color: var(--border-light); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }
+.kpi::after {
+  content: ''; position: absolute;
+  bottom: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--brand-dim), transparent);
+  opacity: 0; transition: opacity 0.25s ease;
+}
+.kpi:hover::after { opacity: 1; }
+.kpi-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-muted); margin-bottom: 4px; }
+.kpi-value { font-size: 30px; font-weight: 900; letter-spacing: -1.5px; line-height: 1.1; }
+.kpi-sub   { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+.kpi-success .kpi-value { color: var(--success); }
+.kpi-warning .kpi-value { color: var(--warning); }
+.kpi-danger  .kpi-value { color: var(--danger); }
+.kpi-brand   .kpi-value { color: var(--brand-light); }
+.kpi-cyan    .kpi-value { color: var(--cyan); }
+.kpi-amber   .kpi-value { color: var(--amber); }
+
+/* ── Action Buttons ──────────────────────────────────────── */
+.action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.action-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  color: var(--text);
+  font-size: 12px; font-weight: 500;
+  cursor: pointer; text-align: left; font-family: inherit;
+  transition: all 0.2s ease;
+  position: relative; overflow: hidden;
+}
+.action-btn::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, transparent, rgba(255,255,255,0.025));
+  opacity: 0; transition: opacity 0.2s;
+}
+.action-btn:hover { background: var(--surface-hover); border-color: var(--border-light); transform: translateY(-1px); }
+.action-btn:hover::before { opacity: 1; }
+.action-btn:active { transform: translateY(0) scale(0.98); }
+.action-btn .label { display: block; font-weight: 700; margin-bottom: 3px; }
+.action-btn .desc  { color: var(--text-muted); font-size: 10px; font-weight: 400; }
+.action-btn.primary { border-color: var(--brand-border); background: var(--brand-dim); }
+.action-btn.primary:hover { box-shadow: 0 0 22px var(--brand-glow); border-color: var(--brand); }
+
+.btn {
+  border: none; border-radius: var(--radius-sm);
+  padding: 12px 22px; font-size: 13px; font-weight: 700;
+  font-family: inherit; cursor: pointer; transition: all 0.2s ease;
+}
+.btn-primary { background: linear-gradient(135deg, var(--brand), #2563eb); color: white; box-shadow: 0 4px 15px rgba(59,130,246,0.35); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(59,130,246,0.5); }
+.btn-primary:active { transform: translateY(0); }
+.btn-secondary { background: transparent; border: 1px solid var(--border-light); color: var(--text-secondary); }
+.btn-secondary:hover { border-color: var(--brand-border); color: var(--text); background: var(--brand-dim); }
+.btn-glow { background: transparent; border: 1px solid var(--brand-border); color: var(--brand-light); box-shadow: 0 0 15px var(--brand-glow); }
+.btn-glow:hover { background: var(--brand-dim); box-shadow: 0 0 28px rgba(59,130,246,0.45); transform: translateY(-1px); }
+
+/* ── Status List ─────────────────────────────────────────── */
+.status-list { display: flex; flex-direction: column; gap: 8px; }
+.status-item {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 16px;
+  cursor: pointer; transition: all 0.2s ease;
+}
+.status-item:hover { background: var(--surface-hover); border-color: var(--border-light); transform: translateX(3px); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-running { background: var(--success); box-shadow: 0 0 8px rgba(52,211,153,0.6); animation: dotPulse 2s ease-in-out infinite; }
+.dot-blocked { background: var(--warning); box-shadow: 0 0 8px rgba(251,191,36,0.5); }
+.dot-setup   { background: var(--text-muted); }
+.status-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 10px; border-radius: 20px; margin-left: auto; }
+.badge-running { background: linear-gradient(var(--success-dim), var(--success-dim)), var(--surface); color: var(--success); border: 1px solid var(--success-border); }
+.badge-blocked { background: linear-gradient(var(--warning-dim), var(--warning-dim)), var(--surface); color: var(--warning); border: 1px solid var(--warning-border); }
+.badge-setup   { background: linear-gradient(rgba(95,99,128,0.12), rgba(95,99,128,0.12)), var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
+
+/* ── Progress Bar ────────────────────────────────────────── */
+.progress { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+.progress-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.progress-title { font-size: 13px; font-weight: 700; }
+.progress-pct   { font-size: 13px; font-weight: 800; color: var(--brand-light); }
+.progress-track { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.progress-fill  { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--brand), var(--cyan)); animation: progressFill 1.2s ease-out; }
+
+/* ── Pipeline Bar ────────────────────────────────────────── */
+.pipeline { display: flex; gap: 4px; margin-bottom: 4px; }
+.pipeline-bar { height: 6px; border-radius: 3px; }
+.pipeline-legend { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); }
+
+/* ── Timeline ────────────────────────────────────────────── */
+.timeline { position: relative; padding-left: 28px; }
+.timeline::before { content: ''; position: absolute; left: 7px; top: 4px; bottom: 4px; width: 2px; background: linear-gradient(180deg, var(--brand), var(--border)); }
+.tl-item { position: relative; padding-bottom: 20px; }
+.tl-item:last-child { padding-bottom: 0; }
+.tl-dot { position: absolute; left: -24px; top: 3px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--brand); background: var(--bg); transition: all 0.2s ease; }
+.tl-dot.done   { background: var(--brand); }
+.tl-dot.active { background: var(--brand); box-shadow: 0 0 12px rgba(59,130,246,0.5); animation: dotPulse 2s ease-in-out infinite; }
+.tl-label { font-size: 13px; font-weight: 700; }
+.tl-desc  { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.tl-time  { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+/* ── Activity Feed ───────────────────────────────────────── */
+.activity-list { list-style: none; }
+.activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); transition: padding-left 0.2s ease; }
+.activity-item:last-child { border-bottom: none; }
+.activity-item:hover { padding-left: 4px; }
+.activity-dot  { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.activity-text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.activity-text strong { color: var(--text); font-weight: 600; }
+.activity-time { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
+
+/* ── Chips ────────────────────────────────────────────────── */
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 11px; font-weight: 600; padding: 5px 14px; border-radius: 20px; border: 1px solid var(--border); color: var(--text-secondary); background: var(--surface); cursor: pointer; transition: all 0.2s ease; }
+.chip:hover { border-color: var(--border-light); color: var(--text); transform: translateY(-1px); }
+.chip.active { background: var(--brand-dim); border-color: var(--brand-border); color: var(--brand-light); }
+.chip .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+/* ── Queue Item ──────────────────────────────────────────── */
+.queue-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start; cursor: pointer; transition: all 0.2s ease; }
+.queue-item:hover { border-color: var(--border-light); background: var(--surface-hover); transform: translateY(-1px); }
+.queue-body  { flex: 1; }
+.queue-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.queue-text  { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.queue-unlock{ font-size: 10px; color: var(--success); margin-top: 6px; font-weight: 600; }
+
+/* ── Agent Card Grid ─────────────────────────────────────── */
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.agent-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; cursor: pointer; position: relative; transition: all 0.25s ease; overflow: hidden;
+}
+.agent-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--brand-dim), transparent);
+  opacity: 0; transition: opacity 0.25s;
+}
+.agent-card:hover { background: var(--surface-hover); border-color: var(--border-light); transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+.agent-card:hover::before { opacity: 1; }
+.agent-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; margin-bottom: 12px; }
+.agent-card h3   { font-size: 13px; font-weight: 700; margin-bottom: 2px; }
+.agent-card .role{ font-size: 11px; color: var(--text-muted); }
+.icon-brand   .agent-icon { background: var(--brand-dim);   color: var(--brand-light); border: 1px solid var(--brand-border); }
+.icon-success .agent-icon { background: linear-gradient(var(--success-dim), var(--success-dim)), var(--surface); color: var(--success);     border: 1px solid var(--success-border); }
+.icon-warning .agent-icon { background: linear-gradient(var(--warning-dim), var(--warning-dim)), var(--surface); color: var(--warning);     border: 1px solid var(--warning-border); }
+.icon-danger  .agent-icon { background: linear-gradient(var(--danger-dim),  var(--danger-dim)),  var(--surface); color: var(--danger);      border: 1px solid var(--danger-border); }
+.icon-cyan    .agent-icon { background: var(--cyan-dim);    color: var(--cyan);        border: 1px solid var(--cyan-border); }
+
+/* ── Badge ────────────────────────────────────────────────── */
+.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; border-radius: 10px; font-size: 10px; font-weight: 700; padding: 0 8px; color: white; }
+.badge-red   { background: var(--danger); }
+.badge-green { background: var(--success); }
+.badge-blue  { background: var(--brand); }
+.badge-cyan  { background: var(--cyan); color: #000; }
+.badge-amber { background: var(--amber); color: #000; }
+
+/* ── Divider ─────────────────────────────────────────────── */
+.divider { height: 1px; background: linear-gradient(90deg, transparent, var(--border), transparent); margin: 20px 0; }
+
+/* ── Utility ──────────────────────────────────────────────── */
+.text-success { color: var(--success); }
+.text-warning { color: var(--warning); }
+.text-danger  { color: var(--danger); }
+.text-brand   { color: var(--brand-light); }
+.text-cyan    { color: var(--cyan); }
+.text-muted   { color: var(--text-muted); }
+.text-sm      { font-size: 12px; }
+.text-xs      { font-size: 10px; }
+.font-bold    { font-weight: 700; }
+.font-black   { font-weight: 900; }
+.spacer       { height: 16px; }
+.spacer-lg    { height: 28px; }
+.flex         { display: flex; }
+.items-center { align-items: center; }
+.gap-2        { gap: 8px; }
+.gap-3        { gap: 12px; }
+.ml-auto      { margin-left: auto; }
+
+    /* ===== TOUCH TARGETS (WCAG 2.5.5 / 2.5.8) — 44px floor ===== */
+    /* Canvas pages are self-contained inline CSS, so this lives in the template's <style>
+       and is copied into every new page. min-height is a true floor: it beats any smaller
+       `height`, so a fixed-height control still meets 44px. */
+    button, [role="button"], a.btn, .btn, select, textarea,
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]) {
+      min-height: 44px;
+    }
+    /* Icon-only buttons collapse below 44px wide without a width floor too. */
+    button.icon, .btn-icon, [data-icon-only] {
+      min-width: 44px;
+    }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     DELETE BELOW — BUILD YOUR PAGE HERE
+     ═══════════════════════════════════════════════════════
+     ANIMATION QUICK-START:
+       - Add anim-slide-up to sections for entrance animations
+       - Add delay-1 through delay-8 to stagger
+       - Wrap body content in <div class="bg-orbs"> for ambient glow
+       - Use gradient-text class on primary headings/KPI values
+       - card-glass works best inside .bg-orbs
+     ═══════════════════════════════════════════════════════ -->
+
+<div class="page-header anim-fade">
+  <div>
+    <h1>Page Title</h1>
+    <div class="subtitle">Page description</div>
+  </div>
+  <button class="back-btn" onclick="menu()">Pages</button>
+</div>
+
+<div class="section-label">Section</div>
+<div class="card anim-slide-up">
+  <p>Content goes here. Use the component classes from the stylesheet above.</p>
+</div>
+
+<div class="spacer"></div>
+
+<!-- REQUIRED: Always include at bottom -->
+<script>
+// Canvas bridge. Call these ONLY from user actions (clicks/taps). speak() marks the
+// message userInitiated so the shell does not drop it as a page-open auto-announcement.
+function nav(page) {
+  window.parent.postMessage({type:'canvas-action', action:'navigate', page: page}, '*');
+}
+function speak(text) {
+  window.parent.postMessage({type:'canvas-action', action:'speak', text: text, userInitiated: true}, '*');
+}
+function menu() {
+  window.parent.postMessage({type:'canvas-action', action:'menu'}, '*');
+}
+  /* Canvas-visibility redraw hook.
+     Canvas pages often hand-draw charts, so a <canvas>/SVG sized to its container renders
+     0-width if it is drawn while the canvas panel is hidden.
+     When the page becomes visible we (1) fire a window "resize" so any container-responsive
+     chart re-fits, and (2) call an optional page-defined window.onCanvasVisible() so a
+     hand-drawn chart that doesn't listen for "resize" can redraw explicitly.
+     Pages with charts should EITHER listen for window "resize" OR define window.onCanvasVisible. */
+  (function () {
+    function canvasRefit() {
+      try { window.dispatchEvent(new Event("resize")); } catch (e) {}
+      if (typeof window.onCanvasVisible === "function") {
+        try { window.onCanvasVisible(); } catch (e) {}
+      }
+    }
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) canvasRefit();
+    });
+    window.addEventListener("message", function (e) {
+      if (e && e.data && e.data.type === "canvas-visible") canvasRefit();
+    });
+    if (document.readyState === "complete") canvasRefit();
+    else window.addEventListener("load", canvasRefit);
+  })();
+</script>
+</body>
+</html>

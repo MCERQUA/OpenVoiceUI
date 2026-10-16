@@ -68,6 +68,10 @@ const openclawConfig = {
 };
 
 fs.mkdirSync("openclaw-data/workspace", { recursive: true });
+// Mountpoint for the bundled agent skills (docker-compose mounts ./skills here read-only).
+// Created now so Docker does not create openclaw-data/skills root-owned on Linux, which would
+// stop you adding your own skills next to it. See docs/SKILLS.md.
+fs.mkdirSync("openclaw-data/skills/openvoiceui", { recursive: true });
 fs.writeFileSync(
   "openclaw-data/openclaw.json",
   JSON.stringify(openclawConfig, null, 2) + "\n"
