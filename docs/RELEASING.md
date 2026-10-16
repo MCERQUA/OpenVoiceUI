@@ -26,6 +26,9 @@ component version.
 1. On a `release/YYYY.M.D` branch off `main`: bump `package.json` `"version"` to today's date
    `YYYY.M.D` (`-N` if it's a repeat release the same day). The repo is trunk-based — there is
    no `dev` branch; every open PR is reviewed and merged (or closed) BEFORE this step.
+   In the same PR, add the release to `CHANGELOG.md`: move the `[Unreleased]` notes under a new
+   `## [YYYY.M.D] - YYYY-MM-DD` heading (a few summary bullets; the GitHub Release keeps the full
+   notes) and add the release link at the bottom.
 2. Open the release PR into `main` (CI green), squash-merge it.
 3. Tag the release commit on `main`:
    ```bash

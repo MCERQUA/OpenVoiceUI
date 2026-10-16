@@ -1,0 +1,33 @@
+# EditorConfig: https://editorconfig.org
+# Matches the conventions already used in the tree; it applies to new edits only and does not
+# require reformatting existing files.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.{py,sh}]
+indent_size = 4
+
+# The frontend modules (src/) and shared stylesheets use 4-space indentation.
+[src/**.{js,css}]
+indent_size = 4
+
+[static/**.css]
+indent_size = 4
+
+[*.md]
+# Two trailing spaces are a hard line break in Markdown.
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+
+[*.{patch,diff}]
+trim_trailing_whitespace = false
+insert_final_newline = false

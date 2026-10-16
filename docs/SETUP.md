@@ -16,7 +16,7 @@ This guide covers three install paths:
 | Python 3.10+ | For local / VPS installs |
 | Docker + Compose | For Docker install only |
 
-> **OpenClaw is the most important dependency.** Without it the server starts but cannot respond to any voice input. OpenVoiceUI is tested with **openclaw@2026.3.13** — other versions may have breaking changes. See [OpenClaw Requirements](docs/openclaw-requirements.md) for full compatibility details.
+> **OpenClaw is the most important dependency.** Without it the server starts but cannot respond to any voice input. OpenVoiceUI is tested with **openclaw@2026.3.13** — other versions may have breaking changes. See [OpenClaw Requirements](getting-started/openclaw-requirements.md) for full compatibility details.
 
 ---
 
@@ -58,7 +58,7 @@ Docker users: `docker compose down`, pull the latest code, then `docker compose 
 3. Start the gateway: `openclaw gateway` (listens on `ws://127.0.0.1:18791`)
 4. Copy your auth token — you'll need it for `CLAWDBOT_AUTH_TOKEN` in `.env`
 
-**Using an existing OpenClaw install?** See [OpenClaw Requirements](docs/openclaw-requirements.md)
+**Using an existing OpenClaw install?** See [OpenClaw Requirements](getting-started/openclaw-requirements.md)
 for the full list of version and configuration requirements. OpenVoiceUI needs
 specific gateway settings to work — don't skip this if you already have OpenClaw
 running with other agents.
@@ -119,7 +119,7 @@ docker compose up --build
 
 > **Important:** OpenVoiceUI is tested with **openclaw@2026.3.13**. If your existing
 > install is a different version, voice features may not work. See
-> [OpenClaw Requirements](docs/openclaw-requirements.md) for the full compatibility
+> [OpenClaw Requirements](getting-started/openclaw-requirements.md) for the full compatibility
 > checklist.
 
 Point openvoiceui at your running OpenClaw gateway instead of starting a new one.
@@ -222,10 +222,10 @@ Open `http://your-server-ip:5001` to verify. Press Ctrl+C when done.
 
 ### 4. Run the setup script (nginx + SSL + systemd)
 
-Edit the top of `deploy/setup-sudo.sh` to set your domain and email, then:
+Edit the top of `setup-sudo.sh` (in the repo root) to set your domain and email, then:
 
 ```bash
-sudo bash deploy/setup-sudo.sh
+sudo bash setup-sudo.sh
 ```
 
 This creates:

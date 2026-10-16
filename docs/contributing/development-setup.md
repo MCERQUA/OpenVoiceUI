@@ -32,13 +32,12 @@ Open `http://localhost:5001` in your browser.
 
 ## Branch Workflow
 
-| Branch | Purpose | Who pushes directly |
-|--------|---------|---------------------|
-| `main` | Stable, released code | Nobody -- PR only, 1 review required |
-| `dev`  | Integration / in-progress work | Maintainers only |
+The repository is **trunk-based**: there is a single long-lived branch, `main`.
 
-**Contributors always open PRs targeting `dev`**, not `main`.
-Maintainers periodically merge `dev` into `main` to cut a release.
+- Branch off the latest `main` (`feat/...`, `fix/...`, `docs/...`, `chore/...`).
+- Open your PR against `main`. Nobody pushes to `main` directly; the `test` CI check must pass.
+- PRs are **squash-merged** and the branch is deleted on merge.
+- Releases are CalVer tags (`vYYYY.M.D`) cut from `main` -- see `docs/RELEASING.md`.
 
 ## Project Structure
 
@@ -111,23 +110,23 @@ See [`plugins/README.md`](https://github.com/MCERQUA/OpenVoiceUI/blob/main/plugi
 2. Make your changes
 3. Run the test suite: `venv/bin/python3 -m pytest tests/ -q`
 4. Test end-to-end locally (voice in, TTS audio out if relevant)
-5. Submit a PR targeting `dev` (not `main`) -- fill out the PR template
+5. Submit a PR targeting `main` -- fill out the PR template
 6. Keep PRs focused -- one feature or fix per PR
 
 **Before submitting security-related PRs**, read:
 - [Architecture](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/ARCHITECTURE.md) -- understand how systems connect
-- [PR Review Checklist](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/PR-REVIEW-CHECKLIST.md) -- what reviewers check
+- [PR Review Checklist](pr-checklist.md) -- what reviewers check
 - [Security](/contributing/security) -- vulnerability reporting policy
 
 ## How PRs Are Reviewed
 
-Every PR is reviewed against the [PR Review Checklist](https://github.com/MCERQUA/OpenVoiceUI/blob/main/docs/PR-REVIEW-CHECKLIST.md). The maintainer will:
+Every PR is reviewed against the [PR Review Checklist](pr-checklist.md). The maintainer will:
 
 1. **Code review** -- check the PR against the review checklist (security, tag system, display pipeline, tests)
 2. **Test locally** -- create a `devtest/pr-<number>` branch, apply changes, run full test suite + manual voice test
 3. **Merge or request changes** -- if tests pass, the original PR is merged (you keep full commit credit). If tests fail, specific feedback is provided.
 
-This process ensures that every change is verified in context before it reaches `dev`. Security fixes in particular are tested carefully because they often touch systems that are tightly coupled (e.g., the tag system spans 4 files -- see the Architecture doc).
+This process ensures that every change is verified in context before it reaches `main`. Security fixes in particular are tested carefully because they often touch systems that are tightly coupled (e.g., the tag system spans 4 files -- see the Architecture doc).
 
 ## Reporting Bugs
 

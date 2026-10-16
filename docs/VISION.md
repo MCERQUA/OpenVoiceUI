@@ -134,5 +134,5 @@ Poor fits:
 ---
 
 MIT licensed. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it works,
-[AGENTS.md](AGENTS.md) if you are an AI coding agent, and
-[CONTRIBUTING.md](CONTRIBUTING.md) to start contributing.
+[AGENTS.md](../AGENTS.md) if you are an AI coding agent, and
+[CONTRIBUTING.md](../CONTRIBUTING.md) to start contributing.

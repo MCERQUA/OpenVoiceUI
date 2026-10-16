@@ -192,12 +192,14 @@ Open `http://your-server-ip:5001` to verify, then press Ctrl+C.
 
 ### 4. Deploy with systemd and nginx
 
-Edit the top of `deploy/setup-sudo.sh` to set your domain and email, then run:
+Edit the top of `setup-sudo.sh` (in the repo root) to set your domain and email, then run:
 
 ```bash
-sudo bash deploy/setup-sudo.sh
-bash deploy/setup-nginx.sh
+sudo bash setup-sudo.sh
 ```
+
+`setup-sudo.sh` writes the nginx config itself. `setup-nginx.sh` is the nginx-only alternative
+for servers where you manage SSL and systemd yourself.
 
 This creates:
 - systemd service (`openvoiceui.service`)

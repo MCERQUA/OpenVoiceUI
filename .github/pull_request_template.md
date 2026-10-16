@@ -1,5 +1,5 @@
-> **Target branch:** Please ensure this PR targets `dev`, not `main`.
-> Maintainers merge `dev → main` to cut releases. PRs targeting `main` will be redirected.
+> **Target branch:** `main`. The repo is trunk-based (there is no `dev` branch) and PRs are
+> squash-merged. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## What does this PR do?
 <!-- Brief description of the change -->
@@ -26,3 +26,5 @@
 - [ ] No API keys or secrets in my changes
 - [ ] `.env.example` updated if I added new env vars
 - [ ] `requirements.txt` updated if I added Python packages
+- [ ] Tests pass locally (`python -m pytest tests/ -q`)
+- [ ] Docs / README updated if behaviour or setup changed

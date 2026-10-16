@@ -32,6 +32,22 @@ const config: Config = {
       {
         docs: {
           path: '../docs',
+          // docs/ also holds repository documents that are read on GitHub rather than
+          // published on the site: contributor/maintainer docs, design plans, and internal
+          // deployment notes. The first four globs are Docusaurus's defaults.
+          exclude: [
+            '**/_*.{js,jsx,ts,tsx,md,mdx}',
+            '**/_*/**',
+            '**/*.test.{js,jsx,ts,tsx}',
+            '**/__tests__/**',
+            'ARCHITECTURE.md',
+            'VISION.md',
+            'SETUP.md',
+            'RELEASING.md',
+            'REPO-ORGANIZATION.md',
+            'plans/**',
+            'jambot/**',
+          ],
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
           editUrl: 'https://github.com/MCERQUA/OpenVoiceUI/edit/main/',

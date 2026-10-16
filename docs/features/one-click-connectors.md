@@ -20,7 +20,7 @@ The entries live in `config/connectors-catalog.json` and are merged under the op
 4. **Fill**: `GET /v1/projects/{ref}/api-keys?reveal=true`. The legacy `anon` + `service_role` JWT keys are used first. If the project rejects them, the new `sb_publishable_` + `sb_secret_` keys are used. The keys are validated (below) before saving, and the save goes through `set_credential`, so they sync to `.openclaw.env` and openclaw restarts exactly as with a paste.
 5. **Disconnect**: the refresh token is revoked with `POST /v1/oauth/revoke`, then the token file is moved aside to `.revoked`. It is never deleted. The filled project keys stay saved.
 
-Docs: <https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration>, scopes: <https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes>, spec: <https://api.supabase.com/api/v1-json>.
+Docs: [Supabase OAuth integration guide](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration), [OAuth scopes](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes), [Management API spec](https://api.supabase.com/api/v1-json).
 
 ## Validate before save (paste path)
 

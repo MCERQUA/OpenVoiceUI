@@ -74,7 +74,7 @@ These systems are fragile — changes in one file can silently break another:
 For PRs from external contributors, follow the devtest workflow:
 
 1. Review against this checklist first
-2. Create `devtest/pr-<number>` branch from `dev`
+2. Create `devtest/pr-<number>` branch from `main`
 3. Apply changes, run full test suite + manual test
 4. If passes: merge the ORIGINAL PR (contributor keeps credit)
 5. If fails: request changes with specific feedback
