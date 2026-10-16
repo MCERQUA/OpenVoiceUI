@@ -1030,6 +1030,11 @@ def _action_status(job_id: str):
 
     job = suno_jobs[job_id]
 
+    # WAV / video / lyrics jobs produce a file or text, not a song: their result
+    # lives behind a different record-info endpoint (see _PROCESS_RESULTS).
+    if job.get('kind') in _PROCESS_RESULTS:
+        return _process_status(job_id, job)
+
     # If already complete, just report
     if job.get('status') == 'complete':
         return jsonify({
@@ -1597,9 +1602,9 @@ def _action_replace_section(_q, body: dict):
 def _action_generate_lyrics(_q, body: dict):
     """Generate lyrics from a prompt. POST /api/v1/lyrics.
 
-    Lyrics come back asynchronously via callback; the studio polls the
-    timestamped/record endpoints — but for the common case we return the taskId
-    so the UI can fetch results. We DON'T register an audio job (no audio).
+    Lyrics come back asynchronously (callback, or GET /api/v1/lyrics/record-info).
+    A process job is registered so `action=status&job_id=...` fetches and returns
+    them (and saves them under generated_music/lyrics/). No audio is produced.
     """
     prompt = (_q('prompt') or body.get('prompt', '')).strip()
     if not prompt:
@@ -1623,12 +1628,24 @@ def _action_generate_lyrics(_q, body: dict):
         if data.get('code') != 200 or not data.get('data', {}).get('taskId'):
             return jsonify({'action': 'error', 'response': f"Suno API error: {data.get('msg', 'Unknown error')}"})
         task_id = data['data']['taskId']
+        job_id = str(uuid.uuid4())
+        suno_jobs[job_id] = {
+            'status': 'generating',
+            'title': 'Lyrics',
+            'prompt': prompt[:200],
+            'task_id': task_id,
+            'created_at': time.time(),
+            'kind': 'lyrics',
+            'process_only': True,
+        }
         _provider_receipt('generate_lyrics')
+        _task_log('submitted', op='generate_lyrics', task_id=task_id, prompt=prompt[:300])
         return jsonify({
             'action': 'lyrics_generating',
+            'job_id': job_id,
             'task_id': task_id,
             'kind': 'lyrics',
-            'response': 'Writing lyrics — fetch results with action=song_details&task_id=...',
+            'response': 'Writing lyrics — poll action=status with this job_id for the text.',
             'estimated_seconds': 15,
         })
     except http_requests.RequestException as exc:
@@ -1697,7 +1714,8 @@ def _action_wav_convert(_q, body: dict):
     return _submit_process_job(
         '/api/v1/wav/generate', request_body, 'wav_convert',
         op='wav_convert', est_seconds=20,
-        response_msg='Converting to WAV — results delivered when ready.',
+        response_msg='Converting to WAV — poll action=status with this job_id for the file.',
+        job_extra={'src_filename': src['filename']},
     )
 
 
@@ -2088,7 +2106,9 @@ def _action_music_video(_q, body: dict):
     return _submit_process_job(
         '/api/v1/mp4/generate', request_body, 'music_video',
         op='music_video', est_seconds=90,
-        response_msg='Rendering music video — this can take a couple minutes.',
+        response_msg='Rendering music video — this can take a couple minutes. '
+                     'Poll action=status with this job_id for the file.',
+        job_extra={'src_filename': src['filename']},
     )
 
 
@@ -2122,7 +2142,8 @@ def _action_song_details(_q, body: dict):
 
 def _submit_process_job(endpoint: str, request_body: dict, kind: str,
                         op: str = None, est_seconds: int = 30,
-                        response_msg: str = None, on_task_id=None):
+                        response_msg: str = None, on_task_id=None,
+                        job_extra: dict = None):
     """POST a process request (WAV/stem/video) that returns a taskId but whose
     output is NOT a normal song download. Registers a lightweight job so the UI
     can show it in the queue; results are delivered via callback / song_details.
@@ -2156,6 +2177,7 @@ def _submit_process_job(endpoint: str, request_body: dict, kind: str,
             'created_at': time.time(),
             'kind': kind,
             'process_only': True,  # status poller won't try to download as music
+            **(job_extra or {}),
         }
         _provider_receipt(op or kind)
         _task_log('submitted', op=op or kind, task_id=task_id,
@@ -2171,6 +2193,227 @@ def _submit_process_job(endpoint: str, request_body: dict, kind: str,
         })
     except http_requests.RequestException as exc:
         return jsonify({'action': 'error', 'response': f"Couldn't reach Suno API: {exc}"})
+
+
+# ---------------------------------------------------------------------------
+# Results of process jobs that are not songs (WAV conversion, music video, lyrics)
+#
+# These were submitted and paid for, but nothing ever fetched their output: the
+# status poller asked /api/v1/generate/record-info (the SONG endpoint) and the
+# webhook only understood song payloads, so a WAV, a video or a set of lyrics
+# never reached the user. Each kind has its own record-info endpoint and its own
+# callback shape (sunoapi.org docs: wav/mp4 callbacks are snake_case `task_id`
+# with `audioWavUrl` / `video_url`; lyrics callbacks are camelCase `taskId` with
+# `callbackType` and a `data` list of {text, title, status}).
+# Files land in generated_music/<subdir>/ and are served by routes/music.py at
+# /generated_music/<subdir>/<file>. Lyrics are saved as JSON (not served).
+# ---------------------------------------------------------------------------
+
+_PROCESS_RESULTS = {
+    'wav_convert': {'record': '/api/v1/wav/record-info', 'flag': 'successFlag',
+                    'url_keys': ('audioWavUrl', 'audio_wav_url'),
+                    'subdir': 'wav', 'ext': '.wav', 'noun': 'WAV file'},
+    'music_video': {'record': '/api/v1/mp4/record-info', 'flag': 'successFlag',
+                    'url_keys': ('videoUrl', 'video_url'),
+                    'subdir': 'video', 'ext': '.mp4', 'noun': 'music video'},
+    'lyrics':      {'record': '/api/v1/lyrics/record-info', 'flag': 'status',
+                    'subdir': 'lyrics', 'ext': '.json', 'noun': 'lyrics'},
+}
+_PROCESS_PENDING_FLAGS = ('', 'PENDING', 'TEXT_SUCCESS', 'FIRST_SUCCESS')
+
+
+def _process_dir(kind: str) -> Path:
+    return GENERATED_MUSIC_DIR / _PROCESS_RESULTS[kind]['subdir']
+
+
+def _process_tid(task_id: str) -> str:
+    return ''.join(ch for ch in (task_id or '') if ch.isalnum())[:16] or 'task'
+
+
+def _existing_process_file(kind: str, task_id: str):
+    """A result already saved for this task (the callback and the poller can both land it)."""
+    spec = _PROCESS_RESULTS[kind]
+    d = _process_dir(kind)
+    suffix = f'-{_process_tid(task_id)}{spec["ext"]}'
+    if d.is_dir():
+        for f in d.iterdir():
+            if f.is_file() and f.name.endswith(suffix):
+                return f
+    return None
+
+
+def _download_capped(url: str, save_path: Path, require_https: bool = False) -> bool:
+    """Download url to save_path with the same SSRF check and size cap as song downloads."""
+    if not url or not _is_safe_download_url(url):
+        return False
+    if require_https and not url.lower().startswith('https://'):
+        logger.warning('Unsigned Suno callback: rejecting non-https result URL')
+        return False
+    try:
+        r = http_requests.get(url, timeout=120, stream=True)
+        if r.status_code != 200:
+            logger.warning(f'Suno result download failed: HTTP {r.status_code}')
+            return False
+        if int(r.headers.get('Content-Length', 0) or 0) > SUNO_MAX_DOWNLOAD_BYTES:
+            logger.warning('Suno result download rejected: over size limit')
+            return False
+        chunks, total = [], 0
+        for chunk in r.iter_content(chunk_size=65536):
+            total += len(chunk)
+            if total > SUNO_MAX_DOWNLOAD_BYTES:
+                logger.warning('Suno result download aborted: over size limit')
+                return False
+            chunks.append(chunk)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        save_path.write_bytes(b''.join(chunks))
+        return True
+    except (http_requests.RequestException, OSError, ValueError) as exc:
+        logger.warning(f'Suno result download error: {exc}')
+        return False
+
+
+def _save_process_result(kind: str, task_id: str, payload, src_filename: str = '',
+                         require_https: bool = False):
+    """Persist a finished process result. Returns the public URL (media) or the
+    lyrics list (lyrics), or None when nothing could be saved."""
+    spec = _PROCESS_RESULTS[kind]
+    existing = _existing_process_file(kind, task_id)
+    if kind == 'lyrics':
+        items = [{'title': (i.get('title') or '').strip(), 'text': i.get('text') or ''}
+                 for i in (payload or []) if isinstance(i, dict) and i.get('text')
+                 and str(i.get('status', 'complete')).lower() != 'failed']
+        if not items:
+            return None
+        if not existing:
+            try:
+                d = _process_dir(kind)
+                d.mkdir(parents=True, exist_ok=True)
+                (d / f'lyrics-{_process_tid(task_id)}.json').write_text(
+                    json.dumps({'task_id': task_id, 'lyrics': items}, indent=2))
+            except OSError as exc:
+                logger.warning(f'Could not save lyrics for {task_id}: {exc}')
+        return items
+    if not existing:
+        base = _slugify_title(Path(src_filename).stem) if src_filename else kind.replace('_', '-')
+        save_path = _process_dir(kind) / f'{base}-{_process_tid(task_id)}{spec["ext"]}'
+        if not _download_capped(payload, save_path, require_https=require_https):
+            return None
+        existing = save_path
+        logger.info(f'Suno {kind} saved: {existing.name}')
+    return f'/generated_music/{spec["subdir"]}/{existing.name}'
+
+
+def _finish_process_job(job: dict, kind: str, task_id: str, result) -> None:
+    job['status'] = 'complete'
+    if kind == 'lyrics':
+        job['lyrics'] = result
+    else:
+        job['url'] = result
+    _task_log('result', op=kind, task_id=task_id,
+              url=result if isinstance(result, str) else '',
+              lyrics=len(result) if isinstance(result, list) else None)
+
+
+def _process_complete_response(job_id: str, job: dict) -> dict:
+    kind = job.get('kind')
+    noun = _PROCESS_RESULTS[kind]['noun']
+    out = {'action': 'complete', 'status': 'complete', 'job_id': job_id, 'kind': kind,
+           'task_id': job.get('task_id', '')}
+    if kind == 'lyrics':
+        out['lyrics'] = job.get('lyrics', [])
+        out['response'] = f"Lyrics ready ({len(out['lyrics'])} version(s))."
+    else:
+        out['url'] = job.get('url', '')
+        out['download_url'] = out['url'] + '?download=1' if out['url'] else ''
+        out['response'] = f"Your {noun} is ready: {out['url']}"
+    return out
+
+
+def _process_status(job_id: str, job: dict):
+    """Poll a WAV / video / lyrics task and save its result when it is ready."""
+    kind = job.get('kind')
+    spec = _PROCESS_RESULTS[kind]
+    if job.get('status') == 'complete':
+        return jsonify(_process_complete_response(job_id, job))
+    if job.get('status') == 'failed':
+        return jsonify({'action': 'failed', 'status': 'failed', 'job_id': job_id, 'kind': kind,
+                        'reason': job.get('error', ''),
+                        'response': f"Suno couldn't make the {spec['noun']}: {job.get('error', '')}"})
+
+    elapsed = int(time.time() - job.get('created_at', time.time()))
+    still = {'action': 'status', 'status': 'generating', 'job_id': job_id, 'kind': kind,
+             'elapsed_seconds': elapsed, 'response': f"Still working on the {spec['noun']}..."}
+    task_id = job.get('task_id')
+    if not task_id:
+        return jsonify(still)
+    try:
+        check = http_requests.get(f"{SUNO_API_BASE}{spec['record']}",
+                                  headers={'Authorization': f'Bearer {SUNO_API_KEY}'},
+                                  params={'taskId': task_id}, timeout=15)
+        if check.status_code != 200:
+            return jsonify(still)
+        cdata = check.json()
+        if cdata.get('code') != 200:
+            return jsonify(still)
+        data = cdata.get('data') or {}
+        flag = str(data.get(spec['flag']) or '').upper()
+        if flag == 'SUCCESS':
+            response = data.get('response') or {}
+            if kind == 'lyrics':
+                payload = response.get('data') or []
+            else:
+                payload = next((response.get(k) for k in spec['url_keys'] if response.get(k)), '')
+            result = _save_process_result(kind, task_id, payload, job.get('src_filename', ''))
+            if result is None:
+                still['response'] = (f"The {spec['noun']} is ready at Suno but could not be "
+                                     'saved yet; poll again.')
+                return jsonify(still)
+            _finish_process_job(job, kind, task_id, result)
+            return jsonify(_process_complete_response(job_id, job))
+        if flag in _PROCESS_PENDING_FLAGS:
+            return jsonify(still)
+        reason = data.get('errorMessage') or flag
+        job['status'] = 'failed'
+        job['error'] = reason
+        _task_log('failed', op=kind, task_id=task_id, reason=reason)
+        return jsonify({'action': 'failed', 'status': 'failed', 'job_id': job_id, 'kind': kind,
+                        'reason': reason,
+                        'response': f"Suno couldn't make the {spec['noun']}: {reason}"})
+    except (http_requests.RequestException, ValueError) as exc:
+        logger.warning(f'Suno {kind} status poll error: {exc}')
+        return jsonify(still)
+
+
+def _process_callback(data: dict, require_https: bool) -> bool:
+    """Handle a webhook for a WAV / video / lyrics task. True when it was one."""
+    d = data.get('data') if isinstance(data.get('data'), dict) else {}
+    task_id = d.get('task_id') or d.get('taskId') or ''
+    items = d.get('data')
+    if 'audioWavUrl' in d or 'audio_wav_url' in d:
+        kind, payload = 'wav_convert', d.get('audioWavUrl') or d.get('audio_wav_url')
+    elif 'video_url' in d or 'videoUrl' in d:
+        kind, payload = 'music_video', d.get('video_url') or d.get('videoUrl')
+    elif (isinstance(items, list) and items
+          and all(isinstance(i, dict) and 'text' in i
+                  and not (i.get('audioUrl') or i.get('audio_url')) for i in items)):
+        kind, payload = 'lyrics', items
+    else:
+        return False
+    job = next((j for j in suno_jobs.values() if j.get('task_id') == task_id), None)
+    if data.get('code') != 200 or not payload:
+        if job and job.get('status') != 'complete':
+            job['status'] = 'failed'
+            job['error'] = data.get('msg') or 'Suno reported an error'
+        _task_log('failed', op=kind, task_id=task_id, reason=data.get('msg', ''), leg='callback')
+        return True
+    result = _save_process_result(kind, task_id, payload,
+                                  (job or {}).get('src_filename', ''), require_https=require_https)
+    if result is not None and job:
+        _finish_process_job(job, kind, task_id, result)
+    elif result is not None:
+        _task_log('result', op=kind, task_id=task_id, leg='callback',
+                  url=result if isinstance(result, str) else '')
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -2527,6 +2770,10 @@ def suno_callback():
                 logger.info(f'Suno callback: persisted vocal-removal stems for {name_stem}: {list(saved)}')
             except Exception as exc:
                 logger.warning(f'Suno callback: stem persist failed ({name_stem}): {exc}')
+            return jsonify({'status': 'ok'})
+
+        # WAV conversion / music video / lyrics results (not songs).
+        if _process_callback(data, _require_https):
             return jsonify({'status': 'ok'})
 
         if data.get('code') == 200:

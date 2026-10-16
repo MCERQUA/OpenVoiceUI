@@ -70,7 +70,7 @@ polls until the song is saved. On the user's next turn you get
 ## Tag: [JINGLE_GENERATE:...] (10-15 s brand jingle)
 
 ```
-[JINGLE_GENERATE:brand|style|gender|instrumental]
+[JINGLE_GENERATE:brand|style|gender|instrumental|repeat]
 ```
 
 | Field | Values | Default |
@@ -79,6 +79,7 @@ polls until the song is saved. On the user's next turn you get
 | `style` | A preset key, or freetext (only the first 3 words are used), or empty | random preset |
 | `gender` | `m` or `f` | `m` |
 | `instrumental` | `true` for an instrumental audio logo | `false` |
+| `repeat` | How many times the brand is sung, `1`-`3` (`1` is shortest) | `2` |
 
 Presets (`action=jingle_styles`): `rock`, `country`, `cinematic`, `gospel`, `lofi-hiphop`, `jazz`,
 `edm`, `bluegrass`, `synthwave`, `latin`, `reggae`, `gritty-blues`, `orchestral`, `punk`, `rnb`.
@@ -103,8 +104,7 @@ short question before the paid generation.
 ```
 
 The server builds a short prompt (`<brand> <brand> <style word> vocal logo jingle, [Intro`, model
-`V5`) designed to stop early. To set how often the brand is sung (`repeat` 1-3, default 2) or to
-omit the style word (`bare`), use the API; the tag carries only the four fields.
+`V5`) designed to stop early. To omit the style word entirely (`bare`), use the API.
 
 **Length is not guaranteed.** Suno often overshoots. Over 20 s, the `status` reply says so;
 check `duration_seconds` via `action=list_jingles` and offer a retry rather than presenting a
@@ -124,8 +124,9 @@ seamless bed), `tempo` (BPM 1-300), `key` (e.g. `Cm`; omit for any).
 - **Poll `action=status` yourself** until `complete`: sound effects have no callback, so your
   poll is what downloads the file.
 - Saved to `generated_music/sfx/<file>`; not in the music player or `action=list`.
-- OVU does not serve the `/generated_music/sfx/...` URL that `status` returns. To use the clip in
-  a canvas page, copy it and reference `/canvas-data/<file>`:
+- The `url` that `status` returns (`/generated_music/sfx/<file>`) plays directly; add
+  `?download=1` to save it. To bundle the clip with a canvas page instead, copy it and reference
+  `/canvas-data/<file>`:
   `mkdir -p ~/.openclaw/workspace/canvas-pages/_data && cp ~/.openclaw/workspace/generated_music/sfx/coin-pickup.mp3 ~/.openclaw/workspace/canvas-pages/_data/`
 - Generate once and reuse the file; never regenerate per play.
 
@@ -258,8 +259,10 @@ curl -s -X POST http://localhost:5001/api/suno \
   `action=timestamped_lyrics` is a paid call; read the cache first.
 - `action=style_boost` `{content}` returns an enhanced style string (`boosted_style`).
 - `action=song_details` `{filename}` returns the provider's record (debugging).
-- `generate_lyrics`, `wav_convert` and `music_video` submit a job, but OVU does not fetch or save
-  their results, so the user gets nothing. Do not offer them; write lyrics yourself.
+- `generate_lyrics` `{prompt}`, `wav_convert` `{filename}` and `music_video` `{filename}` return
+  a `job_id`. Poll `action=status&job_id=...` until `complete`: lyrics come back as `lyrics`
+  (`[{title, text}]`); the WAV and the video come back as `url`
+  (`/generated_music/wav/<file>`, `/generated_music/video/<file>`, add `?download=1` to save).
 
 ## Personas and cloned voices
 

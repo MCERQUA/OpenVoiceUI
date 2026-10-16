@@ -1883,10 +1883,10 @@ connectAiradio();
                 if (this.statusEl) this.statusEl.style.display = 'none';
             },
 
-            async generateJingle(brand, style, gender, instrumental) {
-                // Dedup on the brand+style+gender+instrumental combo
+            async generateJingle(brand, style, gender, instrumental, repeat) {
+                // Dedup on the brand+style+gender+instrumental+repeat combo
                 const now = Date.now();
-                const dedupKey = `JINGLE|${brand}|${style}|${gender}|${instrumental}`;
+                const dedupKey = `JINGLE|${brand}|${style}|${gender}|${instrumental}|${repeat || ''}`;
                 for (const [k, t] of this._recentPrompts) {
                     if (now - t > this._DEDUP_WINDOW_MS) this._recentPrompts.delete(k);
                 }
@@ -1909,6 +1909,9 @@ connectAiradio();
                             style: style || '',
                             vocal_gender: gender || 'm',
                             instrumental: !!instrumental,
+                            // How many times the brand is sung (1-3). The tag's 5th field;
+                            // omitted when absent so the server keeps its own default.
+                            ...(repeat ? { repeat } : {}),
                         }),
                     });
                     const data = await resp.json();
@@ -4566,6 +4569,7 @@ connectAiradio();
                             .replace(/\[MUSIC_NEXT\]/gi, '')
                             .replace(/\[SESSION_RESET\]/gi, '')
                             .replace(/\[SUNO_GENERATE:[^\]]*\]/gi, '')
+                            .replace(/\[JINGLE_GENERATE:[^\]]*\]/gi, '')
                             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
                             .replace(/\[SOUNDCLOUD:[^\]]*\]/gi, '')
                             .replace(/\[SOUNDCLOUD_PAGE:[^\]]*\]/gi, '')
@@ -4685,7 +4689,7 @@ connectAiradio();
                             const style = parts[1] || '';
                             const gender = (parts[2] || 'm').toLowerCase();
                             const instrumental = (parts[3] || '').toLowerCase() === 'true';
-                            const repeat = parseInt(parts[4], 10) || 2;
+                            const repeat = Math.min(3, Math.max(1, parseInt(parts[4], 10) || 2));
                             if (!brand) {
                                 ActionConsole?.addEntry('error', `🎵 Jingle: missing brand name`);
                                 return;
@@ -6427,6 +6431,7 @@ connectAiradio();
                             .replace(/\[MUSIC_NEXT\]/gi, '')
                             .replace(/\[SESSION_RESET\]/gi, '')
                             .replace(/\[SUNO_GENERATE:[^\]]*\]/gi, '')
+                            .replace(/\[JINGLE_GENERATE:[^\]]*\]/gi, '')
                             .replace(/\[SPOTIFY:[^\]]*\]/gi, '')
                             .replace(/\[SOUNDCLOUD:[^\]]*\]/gi, '')
                             .replace(/\[SOUNDCLOUD_PAGE:[^\]]*\]/gi, '')

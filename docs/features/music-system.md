@@ -146,6 +146,7 @@ Music is enabled per-profile via the `features` section:
 |--------|----------|-------------|
 | `GET` | `/music/<filename>` | Serve a library audio file |
 | `GET` | `/generated_music/<filename>` | Serve a generated audio file |
+| `GET` | `/generated_music/<subdir>/<filename>` | Serve a generated sound effect (`sfx`), WAV conversion (`wav`) or music video (`video`) |
 | `GET` | `/api/music?action=list` | List tracks in current playlist |
 | `GET` | `/api/music?action=play&track=<name>` | Play a track (omit `track` for random) |
 | `GET` | `/api/music?action=pause` | Pause current track |

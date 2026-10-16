@@ -504,6 +504,11 @@ Serve a library music file.
 
 Serve an AI-generated music file.
 
+### GET /generated_music/\{subdir\}/\{filename\}
+
+Serve a generated file that is not a song: `sfx/` (sound effects), `wav/` (WAV conversions) or
+`video/` (music videos). `?download=1` saves it instead of playing it.
+
 ---
 
 ## Suno (AI Song Generation)
