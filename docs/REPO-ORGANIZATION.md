@@ -237,6 +237,10 @@ new ignore rules. `archive/README.md` indexes every archived file and how to res
 
 ## 5. Bundled agent skills (proposed, not done)
 
+> Written as the audit and proposal. PR #543 (opened the same day) implements a bundled
+> `skills/` directory and installer wiring. If it merges, treat this section as the background
+> and checklist it was reviewed against.
+
 **The gap.** The repository ships no agent skills (no `SKILL.md`, no `skills/` directory), and no
 installer (Docker Compose, the npm wizard, Pinokio or `setup-sudo.sh`) installs any. The README
 only says the agent can use "any Claude Code or OpenClaw skill". The voice system prompt and the
