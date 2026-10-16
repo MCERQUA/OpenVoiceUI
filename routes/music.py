@@ -418,6 +418,30 @@ def serve_generated_music_file(filename):
     return send_file(music_path, mimetype=mime_type)
 
 
+# Generated files that are not songs live in fixed subfolders of generated_music/
+# (routes/suno.py): sfx/ sound effects, wav/ lossless conversions, video/ music
+# videos. The route above takes a single path segment, so every link Suno's status
+# and callback handed out for these (/generated_music/sfx/<file>, ...) was a 404.
+_GENERATED_SUBDIRS = ("sfx", "wav", "video")
+_GENERATED_SUBDIR_MIME_TYPES = {**_AUDIO_MIME_TYPES, ".mp4": "video/mp4"}
+
+
+@music_bp.route("/generated_music/<subdir>/<filename>")
+def serve_generated_subdir_file(subdir, filename):
+    """Serve a generated sound effect, WAV conversion or music video. ?download=1 saves it."""
+    if subdir not in _GENERATED_SUBDIRS:
+        return jsonify({"error": "Generated file not found"}), 404
+    base = GENERATED_MUSIC_DIR / subdir
+    file_path = _safe_path(base, filename)
+    if file_path is None or not file_path.is_file():
+        return jsonify({"error": "Generated file not found"}), 404
+    mime_type = _GENERATED_SUBDIR_MIME_TYPES.get(file_path.suffix.lower(), "application/octet-stream")
+    if request.args.get("download"):
+        return send_file(file_path, mimetype=mime_type, as_attachment=True,
+                         download_name=file_path.name)
+    return send_file(file_path, mimetype=mime_type)
+
+
 @music_bp.route("/api/music", methods=["GET"])
 def handle_music():
     """
