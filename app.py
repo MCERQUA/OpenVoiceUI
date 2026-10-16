@@ -212,7 +212,8 @@ def create_app(config_override: dict = None):
             '/api/faces',     # GET face list — enrollment writes gated
             '/api/custom-faces',  # GET manifest — HTML-face writes gated (SEC-3 stored XSS)
             '/api/icons/',    # GET icon library — generate/upload gated (SEC-9)
-            '/api/suno',      # GET status/song-list — generation POSTs gated (SEC-9)
+            '/api/suno',      # GET read actions only (status/list/...) — see _PUBLIC_READ_ACTIONS;
+                              # every generation action is gated on GET and POST (SEC-9)
             '/api/profiles',  # GET profile config — activate/save writes gated (SEC-10)
             '/api/maps/config',  # GET Google-Maps JS API key — canvas iframe pages can't
                                  # authenticate (window.authFetch not injected there) and the
@@ -221,6 +222,18 @@ def create_app(config_override: dict = None):
                                  # the key in Google Cloud (must be *.jam-bot.com). /api/maps/
                                  # directions (POST, billable server-side calls) stays gated.
         )
+        # Public-read paths that also run PAID work on GET. `/api/suno` selects its
+        # operation with ?action= on GET as well as POST, so the method-only test
+        # below let an anonymous `GET /api/suno?action=generate` (or jingle, sfx,
+        # extend, cover, stems, ...) spend Suno credits with no login. On these
+        # exact paths only the listed read actions stay public; every other action
+        # falls through to the agent-key / Clerk check, the same gate the POSTs use.
+        # The default action when none is given is the endpoint's own default.
+        _PUBLIC_READ_ACTIONS = {
+            '/api/suno': ('list', frozenset({
+                'list', 'list_jingles', 'jingle_styles', 'status', 'credits',
+            })),
+        }
         # NOTE: /api/stt/ is intentionally NOT public — the Deepgram token
         # endpoint returns a live secret (SEC-1). All /api/stt/* now requires a
         # Clerk session or the agent key.
@@ -291,7 +304,13 @@ def create_app(config_override: dict = None):
             if request.method in ('GET', 'HEAD', 'OPTIONS') and any(
                 path.startswith(p) for p in _PUBLIC_READ_PREFIXES
             ):
-                return
+                _read_actions = _PUBLIC_READ_ACTIONS.get(path.rstrip('/'))
+                if _read_actions is None:
+                    return
+                _default_action, _allowed = _read_actions
+                if request.args.get('action', _default_action) in _allowed:
+                    return
+                # A paid/state-changing action on a public-read path: fall through.
             # Canvas pages and images have their own auth logic (public flag)
             # handled inside canvas_bp — let them through here
             if path.startswith('/pages/') or path.startswith('/canvas-proxy') or path.startswith('/website-dev'):

@@ -183,3 +183,7 @@ All music actions accept an optional `playlist` query parameter (`library`, `gen
 | `GET` | `/api/suno/completed` | Poll for completed songs (frontend notification queue) |
 | `POST` | `/api/suno/completed` | Clear song(s) from notification queue |
 | `DELETE` | `/api/suno/song/<filename>` | Archive a generated song (renames to `.deleted`) |
+
+With login enabled, generation (and every other paid action) needs a signed-in session or the
+agent key on GET as well as POST; only `list`, `list_jingles`, `jingle_styles`, `status` and
+`credits` stay public on GET.
