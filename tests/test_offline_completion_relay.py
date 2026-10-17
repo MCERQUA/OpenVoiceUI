@@ -6,8 +6,8 @@ A voice-started background subagent that finishes after the owner left is
 announced back to the parent session; the orphan continuation collects the
 parent's reply and calls server.push_proactive_message(). With no browser
 connected that function used to return early with NO receipt, so the result
-vanished without a trace (0 .proactive-push.jsonl files fleet-wide; ica lost
-4 completed jobs incl. a client deliverable, danielle 12).
+vanished without a trace (0 .proactive-push.jsonl files fleet-wide; one tenant lost
+4 completed jobs incl. a client deliverable, another 12).
 
 Now:
   * push_proactive_message writes a delivered=0 receipt (with session + run
@@ -92,7 +92,7 @@ class TestProactivePushReceipt:
         ns = _load_push_module(receipt, tts)
 
         result = ns["push_proactive_message"](
-            "Your Fossett takeoff is done. [CANVAS:fossett-takeoff]",
+            "Your site takeoff is done. [CANVAS:site-takeoff]",
             "main", run_id="run-abc")
 
         rows = _receipts(receipt)
@@ -102,7 +102,7 @@ class TestProactivePushReceipt:
         assert row["clients"] == 0
         assert row["session_key"] == "main"
         assert row["run_id"] == "run-abc"
-        assert row["text"].startswith("Your Fossett takeoff is done.")
+        assert row["text"].startswith("Your site takeoff is done.")
         assert result == 0
         assert tts == [], "no audio is generated for a push nobody can hear"
 
@@ -174,7 +174,7 @@ def _conn():
                         "payload": {"runId": "cont-run", "status": "started"}})
         await d._route({"type": "event", "event": "agent", "payload": {
             "runId": "cont-run", "sessionKey": CANON_MAIN, "stream": "assistant",
-            "data": {"text": "Your takeoff is ready. [CANVAS:fossett-takeoff]"}}})
+            "data": {"text": "Your takeoff is ready. [CANVAS:site-takeoff]"}}})
         await d._route({"type": "event", "event": "chat", "payload": {
             "runId": "cont-run", "sessionKey": CANON_MAIN, "state": "final"}})
 
@@ -241,7 +241,7 @@ class TestOfflineRelay:
         assert params["sessionKey"] == RELAY_WIRE_KEY
         assert gw._OFFLINE_RELAY_MARKER in params["message"]
         assert "The owner is offline." in params["message"]
-        assert "Your takeoff is ready. [CANVAS:fossett-takeoff]" in params["message"]
+        assert "Your takeoff is ready. [CANVAS:site-takeoff]" in params["message"]
 
     def test_new_run_id_relays_again(self, fast_sleep, handler):
         calls, _ = handler
