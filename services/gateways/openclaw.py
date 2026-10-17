@@ -296,9 +296,11 @@ _PROACTIVE_HANDLER = None
 
 
 def set_proactive_handler(fn):
-    """Register a callable(text, session_key) that delivers an agent-initiated
-    message to connected browsers. Called from a daemon thread — must not
-    assume a Flask request context."""
+    """Register a callable(text, session_key, run_id=None) that delivers an
+    agent-initiated message to connected browsers and returns how many it
+    reached (0 = nobody connected → the gateway relays it through the tenant's
+    own agent). Called from a daemon thread — must not assume a Flask request
+    context."""
     global _PROACTIVE_HANDLER
     _PROACTIVE_HANDLER = fn
 
@@ -311,6 +313,22 @@ _SUBAGENT_NUDGE_MSG = (
     "sentence about what was done. If it produced a canvas page, open it by "
     "including [CANVAS:page-name] in your reply. Do not narrate your checking "
     "steps — just the outcome."
+)
+
+# Offline relay — a subagent result that finished while no browser was
+# connected is handed to the tenant's OWN agent (default agent, in a session
+# of its own) so it can reach the owner on the owner's channel from the
+# tenant's own identity. OVU never sends SMS itself. Loop guard: this session
+# is never orphan-continued and never relayed again, and the prompt carries a
+# marker that is refused as relay input.
+_OFFLINE_RELAY_SESSION = 'offline-relay'
+_OFFLINE_RELAY_MARKER = '[OFFLINE_RELAY]'
+_OFFLINE_RELAY_MSG = (
+    _OFFLINE_RELAY_MARKER + " The owner is offline. This finished while they "
+    "were away: {summary}\n\nIf it is something they asked for, text them the "
+    "result and its /pages/ link the way you normally text them (your usual "
+    "owner channel and identity, never a company line), once. If they already "
+    "have it, or it is not for them, do nothing."
 )
 
 
@@ -375,9 +393,10 @@ class EventDispatcher:
         # timed out / aborted, or the spawn came from cron), the in-stream
         # continuation nudge in _stream_events can never fire. The hook below
         # (set by GatewayConnection) runs the orphan continuation instead.
-        self._orphan_hook = None                      # callable(parent_alias)
+        self._orphan_hook = None                      # callable(parent_alias, run_ids)
         self._orphan_debounce: dict[str, asyncio.Task] = {}  # parent → pending task
         self._orphan_last_fired: dict[str, float] = {}       # parent → ts cooldown
+        self._orphan_run_ids: dict[str, set] = {}     # parent → finished subagent runIds
         self._last_sub_alias: str | None = None       # newest subscribe() alias
 
     ORPHAN_DEBOUNCE_S = 5      # batch: wait for sibling subagents to finish
@@ -427,6 +446,8 @@ class EventDispatcher:
         if now - self._orphan_last_fired.get(parent, 0) < self.ORPHAN_COOLDOWN_S:
             logger.info(f"### ORPHAN SUBAGENT END: cooldown active for {parent} — skipped")
             return
+        if payload.get('runId'):
+            self._orphan_run_ids.setdefault(parent, set()).add(payload['runId'])
         pending = self._orphan_debounce.get(parent)
         if pending and not pending.done():
             pending.cancel()
@@ -444,10 +465,12 @@ class EventDispatcher:
         for sub in self._subscriptions.values():
             if sub.state != Subscription.DONE and self._sk_match_alias(parent, sub.session_key):
                 logger.info(f"### ORPHAN continuation cancelled — live sub exists for {parent}")
+                self._orphan_run_ids.pop(parent, None)
                 return
         self._orphan_last_fired[parent] = time.time()
+        run_ids = tuple(sorted(self._orphan_run_ids.pop(parent, ())))
         try:
-            self._orphan_hook(parent)
+            self._orphan_hook(parent, run_ids)
         except Exception as e:
             logger.error(f"### ORPHAN hook failed: {e}")
 
@@ -741,6 +764,7 @@ class GatewayConnection:
         self._loop: asyncio.AbstractEventLoop = None
         self._loop_thread: threading.Thread = None
         self._ws_lock: asyncio.Lock = None
+        self._relayed_runs: dict[str, float] = {}  # runId → ts (offline relay, once each)
         self._dispatcher: EventDispatcher = None
         self._started = False
         self._start_lock = threading.Lock()
@@ -792,8 +816,8 @@ class GatewayConnection:
                 self._ws_lock = asyncio.Lock()
                 self._dispatcher = EventDispatcher()
                 self._dispatcher.set_orphan_hook(
-                    lambda parent: asyncio.ensure_future(
-                        self._run_orphan_continuation(parent)))
+                    lambda parent, run_ids=(): asyncio.ensure_future(
+                        self._run_orphan_continuation(parent, run_ids)))
                 ready.set()
                 self._loop.run_forever()
 
@@ -1055,14 +1079,21 @@ class GatewayConnection:
         """
         return wire_session_key(key, self._default_agent_id)
 
-    async def _run_orphan_continuation(self, session_key):
+    async def _run_orphan_continuation(self, session_key, run_ids=()):
         """Nudge the idle main agent after an orphaned subagent completion,
         collect its reply, and hand it to the registered proactive handler.
 
         Runs on the gateway loop thread. The originating HTTP stream is gone,
         so the reply cannot ride the normal NDJSON path — server.py's
-        push_proactive_message broadcasts it over /ws/clawdbot instead.
+        push_proactive_message broadcasts it over /ws/clawdbot instead. When
+        no browser receives it, the result is relayed through the tenant's
+        own agent (_relay_offline_completion).
         """
+        if session_key == _OFFLINE_RELAY_SESSION:
+            # Loop guard: a relay turn's own subagents never trigger another
+            # continuation (its nudge could re-text the owner) or relay.
+            logger.info("### ORPHAN continuation skipped — offline-relay session")
+            return
         if _PROACTIVE_HANDLER is None:
             logger.info("### ORPHAN continuation skipped — no proactive handler registered")
             return
@@ -1141,12 +1172,66 @@ class GatewayConnection:
             logger.info(f"### ORPHAN continuation: pushing proactive message "
                         f"({len(text)} chars): {text[:120]}")
             handler = _PROACTIVE_HANDLER
-            threading.Thread(
-                target=lambda: handler(text, session_key),
-                name='proactive-push', daemon=True,
-            ).start()
+            loop = asyncio.get_running_loop()
+            relay_ids = tuple(run_ids) or (cont_chat_id,)
+
+            def _deliver():
+                delivered = handler(text, session_key, run_id=','.join(relay_ids))
+                if delivered == 0 and not isinstance(delivered, bool):
+                    asyncio.run_coroutine_threadsafe(
+                        self._relay_offline_completion(text, session_key, relay_ids),
+                        loop)
+
+            threading.Thread(target=_deliver, name='proactive-push', daemon=True).start()
         except Exception as e:
             logger.error(f"### ORPHAN continuation failed: {e}")
+
+    _RELAYED_RUNS_MAX = 500
+
+    async def _relay_offline_completion(self, text, session_key, run_ids):
+        """Hand a completion no browser received to the tenant's own agent.
+
+        Fire-and-forget chat.send (same shape as _send_steer) on the default
+        agent's dedicated _OFFLINE_RELAY_SESSION; its events match no
+        subscription and are dropped by the dispatcher, so nothing leaks into
+        a voice stream. At most one relay per subagent runId. Returns True if
+        a relay was sent.
+        """
+        if session_key == _OFFLINE_RELAY_SESSION or _OFFLINE_RELAY_MARKER in (text or ''):
+            logger.info("### OFFLINE RELAY skipped — relay-originated turn")
+            return False
+        relayed = self._relayed_runs
+        fresh = [r for r in run_ids if r and r not in relayed]
+        if not fresh:
+            logger.info(f"### OFFLINE RELAY skipped — already relayed {list(run_ids)}")
+            return False
+        if not self._connected or not self._ws or not self._dispatcher:
+            logger.warning("### OFFLINE RELAY skipped — gateway not connected")
+            return False
+        for r in fresh:
+            relayed[r] = time.time()
+        while len(relayed) > self._RELAYED_RUNS_MAX:
+            relayed.pop(next(iter(relayed)))
+        chat_id = str(uuid.uuid4())
+        try:
+            await self._dispatcher.send(self._ws, {
+                "type": "req",
+                "id": f"relay-{chat_id}",
+                "method": "chat.send",
+                "params": {
+                    "message": _PROMPT_ARMOR + _OFFLINE_RELAY_MSG.format(summary=text[:1500]),
+                    "sessionKey": self._wire_session_key(_OFFLINE_RELAY_SESSION),
+                    "idempotencyKey": chat_id,
+                },
+            })
+        except Exception as e:
+            for r in fresh:
+                relayed.pop(r, None)  # allow a later continuation to retry
+            logger.warning(f"### OFFLINE RELAY send failed: {e}")
+            return False
+        logger.info(f"### OFFLINE RELAY sent to own agent (runs={fresh}, "
+                    f"from_session={session_key}): {text[:120]}")
+        return True
 
     async def _send_abort(self, run_id, session_key, reason="voice-disconnect"):
         """Send chat.abort for a specific run via the dispatcher's send lock."""
