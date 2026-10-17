@@ -326,8 +326,9 @@ _OFFLINE_RELAY_MARKER = '[OFFLINE_RELAY]'
 _OFFLINE_RELAY_MSG = (
     _OFFLINE_RELAY_MARKER + " The owner is offline. This finished while they "
     "were away: {summary}\n\nIf it is something they asked for, text them the "
-    "result and its /pages/ link from your own number, once. If it is not, "
-    "do nothing."
+    "result and its /pages/ link the way you normally text them (your usual "
+    "owner channel and identity, never a company line), once. If they already "
+    "have it, or it is not for them, do nothing."
 )
 
 
