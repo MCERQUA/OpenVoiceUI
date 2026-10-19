@@ -315,6 +315,15 @@ _SUBAGENT_NUDGE_MSG = (
     "steps — just the outcome."
 )
 
+# How long the orphan continuation waits for the parent's reply to the nudge.
+# It was 180 s; a parent turn after a timed-out child has been measured at
+# 303 s, and on expiry with no text the continuation returned before any push
+# receipt or relay, so the completion was lost again without a trace. Matches
+# agents.defaults.subagents.announceTimeoutMs (600000) on hosted gateways.
+# Nobody is waiting on this stream (the owner's request is already gone), so
+# a longer wait costs nothing user-visible.
+_ORPHAN_COLLECT_S = 600
+
 # Offline relay — a subagent result that finished while no browser was
 # connected is handed to the tenant's OWN agent (default agent, in a session
 # of its own) so it can reach the owner on the owner's channel from the
@@ -1119,7 +1128,7 @@ class GatewayConnection:
                             f"(session={session_key}, chat_id={cont_chat_id[:8]})")
                 collected_text = ''
                 prev_len = 0
-                deadline = time.time() + 180
+                deadline = time.time() + _ORPHAN_COLLECT_S
                 while time.time() < deadline:
                     try:
                         data = await asyncio.wait_for(sub.event_queue.get(), timeout=10.0)
@@ -1166,6 +1175,12 @@ class GatewayConnection:
                 self._dispatcher.unsubscribe(cont_chat_id)
 
             text = _strip_internal_markers(collected_text or '')
+            if not text and time.time() >= deadline:
+                logger.warning(
+                    f"### ORPHAN continuation: no reply within {_ORPHAN_COLLECT_S}s "
+                    f"(session={session_key}, runs={list(run_ids)}) — completion "
+                    f"NOT pushed or relayed")
+                return
             if not text or is_system_response(text):
                 logger.info("### ORPHAN continuation: no user-facing text — nothing to push")
                 return

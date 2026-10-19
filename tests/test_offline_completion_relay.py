@@ -304,3 +304,50 @@ class TestOfflineRelay:
 
         asyncio.run(go())
         assert seen == [("main", ("sub-a", "sub-b"))]
+
+
+class _FakeClock:
+    """gw.time stand-in: real module, but time() can be pushed forward."""
+    def __init__(self):
+        self.offset = 0.0
+
+    def time(self):
+        return time.time() + self.offset
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+class TestSlowParentTurn:
+    def test_parent_reply_after_300s_is_still_relayed(self, fast_sleep, handler, monkeypatch):
+        # A parent turn after a timed-out child has been measured at 303 s.
+        # With a 180 s collect deadline the continuation gave up with no text
+        # and returned before any receipt or relay: the completion was lost.
+        clock = _FakeClock()
+        monkeypatch.setattr(gw, "time", clock)
+        calls, state = handler
+        conn = _conn()
+
+        async def slow_reply(frame):
+            if frame.get("method") != "chat.send" or not frame["id"].startswith("chat-"):
+                return
+            d = conn._dispatcher
+            clock.offset += 303          # the parent's turn takes 303 s
+            await d._route({"type": "res", "id": frame["id"], "ok": True,
+                            "payload": {"runId": "cont-run", "status": "started"}})
+            await d._route({"type": "event", "event": "agent", "payload": {
+                "runId": "cont-run", "sessionKey": CANON_MAIN, "stream": "assistant",
+                "data": {"text": "The takeoff is done."}}})
+            await d._route({"type": "event", "event": "chat", "payload": {
+                "runId": "cont-run", "sessionKey": CANON_MAIN, "state": "final"}})
+
+        conn._ws.on_send = slow_reply
+
+        async def go():
+            await conn._run_orphan_continuation("main", ("sub-run-slow",))
+            await _settle(conn, 1, calls)
+
+        asyncio.run(asyncio.wait_for(go(), timeout=15))
+        assert gw._ORPHAN_COLLECT_S >= 600
+        assert [c[2] for c in calls] == ["sub-run-slow"], "the slow reply was pushed"
+        assert len(_relays(conn)) == 1, "and relayed when nobody received it"
