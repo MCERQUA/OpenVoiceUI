@@ -1670,6 +1670,24 @@ def _action_timestamped_lyrics(_q, body: dict):
 
     _log = {'via': 'action', 'task_id': task_id, 'audio_id': audio_id,
             'filename': src['filename'] or None}
+    # Serialize per clip: the second of two concurrent requests then sees the first's saved result.
+    with suno_lyrics.audio_lock(audio_id):
+        # REUSE BEFORE BUYING (2026-10-18, mike): this path used to call Suno unconditionally, so
+        # a clip the generation leg had just paid for was charged again (both clips of two
+        # generations, 0.5 credit each). Word timings never expire and are kept at the first fetch.
+        have = suno_lyrics.saved_result(src['filename'], audio_id)
+        if have:
+            logger.info(f'Suno timestamped_lyrics: {audio_id[:8]} already owned - no paid call')
+            return jsonify({'action': 'timestamped_lyrics', 'cached': True, 'data': have,
+                            'response': 'Got timestamped lyrics (saved copy, no new charge).'})
+        if suno_lyrics.fetch_in_flight(audio_id):
+            return jsonify({'action': 'error', 'in_flight': True,
+                            'response': 'Word timings for this track are being fetched right now - try again in a moment.'})
+        return _paid_timestamped_lyrics(task_id, audio_id, src, _log)
+
+
+def _paid_timestamped_lyrics(task_id: str, audio_id: str, src: dict, _log: dict):
+    """The ONE paid explicit fetch. Caller holds suno_lyrics.audio_lock(audio_id)."""
     try:
         resp = suno_lyrics.post_timestamped_lyrics(task_id, audio_id, SUNO_API_KEY)
         logger.info(f'Suno timestamped_lyrics response: {resp.status_code} {resp.text[:300]}')
@@ -1689,6 +1707,8 @@ def _action_timestamped_lyrics(_q, body: dict):
                               'http_status': 200, 'suno_code': 200,
                               'aligned_words': len(_aw) or None,
                               'credits': suno_lyrics.credits_from(data)})
+        suno_lyrics.record_paid_result(task_id=task_id, audio_id=audio_id, filename=src['filename'],
+                                       aligned=_aw, via='action')
         _provider_receipt('timestamped_lyrics')
         return jsonify({
             'action': 'timestamped_lyrics',
