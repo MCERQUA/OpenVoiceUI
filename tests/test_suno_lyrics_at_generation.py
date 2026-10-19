@@ -346,3 +346,86 @@ def test_background_thread_really_runs(env, monkeypatch):
     t.join(5)
     assert len(env.fake.lyrics_calls) == 1
     assert (env.cache / 'lyrics-bg.json').exists()
+
+
+# ── (g) the explicit action reuses what the generation leg already bought ─────────────────
+# 2026-10-18 mike: a local client asked for timestamped lyrics for both clips of two fresh
+# generations. The generation leg had paid for the first clip of each; the action path called
+# Suno unconditionally, so those two clips were charged twice (0.5 credit each).
+
+def _action(client, **body):
+    return client.post('/api/suno', json={'action': 'timestamped_lyrics', **body}).get_json()
+
+
+def test_action_after_generation_reuses_the_saved_words_and_makes_no_second_call(client, env):
+    env.fake.record_info['task-g1'] = [_clip('audio-g1'), _clip('audio-g1b')]
+    assert _poll(client, _job('task-g1', title='Gen One'))['action'] == 'complete'
+    assert len(env.fake.lyrics_calls) == 1                         # the generation leg's call
+    (env.music / 'generated_metadata.json').write_text(json.dumps(
+        {'gen-one.mp3': {'title': 'Gen One', 'suno_id': 'audio-g1', 'task_id': 'task-g1'}}))
+
+    # by filename (what the sing-along page sends) AND by explicit ids (what the 10-18 caller sent)
+    for body in ({'filename': 'gen-one.mp3'}, {'task_id': 'task-g1', 'audio_id': 'audio-g1'}):
+        r = _action(client, **body)
+        assert r['action'] == 'timestamped_lyrics', (body, r)
+        assert r['cached'] is True
+        assert r['data']['alignedWords'] == ALIGNED               # the exact paid payload, kept
+
+    assert len(env.fake.lyrics_calls) == 1                        # still just the one purchase
+    assert [r['via'] for r in _log_rows(env)] == ['generation']   # and the log agrees
+
+
+def test_action_on_the_second_clip_pays_once_then_reuses_and_blocks_the_generation_leg(client, env):
+    # audio-g2b has no file/metadata (only the first clip is downloaded): ids only.
+    r = _action(client, task_id='task-g2', audio_id='audio-g2b')
+    assert r['action'] == 'timestamped_lyrics' and not r.get('cached')
+    assert len(env.fake.lyrics_calls) == 1
+    assert _marker(env, 'audio-g2b')['via'] == 'action'
+
+    again = _action(client, task_id='task-g2', audio_id='audio-g2b')
+    assert again['cached'] is True and again['data']['alignedWords'] == ALIGNED
+    assert len(env.fake.lyrics_calls) == 1
+
+    # a late generation-leg completion for the same clip is a no-op too (marker is shared)
+    out = suno_lyrics.fetch_once(task_id='task-g2', audio_id='audio-g2b', filename='g2b.mp3',
+                                 lyrics='la', api_key='test-key')
+    assert out == 'skipped-duplicate' and len(env.fake.lyrics_calls) == 1
+
+
+def test_concurrent_actions_for_one_clip_make_one_call(client, env):
+    env.fake.delay = 0.2
+    results = []
+
+    def go():
+        results.append(_action(client, task_id='task-g3', audio_id='audio-g3'))
+    ts = [threading.Thread(target=go) for _ in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(env.fake.lyrics_calls) == 1
+    assert sorted(bool(r.get('cached')) for r in results) == [False, True, True, True]
+
+
+def test_song_fetched_before_raw_words_were_kept_is_served_from_its_cache_lines(client, env):
+    # A pre-fix song: sing-along cache (source suno) exists, no raw-words file.
+    (env.music / 'generated_metadata.json').write_text(json.dumps(
+        {'old.mp3': {'title': 'Old', 'suno_id': 'audio-old', 'task_id': 'task-old'}}))
+    suno_lyrics.write_cache('old.mp3', suno_lyrics.lines_from_aligned(ALIGNED), len(ALIGNED),
+                            'task-old', 'audio-old')
+    r = _action(client, filename='old.mp3')
+    assert r['action'] == 'timestamped_lyrics' and r['cached'] is True
+    assert r['data']['source'] == 'cache' and r['data']['lines']
+    assert env.fake.lyrics_calls == []
+
+
+def test_a_fresh_pending_claim_blocks_the_explicit_action_but_a_stale_one_does_not(client, env):
+    suno_lyrics._claim('audio-g5', {'task_id': 't', 'audio_id': 'audio-g5', 'state': 'pending',
+                                    'called': True})
+    r = _action(client, task_id='task-g5', audio_id='audio-g5')
+    assert r['action'] == 'error' and r['in_flight'] is True and env.fake.lyrics_calls == []
+
+    mp = suno_lyrics.marker_path('audio-g5')
+    old = json.loads(mp.read_text())
+    old['ts'] = time.time() - suno_lyrics.PENDING_WAIT_S - 5
+    mp.write_text(json.dumps(old))
+    assert _action(client, task_id='task-g5', audio_id='audio-g5')['action'] == 'timestamped_lyrics'
+    assert len(env.fake.lyrics_calls) == 1

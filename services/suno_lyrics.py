@@ -25,6 +25,12 @@ never waits on it. `fetch_once()`:
     (host: /mnt/clients/<tenant>/openvoiceui/generated_music/suno-lyrics-calls.jsonl).
     Only real HTTP attempts are logged, so the line count IS the paid-call count.
 
+THE EXPLICIT ACTION (routes/suno.py action=timestamped_lyrics) REUSES, never re-buys: the raw
+alignedWords of every paid fetch are kept at canvas-pages/_data/singalong/.suno-lyrics-aligned/
+<audio_id>.json (alignment data never expires), and the action serves that copy (or the sing-along
+cache lines for songs fetched before this existed) before it will call Suno. A fresh 'pending'
+marker means a fetch is in flight: the action declines instead of paying a second time.
+
 MARKER CONTRACT (read by the host sync — keep the two in step)
   canvas-pages/_data/singalong/.suno-lyrics-markers/<audio_id>.json
   {"state": "pending"|"ok"|"instrumental"|"failed", "ts": <epoch>, "task_id", "audio_id",
@@ -60,6 +66,8 @@ TIMESTAMPED_LYRICS_PATH = '/api/v1/generate/get-timestamped-lyrics'
 CACHE_DIR = CANVAS_PAGES_DIR / '_data' / 'singalong'
 CALL_LOG = GENERATED_MUSIC_DIR / 'suno-lyrics-calls.jsonl'
 MARKER_DIRNAME = '.suno-lyrics-markers'
+ALIGNED_DIRNAME = '.suno-lyrics-aligned'      # raw alignedWords per audioId: the paid result, kept
+PENDING_WAIT_S = 180                          # a claim younger than this is a fetch still in flight
 HOST_SYNC_STATE = '.suno-sync-state.json'      # written by the host sync, keyed by filename
 VIA = 'openvoiceui-generation'
 
@@ -80,6 +88,55 @@ def cache_path(filename: str) -> Path:
 def marker_path(audio_id: str) -> Path:
     safe = re.sub(r'[^A-Za-z0-9_\-]', '_', audio_id or '')[:128]
     return CACHE_DIR / MARKER_DIRNAME / f'{safe}.json'
+
+
+def aligned_path(audio_id: str) -> Path:
+    safe = re.sub(r'[^A-Za-z0-9_\-]', '_', audio_id or '')[:128]
+    return CACHE_DIR / ALIGNED_DIRNAME / f'{safe}.json'
+
+
+def save_aligned(audio_id: str, task_id: str, aligned: list, filename: str = '') -> None:
+    """Keep the raw word timings Suno was paid to produce, keyed by audioId (atomic).
+
+    WHY: the sing-along cache stores only derived `lines`, so a second caller that wanted the
+    raw alignedWords (the explicit timestamped_lyrics action) had to buy them again. 2026-10-18
+    mike: both clips of two generations were each charged twice. Never raises."""
+    if not (audio_id and aligned):
+        return
+    p = aligned_path(audio_id)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(f'.json.tmp-{os.getpid()}-{threading.get_ident()}')
+        tmp.write_text(json.dumps({'audio_id': audio_id, 'task_id': task_id,
+                                   'filename': filename or None, 'saved': _now_iso(),
+                                   'alignedWords': aligned}))
+        os.replace(tmp, p)
+    except OSError as exc:
+        logger.warning(f'suno aligned words not saved ({p}): {exc}')
+
+
+def load_aligned(audio_id: str) -> list | None:
+    """The saved alignedWords for this audioId, or None. A corrupt file reads as absent."""
+    p = aligned_path(audio_id)
+    if not p.exists():
+        return None
+    try:
+        aw = json.loads(p.read_text()).get('alignedWords')
+    except Exception:  # noqa: BLE001
+        return None
+    return aw if isinstance(aw, list) and aw else None
+
+
+def fetch_in_flight(audio_id: str) -> bool:
+    """True while another leg holds a fresh 'pending' claim for this audioId (its paid call
+    has been, or is about to be, made). Buying again now would be the double charge."""
+    mk = read_marker(audio_id) or {}
+    if mk.get('state') != 'pending':
+        return False
+    try:
+        return (time.time() - float(mk.get('ts') or 0)) < PENDING_WAIT_S
+    except (TypeError, ValueError):
+        return False
 
 
 def is_instrumental_lyrics(lyrics) -> bool:
@@ -271,6 +328,50 @@ def known_instrumental(filename: str = '', audio_id: str = '') -> bool:
     return False
 
 
+_audio_locks: dict = {}
+_audio_locks_guard = threading.Lock()
+
+
+def audio_lock(audio_id: str) -> threading.Lock:
+    """One lock per audioId, so two concurrent explicit requests for the same clip serialize
+    (the second then finds the first's saved result instead of buying again)."""
+    with _audio_locks_guard:
+        return _audio_locks.setdefault(audio_id, threading.Lock())
+
+
+def saved_result(filename: str, audio_id: str) -> dict | None:
+    """What we already own for this clip, so an explicit request needs no paid call.
+
+    {'alignedWords': [...]}  the raw timings saved at the first paid fetch (preferred), or
+    {'lines': [...], 'source': 'cache'}  songs fetched before raw words were kept: the sing-along
+    cache still holds the derived lines. None = we own nothing usable, a paid call is justified."""
+    aw = load_aligned(audio_id)
+    if aw:
+        return {'alignedWords': aw}
+    if filename:
+        p = cache_path(filename)
+        try:
+            c = json.loads(p.read_text()) if p.exists() else None
+        except Exception:  # noqa: BLE001
+            c = None
+        if c and c.get('source') == 'suno' and isinstance(c.get('lines'), list) and c['lines']:
+            return {'lines': c['lines'], 'source': 'cache'}
+    return None
+
+
+def record_paid_result(*, task_id: str, audio_id: str, filename: str, aligned: list, via: str) -> None:
+    """After ANY paid fetch outside fetch_once (the explicit action): keep the words and mark the
+    clip handled so the generation leg and the host sync do not buy it again."""
+    save_aligned(audio_id, task_id, aligned, filename)
+    try:
+        marker_path(audio_id).parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning(f'suno lyrics marker dir unwritable: {exc}')
+    _finish_marker(audio_id, {'task_id': task_id, 'audio_id': audio_id, 'filename': filename or None,
+                              'kind': 'song', 'via': via, 'state': 'ok' if aligned else 'instrumental',
+                              'called': True, 'aligned_words': len(aligned) or None})
+
+
 # ── the generation-time fetch ────────────────────────────────────────────────
 
 def fetch_once(*, task_id: str, audio_id: str, filename: str, lyrics: str = '',
@@ -340,6 +441,7 @@ def fetch_once(*, task_id: str, audio_id: str, filename: str, lyrics: str = '',
                     state = 'instrumental'              # Suno: nothing to align
                 else:
                     n_aligned = len(aw)
+                    save_aligned(audio_id, task_id, aw, filename)     # paid for: keep it
                     lines = lines_from_aligned(aw)
                     if not lines:
                         state = 'instrumental'          # only [Section] tags aligned
