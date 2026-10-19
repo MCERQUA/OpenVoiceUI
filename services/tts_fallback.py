@@ -41,6 +41,7 @@ _DEFAULT_FALLBACK: Dict[str, Any] = {
         "groq": "supertonic",
         "qwen3": "groq",
         "qwen3-local": "groq",
+        "qwen3-mlx": "groq",
         "resemble": "groq",
         "elevenlabs": "groq",
     },

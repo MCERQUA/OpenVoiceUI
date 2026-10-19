@@ -274,6 +274,10 @@ def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
         if len(text) > 400:
             return generate_tts_chunked(provider, text, voice, max_chars=400)
         return provider.generate_speech(text=text, voice=voice)
+    # qwen3-mlx splits per sentence itself (one request per sentence keeps the
+    # cloned voice from drifting) and returns one stitched WAV.
+    if tts_provider == 'qwen3-mlx':
+        return provider.generate_speech(text=text, voice=voice)
     # Cloud providers returning MP3 (groq, elevenlabs) handle their own limits
     if audio_format == 'mp3':
         return provider.generate_speech(text=text, voice=voice)
@@ -339,7 +343,7 @@ def generate_tts_b64(
     # (see _generate_with_provider) keeps each request short, so 2 attempts against
     # the now-30s STREAM_TIMEOUT is the sane ceiling. Other cloud providers
     # (groq/elevenlabs/qwen3) also get 2.
-    if tts_provider in ('resemble', 'groq', 'qwen3', 'qwen3-local', 'elevenlabs'):
+    if tts_provider in ('resemble', 'groq', 'qwen3', 'qwen3-local', 'qwen3-mlx', 'elevenlabs'):
         max_attempts = 2
     else:
         max_attempts = _MAX_RETRIES + 1
