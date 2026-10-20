@@ -27,6 +27,19 @@ stream_to_queue() must put dicts onto event_queue in this order:
    'response': str | None,
    'actions': list}
   {'type': 'error', 'error': str}            on failure instead of text_done
+
+Optional text_done flag — 'deferred': True
+  Set it, with response '' (or None), when the gateway ends the turn ON
+  PURPOSE with nothing to say yet: the agent still holds the words and will
+  deliver them later through its own proactive push channel. conversation.py
+  then ends the turn silently — no empty-retry, no fallback LLM call, no
+  substituted line, no TTS, no saved assistant turn — and tells the frontend
+  {'type': 'no_audio', 'deferred': True}. Never set it to mean "I failed":
+  an empty text_done WITHOUT deferred still takes the empty-response recovery
+  path, and that is the right signal for a failure. Ignored when the
+  response is non-empty or 'error' is set.
+
+  {'type': 'text_done', 'response': '', 'deferred': True, 'actions': list}
 """
 
 import queue

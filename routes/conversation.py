@@ -2289,6 +2289,9 @@ def _conversation_inner():
     _gateway_message_with_suno = _suno_prefix + _gateway_message if _suno_prefix else _gateway_message
     message_with_context = context_prefix + _gateway_message_with_suno if context_prefix else _gateway_message_with_suno
     ai_response = None
+    # True when the gateway ended the turn on purpose with no reply
+    # (text_done deferred=True) — see the streaming DEFERRED branch.
+    _deferred_turn = False
     captured_actions = []
 
     # ── PRIMARY PATH: Gateway (routed by gateway_id from request/profile) ──
@@ -2752,6 +2755,53 @@ def _conversation_inner():
 
                         if evt['type'] == 'text_done':
                             logger.info(f"### TEXT_DONE received. response={len(evt.get('response', '') or '')} chars, _tts_pending={len(_tts_pending)}, _tts_buf={repr(_tts_buf[:80])}")
+                            # ── DEFERRED turn: the gateway ended this turn on purpose ──
+                            # A gateway sets deferred=True with an empty response when
+                            # the agent is still holding the words and will answer later
+                            # through its own proactive push channel. That is NOT a
+                            # failure: no empty-retry, no fallback LLM, no substituted
+                            # line, no TTS (NO FAKE REPLIES — Mike 2026-10-20). End the
+                            # turn silently, tell the frontend there is no audio, log
+                            # metrics, and save nothing (there is no assistant turn yet).
+                            # Gateways that never set `deferred` never enter this branch.
+                            if evt.get('deferred') and not evt.get('error') \
+                                    and not (evt.get('response') or '').strip():
+                                metrics['llm_inference_ms'] = int((time.time() - t_llm_start) * 1000)
+                                metrics['tool_count'] = sum(
+                                    1 for a in captured_actions
+                                    if a.get('type') == 'tool' and a.get('phase') == 'start'
+                                )
+                                metrics['profile'] = 'gateway-deferred'
+                                metrics['deferred'] = 1
+                                metrics['response_len'] = 0
+                                if _tts_pending or _tts_buf.strip():
+                                    logger.info(
+                                        f"### DEFERRED: discarding {len(_tts_pending)} pending TTS "
+                                        f"chunk(s) + buffer {len(_tts_buf)} chars (deferred turn speaks nothing)"
+                                    )
+                                _tts_buf = ''
+                                _tts_pending = []
+                                logger.info(
+                                    f"### DEFERRED TURN — gateway={gateway_id or 'openclaw'} "
+                                    f"ended the turn with no reply on purpose "
+                                    f"({metrics['llm_inference_ms']}ms, tools={metrics['tool_count']}); "
+                                    f"answer will arrive via push — no retry, no fallback, no TTS"
+                                )
+                                yield json.dumps({
+                                    'type': 'text_done',
+                                    'response': '',
+                                    'deferred': True,
+                                    'actions': captured_actions,
+                                    'timing': {
+                                        'handshake_ms': metrics.get('handshake_ms'),
+                                        'llm_ms': metrics.get('llm_inference_ms'),
+                                    }
+                                }) + '\n'
+                                yield json.dumps({'type': 'no_audio', 'deferred': True}) + '\n'
+                                metrics['total_ms'] = int((time.time() - t_request_start) * 1000)
+                                log_metrics(metrics)
+                                break
+
                             # Handle LLM/gateway errors with a spoken fallback
                             if evt.get('error') and not evt.get('response'):
                                 error_msg = evt['error']
@@ -3620,9 +3670,12 @@ def _conversation_inner():
                         ai_response = evt.get('response')
                         if ai_response:
                             ai_response = normalize_action_tags(ai_response)
+                        if evt.get('deferred') and not evt.get('error') \
+                                and not (ai_response or '').strip():
+                            _deferred_turn = True
                     elif evt['type'] == 'handshake':
                         metrics['handshake_ms'] = evt['ms']
-                if not ai_response:
+                if not ai_response and not _deferred_turn:
                     # Turn failed — re-arm any consumed recovery prime so the
                     # next request still carries the conversation context.
                     restore_recovery_prime(_recovery_prime)
@@ -3645,6 +3698,25 @@ def _conversation_inner():
 
         except Exception as e:
             logger.error(f'Failed to call Clawdbot Gateway: {e}')
+
+    # ── DEFERRED: gateway ended the turn on purpose, answer comes via push ──
+    # NO FAKE REPLIES: no flash fallback, no generic line, no TTS, nothing saved.
+    if _deferred_turn:
+        metrics['profile'] = 'gateway-deferred'
+        metrics['response_len'] = 0
+        metrics['total_ms'] = int((time.time() - t_request_start) * 1000)
+        logger.info('### DEFERRED TURN (non-streaming) — no reply, no fallback, no TTS')
+        log_metrics(metrics)
+        _deferred_data = {'response': '', 'deferred': True, 'user_said': user_message}
+        if captured_actions:
+            _deferred_data['actions'] = captured_actions
+        _deferred_data['timing'] = {
+            'handshake_ms': metrics.get('handshake_ms'),
+            'llm_ms': metrics.get('llm_inference_ms'),
+            'tts_ms': None,
+            'total_ms': metrics.get('total_ms'),
+        }
+        return jsonify(_deferred_data)
 
     # ── FALLBACK: Z.AI direct (glm-5-flash, no tools) ───────────────────
     if not ai_response:
