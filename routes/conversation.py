@@ -1127,6 +1127,16 @@ PROMISE_RE = re.compile(
 )
 
 
+def gateway_reports_tools(gateway_id) -> bool:
+    """True only for the OpenClaw gateway, the one gateway that reports tool_count.
+    A plugin gateway (comms-brain, hermes, ...) always reports 0 tools, so the
+    uncommitted-promise detector would fire on every "I'll ..." reply it gives and
+    send a bracket-only [SYSTEM: ...] steer it was never built to answer. Measured on
+    test-dev 2026-10-20 01:14-01:21Z: comms-brain answered each steer with its own
+    "Sorry, I didn't catch that." 4 times in 7 minutes, spoken after real replies."""
+    return gateway_id in (None, 'openclaw')
+
+
 def is_uncommitted_promise(text, tool_count, llm_ms):
     """True when a reply promised work it did not do: it says "I'll / let me <verb>",
     called ZERO tools, carried no work-doing action tag, took >1s (instant
@@ -2949,6 +2959,7 @@ def _conversation_inner():
                                     )
                             if (
                                 not getattr(stream_response, '_continued', False)
+                                and gateway_reports_tools(gateway_id)
                                 and is_uncommitted_promise(
                                     full_response,
                                     metrics.get('tool_count', 0),
