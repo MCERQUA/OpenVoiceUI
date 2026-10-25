@@ -15,7 +15,7 @@ import re
 import shutil
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 import mimetypes
 from pathlib import Path
 
@@ -1641,8 +1641,11 @@ def handle_page_metadata(page_id):
             created_str = page.get('created', '')
             if created_str:
                 try:
-                    created_dt = datetime.fromisoformat(created_str)
-                    age_seconds = (datetime.now() - created_dt).total_seconds()
+                    created_dt = datetime.fromisoformat(created_str.replace('Z', '+00:00'))
+                    # Compare like with like: naive values come from datetime.now() on this
+                    # same clock; tz-aware ones (meshy, custom faces) against aware UTC.
+                    now = datetime.now(timezone.utc) if created_dt.tzinfo else datetime.now()
+                    age_seconds = (now - created_dt).total_seconds()
                     if age_seconds < 30:
                         return jsonify({
                             'error': 'Cannot make a page public within 30 seconds of creation. '

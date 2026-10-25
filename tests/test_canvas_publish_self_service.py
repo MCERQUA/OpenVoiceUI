@@ -15,7 +15,7 @@ tenant's. Admin identity is patched at ``services.auth.is_admin_user``.
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -394,3 +394,38 @@ class TestAuthRequiredNamesAcceptedCredentials:
         assert body['code'] == 'auth_required'
         assert any('X-Agent-Key' in c for c in body['accepted_credentials'])
         assert 'locked' not in json.dumps(body).lower()
+
+
+# ---------------------------------------------------------------------------
+# 30 s cooldown reads tz-aware 'created' values (meshy/custom-faces write UTC
+# offsets; ~12% of live manifest entries). A naive-minus-aware subtraction used
+# to raise TypeError, which the fail-closed branch turned into a 409 on a
+# perfectly valid publish.
+# ---------------------------------------------------------------------------
+
+class TestCooldownCreatedFormats:
+    @pytest.mark.parametrize('created', ['2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00Z',
+                                         '2026-01-01T05:30:00+05:30'])
+    def test_old_tz_aware_created_publishes(self, canvas_env, app_client, created):
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'deliverable.html').write_text('<p>done</p>')
+        _write_manifest(manifest_path, {'deliverable': _entry(is_locked=False, created=created)})
+        resp = _agent_patch(app_client, 'deliverable', {'is_public': True})
+        assert resp.status_code == 200, resp.get_json()
+
+    def test_fresh_tz_aware_created_still_hits_cooldown(self, canvas_env, app_client):
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'deliverable.html').write_text('<p>done</p>')
+        fresh = datetime.now(timezone.utc).isoformat()
+        _write_manifest(manifest_path, {'deliverable': _entry(is_locked=False, created=fresh)})
+        resp = _agent_patch(app_client, 'deliverable', {'is_public': True})
+        assert resp.status_code == 429
+        assert resp.get_json()['code'] == 'publish_cooldown'
+
+    def test_unparseable_created_still_fails_closed(self, canvas_env, app_client):
+        canvas, pages_dir, manifest_path = canvas_env
+        (pages_dir / 'deliverable.html').write_text('<p>done</p>')
+        _write_manifest(manifest_path, {'deliverable': _entry(is_locked=False, created='not-a-date')})
+        resp = _agent_patch(app_client, 'deliverable', {'is_public': True})
+        assert resp.status_code == 409
+        assert resp.get_json()['code'] == 'created_unverifiable'
