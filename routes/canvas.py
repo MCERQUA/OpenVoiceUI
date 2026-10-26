@@ -1049,11 +1049,13 @@ def canvas_pages_proxy(path):
         if resolved is None:
             return 'Invalid path', 400
         # Slug-only URLs (no extension): redirect to .html so shared client links work.
-        if not resolved.exists() and not path.endswith('.html') and '.' not in Path(path).name:
+        # is_file(), not exists(): a DIRECTORY with the same name as a page (pages/foo/ beside foo.html) used to
+        # block this redirect and then 500 on open() ('Is a directory'). Measured on josh 2026-10-26.
+        if not resolved.is_file() and not path.endswith('.html') and '.' not in Path(path).name:
             html_resolved = _safe_canvas_path(str(CANVAS_PAGES_DIR), path + '.html')
             if html_resolved and html_resolved.exists():
                 return redirect('/pages/' + path + '.html', code=301)
-        if resolved.exists():
+        if resolved.is_file():
             # HTML files need custom processing (script stripping, CSS/error injection)
             if path.endswith('.html'):
                 with open(resolved, 'rb') as f:
