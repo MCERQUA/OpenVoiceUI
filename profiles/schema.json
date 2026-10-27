@@ -479,7 +479,7 @@
           ],
           "maxLength": 500,
           "default": null,
-          "description": "Text spoken on session start. null = random pool. '' = silent connect."
+          "description": "Optional STYLE HINT (tone only) for the session-start greeting. The agent always generates its own greeting, personal to the signed-in user and current context; this text is never spoken verbatim. null or '' = no hint."
         },
         "auto_hangup_silence_ms": {
           "type": [
