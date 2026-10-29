@@ -27,6 +27,7 @@ import re
 import sqlite3
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -1248,6 +1249,90 @@ def is_uncommitted_promise(text, tool_count, llm_ms):
     return bool(PROMISE_RE.search(text))
 
 
+# ── stream-offline-relay ────────────────────────────────────────────────────
+# A streamed reply that FINISHES after the browser dropped used to land in the
+# gateway history only: the stream generator died at its next write
+# (GeneratorExit), nobody read the rest of event_queue, and the owner was never
+# told. When the stream's client is gone before its final text_done was written,
+# a background thread waits for the turn's final reply and hands it to the SAME
+# delivery path as offline subagent completions (#549):
+# gateway.deliver_offline_completion -> server.push_proactive_message (browser
+# push + .proactive-push.jsonl receipt) -> delivered=0 -> _relay_offline_completion
+# (tenant's own agent; once per run id; skips relay-marker text and the relay
+# session; skips when the gateway is disconnected).
+# Never relayed: partial text (aborted / timed-out runs), errors, deferred
+# turns, system triggers (__session_start__ ...), system responses, and turns
+# the user deliberately aborted (/api/conversation/abort: stop, barge-in, PTT).
+_STREAM_RELAY_MAX_WAIT_S = 900      # gateway turns end by their own watchdogs well before this
+_STREAM_RELAY_ABORT_GRACE_S = 2.0   # the abort POST trails the fetch abort by ms
+_STREAM_RELAY_ABORT_WINDOW_S = 30   # disconnect is noticed at the next write (heartbeat <=10s)
+_last_user_abort_ts = 0.0
+
+
+def _offline_relay_text(evt):
+    """The completed final reply carried by a text_done event, or None when the
+    event must not be relayed (partial / error / deferred / empty / system)."""
+    if not evt or evt.get('type') != 'text_done':
+        return None
+    if evt.get('deferred') or evt.get('error') or evt.get('aborted') or evt.get('timed_out'):
+        return None
+    text = normalize_action_tags(evt.get('response') or '').strip()
+    if not text or is_system_response(text):
+        return None
+    return text
+
+
+def _stream_offline_relay(event_queue, done_evt, *, gateway_id, agent_id,
+                          session_key, run_id, t_request_start, t_disconnect):
+    """Background body of stream-offline-relay (see block comment above).
+
+    done_evt is the text_done the dead stream had already taken off
+    event_queue, or None when the turn is still running on event_queue."""
+    evt = done_evt
+    if evt is None:
+        deadline = time.time() + _STREAM_RELAY_MAX_WAIT_S
+        while time.time() < deadline:
+            try:
+                e = event_queue.get(timeout=min(30.0, max(0.1, deadline - time.time())))
+            except queue.Empty:
+                continue
+            etype = e.get('type')
+            if etype == 'text_done':
+                evt = e
+                break
+            if etype == 'error':
+                logger.info(f'### stream-offline-relay: turn errored after disconnect ({run_id}) — nothing to relay')
+                return
+        if evt is None:
+            logger.warning(f'### stream-offline-relay: no final reply within {_STREAM_RELAY_MAX_WAIT_S}s ({run_id})')
+            return
+    text = _offline_relay_text(evt)
+    if text is None:
+        logger.info(f'### stream-offline-relay: final event not relayable ({run_id})')
+        return
+    if _STREAM_RELAY_ABORT_GRACE_S:
+        time.sleep(_STREAM_RELAY_ABORT_GRACE_S)
+    if _last_user_abort_ts >= max(t_request_start, t_disconnect - _STREAM_RELAY_ABORT_WINDOW_S):
+        logger.info(f'### stream-offline-relay: skipped — user aborted this turn ({run_id})')
+        return
+    gw = gateway_manager.get(gateway_id)
+    deliver = getattr(gw, 'deliver_offline_completion', None)
+    if deliver is None:
+        logger.info(f'### stream-offline-relay: gateway {gateway_id or "openclaw"} has no offline delivery ({run_id})')
+        return
+    logger.info(f'### stream-offline-relay: reply finished after the client left — '
+                f'delivering ({len(text)} chars, {run_id}): {text[:120]}')
+    try:
+        deliver(text, session_key, (run_id,), agent_id=agent_id)
+    except Exception as e:
+        logger.warning(f'### stream-offline-relay: delivery failed ({run_id}): {e}')
+
+
+def _start_stream_offline_relay(**kwargs):
+    threading.Thread(target=_stream_offline_relay, kwargs=kwargs,
+                     name='stream-offline-relay', daemon=True).start()
+
+
 def strip_canvas_action_tags(text: str) -> str:
     """Strip [CANVAS_ACTION:{...JSON...}] tags via a brace walker.
 
@@ -2448,6 +2533,8 @@ def _conversation_inner():
 
             if wants_stream:
                 # ── STREAMING MODE ────────────────────────────────────────
+                _stream_state = {'done_q': None, 'done_evt': None}
+
                 def stream_response():
                     nonlocal ai_response, event_queue, t_llm_start
 
@@ -2844,6 +2931,11 @@ def _conversation_inner():
                             continue
 
                         if evt['type'] == 'text_done':
+                            # stream-offline-relay: remember the terminal event
+                            # of the turn running on THIS queue (a retry or
+                            # auto-continue swaps event_queue for a new one).
+                            _stream_state['done_q'] = event_queue
+                            _stream_state['done_evt'] = evt
                             logger.info(f"### TEXT_DONE received. response={len(evt.get('response', '') or '')} chars, _tts_pending={len(_tts_pending)}, _tts_buf={repr(_tts_buf[:80])}")
                             # ── DEFERRED turn: the gateway ended this turn on purpose ──
                             # A gateway sets deferred=True with an empty response when
@@ -3762,8 +3854,41 @@ def _conversation_inner():
                         else:
                             logger.info(f"### STREAM EXIT drained {len(_remaining_evts)} stale tts_ready wake-ping(s) (already flushed)")
 
+                def stream_with_offline_relay():
+                    """stream-offline-relay: pass every chunk through
+                    unchanged. Only when the client is gone (the WSGI server
+                    closes the iterator after a failed write -> GeneratorExit
+                    here) before a text_done was written is the turn's final
+                    reply handed to the offline delivery path."""
+                    inner = stream_response()
+                    text_done_sent = False
+                    try:
+                        for chunk in inner:
+                            yield chunk
+                            # Resumed = the server wrote this chunk.
+                            if not text_done_sent and isinstance(chunk, str) \
+                                    and '"type": "text_done"' in chunk[:40]:
+                                text_done_sent = True
+                    except GeneratorExit:
+                        inner.close()
+                        if not text_done_sent and not user_message.startswith('__'):
+                            _q = event_queue
+                            _done = _stream_state['done_evt'] if _stream_state['done_q'] is _q else None
+                            logger.warning(
+                                '### stream-offline-relay: client disconnected before the '
+                                'final reply was written — waiting for it in the background')
+                            _start_stream_offline_relay(
+                                event_queue=_q, done_evt=_done,
+                                gateway_id=gateway_id, agent_id=agent_id,
+                                session_key=_session_key,
+                                run_id=f'stream:{_session_key}:{uuid.uuid4().hex[:12]}',
+                                t_request_start=t_request_start,
+                                t_disconnect=time.time(),
+                            )
+                        raise
+
                 return Response(
-                    stream_response(),
+                    stream_with_offline_relay(),
                     mimetype='application/x-ndjson',
                     headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'}
                 )
@@ -3923,6 +4048,10 @@ def conversation_abort():
         source_text = body.get('text', '')
     except Exception:
         pass
+    # stream-offline-relay: a turn the user deliberately stopped is never
+    # relayed to them afterwards.
+    global _last_user_abort_ts
+    _last_user_abort_ts = time.time()
     gw = gateway_manager.get('openclaw')
     aborted = False
     if gw and hasattr(gw, 'abort_active_run'):

@@ -1186,20 +1186,47 @@ class GatewayConnection:
                 return
             logger.info(f"### ORPHAN continuation: pushing proactive message "
                         f"({len(text)} chars): {text[:120]}")
-            handler = _PROACTIVE_HANDLER
             loop = asyncio.get_running_loop()
             relay_ids = tuple(run_ids) or (cont_chat_id,)
 
             def _deliver():
-                delivered = handler(text, session_key, run_id=','.join(relay_ids))
-                if delivered == 0 and not isinstance(delivered, bool):
-                    asyncio.run_coroutine_threadsafe(
-                        self._relay_offline_completion(text, session_key, relay_ids),
-                        loop)
+                self.deliver_offline_completion(text, session_key, relay_ids, loop=loop)
 
             threading.Thread(target=_deliver, name='proactive-push', daemon=True).start()
         except Exception as e:
             logger.error(f"### ORPHAN continuation failed: {e}")
+
+    def deliver_offline_completion(self, text, session_key, run_ids, loop=None):
+        """Deliver a completed reply whose originating stream is gone.
+
+        Sync; callable from any thread. Pushes the text to connected browsers
+        through the registered proactive handler (server.push_proactive_message,
+        which writes the .proactive-push.jsonl receipt), and when that reached
+        nobody, relays it through the tenant's own agent
+        (_relay_offline_completion — at most once per run id). Shared by the
+        orphan subagent continuation and the conversation route's
+        stream-offline-relay. Returns the handler's delivered count, or None
+        when nothing was attempted.
+        """
+        if session_key == _OFFLINE_RELAY_SESSION:
+            # Loop guard: a relay turn's own reply is never pushed or relayed.
+            # (Marker text is refused inside _relay_offline_completion.)
+            logger.info("### OFFLINE delivery skipped — offline-relay session")
+            return None
+        handler = _PROACTIVE_HANDLER
+        if handler is None:
+            logger.info("### OFFLINE delivery skipped — no proactive handler registered")
+            return None
+        run_ids = tuple(run_ids)
+        delivered = handler(text, session_key, run_id=','.join(run_ids))
+        if delivered == 0 and not isinstance(delivered, bool):
+            loop = loop or self._loop
+            if loop is None:
+                logger.warning("### OFFLINE RELAY skipped — gateway loop not started")
+                return delivered
+            asyncio.run_coroutine_threadsafe(
+                self._relay_offline_completion(text, session_key, run_ids), loop)
+        return delivered
 
     _RELAYED_RUNS_MAX = 500
 
@@ -1711,7 +1738,9 @@ class GatewayConnection:
                     event_queue.put({
                         'type': 'text_done',
                         'response': collected_text if collected_text else None,
-                        'actions': captured_actions
+                        'actions': captured_actions,
+                        # Partial text of an aborted run — never relayed offline.
+                        'aborted': True,
                     })
                     return
 
@@ -1872,7 +1901,9 @@ class GatewayConnection:
 
         logger.warning(f"[GW] hard timeout. collected_text ({len(collected_text)} chars): {repr(collected_text[:200])}")
         if collected_text:
-            event_queue.put({'type': 'text_done', 'response': collected_text, 'actions': captured_actions})
+            # Partial text cut off by the hard timeout — never relayed offline.
+            event_queue.put({'type': 'text_done', 'response': collected_text,
+                             'actions': captured_actions, 'timed_out': True})
         else:
             await self._send_abort(sub.run_id or chat_id, session_key, "timeout")
             event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions})
@@ -2096,6 +2127,11 @@ class GatewayRouter:
         conn.stream_to_queue(event_queue, message, session_key,
                              captured_actions, agent_id=agent_id)
 
+    def deliver_offline_completion(self, text, session_key, run_ids, agent_id=None):
+        """See GatewayConnection.deliver_offline_completion."""
+        return self._get_connection(agent_id).deliver_offline_completion(
+            text, session_key, run_ids)
+
     def abort_active_run(self, session_key):
         """Abort the active run across all connections."""
         for conn in self._connections.values():
@@ -2233,6 +2269,12 @@ class OpenClawGateway(GatewayBase):
     def abort_active_run(self, session_key):
         """Abort the active run for the given session key."""
         return self._router.abort_active_run(session_key)
+
+    def deliver_offline_completion(self, text, session_key, run_ids, agent_id=None):
+        """Push a reply nobody's stream received to browsers, else relay it
+        through the tenant's own agent (stream-offline-relay)."""
+        return self._router.deliver_offline_completion(
+            text, session_key, run_ids, agent_id=agent_id)
 
     def send_steer(self, message, session_key):
         """Inject a message into the active run (steer mode).
