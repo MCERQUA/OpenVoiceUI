@@ -809,7 +809,9 @@
             bottom: 60px;
             right: 10px;
             width: 380px;
-            max-height: 50vh;
+            /* grows with the conversation up to the top of the screen (60px offset + 10px margin) */
+            max-height: calc(100vh - 70px);
+            max-height: calc(100dvh - 70px);
             z-index: 9999;
             background: rgba(0, 0, 0, 0.95);
             backdrop-filter: blur(10px);
@@ -872,6 +874,39 @@
             cursor: pointer; font-size: 18px; padding: 0 4px;
         }
         #transcript-panel .tp-close:hover { color: var(--text-primary); }
+        #transcript-panel form.tp-input-bar { margin: 0; }
+        /* Size + move (2026-11-01). Grip = fat, centred on the top border, thumb-sized touch zone. */
+        #transcript-panel .tp-grip {
+            flex: 0 0 auto;
+            height: 18px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: ns-resize;
+            touch-action: none;           /* the drag must not scroll the page */
+        }
+        #transcript-panel .tp-grip-bar {
+            width: 56px; height: 6px;
+            border-radius: var(--radius-full);
+            background: rgba(0, 136, 255, 0.45);
+            transition: background 0.2s, width 0.2s;
+        }
+        #transcript-panel .tp-grip:hover .tp-grip-bar,
+        #transcript-panel.tp-resizing .tp-grip-bar { background: var(--cyan); width: 72px; }
+        #transcript-panel.tp-resizing { transition: none !important; user-select: none; }
+        #transcript-panel .tp-dock {
+            display: none;
+            background: none; border: none; color: var(--text-secondary);
+            font-size: 16px; cursor: pointer; padding: 0 4px;
+        }
+        #transcript-panel .tp-dock:hover { color: var(--text-primary); }
+        #transcript-panel.tp-detached .tp-dock { display: inline-block; }
+        #transcript-panel.tp-detached { resize: both; min-width: 260px; min-height: 140px; }
+        @media (pointer: fine) and (min-width: 769px) {
+            #transcript-panel .tp-header { cursor: move; touch-action: none; }
+        }
+        @media (pointer: coarse) {
+            #transcript-panel .tp-grip { height: 28px; }      /* thumb target with the header below it */
+            #transcript-panel .tp-grip-bar { width: 64px; height: 7px; }
+        }
         #transcript-panel .tp-messages {
             flex: 1;
             overflow-y: auto;

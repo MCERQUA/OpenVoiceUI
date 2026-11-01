@@ -15,6 +15,10 @@ Safari 26.6.2 reached the server as multipart with content_length=0 (WebKit bugs
 static/sw.js re-issued every POST through respondWith(fetch(...)), and the bulk upload path sent
 the picker's disk-backed File instead of bytes the page had read. The test fails on both.
 
+tests/js/transcript-panel-input.test.js covers the chat panel text box: it must be a form so Enter, a phone's
+Send key and the send icon all submit once, every other button in it must be type="button", it opens by
+default and can grow to the top of the screen, and dock() must undo a detach completely.
+
 tests/js/safe-redirect.test.js covers the post-login ?redirect= target. The login shell sends a
 browser back there after it refreshes a stale session, and a bare startsWith('/') check let
 protocol-relative targets ('//host', '/\\host', '/<tab>/host') send it to another origin.
@@ -36,6 +40,7 @@ JS_TESTS = Path(__file__).resolve().parent / "js"
 @pytest.mark.parametrize("name", [
     "deepgram-streaming-ptt.test.js",
     "ptt-button-standalone.test.js",
+    "transcript-panel-input.test.js",
     "upload-body-ios.test.js",
     "safe-redirect.test.js",
 ])
