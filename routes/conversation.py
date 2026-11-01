@@ -1261,8 +1261,14 @@ def is_uncommitted_promise(text, tool_count, llm_ms):
 # (tenant's own agent; once per run id; skips relay-marker text and the relay
 # session; skips when the gateway is disconnected).
 # Never relayed: partial text (aborted / timed-out runs), errors, deferred
-# turns, system triggers (__session_start__ ...), system responses, and turns
-# the user deliberately aborted (/api/conversation/abort: stop, barge-in, PTT).
+# turns, system triggers (__session_start__ ...), system responses, turns
+# the user deliberately aborted (/api/conversation/abort: stop, barge-in, PTT),
+# and an UNCOMMITTED PROMISE ("I'll set that up now", 0 tools): the
+# auto-continue steer that would have made the agent do the work lives inside
+# stream_response(), which is dead, so relaying the promise would tell the owner
+# the work is happening when nothing will do it (#563 review). Same predicate
+# and arguments as the in-stream auto-continue: gateway_reports_tools() +
+# is_uncommitted_promise(text, tool_count, llm_ms).
 _STREAM_RELAY_MAX_WAIT_S = 900      # gateway turns end by their own watchdogs well before this
 _STREAM_RELAY_ABORT_GRACE_S = 2.0   # the abort POST trails the fetch abort by ms
 _STREAM_RELAY_ABORT_WINDOW_S = 30   # disconnect is noticed at the next write (heartbeat <=10s)
@@ -1282,13 +1288,24 @@ def _offline_relay_text(evt):
     return text
 
 
+def _tool_start_count(actions):
+    """Tool calls in a turn's actions, counted exactly as metrics['tool_count']."""
+    return sum(1 for a in (actions or [])
+               if isinstance(a, dict) and a.get('type') == 'tool' and a.get('phase') == 'start')
+
+
 def _stream_offline_relay(event_queue, done_evt, *, gateway_id, agent_id,
-                          session_key, run_id, t_request_start, t_disconnect):
+                          session_key, run_id, t_request_start, t_disconnect,
+                          t_llm_start=None, done_llm_ms=None):
     """Background body of stream-offline-relay (see block comment above).
 
     done_evt is the text_done the dead stream had already taken off
-    event_queue, or None when the turn is still running on event_queue."""
+    event_queue, or None when the turn is still running on event_queue.
+    done_llm_ms is that leg's LLM time as the stream measured it; for a
+    text_done read here the time is measured from t_llm_start (the start of
+    the leg running on event_queue), the same way the stream measures it."""
     evt = done_evt
+    llm_ms = done_llm_ms
     if evt is None:
         deadline = time.time() + _STREAM_RELAY_MAX_WAIT_S
         while time.time() < deadline:
@@ -1299,6 +1316,8 @@ def _stream_offline_relay(event_queue, done_evt, *, gateway_id, agent_id,
             etype = e.get('type')
             if etype == 'text_done':
                 evt = e
+                if t_llm_start is not None:
+                    llm_ms = int((time.time() - t_llm_start) * 1000)
                 break
             if etype == 'error':
                 logger.info(f'### stream-offline-relay: turn errored after disconnect ({run_id}) — nothing to relay')
@@ -1309,6 +1328,14 @@ def _stream_offline_relay(event_queue, done_evt, *, gateway_id, agent_id,
     text = _offline_relay_text(evt)
     if text is None:
         logger.info(f'### stream-offline-relay: final event not relayable ({run_id})')
+        return
+    _tools = _tool_start_count(evt.get('actions'))
+    if gateway_reports_tools(gateway_id) and is_uncommitted_promise(text, _tools, llm_ms):
+        logger.warning(
+            f'### stream-offline-relay: NOT relayed — the final reply is an uncommitted '
+            f'promise (tools={_tools}, ms={llm_ms}); the auto-continue that would have '
+            f'done the work died with the stream, so the owner is not told it is '
+            f'happening ({run_id}): {text[:120]!r}')
         return
     if _STREAM_RELAY_ABORT_GRACE_S:
         time.sleep(_STREAM_RELAY_ABORT_GRACE_S)
@@ -2936,6 +2963,7 @@ def _conversation_inner():
                             # auto-continue swaps event_queue for a new one).
                             _stream_state['done_q'] = event_queue
                             _stream_state['done_evt'] = evt
+                            _stream_state['done_llm_ms'] = int((time.time() - t_llm_start) * 1000)
                             logger.info(f"### TEXT_DONE received. response={len(evt.get('response', '') or '')} chars, _tts_pending={len(_tts_pending)}, _tts_buf={repr(_tts_buf[:80])}")
                             # ── DEFERRED turn: the gateway ended this turn on purpose ──
                             # A gateway sets deferred=True with an empty response when
@@ -3884,6 +3912,9 @@ def _conversation_inner():
                                 run_id=f'stream:{_session_key}:{uuid.uuid4().hex[:12]}',
                                 t_request_start=t_request_start,
                                 t_disconnect=time.time(),
+                                # the leg running on _q (auto-continue/retry reset it)
+                                t_llm_start=t_llm_start,
+                                done_llm_ms=_stream_state.get('done_llm_ms') if _done is not None else None,
                             )
                         raise
 

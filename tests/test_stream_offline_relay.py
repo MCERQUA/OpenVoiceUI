@@ -273,6 +273,116 @@ class TestStreamOfflineRelay:
         assert _relays(conn) == []
 
 
+PROMISE = "Got it. I'll rebuild the three service pages now."
+TOOL_START = {'type': 'tool', 'phase': 'start', 'name': 'write', 'toolCallId': 't1'}
+
+
+class _MultiLegGateway(_ScriptedGateway):
+    """Like _ScriptedGateway, but each stream_to_queue call (first leg,
+    auto-continue leg, ...) takes its own (release, final) pair, so a test can
+    drive the promise leg and the continue leg separately."""
+
+    def __init__(self, openclaw, before, legs):
+        super().__init__(openclaw, before, None, None)
+        self.legs = list(legs)
+
+    def stream_to_queue(self, event_queue, message, session_key,
+                        captured_actions=None, **kwargs):
+        self.calls.append(message)
+        release, final = self.legs[min(len(self.calls), len(self.legs)) - 1]
+        for evt in self.before:
+            event_queue.put(evt)
+        release.wait(10)
+        event_queue.put(final)
+
+
+def _open_multi(client, monkeypatch, oc, legs):
+    stub = _MultiLegGateway(oc, BEFORE, legs)
+    monkeypatch.setattr(conv, 'gateway_manager', stub)
+    resp = client.post('/api/conversation?stream=1', buffered=False,
+                       json={'message': 'rebuild the three service pages',
+                             'tts_provider': 'groq'})
+    assert resp.status_code == 200
+    return stub, resp
+
+
+class TestStreamOfflineRelayUncommittedPromise:
+    """Review of #563: a promise reply ("I'll ...", 0 tools, >1s) is the turn
+    the in-stream auto-continue would have steered into doing the work. When
+    the stream is dead that steer never runs, so the promise must NOT be
+    relayed to the owner as if it were the finished answer."""
+
+    def test_disconnect_before_promise_on_original_queue_no_relay(
+            self, app_client, monkeypatch, quiet, openclaw):
+        oc, conn, calls, _ = openclaw
+        release = threading.Event()
+        stub, resp = _open_stream(app_client, monkeypatch, oc, _final(PROMISE), release)
+        it = iter(resp.response)
+        _chunks_until(it, 'heartbeat')
+        resp.close()          # client drops while the first leg is still running
+        time.sleep(1.1)       # past is_uncommitted_promise's 1s floor
+        release.set()         # ...and the first leg ends on a bare promise
+        time.sleep(0.6)
+        assert calls == [], 'an uncommitted promise is never relayed as the answer'
+        assert _relays(conn) == []
+        assert len(stub.calls) == 1, 'no continue steer runs from a dead stream'
+
+    def test_generator_exit_at_retrying_yield_no_relay(
+            self, app_client, monkeypatch, quiet, openclaw):
+        oc, conn, calls, _ = openclaw
+        release = threading.Event()
+        threading.Timer(1.1, release.set).start()
+        stub, resp = _open_stream(app_client, monkeypatch, oc, _final(PROMISE), release)
+        it = iter(resp.response)
+        # The stream sees the promise text_done, starts auto-continue and
+        # yields {"type": "retrying"} BEFORE it swaps event_queue. The write of
+        # that chunk is the one that fails: GeneratorExit lands at that yield.
+        assert 'retrying' in _chunks_until(it, 'retrying')
+        resp.close()
+        time.sleep(0.6)
+        assert calls == [], 'the promise text_done taken by the dead stream is not relayed'
+        assert _relays(conn) == []
+        assert len(stub.calls) == 1, 'the continue thread was never started'
+
+    def test_promise_wording_with_a_tool_call_still_relays(
+            self, app_client, monkeypatch, quiet, openclaw):
+        """Control: the guard keys on the tool count from evt['actions'], not
+        on the wording. Same 'I'll ...' text, >1s, but a tool ran -> relayed."""
+        oc, conn, calls, _ = openclaw
+        release = threading.Event()
+        _, resp = _open_stream(app_client, monkeypatch, oc,
+                               dict(_final(PROMISE), actions=[TOOL_START]), release)
+        it = iter(resp.response)
+        _chunks_until(it, 'heartbeat')
+        resp.close()
+        time.sleep(1.1)
+        release.set()
+        assert _wait(lambda: len(calls) == 1 and len(_relays(conn)) == 1)
+        assert calls[0][0] == PROMISE
+
+    def test_disconnect_during_continue_leg_relays_finished_reply(
+            self, app_client, monkeypatch, quiet, openclaw):
+        """The swap happened while the client was connected; the client drops
+        during the continue leg; the continue leg's finished reply relays."""
+        oc, conn, calls, _ = openclaw
+        rel1, rel2 = threading.Event(), threading.Event()
+        threading.Timer(1.1, rel1.set).start()
+        stub, resp = _open_multi(app_client, monkeypatch, oc, [
+            (rel1, _final(PROMISE)),
+            (rel2, dict(_final(FINAL), actions=[TOOL_START])),
+        ])
+        it = iter(resp.response)
+        assert 'retrying' in _chunks_until(it, 'retrying')
+        # The next chunk (the continue leg's heartbeat) is pulled, so the
+        # 'retrying' write succeeded and event_queue is already the continue queue.
+        assert 'heartbeat' in _chunks_until(it, 'heartbeat')
+        resp.close()
+        rel2.set()
+        assert _wait(lambda: len(calls) == 1 and len(_relays(conn)) == 1)
+        assert calls[0][0] == FINAL
+        assert len(stub.calls) == 2 and stub.calls[1].startswith('[SYSTEM: You said you would')
+
+
 class TestDeliverOfflineCompletion:
     """The shared gateway entry point both offline paths now use."""
 
