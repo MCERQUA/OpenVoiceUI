@@ -14,7 +14,7 @@ GET  /api/transcripts/<date>/<filename>  — read one transcript
 import os
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from flask import Blueprint, jsonify, request
 
@@ -341,8 +341,11 @@ def save_conversation_turn(
         now = datetime.now()
         date_str = now.strftime('%Y-%m-%d')
         time_str = now.strftime('%H-%M-%S')
-        ms_str = f'{now.microsecond // 1000:03d}'
-        ts_iso = f'{now.strftime("%Y-%m-%dT%H:%M:%S")}.{ms_str}Z'
+        # `timestamp` claims UTC ("Z"), so it must BE UTC; date/time + the filename stay local for browsing.
+        # (datetime.now() + "Z" was 4h off on a TZ=America/New_York container.)
+        utc = now.astimezone(timezone.utc)
+        ms_str = f'{utc.microsecond // 1000:03d}'
+        ts_iso = f'{utc.strftime("%Y-%m-%dT%H:%M:%S")}.{ms_str}Z'
 
         # Extract brief tool summaries from captured actions (phase=result only)
         tools = []
