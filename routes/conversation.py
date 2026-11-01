@@ -1229,6 +1229,14 @@ def gateway_reports_tools(gateway_id) -> bool:
     return gateway_id in (None, 'openclaw')
 
 
+def is_degenerate_reply(text):
+    """True for a bare "NO" / "YES" (optional trailing . ! ?) reply: broken-LLM
+    output, never a real answer. ONE predicate shared by the in-stream
+    empty/degenerate retry, the final safety net and the offline relay
+    (#565), so they cannot drift apart."""
+    return (text or '').strip().upper().rstrip('.!?') in ('NO', 'YES')
+
+
 def is_uncommitted_promise(text, tool_count, llm_ms):
     """True when a reply promised work it did not do: it says "I'll / let me <verb>",
     called ZERO tools, carried no work-doing action tag, took >1s (instant
@@ -1285,6 +1293,8 @@ def _offline_relay_text(evt):
     text = normalize_action_tags(evt.get('response') or '').strip()
     if not text or is_system_response(text):
         return None
+    if is_degenerate_reply(text):
+        return None   # bare NO/YES is broken-LLM output, not an answer (#565)
     return text
 
 
@@ -3271,8 +3281,7 @@ def _conversation_inner():
                             # YES/NO; the voice-system-prompt instructs the agent
                             # accordingly.
                             _resp_stripped = (full_response or '').strip()
-                            _resp_norm = _resp_stripped.upper().rstrip('.!?')
-                            _is_degenerate = _resp_norm in ('NO', 'YES')
+                            _is_degenerate = is_degenerate_reply(full_response)
                             _is_empty = (not full_response or not _resp_stripped) or _is_degenerate
                             if _is_empty and metrics.get('llm_inference_ms', 9999) < 5000 \
                                     and not getattr(stream_response, '_retried', False):
@@ -3287,8 +3296,9 @@ def _conversation_inner():
                                 if _is_degenerate:
                                     _tts_buf = ''
                                     _tts_pending.clear()
-                                # Tell the client to wait — don't show fallback
-                                yield json.dumps({'type': 'retrying'}) + '\n'
+                                # (The 'retrying' event is yielded AFTER the queue swap
+                                # below: if the client drops at that yield, the offline
+                                # relay must wait on the RETRY queue, not the dead one — #565.)
                                 # No sleep — the original `time.sleep(2)` was to let
                                 # Z.AI "settle" between attempts but empirically every
                                 # second here is pure dead silence for the user. The
@@ -3347,6 +3357,8 @@ def _conversation_inner():
                                 retry_thread.start()
                                 event_queue = retry_queue
                                 logger.info("### RETRY: re-sent message to gateway (with anti-empty nudge)")
+                                # Tell the client to wait — don't show fallback
+                                yield json.dumps({'type': 'retrying'}) + '\n'
                                 continue  # back to event loop — text_done NOT sent yet
 
                             # ── Z.AI direct fallback after double-empty ──
@@ -3606,8 +3618,7 @@ def _conversation_inner():
                             # the retry path above (slow-degenerate 5s–30s, or a retry that
                             # itself returned bare NO/YES). A real voice answer always
                             # elaborates; bare YES/NO is broken-LLM output.
-                            _final_norm = (full_response or '').strip().upper().rstrip('.!?')
-                            if _final_norm in ('NO', 'YES') and not user_message.startswith('__'):
+                            if is_degenerate_reply(full_response) and not user_message.startswith('__'):
                                 logger.warning(
                                     f"### DEGENERATE FINAL ({metrics.get('llm_inference_ms')}ms) "
                                     f"response={full_response!r} — replacing with graceful fallback"
