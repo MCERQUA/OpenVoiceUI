@@ -250,3 +250,45 @@ class TestHandlePageMetadataManifestWrite:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["status"] == "ok"
+
+
+class TestPagesSlugBesideDirectory:
+    """A directory named like a page (pages/foo/ beside foo.html) must not 500 the slug URL.
+
+    Measured on josh 2026-10-26: /pages/carrier-forms returned 500 'Is a directory' because the slug
+    redirect checked exists() (true for the dir) and the serve path then open()ed a directory.
+    """
+
+    def _setup(self, tmp_path):
+        (tmp_path / "foo.html").write_text("<html><body>foo</body></html>")
+        (tmp_path / "foo").mkdir()
+        (tmp_path / "foo" / "a.pdf").write_bytes(b"%PDF-1.5\n%%EOF\n")
+        (tmp_path / "bar").mkdir()
+        return tmp_path
+
+    def test_slug_redirects_to_html_when_same_named_dir_exists(self, canvas_client, tmp_path):
+        d = self._setup(tmp_path)
+        with patch("routes.canvas.CANVAS_PAGES_DIR", d), patch("routes.canvas.CANVAS_REQUIRE_AUTH", False):
+            r = canvas_client.get("/pages/foo")
+        assert r.status_code == 301
+        assert r.headers["Location"].endswith("/pages/foo.html")
+
+    def test_bare_directory_is_404_not_500(self, canvas_client, tmp_path):
+        d = self._setup(tmp_path)
+        with patch("routes.canvas.CANVAS_PAGES_DIR", d), patch("routes.canvas.CANVAS_REQUIRE_AUTH", False):
+            r = canvas_client.get("/pages/bar")
+        assert r.status_code == 404
+
+    def test_file_inside_directory_still_served(self, canvas_client, tmp_path):
+        d = self._setup(tmp_path)
+        with patch("routes.canvas.CANVAS_PAGES_DIR", d), patch("routes.canvas.CANVAS_REQUIRE_AUTH", False):
+            r = canvas_client.get("/pages/foo/a.pdf")
+        assert r.status_code == 200
+
+    def test_directory_named_like_the_html_target_is_404_not_a_dead_redirect(self, canvas_client, tmp_path):
+        # Review (Alexi5000, PR #561): the redirect TARGET check used exists(), so a directory literally
+        # named baz.html/ (an unpacked export) produced a 301 to /pages/baz.html, which then 404s.
+        (tmp_path / "baz.html").mkdir()
+        with patch("routes.canvas.CANVAS_PAGES_DIR", tmp_path), patch("routes.canvas.CANVAS_REQUIRE_AUTH", False):
+            r = canvas_client.get("/pages/baz")
+        assert r.status_code == 404
