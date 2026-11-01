@@ -27,6 +27,7 @@ import re
 import sqlite3
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -340,6 +341,97 @@ _VOICE_INSTRUCTIONS = (
 # (silence + warning log) so the bug is visible. The profile's verbatim
 # conversation.greeting still wins when defined — that's not hardcoded, it's
 # tenant-owned config.
+#
+# 2026-10-27 SUPERSEDED for the profile greeting too (Mike: "we have a rule no fake
+# voice clips injected" / "it should be a real greeting from the agent diffent
+# everytime relivant to the user, memory, current tasks and updates"). A profile's
+# conversation.greeting is now at most a STYLE HINT inside the brief below; it is
+# never a sentence the agent is told to repeat, and never spoken by the empty-turn
+# fallback. Rule Book: mikes-decisions/greetings-are-real-agent-turns.
+
+#: Session-start brief for the OpenClaw path. Same intent as the comms-brain
+#: plugin's GREETING_BRIEF (scripts/voice-brain/ovu-plugin/comms-brain/gateway.py):
+#: the greeting is a real agent turn, personal, current, different every time.
+#: Leading sentence of every session-start brief. The comms-brain plugin detects a
+#: session start by this exact text (SESSION_START_MARK in its gateway.py, first 200
+#: chars after the context tags) — keep the two in sync or that lane stops greeting.
+_SESSION_START_MARK = "A new voice session has just started."
+_SESSION_START_BRIEF_KNOWN = (
+    _SESSION_START_MARK + " {speaker} just opened it and is listening right now. "
+    "Greet {speaker} by name as their own agent, in ONE or TWO short spoken sentences. "
+    "Make it real and specific to them: lead with the single most relevant live thing for "
+    "{speaker} right now, e.g. an open thread or promise, a text or question you sent that "
+    "they never answered, a pending task or decision, or a fresh update or result you have "
+    "for them. Take it from what you already know (this session, your memory files, notes, "
+    "the CURRENT_USER context above, SMS and email threads); answer within a few seconds, no "
+    "long lookups. Different every time; never reuse an opener you have used before. Never "
+    "a generic 'how can I help'. Never invent a fact: if nothing is pending, say something "
+    "true and current instead. Spoken words only, no markdown, no tags."
+)
+_SESSION_START_BRIEF_UNKNOWN = (
+    _SESSION_START_MARK + " Someone just opened it on this account and is "
+    "listening right now. You do NOT know who is speaking: do not address anyone by name and "
+    "do not guess who it is. Greet them as this account's own agent, in ONE or TWO short "
+    "spoken sentences. If you have a true, current update for this account (an open task, a "
+    "fresh result, something pending from your memory), lead with it; otherwise say "
+    "something true and current. Different every time; never reuse an opener you have used "
+    "before. Never a generic 'how can I help'. Never invent a fact. Spoken words only, no "
+    "markdown, no tags."
+)
+
+
+def _session_start_speaker(face_name: str = '', current_user_name: str = '') -> str:
+    """Who the greeting is for: the face on camera, else the signed-in Clerk user."""
+    for n in (face_name, current_user_name):
+        n = (n or '').strip()
+        if n and n.lower() not in ('unknown', 'guest'):
+            return n
+    return ''
+
+
+def _build_session_start_message(face_name: str = '', current_user_name: str = '',
+                                 profile_greeting: str = '',
+                                 persona_prompt: str = '') -> str:
+    """Build the gateway message that replaces the __session_start__ sentinel.
+
+    The agent ALWAYS generates the greeting. Nothing here is a sentence to say:
+      * known speaker  -> contextual brief that greets them by name and leads with
+                          the most relevant live thing from memory/threads/tasks
+      * unknown        -> generates without inventing a name
+      * persona rotation prompt (greeting_angles) -> kept, plus the same
+                          user/context guidance
+      * profile conversation.greeting -> only a tone/style hint, never verbatim
+    """
+    speaker = _session_start_speaker(face_name, current_user_name)
+    hint = ''
+    pg = (profile_greeting or '').strip()
+    if pg:
+        hint = (
+            f' Style hint from this agent\'s profile, for tone only: "{pg}". Do NOT say it '
+            f'word for word and do not open with it; write your own greeting.'
+        )
+    if persona_prompt:
+        if speaker:
+            who = (
+                f" The person who just opened the session is {speaker}; greet them by name, "
+                f"and if there is a real, current thing pending for {speaker} (an open thread, "
+                f"a promise, an unanswered text, a task, a fresh update from your memory), "
+                f"weave it into the bit. Never invent one."
+            )
+        else:
+            who = (
+                " You do not know who is speaking: do not address anyone by name or guess. "
+                "If there is a real, current update for this account in your memory, you can "
+                "weave it in. Never invent one."
+            )
+        return f"{_SESSION_START_MARK}\n\n{persona_prompt}{who}{hint}"
+    if speaker:
+        msg = _SESSION_START_BRIEF_KNOWN.format(speaker=speaker)
+        if face_name and current_user_name and face_name.strip() != current_user_name.strip():
+            msg += (f" (The camera recognizes {face_name.strip()}; the signed-in account is "
+                    f"{current_user_name.strip()}.)")
+        return msg + hint
+    return _SESSION_START_BRIEF_UNKNOWN + hint
 
 
 def _is_vision_request(msg: str) -> bool:
@@ -1155,6 +1247,117 @@ def is_uncommitted_promise(text, tool_count, llm_ms):
     if text.strip().rstrip('*_ \n').endswith('?'):
         return False
     return bool(PROMISE_RE.search(text))
+
+
+# ── stream-offline-relay ────────────────────────────────────────────────────
+# A streamed reply that FINISHES after the browser dropped used to land in the
+# gateway history only: the stream generator died at its next write
+# (GeneratorExit), nobody read the rest of event_queue, and the owner was never
+# told. When the stream's client is gone before its final text_done was written,
+# a background thread waits for the turn's final reply and hands it to the SAME
+# delivery path as offline subagent completions (#549):
+# gateway.deliver_offline_completion -> server.push_proactive_message (browser
+# push + .proactive-push.jsonl receipt) -> delivered=0 -> _relay_offline_completion
+# (tenant's own agent; once per run id; skips relay-marker text and the relay
+# session; skips when the gateway is disconnected).
+# Never relayed: partial text (aborted / timed-out runs), errors, deferred
+# turns, system triggers (__session_start__ ...), system responses, turns
+# the user deliberately aborted (/api/conversation/abort: stop, barge-in, PTT),
+# and an UNCOMMITTED PROMISE ("I'll set that up now", 0 tools): the
+# auto-continue steer that would have made the agent do the work lives inside
+# stream_response(), which is dead, so relaying the promise would tell the owner
+# the work is happening when nothing will do it (#563 review). Same predicate
+# and arguments as the in-stream auto-continue: gateway_reports_tools() +
+# is_uncommitted_promise(text, tool_count, llm_ms).
+_STREAM_RELAY_MAX_WAIT_S = 900      # gateway turns end by their own watchdogs well before this
+_STREAM_RELAY_ABORT_GRACE_S = 2.0   # the abort POST trails the fetch abort by ms
+_STREAM_RELAY_ABORT_WINDOW_S = 30   # disconnect is noticed at the next write (heartbeat <=10s)
+_last_user_abort_ts = 0.0
+
+
+def _offline_relay_text(evt):
+    """The completed final reply carried by a text_done event, or None when the
+    event must not be relayed (partial / error / deferred / empty / system)."""
+    if not evt or evt.get('type') != 'text_done':
+        return None
+    if evt.get('deferred') or evt.get('error') or evt.get('aborted') or evt.get('timed_out'):
+        return None
+    text = normalize_action_tags(evt.get('response') or '').strip()
+    if not text or is_system_response(text):
+        return None
+    return text
+
+
+def _tool_start_count(actions):
+    """Tool calls in a turn's actions, counted exactly as metrics['tool_count']."""
+    return sum(1 for a in (actions or [])
+               if isinstance(a, dict) and a.get('type') == 'tool' and a.get('phase') == 'start')
+
+
+def _stream_offline_relay(event_queue, done_evt, *, gateway_id, agent_id,
+                          session_key, run_id, t_request_start, t_disconnect,
+                          t_llm_start=None, done_llm_ms=None):
+    """Background body of stream-offline-relay (see block comment above).
+
+    done_evt is the text_done the dead stream had already taken off
+    event_queue, or None when the turn is still running on event_queue.
+    done_llm_ms is that leg's LLM time as the stream measured it; for a
+    text_done read here the time is measured from t_llm_start (the start of
+    the leg running on event_queue), the same way the stream measures it."""
+    evt = done_evt
+    llm_ms = done_llm_ms
+    if evt is None:
+        deadline = time.time() + _STREAM_RELAY_MAX_WAIT_S
+        while time.time() < deadline:
+            try:
+                e = event_queue.get(timeout=min(30.0, max(0.1, deadline - time.time())))
+            except queue.Empty:
+                continue
+            etype = e.get('type')
+            if etype == 'text_done':
+                evt = e
+                if t_llm_start is not None:
+                    llm_ms = int((time.time() - t_llm_start) * 1000)
+                break
+            if etype == 'error':
+                logger.info(f'### stream-offline-relay: turn errored after disconnect ({run_id}) — nothing to relay')
+                return
+        if evt is None:
+            logger.warning(f'### stream-offline-relay: no final reply within {_STREAM_RELAY_MAX_WAIT_S}s ({run_id})')
+            return
+    text = _offline_relay_text(evt)
+    if text is None:
+        logger.info(f'### stream-offline-relay: final event not relayable ({run_id})')
+        return
+    _tools = _tool_start_count(evt.get('actions'))
+    if gateway_reports_tools(gateway_id) and is_uncommitted_promise(text, _tools, llm_ms):
+        logger.warning(
+            f'### stream-offline-relay: NOT relayed — the final reply is an uncommitted '
+            f'promise (tools={_tools}, ms={llm_ms}); the auto-continue that would have '
+            f'done the work died with the stream, so the owner is not told it is '
+            f'happening ({run_id}): {text[:120]!r}')
+        return
+    if _STREAM_RELAY_ABORT_GRACE_S:
+        time.sleep(_STREAM_RELAY_ABORT_GRACE_S)
+    if _last_user_abort_ts >= max(t_request_start, t_disconnect - _STREAM_RELAY_ABORT_WINDOW_S):
+        logger.info(f'### stream-offline-relay: skipped — user aborted this turn ({run_id})')
+        return
+    gw = gateway_manager.get(gateway_id)
+    deliver = getattr(gw, 'deliver_offline_completion', None)
+    if deliver is None:
+        logger.info(f'### stream-offline-relay: gateway {gateway_id or "openclaw"} has no offline delivery ({run_id})')
+        return
+    logger.info(f'### stream-offline-relay: reply finished after the client left — '
+                f'delivering ({len(text)} chars, {run_id}): {text[:120]}')
+    try:
+        deliver(text, session_key, (run_id,), agent_id=agent_id)
+    except Exception as e:
+        logger.warning(f'### stream-offline-relay: delivery failed ({run_id}): {e}')
+
+
+def _start_stream_offline_relay(**kwargs):
+    threading.Thread(target=_stream_offline_relay, kwargs=kwargs,
+                     name='stream-offline-relay', daemon=True).start()
 
 
 def strip_canvas_action_tags(text: str) -> str:
@@ -1988,6 +2191,8 @@ def _conversation_inner():
     _grot_state_path = ''
     _persona_greeting_prompt = ''
     _persona_fallbacks = []
+    _current_user_name = ''  # signed-in Clerk user's name (set below); the
+                             # __session_start__ brief greets them by it
     try:
         from profiles.manager import get_profile_manager
         from routes.profiles import _active_profile_id
@@ -2027,6 +2232,11 @@ def _conversation_inner():
         _clerk_uid = getattr(_flask_g, 'clerk_user_id', None)
         _tenant = os.getenv('JAMBOT_TENANT') or os.getenv('TENANT_NAME') or None
         _user_tag = _get_current_user_tag(_clerk_uid, _tenant)
+        try:
+            from services.identity import resolve as _resolve_identity
+            _current_user_name = ((_resolve_identity(_clerk_uid) or {}).get('name') or '').strip()
+        except Exception:
+            _current_user_name = ''
         if _user_tag:
             static_parts.append(_user_tag)
             logger.info(f'### CURRENT_USER injected: clerk_uid={_clerk_uid} tenant={_tenant}')
@@ -2147,10 +2357,9 @@ def _conversation_inner():
     # prompt so the LLM produces a real greeting instead of a system sentinel ("NO").
     # user_message is kept as-is so the sentinel suppression logic still works.
     #
-    # If the active profile defines a verbatim conversation.greeting, the LLM is
-    # instructed to say it EXACTLY — no improvisation, no "Welcome back, ready
-    # when you are" drift. This makes the on-screen greeting deterministic across
-    # restarts. Profiles without a greeting fall back to the open-ended prompt.
+    # 2026-10-27: the greeting is ALWAYS generated by the agent: a contextual brief
+    # (name + the most relevant live thing). A profile conversation.greeting is only
+    # a style hint; it is never sent as a verbatim say-this-sentence order any more.
     if user_message == '__session_start__':
         logger.info(f"### CALL_START session={session_id}")
         _face = identified_person or {}
@@ -2213,10 +2422,6 @@ def _conversation_inner():
                 if _recent:
                     _joined = ' | '.join(r[:120] for r in _recent)
                     _avoid = f" Do NOT reuse or closely echo any of these recent openers: {_joined}."
-                _face_clause = ''
-                if _face_name:
-                    _face_clause = (f" The person is {_face_name} — you can work their name in "
-                                    f"naturally, or not.")
                 # Per-profile bit style: a profile can define conversation.greeting_bit_style
                 # to control the SHAPE of the opener (length, pacing, sound tags). Without it,
                 # the default stays the short punchy 40-word greeting. (persona-tenant wants the
@@ -2233,38 +2438,25 @@ def _conversation_inner():
                     f"{_persona}\n\n"
                     f"A new voice session just started — someone woke you up. {_bit_style} "
                     f"{_angle}{_avoid} Make it a completely FRESH bit in your real voice — not a repeat, "
-                    f"not a generic AI joke.{_face_clause} Output ONLY the greeting."
+                    f"not a generic AI joke. Output ONLY the greeting."
                 )
                 _grot_active = True
         except Exception:
             _grot_active = False
-        if _profile_greeting:
-            if _face_name:
-                _gateway_message = (
-                    f'A new voice session has just started. The person in front of the camera '
-                    f'has been identified as {_face_name}. Say EXACTLY this sentence as your '
-                    f'entire response — do not add or remove anything, do not rephrase, do not '
-                    f'append qualifiers: "{_profile_greeting}"'
-                )
-            else:
-                _gateway_message = (
-                    f'A new voice session has just started. Say EXACTLY this sentence as your '
-                    f'entire response — do not add or remove anything, do not rephrase, do not '
-                    f'append qualifiers: "{_profile_greeting}"'
-                )
-        elif _grot_active and _persona_greeting_prompt:
-            _gateway_message = _persona_greeting_prompt
-        elif _face_name:
-            _gateway_message = (
-                f'A new voice session has just started. The person in front of the camera '
-                f'has been identified as {_face_name}. Greet them by name — '
-                f'one brief, friendly sentence.'
-            )
-        else:
-            _gateway_message = (
-                'A new voice session has just started. Give a brief, friendly one-sentence greeting. '
-                'Do NOT address anyone by name — no face has been recognized and you do not know who is speaking.'
-            )
+        # The agent ALWAYS generates the greeting (Rule Book:
+        # mikes-decisions/greetings-are-real-agent-turns). The profile greeting is a
+        # style hint only; the persona rotation prompt keeps its angle/bit style and
+        # gains the same who-is-this + live-context guidance.
+        _gateway_message = _build_session_start_message(
+            face_name=_face_name,
+            current_user_name=_current_user_name,
+            profile_greeting=_profile_greeting,
+            persona_prompt=_persona_greeting_prompt if _grot_active else '',
+        )
+        logger.info(
+            f"### SESSION_START brief: speaker={_session_start_speaker(_face_name, _current_user_name)!r} "
+            f"persona={bool(_grot_active)} style_hint={bool(_profile_greeting)}"
+        )
     else:
         _gateway_message = user_message
 
@@ -2368,6 +2560,8 @@ def _conversation_inner():
 
             if wants_stream:
                 # ── STREAMING MODE ────────────────────────────────────────
+                _stream_state = {'done_q': None, 'done_evt': None}
+
                 def stream_response():
                     nonlocal ai_response, event_queue, t_llm_start
 
@@ -2764,6 +2958,12 @@ def _conversation_inner():
                             continue
 
                         if evt['type'] == 'text_done':
+                            # stream-offline-relay: remember the terminal event
+                            # of the turn running on THIS queue (a retry or
+                            # auto-continue swaps event_queue for a new one).
+                            _stream_state['done_q'] = event_queue
+                            _stream_state['done_evt'] = evt
+                            _stream_state['done_llm_ms'] = int((time.time() - t_llm_start) * 1000)
                             logger.info(f"### TEXT_DONE received. response={len(evt.get('response', '') or '')} chars, _tts_pending={len(_tts_pending)}, _tts_buf={repr(_tts_buf[:80])}")
                             # ── DEFERRED turn: the gateway ended this turn on purpose ──
                             # A gateway sets deferred=True with an empty response when
@@ -3289,8 +3489,8 @@ def _conversation_inner():
 
                                 # Z.AI direct didn't return text either — graceful apology.
                                 # For __session_start__ do NOT hardcode a greeting here: the
-                                # __session_start__ block below substitutes the profile-defined
-                                # greeting (or intentional silence, feedback_no_hardcoded_responses).
+                                # __session_start__ block below takes one GENERATED retry
+                                # (or intentional silence, feedback_no_hardcoded_responses).
                                 # Setting one here left full_response non-empty, so that block's
                                 # `if not _gs...` skipped — the canned "give me a moment" filler
                                 # then won over the tenant's persona greeting (persona-tenant, 2026-07-13).
@@ -3319,9 +3519,9 @@ def _conversation_inner():
                             # covers >30s runs. So a 5–30s empty greeting falls through to
                             # here with full_response = None — and an empty text_done makes
                             # app.js "silent resume" (user connects the call, hears dead air,
-                            # has to speak first). Substitute a real greeting instead: the
-                            # profile's verbatim conversation.greeting if it defines one,
-                            # otherwise a varied generic one. The agent's openclaw session is
+                            # has to speak first). Take ONE generated retry instead (Z.AI direct,
+                            # same brief + context); never a canned line (2026-10-27,
+                            # greetings-are-real-agent-turns). The agent's openclaw session is
                             # still warmed by the empty turn, so the conversation continues
                             # normally from the user's next message.
                             if user_message == '__session_start__':
@@ -3334,18 +3534,37 @@ def _conversation_inner():
                                     # the gateway emptied, so take ONE more shot using the SAME rotated
                                     # persona prompt we built for the gateway turn above
                                     # (_persona_greeting_prompt — faithful voice + fresh angle + avoid-recent).
-                                    # That keeps even this standalone shot on-character and varied. If it
-                                    # also empties, rotate a VARIED real-voice line from fallback_greetings.
-                                    # Gated on the persona config, so tenants without it are unaffected —
-                                    # they keep the plain profile-greeting-or-silence behaviour below.
-                                    # (persona-tenant 2026-07-13; feedback_no_hardcoded_responses honoured — all
-                                    # copy lives in the tenant's own profile, nothing hardcoded here.)
+                                    # That keeps even this standalone shot on-character and varied.
+                                    # Everyone else gets one generated retry with the contextual brief.
+                                    # fallback_greetings and the profile greeting are NOT spoken any
+                                    # more (2026-10-27): a code-chosen line is a canned clip.
+                                    # (persona-tenant 2026-07-13; feedback_no_hardcoded_responses.)
+                                    # 2026-10-27 (greetings-are-real-agent-turns): every fallback
+                                    # here is a GENERATED greeting. No profile greeting string and
+                                    # no fallback_greetings line is ever spoken by code.
                                     _fb_greeting = ''
                                     try:
-                                        import random as _rnd_g
                                         _zk = os.environ.get('ZAI_API_KEY', '')
-                                        if _persona_greeting_prompt and _zk:
+                                        if _zk:
                                             import requests as _req_g
+                                            if _persona_greeting_prompt:
+                                                # Persona: SAME rotated prompt as the gateway turn
+                                                # (faithful voice + fresh angle + avoid-recent + who).
+                                                _g_system = ('Output ONLY the spoken greeting text — '
+                                                             'no tags, no preamble, fully in character.')
+                                                _g_msg = _gateway_message
+                                                _g_label = 'persona-greeting-retry'
+                                            else:
+                                                # Everyone else: the contextual brief WITH the full
+                                                # context prefix (CURRENT_USER, office briefing, recent
+                                                # turns), so the retry is still personal and current.
+                                                _g_system = (_fallback_system_prompt()
+                                                             + ' Output ONLY the spoken greeting text — '
+                                                               'one or two sentences, no tags, no preamble.')
+                                                _g_msg = _with_recent_history(
+                                                    message_with_context if message_with_context
+                                                    else _gateway_message)
+                                                _g_label = 'session-start-greeting-retry'
                                             try:
                                                 _rr = _req_g.post(
                                                     'https://api.z.ai/api/anthropic/v1/messages',
@@ -3353,35 +3572,32 @@ def _conversation_inner():
                                                              'anthropic-version': '2023-06-01',
                                                              'content-type': 'application/json'},
                                                     json={'model': 'glm-5-turbo', 'max_tokens': 400,
-                                                          'system': 'Output ONLY the spoken greeting text — '
-                                                                    'no tags, no preamble, fully in character.',
-                                                          'messages': [{'role': 'user', 'content': _persona_greeting_prompt}]},
+                                                          'system': _g_system,
+                                                          'messages': [{'role': 'user', 'content': _g_msg}]},
                                                     timeout=15)
                                                 if _rr.status_code == 200:
                                                     _fb_greeting = (_rr.json().get('content', [{}])[0]
                                                                     .get('text', '') or '').strip()
                                                     if _fb_greeting:
-                                                        metrics['profile'] = 'persona-greeting-retry'
-                                            except Exception:
-                                                pass
-                                        if not _fb_greeting and _persona_fallbacks:
-                                            _fb_greeting = _rnd_g.choice(_persona_fallbacks).strip()
+                                                        metrics['profile'] = _g_label
+                                            except Exception as _ge:
+                                                logger.warning(f'### SESSION_START greeting retry failed: {_ge}')
                                     except Exception:
                                         _fb_greeting = ''
-                                    # Tenants without the entertainment-persona config: profile greeting
-                                    # or intentional silence (feedback_no_hardcoded_responses).
-                                    if not _fb_greeting:
-                                        _fb_greeting = (_profile_greeting or '').strip()
+                                    if not _fb_greeting and (_persona_fallbacks or _profile_greeting):
+                                        logger.warning(
+                                            '### SESSION_START: canned profile greeting / fallback_greetings '
+                                            'NOT spoken (greetings-are-real-agent-turns)')
                                     logger.warning(
                                         f"### SESSION_START produced no usable greeting "
                                         f"(was {full_response!r}, {metrics.get('llm_inference_ms')}ms) "
-                                        f"— profile_greeting={_fb_greeting!r} (empty = silence by design)"
+                                        f"— generated_retry={_fb_greeting!r} (empty = silence by design)"
                                     )
                                     full_response = _fb_greeting  # may be '' — that's the right diagnostic signal
                                     metrics['fallback_used'] = 1 if _fb_greeting else 0
                                     metrics['llm_empty_session_start'] = 1
                                     # Drop any partial / bare-token TTS buffered from the
-                                    # broken turn so only the (profile) greeting is spoken, if any.
+                                    # broken turn so only the generated greeting is spoken, if any.
                                     _tts_buf = ''
                                     _tts_pending.clear()
 
@@ -3666,8 +3882,44 @@ def _conversation_inner():
                         else:
                             logger.info(f"### STREAM EXIT drained {len(_remaining_evts)} stale tts_ready wake-ping(s) (already flushed)")
 
+                def stream_with_offline_relay():
+                    """stream-offline-relay: pass every chunk through
+                    unchanged. Only when the client is gone (the WSGI server
+                    closes the iterator after a failed write -> GeneratorExit
+                    here) before a text_done was written is the turn's final
+                    reply handed to the offline delivery path."""
+                    inner = stream_response()
+                    text_done_sent = False
+                    try:
+                        for chunk in inner:
+                            yield chunk
+                            # Resumed = the server wrote this chunk.
+                            if not text_done_sent and isinstance(chunk, str) \
+                                    and '"type": "text_done"' in chunk[:40]:
+                                text_done_sent = True
+                    except GeneratorExit:
+                        inner.close()
+                        if not text_done_sent and not user_message.startswith('__'):
+                            _q = event_queue
+                            _done = _stream_state['done_evt'] if _stream_state['done_q'] is _q else None
+                            logger.warning(
+                                '### stream-offline-relay: client disconnected before the '
+                                'final reply was written — waiting for it in the background')
+                            _start_stream_offline_relay(
+                                event_queue=_q, done_evt=_done,
+                                gateway_id=gateway_id, agent_id=agent_id,
+                                session_key=_session_key,
+                                run_id=f'stream:{_session_key}:{uuid.uuid4().hex[:12]}',
+                                t_request_start=t_request_start,
+                                t_disconnect=time.time(),
+                                # the leg running on _q (auto-continue/retry reset it)
+                                t_llm_start=t_llm_start,
+                                done_llm_ms=_stream_state.get('done_llm_ms') if _done is not None else None,
+                            )
+                        raise
+
                 return Response(
-                    stream_response(),
+                    stream_with_offline_relay(),
                     mimetype='application/x-ndjson',
                     headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'}
                 )
@@ -3827,6 +4079,10 @@ def conversation_abort():
         source_text = body.get('text', '')
     except Exception:
         pass
+    # stream-offline-relay: a turn the user deliberately stopped is never
+    # relayed to them afterwards.
+    global _last_user_abort_ts
+    _last_user_abort_ts = time.time()
     gw = gateway_manager.get('openclaw')
     aborted = False
     if gw and hasattr(gw, 'abort_active_run'):
