@@ -284,3 +284,11 @@ class TestPagesSlugBesideDirectory:
         with patch("routes.canvas.CANVAS_PAGES_DIR", d), patch("routes.canvas.CANVAS_REQUIRE_AUTH", False):
             r = canvas_client.get("/pages/foo/a.pdf")
         assert r.status_code == 200
+
+    def test_directory_named_like_the_html_target_is_404_not_a_dead_redirect(self, canvas_client, tmp_path):
+        # Review (Alexi5000, PR #561): the redirect TARGET check used exists(), so a directory literally
+        # named baz.html/ (an unpacked export) produced a 301 to /pages/baz.html, which then 404s.
+        (tmp_path / "baz.html").mkdir()
+        with patch("routes.canvas.CANVAS_PAGES_DIR", tmp_path), patch("routes.canvas.CANVAS_REQUIRE_AUTH", False):
+            r = canvas_client.get("/pages/baz")
+        assert r.status_code == 404

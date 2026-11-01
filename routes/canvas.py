@@ -1053,7 +1053,7 @@ def canvas_pages_proxy(path):
         # block this redirect and then 500 on open() ('Is a directory'). Measured on josh 2026-10-26.
         if not resolved.is_file() and not path.endswith('.html') and '.' not in Path(path).name:
             html_resolved = _safe_canvas_path(str(CANVAS_PAGES_DIR), path + '.html')
-            if html_resolved and html_resolved.exists():
+            if html_resolved and html_resolved.is_file():   # same rule as the outer checks (review, PR #561)
                 return redirect('/pages/' + path + '.html', code=301)
         if resolved.is_file():
             # HTML files need custom processing (script stripping, CSS/error injection)
