@@ -251,3 +251,45 @@ def test_server_down_falls_back_through_chain(monkeypatch):
     assert seen[0][0] == "qwen3-mlx"
     assert ("groq", "troy") in seen          # unknown gender -> male fallback voice
     assert state == {"provider": "groq", "voice": "troy"}
+
+
+# ── optional bearer token (2026-11-01: the GPU-box trial TTS requires one) ─────────────────────────────
+
+_LONG = "This sentence is comfortably over forty characters long for one call."
+
+
+def _auth_of_last_post():
+    posts = [c for c in _FakeNode.calls if c[0] == "/tts/stream"]
+    return {k.lower(): v for k, v in posts[-1][2].items()}.get("authorization")
+
+
+def test_no_token_sends_no_authorization_header(node, monkeypatch):
+    monkeypatch.delenv("QWEN_MLX_TTS_TOKEN", raising=False)
+    monkeypatch.delenv("QWEN_MLX_TTS_TOKEN_FILE", raising=False)
+    _provider().generate_speech(_LONG, voice="char-a")
+    assert _auth_of_last_post() is None
+
+
+def test_token_file_is_sent_as_bearer(node, monkeypatch, tmp_path):
+    f = tmp_path / "key"
+    f.write_text("  file-secret\n")
+    monkeypatch.setenv("QWEN_MLX_TTS_TOKEN_FILE", str(f))
+    monkeypatch.delenv("QWEN_MLX_TTS_TOKEN", raising=False)
+    _provider().generate_speech(_LONG, voice="char-a")
+    assert _auth_of_last_post() == "Bearer file-secret"
+
+
+def test_token_env_is_the_fallback(node, monkeypatch):
+    monkeypatch.delenv("QWEN_MLX_TTS_TOKEN_FILE", raising=False)
+    monkeypatch.setenv("QWEN_MLX_TTS_TOKEN", "env-secret")
+    _provider().generate_speech(_LONG, voice="char-a")
+    assert _auth_of_last_post() == "Bearer env-secret"
+
+
+def test_token_file_wins_over_env(node, monkeypatch, tmp_path):
+    f = tmp_path / "key"
+    f.write_text("file-secret")
+    monkeypatch.setenv("QWEN_MLX_TTS_TOKEN_FILE", str(f))
+    monkeypatch.setenv("QWEN_MLX_TTS_TOKEN", "env-secret")
+    _provider().generate_speech(_LONG, voice="char-a")
+    assert _auth_of_last_post() == "Bearer file-secret"

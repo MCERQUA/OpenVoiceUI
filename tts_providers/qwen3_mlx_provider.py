@@ -34,6 +34,10 @@ Configuration (environment):
   QWEN_MLX_TTS_PURPOSE        X-Purpose header (default "voice")
   QWEN_MLX_TTS_READ_TIMEOUT   per-sentence read timeout seconds (default 20)
   QWEN_MLX_TTS_LOCK_TIMEOUT   max seconds to wait for the in-flight slot (default 30)
+  QWEN_MLX_TTS_TOKEN_FILE     optional: file holding a bearer token sent as Authorization on every call
+                              (preferred: the key never sits in the environment)
+  QWEN_MLX_TTS_TOKEN          optional: the bearer token itself (used when no _FILE is set)
+                              Neither set = no Authorization header, exactly as before.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import httpx
+from pathlib import Path
 
 from .base_provider import (
     TTSProvider,
@@ -146,7 +151,7 @@ def _check_health(force: bool = False) -> bool:
     else:
         try:
             with httpx.Client(timeout=httpx.Timeout(3.0)) as c:
-                r = c.get(f"{url}/health")
+                r = c.get(f"{url}/health", headers=_auth_headers())
             if r.status_code != 200:
                 err = f"health HTTP {r.status_code}"
             else:
@@ -162,6 +167,22 @@ def _check_health(force: bool = False) -> bool:
         _HEALTH.update(ok=ok, checked_at=time.time(), voices=voices, model=model,
                        error=err, url=url)
     return ok
+
+
+def _auth_headers() -> dict:
+    """Optional bearer for servers that require one (e.g. the GPU-box trial TTS). Read on every call so a rotated
+    token file is picked up without a restart; an unreadable file means no header, and the server's 401 is then
+    the visible error."""
+    tok = ""
+    path = os.getenv("QWEN_MLX_TTS_TOKEN_FILE", "").strip()
+    if path:
+        try:
+            tok = Path(path).read_text(encoding="utf-8").strip()
+        except OSError:
+            tok = ""
+    if not tok:
+        tok = os.getenv("QWEN_MLX_TTS_TOKEN", "").strip()
+    return {"Authorization": f"Bearer {tok}"} if tok else {}
 
 
 def _mark_unhealthy(reason: str) -> None:
@@ -184,6 +205,7 @@ class Qwen3MlxProvider(TTSProvider):
             "Content-Type": "application/json",
             "X-Caller": os.getenv("QWEN_MLX_TTS_CALLER", "openvoiceui"),
             "X-Purpose": os.getenv("QWEN_MLX_TTS_PURPOSE", "voice"),
+            **_auth_headers(),
         }
         try:
             chunk = int(os.getenv("QWEN_MLX_TTS_CHUNK", "6"))
