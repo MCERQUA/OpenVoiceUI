@@ -3,7 +3,9 @@
 Cases are taken from production firings (2026-10-01/02, tenant-g + tenant-c), not
 invented, so the tests pin the behaviour that was actually observed.
 """
-from routes.conversation import PROMISE_RE, WORK_ACTION_TAG_RE, is_uncommitted_promise
+from routes.conversation import (
+    PROMISE_RE, WORK_ACTION_TAG_RE, gateway_reports_tools, is_uncommitted_promise,
+)
 from services.gateways.openclaw import item_stream_tool_start
 
 # tenant-c 2026-10-01 15:32Z: claimed "Done" with zero tools; the nudge made it send.
@@ -105,3 +107,12 @@ class TestItemStreamToolStart:
         p = _item("77808579", MAIN)
         p["stream"] = "tool"
         assert item_stream_tool_start(p, {"77808579"}, MAIN, []) is None
+
+
+def test_auto_continue_only_for_the_gateway_that_reports_tools():
+    # test-dev 2026-10-20: comms-brain reports 0 tools on every turn, so the steer
+    # fired after real replies and the plugin spoke "Sorry, I didn't catch that."
+    assert gateway_reports_tools(None)
+    assert gateway_reports_tools('openclaw')
+    assert not gateway_reports_tools('comms-brain')
+    assert not gateway_reports_tools('hermes')

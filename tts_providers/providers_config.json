@@ -189,6 +189,34 @@
       "audio_format": "mp3",
       "sample_rate": 24000
     },
+    "qwen3-mlx": {
+      "name": "Qwen3-TTS (MLX node)",
+      "provider_id": "qwen3-mlx",
+      "cost_per_minute": 0.0,
+      "quality": "very-high",
+      "latency": "fast",
+      "voices": [],
+      "features": [
+        "voice-cloning",
+        "self-hosted",
+        "free",
+        "wav-output",
+        "no-api-key"
+      ],
+      "requires_api_key": false,
+      "status": "active",
+      "description": "Qwen3-TTS on a self-hosted Apple-silicon (mlx-audio) node over HTTP. One request per sentence, allow-listed reference voices only.",
+      "languages": [
+        "en"
+      ],
+      "max_characters": 5000,
+      "notes": "QWEN_MLX_TTS_URL + QWEN_MLX_TTS_VOICES (allow-list, fail closed) required; QWEN_MLX_TTS_DENY_PREFIXES optional. Unset URL = inert. Server down = falls back via config/tts-fallback.json (qwen3-mlx -> groq -> supertonic).",
+      "requires_microphone": false,
+      "requires_websocket": false,
+      "mode": "tts-only",
+      "audio_format": "wav",
+      "sample_rate": 24000
+    },
     "resemble": {
       "name": "Resemble AI (Chatterbox)",
       "provider_id": "resemble",

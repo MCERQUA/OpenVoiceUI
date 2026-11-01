@@ -33,6 +33,7 @@ from .supertonic_provider import SupertonicProvider
 from .groq_provider import GroqProvider
 from .qwen3_provider import Qwen3Provider
 from .qwen3_local_provider import Qwen3LocalProvider
+from .qwen3_mlx_provider import Qwen3MlxProvider
 from .resemble_provider import ResembleProvider
 from .elevenlabs_provider import ElevenLabsProvider
 from .grok_provider import GrokProvider
@@ -44,6 +45,7 @@ _PROVIDERS = {
     'groq': GroqProvider,
     'qwen3': Qwen3Provider,
     'qwen3-local': Qwen3LocalProvider,
+    'qwen3-mlx': Qwen3MlxProvider,
     'resemble': ResembleProvider,
     'elevenlabs': ElevenLabsProvider,
     'grok': GrokProvider,
@@ -211,6 +213,7 @@ __all__ = [
     'GroqProvider',
     'Qwen3Provider',
     'Qwen3LocalProvider',
+    'Qwen3MlxProvider',
     'ResembleProvider',
     'ElevenLabsProvider',
     'GrokProvider',

@@ -103,6 +103,15 @@ class Gateway(GatewayBase):
 | `text_done` | **required**, once at the end | `response: str\|None`, `actions: list` |
 | `error` | instead of text_done on failure | `error: str` |
 
+**`deferred` (optional, on `text_done`).** Send `{'type': 'text_done', 'response': '', 'deferred': True, 'actions': [...]}`
+when your gateway ends the turn **on purpose** with nothing to say yet — the agent still has the words and
+will deliver them later through its own proactive push channel. OpenVoiceUI then ends the turn silently:
+no empty-response retry, no fallback LLM call, no substituted filler line, no TTS, and no empty assistant
+turn saved; the browser gets `{'type': 'no_audio', 'deferred': True}` and re-enables the mic. Do **not**
+use it to report a failure — an empty `text_done` *without* `deferred` still runs the empty-response
+recovery path, which is what a failure should get. `deferred` is ignored when `response` is non-empty or
+`error` is set.
+
 ### Routing via profile
 
 To use your gateway, add `gateway_id` to a profile's `adapter_config`:

@@ -62,6 +62,7 @@ _TTS_CRED_ENV = {
     'hume': 'HUME_API_KEY',
     'qwen3': 'FAL_KEY',
     'qwen3-local': '',
+    'qwen3-mlx': '',
     'supertonic': '',
 }
 

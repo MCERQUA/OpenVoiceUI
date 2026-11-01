@@ -5071,6 +5071,21 @@ connectAiradio();
                                     // through /interject (which would steer into a
                                     // closed turn and poison the session).
                                     this._textDoneReceived = true;
+                                    // Deferred turn: the gateway ended the turn on purpose
+                                    // with nothing to say yet — the agent will answer later
+                                    // via the proactive push channel. Not an error and not
+                                    // empty-cascade: close the streaming bubble quietly and
+                                    // keep reading so the following no_audio re-enables the mic.
+                                    if (data.deferred && !(data.response || '').trim()) {
+                                        console.log('[text_done] Deferred turn — answer will arrive via push');
+                                        TranscriptPanel.removeThinking();
+                                        TranscriptPanel.finalizeStreaming(null);
+                                        document.getElementById('thought-bubbles')?.classList.remove('active');
+                                        window.HaloSmokeFace?.setThinking(false);
+                                        window.BigHeadFace?.setThinking(false);
+                                        ActionConsole.addEntry('system', 'Agent is still working — the answer will arrive when ready');
+                                        continue;
+                                    }
                                     const fullResponse = data.response || streamingText;
                                     const cleanedResponse = this.stripReasoningTokens(fullResponse);
                                     const displayText = stripCanvasTags(cleanedResponse);
@@ -5215,7 +5230,9 @@ connectAiradio();
                                 // Server signals this explicitly so we can unblock isProcessing immediately.
                                 if (data.type === 'no_audio') {
                                     console.log('No audio for this response — resetting STT');
-                                    ActionConsole.addEntry('system', 'Silent response — canvas/action only, mic re-enabled');
+                                    ActionConsole.addEntry('system', data.deferred
+                                        ? 'Waiting on the agent — mic re-enabled'
+                                        : 'Silent response — canvas/action only, mic re-enabled');
                                     FaceModule.setMood('neutral');
                                     if (this._voiceActive && this.stt) {
                                         if (this.stt.resume) {

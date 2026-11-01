@@ -309,6 +309,10 @@ export class VoiceSession {
                     }
 
                     if (data.type === 'text_done') {
+                        // Deferred turn: no reply yet (answer arrives via push) — emit nothing.
+                        if (data.deferred && !(data.response || '').trim()) {
+                            continue;
+                        }
                         const fullText = data.response || streamingText;
                         const cleanText = this._stripReasoningTokens(fullText);
                         const displayText = this._stripCmdTags(cleanText);
