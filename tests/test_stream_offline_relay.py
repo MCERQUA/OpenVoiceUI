@@ -383,6 +383,49 @@ class TestStreamOfflineRelayUncommittedPromise:
         assert len(stub.calls) == 2 and stub.calls[1].startswith('[SYSTEM: You said you would')
 
 
+class TestStreamOfflineRelayDegenerate:
+    """#565: a bare NO/YES final is broken-LLM output. The in-stream retry
+    would have re-asked; with the stream dead it must not reach the owner as
+    the answer, and a drop at the 'retrying' yield must still run the retry."""
+
+    @pytest.mark.parametrize('bare', ['NO', 'yes.', ' No! '])
+    def test_disconnect_before_bare_final_no_relay(
+            self, app_client, monkeypatch, quiet, openclaw, bare):
+        oc, conn, calls, _ = openclaw
+        release = threading.Event()
+        stub, resp = _open_stream(app_client, monkeypatch, oc, _final(bare), release)
+        it = iter(resp.response)
+        _chunks_until(it, 'heartbeat')
+        resp.close()
+        release.set()
+        time.sleep(0.6)
+        assert calls == [], 'a bare NO/YES is never relayed as the answer'
+        assert _relays(conn) == []
+
+    def test_drop_at_retrying_yield_retry_still_runs_and_real_answer_relays(
+            self, app_client, monkeypatch, quiet, openclaw):
+        oc, conn, calls, _ = openclaw
+        rel1, rel2 = threading.Event(), threading.Event()
+        rel1.set()
+        stub, resp = _open_multi(app_client, monkeypatch, oc, [
+            (rel1, _final('NO')),
+            (rel2, _final(FINAL)),
+        ])
+        it = iter(resp.response)
+        assert 'retrying' in _chunks_until(it, 'retrying')
+        resp.close()          # GeneratorExit lands at the 'retrying' yield
+        rel2.set()
+        assert _wait(lambda: len(calls) == 1 and len(_relays(conn)) == 1)
+        assert calls[0][0] == FINAL, 'the retry leg ran and its real answer is relayed'
+        assert len(stub.calls) == 2
+
+    def test_offline_relay_text_uses_the_shared_predicate(self):
+        assert conv._offline_relay_text(_final('NO')) is None
+        assert conv._offline_relay_text(_final('Yes!')) is None
+        assert conv._offline_relay_text(_final('No problem, done.')) == 'No problem, done.'
+        assert conv.is_degenerate_reply('YES.') and not conv.is_degenerate_reply('Yes, done')
+
+
 class TestDeliverOfflineCompletion:
     """The shared gateway entry point both offline paths now use."""
 
