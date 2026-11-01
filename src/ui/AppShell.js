@@ -103,18 +103,25 @@ return `
         <div class="unread-dot" id="transcript-unread"></div>
     </button>
     <div id="transcript-panel">
-        <div class="tp-header">
+        <!-- Grip: drag (mouse or touch) to change the height. Fat on purpose so a thumb finds it. -->
+        <div class="tp-grip" id="tp-grip" title="Drag to resize"><span class="tp-grip-bar"></span></div>
+        <div class="tp-header" id="tp-header">
             <span>Transcript</span>
             <div class="tp-header-controls">
                 <button class="tp-mode-toggle" id="tp-mode-toggle" onclick="TranscriptPanel.toggleMode()" title="Switch between voice and text mode">
                     <span class="tp-mode-icon" id="tp-mode-icon"></span>
                     <span class="tp-mode-label" id="tp-mode-label">Voice</span>
                 </button>
+                <button class="tp-dock" id="tp-dock" onclick="TranscriptPanel.dock()" title="Dock back to the corner">&#8690;</button>
                 <button class="tp-close" onclick="TranscriptPanel.hide()" title="Close transcript">&times;</button>
             </div>
         </div>
         <div class="tp-messages" id="transcript-messages"></div>
-        <div class="tp-input-bar">
+        <!-- A FORM, so Enter, a phone keyboard's Send/Go key and the send icon all take ONE path (submit),
+             and an IME composition Enter does not send half a word. Every other button in here MUST be
+             type="button" or it submits the form. -->
+        <form class="tp-input-bar" id="tp-input-form" autocomplete="off"
+              onsubmit="event.preventDefault();TranscriptPanel.sendText()">
             <label class="tp-upload-btn" title="Attach file">
                 📎
                 <input type="file" id="tp-file-input" style="display:none" multiple
@@ -123,13 +130,12 @@ return `
             </label>
             <div class="tp-file-preview" id="tp-file-preview" style="display:none">
                 <span id="tp-file-name"></span>
-                <button class="tp-file-clear" onclick="TranscriptPanel.clearFile()" title="Remove attachment">✕</button>
+                <button type="button" class="tp-file-clear" onclick="TranscriptPanel.clearFile()" title="Remove attachment">✕</button>
             </div>
             <input type="text" class="tp-text-input" id="tp-text-input"
-                   placeholder="Type a message..."
-                   onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();TranscriptPanel.sendText()}">
-            <button class="tp-send-btn" onclick="TranscriptPanel.sendText()" title="Send">➤</button>
-        </div>
+                   placeholder="Type a message..." enterkeyhint="send">
+            <button type="submit" class="tp-send-btn" title="Send">➤</button>
+        </form>
     </div>
 
     <!-- User Auth Section -->

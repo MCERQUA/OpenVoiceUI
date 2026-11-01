@@ -1266,7 +1266,16 @@ connectAiradio();
                 const offset = mpHeight > 0 ? `${mpHeight + 4}px` : '60px';
                 const tp = document.getElementById('transcript-panel');
                 const ac = document.getElementById('action-console');
-                if (tp) { tp.style.bottom = offset; tp.style.transition = 'bottom 0.3s ease'; }
+                if (tp && !(typeof TranscriptPanel !== 'undefined' && TranscriptPanel.detached)) {
+                    tp.style.bottom = offset; tp.style.transition = 'bottom 0.3s ease';
+                    // grow up to the top of the screen, whatever the bottom offset is (music panel open or not);
+                    // a height the user dragged to stays, it is only kept on screen
+                    if (typeof TranscriptPanel !== 'undefined' && TranscriptPanel.userHeight) {
+                        tp.style.height = `min(${TranscriptPanel.userHeight}, calc(100dvh - ${offset} - 10px))`;
+                    } else {
+                        tp.style.maxHeight = `calc(100dvh - ${offset} - 10px)`;
+                    }
+                }
                 if (ac) { ac.style.bottom = offset; ac.style.transition = 'bottom 0.3s ease'; }
             },
 
@@ -9076,6 +9085,10 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
 
                 // Init voice/text mode toggle
                 this._updateModeUI();
+                this._initResizeAndMove();
+                // Open by default (Mike 2026-11-01): someone can just click in and type. The x and the
+                // chat button still close and reopen it.
+                this.show();
                 console.log('Transcript Panel initialized');
             },
 
@@ -9174,6 +9187,129 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
 
             toggle() {
                 if (this.isVisible) this.hide(); else this.show();
+            },
+
+            // ── Size + position (Mike 2026-11-01) ───────────────────────────────────────────────────────
+            // Starts small and grows upward with the conversation (CSS max-height). On top of that:
+            //   * the grip on the top border (fat, centred: thumb-sized) drags the height, mouse or touch
+            //   * on a pointer:fine screen, dragging the header DETACHES the panel; it then moves anywhere,
+            //     resizes from its corner, and the dock button puts it back in the corner
+            // Pointer events = one path for mouse, pen and touch. Nothing is stored in the browser: every
+            // load starts docked at the default size (project rule: no localStorage for UI state).
+            detached: false,
+            userHeight: null,
+
+            _canDetach() {
+                return window.matchMedia('(pointer: fine)').matches && window.innerWidth > 768;
+            },
+
+            _clampHeight(h) {
+                const r = this.panel.getBoundingClientRect();
+                const bottomGap = this.detached ? 0 : (window.innerHeight - r.bottom);
+                const max = this.detached ? (window.innerHeight - r.top - 10) : (window.innerHeight - bottomGap - 10);
+                return Math.max(140, Math.min(h, max));
+            },
+
+            _initResizeAndMove() {
+                const grip = document.getElementById('tp-grip');
+                const header = document.getElementById('tp-header');
+                if (!this.panel || !grip) return;
+
+                // Height drag from the top grip. Docked, the panel is bottom-anchored, so dragging UP grows
+                // it; detached, the top edge moves and the bottom stays put.
+                grip.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    grip.setPointerCapture?.(e.pointerId);
+                    const r = this.panel.getBoundingClientRect();
+                    const start = { y: e.clientY, h: r.height, top: r.top, bottom: r.bottom };
+                    this.panel.classList.add('tp-resizing');
+                    const move = (ev) => {
+                        const dy = ev.clientY - start.y;
+                        if (this.detached) {
+                            const top = Math.max(10, Math.min(start.top + dy, start.bottom - 140));
+                            this.panel.style.top = `${top}px`;
+                            this.panel.style.height = `${start.bottom - top}px`;
+                        } else {
+                            this.panel.style.height = `${this._clampHeight(start.h - dy)}px`;
+                        }
+                        this.panel.style.maxHeight = 'none';
+                        this.userHeight = this.panel.style.height;
+                    };
+                    const up = () => {
+                        this.panel.classList.remove('tp-resizing');
+                        grip.removeEventListener('pointermove', move);
+                        grip.removeEventListener('pointerup', up);
+                        grip.removeEventListener('pointercancel', up);
+                    };
+                    grip.addEventListener('pointermove', move);
+                    grip.addEventListener('pointerup', up);
+                    grip.addEventListener('pointercancel', up);
+                });
+
+                // Detach + move by the header (desktop only; a phone keeps the docked bottom sheet).
+                if (header) {
+                    header.addEventListener('pointerdown', (e) => {
+                        if (!this._canDetach() || e.button !== 0) return;
+                        if (e.target.closest('button, input, label, a')) return;
+                        e.preventDefault();
+                        header.setPointerCapture?.(e.pointerId);
+                        const r = this.panel.getBoundingClientRect();
+                        const off = { x: e.clientX - r.left, y: e.clientY - r.top };
+                        let moved = false;
+                        const move = (ev) => {
+                            if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return;
+                            if (!moved) { this._detach(r); moved = true; }
+                            const w = this.panel.offsetWidth, h = this.panel.offsetHeight;
+                            const x = Math.max(0, Math.min(ev.clientX - off.x, window.innerWidth - w));
+                            const y = Math.max(0, Math.min(ev.clientY - off.y, window.innerHeight - h));
+                            this.panel.style.left = `${x}px`;
+                            this.panel.style.top = `${y}px`;
+                        };
+                        const up = () => {
+                            header.removeEventListener('pointermove', move);
+                            header.removeEventListener('pointerup', up);
+                            header.removeEventListener('pointercancel', up);
+                        };
+                        header.addEventListener('pointermove', move);
+                        header.addEventListener('pointerup', up);
+                        header.addEventListener('pointercancel', up);
+                    });
+                }
+
+                // Keep a detached/resized panel on screen when the window shrinks.
+                window.addEventListener('resize', () => {
+                    if (!this.panel) return;
+                    if (this.detached) {
+                        const r = this.panel.getBoundingClientRect();
+                        this.panel.style.left = `${Math.max(0, Math.min(r.left, window.innerWidth - r.width))}px`;
+                        this.panel.style.top = `${Math.max(0, Math.min(r.top, window.innerHeight - Math.min(r.height, window.innerHeight)))}px`;
+                    } else if (this.userHeight) {
+                        this.panel.style.height = `${this._clampHeight(parseFloat(this.userHeight))}px`;
+                    }
+                });
+            },
+
+            _detach(r) {
+                if (this.detached) return;
+                this.detached = true;
+                const p = this.panel.style;
+                p.transition = 'none';
+                p.right = 'auto'; p.bottom = 'auto';
+                p.left = `${r.left}px`; p.top = `${r.top}px`;
+                p.width = `${r.width}px`; p.height = `${r.height}px`;
+                p.maxHeight = 'none';
+                this.panel.classList.add('tp-detached');
+            },
+
+            dock() {
+                if (!this.panel) return;
+                this.detached = false;
+                this.userHeight = null;
+                const p = this.panel.style;
+                ['left', 'top', 'width', 'height', 'right', 'bottom', 'maxHeight', 'transition'].forEach((k) => { p[k] = ''; });
+                this.panel.classList.remove('tp-detached');
+                // re-apply the docked offset (music panel open or not)
+                if (typeof MusicModule !== 'undefined' && MusicModule._adjustOverlayPanels) MusicModule._adjustOverlayPanels();
             },
 
             addMessage(role, text, opts = {}) {
@@ -10560,6 +10696,12 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                         this._set({ type: 'key', code: e.code, label });
                         return;
                     }
+                    // Typing in a text field is typing, not push-to-talk: a key that produces text (or
+                    // Enter/Backspace) in an input/textarea/contenteditable never fires the hotkey.
+                    const _t = e.target;
+                    const _editable = _t && (_t.isContentEditable ||
+                        ['INPUT', 'TEXTAREA', 'SELECT'].includes(_t.tagName));
+                    if (_editable && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace')) return;
                     if (!this._held && !e.repeat &&
                         this._hotkey?.type === 'key' && e.code === this._hotkey.code) {
                         e.preventDefault();
