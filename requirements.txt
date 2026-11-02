@@ -22,7 +22,7 @@ python-dotenv==1.2.4
 psutil==7.2.2
 
 # Image processing (icon generation, uploads)
-Pillow>=12.3.0
+Pillow>=13.0.0
 pillow-heif>=1.8.1
 PyYAML>=6.0.3
 
