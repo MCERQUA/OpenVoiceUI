@@ -38,6 +38,7 @@ from routes.transcripts import save_conversation_turn
 from routes.music import current_music_state as _music_state
 from services.gateway_manager import gateway_manager
 from services.gateways.compat import is_system_response
+from services.interim_status import DelegatedStatus
 from services.tts import generate_tts_b64 as _tts_generate_b64
 from tts_providers import get_provider, list_providers, invalidate as _tts_invalidate
 
@@ -2744,6 +2745,13 @@ def _conversation_inner():
                     _tts_buf = ''       # raw incremental text buffer
                     _tts_pending = []   # [(done_event, result_dict), ...]
                     _chunks_sent = 0    # audio chunks already yielded early
+                    # True once THIS answer leg's own text was sent to TTS from
+                    # streamed deltas. _chunks_sent alone cannot answer "was the
+                    # answer already spoken?": it also counts the spoken status
+                    # and the previous leg's acknowledgement, and the whole-reply
+                    # fallbacks below then skipped a reply that arrived without
+                    # deltas — the result went unspoken (pledge 25dfb03c).
+                    _answer_tts_fired = False
 
                     # ── Spoken status updates during long tool execution ──
                     # Prevents dead silence when agent runs tools for 30-90+ seconds.
@@ -2753,6 +2761,20 @@ def _conversation_inner():
                     _last_tool_name = None           # name of the most recent tool
                     _STATUS_SILENCE_THRESHOLD = 45   # long safety net — agent should speak naturally
                     _STATUS_REPEAT_INTERVAL = 90     # almost never repeat
+                    # Delegated (sub-agent) turns get their own status, built
+                    # only from what the stream showed (services/interim_status.py,
+                    # pledge 25dfb03c). It is checked on EVERY loop wake-up, not
+                    # only on gateway heartbeats: while a sub-agent works its
+                    # tool events stream in continuously, so the heartbeat that
+                    # the legacy check waits for never arrives (2026-09-16:
+                    # ~9 min of silence on a delegated research ask).
+                    _delegated_status = DelegatedStatus()
+
+                    def _delegated_status_text():
+                        if _tts_pending:
+                            return None  # real audio is already on its way
+                        return _delegated_status.due(
+                            time.time(), _last_audio_time, tts_enabled=not skip_tts)
 
                     full_response = None
                     _stream_start = time.time()
@@ -2775,6 +2797,11 @@ def _conversation_inner():
                                 yield json.dumps({'type': 'error', 'code': 'timeout'}) + '\n'
                                 break
                             yield json.dumps({'type': 'heartbeat', 'elapsed': elapsed}) + '\n'
+                            _ds_text = _delegated_status_text()
+                            if _ds_text:
+                                logger.info(f"### DELEGATED STATUS TTS ({_delegated_status.spoken}): '{_ds_text}' (queue idle)")
+                                _tts_pending.append(_fire_tts(_ds_text))
+                                _last_audio_time = time.time()
                             continue
 
                         # Proof-of-life on the recovery session — reset the idle
@@ -2819,7 +2846,13 @@ def _conversation_inner():
                             # ── Spoken status: break silence during long tool execution ──
                             # If tools are running and user has heard nothing for too long,
                             # speak a brief status so they know the agent is alive.
-                            if not _flushed_audio and _tools_seen > 0 and not skip_tts:
+                            _ds_text = _delegated_status_text()
+                            if _ds_text:
+                                logger.info(f"### DELEGATED STATUS TTS ({_delegated_status.spoken}): '{_ds_text}' (heartbeat)")
+                                _tts_pending.append(_fire_tts(_ds_text))
+                                _last_audio_time = time.time()
+                            elif (not _flushed_audio and _tools_seen > 0 and not skip_tts
+                                    and not _delegated_status.delegated):
                                 _silence_secs = time.time() - _last_audio_time
                                 _threshold = (
                                     _STATUS_SILENCE_THRESHOLD if _status_tts_count == 0
@@ -2844,6 +2877,8 @@ def _conversation_inner():
 
                         if evt['type'] == 'delta':
                             _tts_buf += evt['text']
+                            if (evt.get('text') or '').strip():
+                                _delegated_status.note_answer_text()
                             # Don't fire TTS if buffer looks like a system response
                             # that will be suppressed at text_done. Wait for final
                             # confirmation before speaking.
@@ -2865,6 +2900,7 @@ def _conversation_inner():
                                 if sentence:
                                     logger.info(f"### TTS sentence (streaming): {sentence[:80]}")
                                     _tts_pending.append(_fire_tts(sentence))
+                                    _answer_tts_fired = True
                             yield json.dumps({'type': 'delta', 'text': evt['text']}) + '\n'
                             # Flush any TTS chunks that finished while text was streaming —
                             # play audio as soon as it's ready instead of waiting for text_done
@@ -2883,6 +2919,7 @@ def _conversation_inner():
                             if evt.get('action', {}).get('phase') == 'start':
                                 _tools_seen += 1
                                 _last_tool_name = evt.get('action', {}).get('name', None)
+                            _delegated_status.note_action(evt.get('action'))
                             # Flush any TTS chunks that already finished —
                             # avoids silence during long tool calls (the first
                             # sentence TTS completes ~1s in but would otherwise
@@ -2896,6 +2933,11 @@ def _conversation_inner():
                                     _chunks_sent += 1
                                     _last_audio_time = time.time()
                             yield json.dumps({'type': 'action', 'action': evt['action']}) + '\n'
+                            _ds_text = _delegated_status_text()
+                            if _ds_text:
+                                logger.info(f"### DELEGATED STATUS TTS ({_delegated_status.spoken}): '{_ds_text}' (sub-agent activity)")
+                                _tts_pending.append(_fire_tts(_ds_text))
+                                _last_audio_time = time.time()
                             continue
 
                         if evt['type'] == 'queued':
@@ -2907,6 +2949,7 @@ def _conversation_inner():
                             # Agent spoke but sub-agents still running.
                             # Process TTS for this text but keep stream open.
                             interim_response = evt.get('response', '')
+                            _delegated_status.note_interim()
                             logger.info(
                                 f"### TEXT_INTERIM: {len(interim_response)} chars "
                                 f"— sub-agents still working, stream stays open"
@@ -2934,7 +2977,8 @@ def _conversation_inner():
                             # the list is already empty and this re-spoke the WHOLE
                             # reply a second time (measured live on test-dev
                             # 2026-09-15 — same 217-char sentence TTS'd twice).
-                            if not _tts_pending and _chunks_sent == 0 and interim_response:
+                            if (not _tts_pending and interim_response
+                                    and (_chunks_sent == 0 or not _answer_tts_fired)):
                                 tts_text_interim = clean_for_tts(interim_response)
                                 if tts_text_interim and tts_text_interim.strip():
                                     _tts_pending.append(_fire_tts(tts_text_interim))
@@ -2956,6 +3000,8 @@ def _conversation_inner():
                                     _status_tts_count += 1  # suppress first status fire
                             _tts_pending = []
                             _tts_buf = ''
+                            # What streams next is a NEW answer leg.
+                            _answer_tts_fired = False
 
                             # Tell frontend sub-agents are actively working
                             yield json.dumps({
@@ -3738,7 +3784,8 @@ def _conversation_inner():
                             # reply a second time (double audio, 2026-07-12).
                             # _chunks_sent counts audio actually delivered — if any
                             # went out, streaming TTS already covered the text.
-                            if not _tts_pending and _chunks_sent == 0 and full_response:
+                            if (not _tts_pending and full_response
+                                    and (_chunks_sent == 0 or not _answer_tts_fired)):
                                 tts_text = clean_for_tts(full_response)
                                 if tts_text and tts_text.strip():
                                     _tts_pending.append(_fire_tts(tts_text))
