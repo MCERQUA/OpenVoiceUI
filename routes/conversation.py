@@ -1156,6 +1156,29 @@ def log_metrics(metrics: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+def extract_tts_sentence(text, min_len=40):
+    """Return (sentence, remainder) at the first sentence boundary at or after
+    min_len chars of a STREAMING buffer, or (None, text) when there is none yet.
+
+    A boundary is . ! or ? followed by a space or by the end of the buffer.
+    A period that ends the buffer right after a digit is NOT a boundary: the
+    buffer is still growing, so "$0." is usually the front half of "$0.79"
+    whose digits are in the next delta. Splitting there spoke "79/hr ..." as a
+    fragment. The next delta (or the end-of-turn flush) settles it.
+    """
+    if len(text) < min_len:
+        return None, text
+    for match in re.finditer(r'[.!?](?= |\Z)', text):
+        end = match.end()
+        if end < min_len:
+            continue
+        if (end == len(text) and match.group() == '.'
+                and end >= 2 and text[end - 2].isdigit()):
+            return None, text
+        return text[:end].strip(), text[end:].lstrip()
+    return None, text
+
+
 def _truncate_at_sentence(text: str, max_chars: int) -> str:
     """Truncate text at the nearest sentence boundary at or before max_chars.
     Falls back to hard truncation if no boundary is found."""
@@ -2635,17 +2658,7 @@ def _conversation_inner():
                             return True
                         return False
 
-                    def _extract_sentence(text, min_len=40):
-                        """Return (sentence, remainder) at first sentence boundary
-                        that falls at or after min_len chars. Skips boundaries that
-                        are likely inside abbreviations (e.g. A.I., Mr.)."""
-                        if len(text) < min_len:
-                            return None, text
-                        for match in re.finditer(r'[.!?](?= |\Z)', text):
-                            end = match.end()
-                            if end >= min_len:
-                                return text[:end].strip(), text[end:].lstrip()
-                        return None, text
+                    _extract_sentence = extract_tts_sentence
 
                     # Sticky fallback state — shared across all TTS calls in this response.
                     # If one sentence falls back to a different provider, all subsequent

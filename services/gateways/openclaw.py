@@ -189,6 +189,35 @@ def res_error_message(data: dict) -> str | None:
     return str(msg) if msg else 'request rejected by gateway'
 
 
+def is_subagent_agent_event(payload, subagent_run_ids=()):
+    """True when an `agent` event was produced by a SUB-AGENT run.
+
+    The dispatcher hands every sub-agent event to the parent's live
+    subscription (so tool/lifecycle progress can be shown), which means a
+    sub-agent's `assistant` deltas (its own narration, its raw report, its
+    "OUTPUT_SAVED: ..." protocol line) arrive on the same queue as the user's
+    turn. They are the sub-agent talking to the parent agent, never to the
+    user, and must not be streamed to TTS.
+
+    Identified by the event's sessionKey, NOT by runId: the parent's
+    announce-back run and the continuation run both carry runIds this turn
+    never saw an ACK for (the announce one is "announce:v1:<child session
+    key>:<child runId>", which itself contains "subagent:"), yet they are the
+    answer the user is waiting for. Their sessionKey is the parent's.
+    An event with no sessionKey counts as a sub-agent's only when its runId
+    was already seen on a sub-agent session (`subagent_run_ids`); an event
+    with neither field is kept, because dropping the user's answer is worse
+    than speaking a stray line.
+    """
+    sk = payload.get('sessionKey') or ''
+    if sk:
+        return is_subagent_session_key(sk)
+    if payload.get('spawnedBy'):
+        return True
+    rid = payload.get('runId') or ''
+    return bool(rid) and rid in subagent_run_ids
+
+
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -1128,6 +1157,7 @@ class GatewayConnection:
                             f"(session={session_key}, chat_id={cont_chat_id[:8]})")
                 collected_text = ''
                 prev_len = 0
+                orphan_subagent_runs = set()
                 deadline = time.time() + _ORPHAN_COLLECT_S
                 while time.time() < deadline:
                     try:
@@ -1145,6 +1175,12 @@ class GatewayConnection:
                     canonical_evt = match_event(data.get('event', ''))
                     if canonical_evt == 'agent':
                         stream = match_stream(payload.get('stream', ''))
+                        _sk = payload.get('sessionKey') or ''
+                        if payload.get('runId') and _sk and is_subagent_session_key(_sk):
+                            orphan_subagent_runs.add(payload['runId'])
+                        if stream == 'assistant' and is_subagent_agent_event(
+                                payload, orphan_subagent_runs):
+                            continue
                         if stream == 'assistant':
                             d = payload.get('data', {})
                             full_text = d.get('text', '')
@@ -1409,6 +1445,9 @@ class GatewayConnection:
         continuation_sent = False  # True after we send a continuation nudge
         continuation_sub = None    # Subscription for continuation chat.send
         saw_run_event = False      # True once ANY agent/delta event arrived for our run
+        subagent_run_ids = set()   # runIds seen on a sub-agent sessionKey
+        muted_subagent_runs = set()  # sub-agent runs whose text was withheld (log once each)
+        last_muted_heartbeat = time.time()
         followup_demoted = False   # True after a bare final demoted us to QUEUED (waiting for followup run)
         # Max wait for the coalesced followup run. Balance: a legit followup
         # fires when the active turn ends (typically <60s of remaining work);
@@ -1495,8 +1534,28 @@ class GatewayConnection:
                 # queued-coalesced bare final (ZERO events ever).
                 if payload.get('runId') and payload.get('runId') == sub.run_id:
                     saw_run_event = True
+                _evt_sk = payload.get('sessionKey') or ''
+                if payload.get('runId') and _evt_sk and is_subagent_session_key(_evt_sk):
+                    subagent_run_ids.add(payload['runId'])
 
-                if canonical_stream == 'assistant':
+                # A sub-agent's own text is addressed to the parent agent,
+                # not to the user: never stream it (see is_subagent_agent_event).
+                if (canonical_stream == 'assistant'
+                        and is_subagent_agent_event(payload, subagent_run_ids)):
+                    _rid = payload.get('runId') or _evt_sk
+                    if _rid not in muted_subagent_runs:
+                        muted_subagent_runs.add(_rid)
+                        logger.info(f"### SUBAGENT TEXT not spoken (run={str(_rid)[:60]})")
+                    # A steady stream of withheld deltas starves the 5 s
+                    # queue-timeout heartbeat above; keep the HTTP stream (and
+                    # the outer idle watchdog) fed exactly as a silent
+                    # sub-agent would.
+                    _now = time.time()
+                    if _now - last_muted_heartbeat >= 5.0:
+                        last_muted_heartbeat = _now
+                        event_queue.put({'type': 'heartbeat',
+                                         'elapsed': int(_now - start_time)})
+                elif canonical_stream == 'assistant':
                     d = payload.get('data', {})
                     full_text = d.get('text', '')
                     delta_text = d.get('delta', '')
