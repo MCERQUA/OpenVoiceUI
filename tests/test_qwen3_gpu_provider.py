@@ -705,3 +705,103 @@ def test_route_http_status_for_every_code(code, status):
     assert resp.get_json()['error_code'] == code
     if code == 'busy':
         assert resp.headers['Retry-After'] == '42'
+
+
+# ---------------------------------------------------------------------------
+# Output loudness (pledge qwen3-gpu-output-loudness-normalise): a clone
+# inherits its consent reference's level (J1: -27.9 LUFS); the provider
+# levels the OUTPUT toward -17 LUFS with one linear gain.
+# ---------------------------------------------------------------------------
+
+import array as _array
+import math as _math
+import shutil as _shutil
+
+_needs_ffmpeg = pytest.mark.skipif(not _shutil.which('ffmpeg'), reason='ffmpeg not installed')
+
+
+def _tone(seconds, dbfs, rate=24000, hz=220.0):
+    amp = 32767 * 10 ** (dbfs / 20.0)
+    n = int(seconds * rate)
+    s = _array.array('h', (int(amp * _math.sin(2 * _math.pi * hz * i / rate)) for i in range(n)))
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(s.tobytes())
+    return buf.getvalue()
+
+
+def _lufs(wav_bytes):
+    from tts_providers.qwen3_gpu_provider import _measure_loudness
+    m = _measure_loudness(wav_bytes)
+    assert m is not None
+    return m
+
+
+@_needs_ffmpeg
+def test_quiet_output_is_raised_toward_target_same_format():
+    from tts_providers.qwen3_gpu_provider import _normalise_loudness
+    quiet = _tone(2.0, -32.0)
+    before_i, _ = _lufs(quiet)
+    assert before_i < -28
+    out = _normalise_loudness(quiet)
+    after_i, after_tp = _lufs(out)
+    assert abs(after_i - (-17.0)) < 1.0, after_i
+    assert after_tp <= -1.0
+    with wave.open(io.BytesIO(quiet)) as a, wave.open(io.BytesIO(out)) as b:
+        assert (b.getframerate(), b.getnchannels(), b.getsampwidth()) == (24000, 1, 2)
+        assert b.getnframes() == a.getnframes()
+
+
+@_needs_ffmpeg
+def test_gain_is_capped_by_true_peak_ceiling():
+    """A peaky clip whose integrated level is low must not be pushed past
+    -1.5 dBTP (no clipping) even though it stays under the LUFS target."""
+    from tts_providers.qwen3_gpu_provider import _normalise_loudness
+    rate = 24000
+    s = _array.array('h', [0] * (2 * rate))
+    for i in range(0, 2 * rate, rate // 4):           # sparse loud clicks
+        for k in range(48):
+            s[i + k] = int(16000 * _math.sin(2 * _math.pi * 1000 * k / rate))
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+        w.writeframes(s.tobytes())
+    out = _normalise_loudness(buf.getvalue())
+    _, tp = _lufs(out)
+    assert tp <= -1.0, tp
+
+
+def test_silence_and_missing_ffmpeg_pass_through_unchanged(monkeypatch):
+    from tts_providers import qwen3_gpu_provider as mod
+    silence = _wav(1.0, rate=24000)
+    assert mod._normalise_loudness(silence) == silence
+    quiet = _tone(1.0, -32.0)
+    monkeypatch.setattr(mod.shutil, 'which', lambda name: None)
+    assert mod._normalise_loudness(quiet) == quiet
+
+
+def test_ffmpeg_failure_passes_through_unchanged(monkeypatch):
+    from tts_providers import qwen3_gpu_provider as mod
+
+    def boom(*a, **k):
+        raise mod.subprocess.TimeoutExpired('ffmpeg', 10)
+    monkeypatch.setattr(mod.shutil, 'which', lambda name: '/usr/bin/ffmpeg')
+    monkeypatch.setattr(mod.subprocess, 'run', boom)
+    quiet = _tone(1.0, -32.0)
+    assert mod._normalise_loudness(quiet) == quiet
+
+
+@_needs_ffmpeg
+def test_generate_speech_levels_a_quiet_clone(env):
+    env.token_file.write_text(env.token_a + '\n')
+    p = _provider()
+    vid = p.create_clone(_req(env)).voice_id
+    quiet = _tone(1.5, -32.0)
+    env.fake.override[('POST', '/v1/tts')] = lambda rec: (200, {'Content-Type': 'audio/wav'}, quiet)
+    audio = p.generate_speech('hello there', voice=vid)
+    assert audio != quiet
+    i, _ = _lufs(audio)
+    assert abs(i - (-17.0)) < 1.0, i
