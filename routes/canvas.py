@@ -984,6 +984,9 @@ def _safe_canvas_path(base: str, user_path: str) -> Path | None:
     return None
 
 
+_TRAILING_PUNCT_PAGE_RE = re.compile('(.+\\.html)[.,;:!)\\]}>\'"\u2019\u201d\u2026]+')
+
+
 @canvas_bp.route('/pages/<path:path>')
 def canvas_pages_proxy(path):
     """Serve files from Canvas pages directory.
@@ -992,6 +995,16 @@ def canvas_pages_proxy(path):
     - If CANVAS_REQUIRE_AUTH=true: pages with is_public=False require a valid Clerk session token.
     - Default (self-hosted): all pages served without auth.
     """
+    # Trailing punctuation glued to a page link (2026-11-07). Agents end sentences with the URL, so the
+    # owner copies "…/pages/x.html." and gets a 404 forever. Measured on danielle 2026-11-03 22:00-22:04Z:
+    # three 404s on "cortez-post-checklist.html." for a page that had served 200 since 21:42:33; the agent
+    # then invented an "index registration delay" to explain it. Normalise to the clean URL BEFORE any gate,
+    # and unconditionally (not only when the page exists), so the redirect reveals nothing about which
+    # pages exist; the clean URL then gets the normal auth / 404 handling.
+    _m = _TRAILING_PUNCT_PAGE_RE.fullmatch(path)
+    if _m:
+        _qs = request.query_string.decode('utf-8', errors='replace')
+        return redirect('/pages/' + _m.group(1) + ('?' + _qs if _qs else ''), code=301)
     try:
         # Auth check — only when explicitly enabled (opt-in for self-hosted deployments)
         # Skip auth for non-HTML assets (images, icons, CSS) — they're embedded resources
