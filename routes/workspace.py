@@ -60,17 +60,53 @@ def _writable_path(rel: str):
     target = (base / sub).resolve()
     # Safety: ensure it stays within the writable base
     try:
-        target.relative_to(base.resolve())
+        inner = target.relative_to(base.resolve())
     except ValueError:
         return None
+    # Voice-clone seam state (policy now; codes/consent/audit later) lives in
+    # VOICE_CLONES_DIR/_seam and is admin-written, never edited through the
+    # workspace file API (docs/jambot/ovu-voice-clone-seam-spec.md).
+    if prefix == 'Voice-Clones' and inner.parts:
+        from services.paths import VOICE_CLONE_SEAM_DIR
+        if inner.parts[0] == VOICE_CLONE_SEAM_DIR.name:
+            return None
     return target
 
 
+def _is_seam(p: Path) -> bool:
+    """True if p is, or is inside, the voice-clone seam state dir.
+
+    The seam dir (policy, codes, consent, audit, jobs, GPU bearer) is reachable two ways:
+    VOICE_CLONES_DIR/_seam, and the read-only workspace bind WORKSPACE_DIR/Voice-Clones/_seam
+    of the same host directory. It must be invisible to the workspace browser on BOTH, for READ
+    as well as write: a tenant admin must not read the bearer or edit the audit trail that is
+    supposed to be the independent instrument (mac-claude@mesh review, 2026-11-07).
+    """
+    from services.paths import VOICE_CLONE_SEAM_DIR
+    try:
+        rp = p.resolve()
+    except Exception:
+        return True  # cannot tell -> treat as seam (fail closed)
+    roots = (VOICE_CLONE_SEAM_DIR, WORKSPACE_DIR / 'Voice-Clones' / VOICE_CLONE_SEAM_DIR.name)
+    for root in roots:
+        try:
+            rp.relative_to(root.resolve())
+            return True
+        except ValueError:
+            continue
+        except Exception:
+            return True
+    return False
+
+
 def _resolve(rel: str):
-    """Resolve relative path safely within WORKSPACE_DIR. Returns None on traversal."""
+    """Resolve relative path safely within WORKSPACE_DIR. Returns None on traversal
+    and for anything inside the voice-clone seam dir (see _is_seam)."""
     try:
         p = (WORKSPACE_DIR / rel.lstrip('/')).resolve()
         p.relative_to(WORKSPACE_DIR.resolve())  # raises ValueError if outside
+        if _is_seam(p):
+            return None
         return p
     except (ValueError, Exception):
         return None
@@ -128,7 +164,7 @@ def browse():
     try:
         entries = []
         for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-            if _is_hidden(item.name):
+            if _is_hidden(item.name) or _is_seam(item):
                 continue
             try:
                 entries.append(_entry(item))
@@ -162,7 +198,7 @@ def tree():
     try:
         dirs = []
         for item in sorted(target.iterdir(), key=lambda p: p.name.lower()):
-            if item.is_dir() and not _is_hidden(item.name):
+            if item.is_dir() and not _is_hidden(item.name) and not _is_seam(item):
                 try:
                     rel_p = str(item.relative_to(WORKSPACE_DIR.resolve()))
                 except ValueError:
@@ -170,7 +206,7 @@ def tree():
                 # Check if this dir has subdirectories (for expand arrow)
                 try:
                     has_subdirs = any(
-                        c.is_dir() and not _is_hidden(c.name)
+                        c.is_dir() and not _is_hidden(c.name) and not _is_seam(c)
                         for c in item.iterdir()
                     )
                 except PermissionError:

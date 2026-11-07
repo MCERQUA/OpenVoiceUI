@@ -4710,6 +4710,38 @@ def tts_generate():
 # ---------------------------------------------------------------------------
 
 
+# CloneError code -> HTTP status (spec §2.4).
+_CLONE_ERROR_HTTP = {
+    'unavailable': 503,
+    'busy': 503,
+    'bad_audio': 422,
+    'quota': 429,
+    'consent_mismatch': 409,
+    'timeout': 504,
+    'internal': 500,
+}
+_CLONE_BUSY_RETRY_AFTER_S = 30
+
+
+def _clone_error_response(err, provider_id):
+    """JSON error for a typed CloneError. ``error`` stays a plain string so
+    existing callers (voice-studio reads resp.text) keep working."""
+    status = _CLONE_ERROR_HTTP.get(err.code, 500)
+    resp = jsonify({
+        'error': err.message,
+        'error_code': err.code,
+        'retryable': err.retryable,
+        'provider': provider_id,
+    })
+    resp.status_code = status
+    retry_after = err.retry_after
+    if err.code == 'busy' and not retry_after:
+        retry_after = _CLONE_BUSY_RETRY_AFTER_S
+    if retry_after:
+        resp.headers['Retry-After'] = str(int(retry_after))
+    return resp
+
+
 @conversation_bp.route('/api/tts/clone', methods=['POST'])
 def tts_clone_voice():
     """
@@ -4719,21 +4751,42 @@ def tts_clone_voice():
       - JSON: {"audio_url": "...", "name": "...", "provider": "qwen3", "reference_text": "..."}
       - Multipart form: audio file + name + provider fields
 
-    Provider support:
+    Provider support is REGISTRY-DRIVEN (voice-clone provider seam,
+    docs/jambot/ovu-voice-clone-seam-spec.md §2): a provider is offered when
+    its catalog entry has the "voice-cloning" feature and is active, its class
+    implements CloneCapableTTSProvider, and the tenant policy
+    (VOICE_CLONE_SEAM_DIR/policy.json) allows it. With no policy file the set
+    is exactly qwen3, qwen3-local, elevenlabs, resemble (as before):
       - qwen3: Instant clone via fal.ai (~37s). Needs audio URL.
       - elevenlabs: Instant clone (~5-10s). Needs audio file.
       - resemble: Multi-step clone (~1-5min). Needs audio file.
 
+    A clone runs on exactly ONE provider: a failure is returned to the
+    caller, never silently retried on another provider (spec §2.4).
+
+    TODO spec §1 (access codes), §3 (consent), §3.4 (size/duration caps),
+    §2.3 (async jobs route) — not in this release.
+
     Returns: JSON with voice_id, name, provider, clone metadata.
     """
+    from services.voice_clone import (
+        clone_provider_ids, default_clone_provider, tenant_id as _clone_tenant_id,
+    )
+    from tts_providers.base_provider import (
+        CloneCapableTTSProvider, CloneError, CloneRequest,
+    )
+    import uuid
+
+    provider_id = ''
     try:
         # --- Parse request (JSON or multipart) ---
         save_path = None
         audio_url = None
+        default_provider = default_clone_provider()
 
         if request.is_json:
             data = request.get_json()
-            provider_id = data.get('provider', 'qwen3').strip()
+            provider_id = data.get('provider', default_provider).strip()
             audio_url = data.get('audio_url', '').strip()
             name = data.get('name', '').strip()
             reference_text = data.get('reference_text', '').strip() or None
@@ -4745,9 +4798,8 @@ def tts_clone_voice():
 
         elif 'audio' in request.files:
             from services.paths import UPLOADS_DIR
-            import uuid
 
-            provider_id = request.form.get('provider', 'qwen3').strip()
+            provider_id = request.form.get('provider', default_provider).strip()
             audio_file = request.files['audio']
             name = request.form.get('name', '').strip()
             reference_text = request.form.get('reference_text', '').strip() or None
@@ -4771,8 +4823,8 @@ def tts_clone_voice():
                 'error': 'Send JSON with audio_url or multipart form with audio file'
             }), 400
 
-        # --- Validate provider ---
-        clone_providers = ('qwen3', 'qwen3-local', 'elevenlabs', 'resemble')
+        # --- Validate provider (registry + tenant policy) ---
+        clone_providers = clone_provider_ids()
         if provider_id not in clone_providers:
             return jsonify({
                 'error': f'Voice cloning not supported for provider "{provider_id}". '
@@ -4780,10 +4832,24 @@ def tts_clone_voice():
             }), 400
 
         provider = get_provider(provider_id)
+        if not isinstance(provider, CloneCapableTTSProvider):
+            # Registry says clone-capable but the live instance is not —
+            # a wiring defect, never a client error.
+            logger.error(f"Voice clone: {provider_id} instance is not CloneCapableTTSProvider")
+            return jsonify({'error': 'Internal server error'}), 500
         if not provider.is_available():
             return jsonify({
                 'error': f'{provider_id} provider not available (API key not set)'
             }), 503
+
+        clone_req = CloneRequest(
+            tenant_id=_clone_tenant_id(),
+            request_id=uuid.uuid4().hex,
+            name=name,
+            audio_path=str(save_path) if save_path else None,
+            audio_url=audio_url,
+            reference_text=reference_text,
+        )
 
         # --- Route to provider ---
         logger.info(
@@ -4791,61 +4857,48 @@ def tts_clone_voice():
             f"url={audio_url[:80] if audio_url else 'N/A'}"
         )
 
-        if provider_id == 'qwen3':
-            if not audio_url:
-                return jsonify({'error': 'Qwen3 requires audio_url'}), 400
-            result = provider.clone_voice(
-                audio_url=audio_url,
-                name=name,
-                reference_text=reference_text,
-            )
+        input_error = provider.clone_request_error(clone_req)
+        if input_error:
+            return jsonify({'error': input_error}), 400
 
-        elif provider_id == 'qwen3-local':
-            if not save_path:
-                return jsonify({
-                    'error': 'qwen3-local requires audio file upload (multipart form)'
-                }), 400
-            result = provider.clone_voice(
-                audio_path=str(save_path),
-                name=name,
-                reference_text=reference_text,
-            )
+        result = provider.create_clone(clone_req)
 
-        elif provider_id == 'elevenlabs':
-            if not save_path:
-                return jsonify({
-                    'error': 'ElevenLabs requires audio file upload (multipart form)'
-                }), 400
-            result = provider.clone_voice(
-                audio_path=str(save_path),
-                name=name,
+        if result.status == 'failed':
+            raise CloneError.from_dict(result.error)
+        if result.status != 'ready':
+            # 'pending' needs the async jobs route (spec §2.3), which does not
+            # exist yet. Return the job id so it is not lost, but say plainly
+            # that it cannot be polled here.
+            logger.error(
+                f"Voice clone: {provider_id} returned status={result.status!r} "
+                f"job_id={result.job_id!r}; async clones are not supported yet"
             )
-
-        elif provider_id == 'resemble':
-            if not save_path:
-                return jsonify({
-                    'error': 'Resemble requires audio file upload (multipart form)'
-                }), 400
-            result = provider.clone_voice(
-                audio_path=str(save_path),
-                name=name,
-                reference_text=reference_text,
-            )
+            return jsonify({
+                'error': 'Async voice clones are not supported yet (no jobs route)',
+                'error_code': 'internal',
+                'retryable': False,
+                'provider': provider_id,
+                'status': result.status,
+                'job_id': result.job_id,
+            }), 500
 
         return jsonify({
             'status': 'ok',
             'provider': provider_id,
-            'voice_id': result.get('voice_id', ''),
-            'name': result.get('name', name),
-            'created_at': result.get('created_at', ''),
-            'clone_time_ms': result.get('clone_time_ms', 0),
-            'embedding_size': result.get('embedding_size', 0),
+            'voice_id': result.voice_id or '',
+            'name': result.name,
+            'created_at': result.created_at,
+            'clone_time_ms': result.clone_time_ms,
+            'embedding_size': result.metadata.get('embedding_size', 0),
             'usage': (
-                f'Use voice_id "{result.get("voice_id", "")}" in '
+                f'Use voice_id "{result.voice_id or ""}" in '
                 f'/api/tts/generate with provider={provider_id}'
             ),
         })
 
+    except CloneError as e:
+        logger.error(f"Voice clone failed ({provider_id}): {e}")
+        return _clone_error_response(e, provider_id)
     except RuntimeError as e:
         logger.error(f"Voice clone failed: {e}")
         return jsonify({'error': str(e)}), 500

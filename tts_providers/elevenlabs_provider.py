@@ -19,7 +19,9 @@ from typing import Optional
 
 import httpx
 
-from .base_provider import TTSProvider
+from .base_provider import (
+    CloneCapableTTSProvider, CloneError, CloneInfo, CloneRequest, CloneResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +39,17 @@ _AUDIO_CONTENT_TYPES = {
 }
 
 
-class ElevenLabsProvider(TTSProvider):
+class ElevenLabsProvider(CloneCapableTTSProvider):
     """
     TTS Provider using ElevenLabs API.
 
     Supports instant voice cloning and high-quality TTS.
     Output: MP3 audio bytes (default) or other formats via output_format param.
     """
+
+    # Clone seam (base_provider.CloneCapableTTSProvider)
+    clone_label = 'ElevenLabs'
+    clone_input = ('path',)
 
     def __init__(self):
         super().__init__()
@@ -134,6 +140,40 @@ class ElevenLabsProvider(TTSProvider):
             'created_at': time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             'clone_time_ms': elapsed_ms,
         }
+
+    # ------------------------------------------------------------------
+    # Clone seam shims — wrap clone_voice exactly as the pre-seam route did
+    # ------------------------------------------------------------------
+
+    def create_clone(self, req: CloneRequest) -> CloneResult:
+        # The pre-seam route passed ONLY audio_path + name (no reference_text,
+        # no description); keep it that way.
+        record = self.clone_voice(
+            audio_path=req.audio_path,
+            name=req.name,
+        )
+        return CloneResult.from_legacy('elevenlabs', req.name, record,
+                                       record.get('voice_id', ''))
+
+    def list_clones(self, tenant_id: str) -> list:
+        # Network-free, same source as get_info()['cloned_voices'].
+        voices = self._voices_cache or []
+        return [
+            CloneInfo(voice_id=v['id'], name=v.get('name', ''),
+                      provider='elevenlabs', tenant_id=tenant_id, metadata=v)
+            for v in voices if v.get('category') == 'cloned' and v.get('id')
+        ]
+
+    def disable_clone(self, tenant_id: str, voice_id: str, reason: str = '') -> None:
+        # The vendor's only removal is a hard DELETE of the voice, and this
+        # provider keeps no local clone record to flag. Refuse rather than
+        # delete (never-delete rule); retiring a vendor-side clone is a
+        # deliberate human action in the vendor dashboard.
+        raise CloneError(
+            'internal',
+            f'{self.clone_label} clones cannot be soft-retired from OVU '
+            f'(vendor removal is a hard delete): {voice_id}',
+        )
 
     # ------------------------------------------------------------------
     # Speech generation
@@ -334,5 +374,6 @@ class ElevenLabsProvider(TTSProvider):
             'default_voice': self.get_default_voice(),
             'audio_format': 'mp3',
             'sample_rate': 44100,
+            'capabilities': self.clone_capabilities(),
             'error': self._init_error,
         }
