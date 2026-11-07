@@ -189,6 +189,34 @@
       "audio_format": "mp3",
       "sample_rate": 24000
     },
+    "qwen3-gpu": {
+      "name": "Qwen3-TTS (GPU lane)",
+      "provider_id": "qwen3-gpu",
+      "cost_per_minute": 0.0,
+      "quality": "very-high",
+      "latency": "medium",
+      "voices": [],
+      "features": [
+        "voice-cloning",
+        "remote-gpu",
+        "free",
+        "wav-output"
+      ],
+      "requires_api_key": false,
+      "status": "active",
+      "description": "Qwen3-TTS-12Hz-1.7B-Base on the GPU lane (res-desktop-gpu) via the vcg endpoint over the tailnet. Tenant-scoped clones only.",
+      "languages": [
+        "en"
+      ],
+      "max_characters": 600,
+      "notes": "OPT-IN PER TENANT, never a default: offered only when the tenant's voice-clones/_seam/policy.json lists qwen3-gpu AND the container holds a bearer at /app/runtime/secrets/vcg.token (read per request; missing = unavailable, no network call). Clones need a consent record and a reference transcript. Wire: mac-claude voice-clone-gpu-wire-v0 + vcg-build-v0.1.",
+      "clone_endpoint": "/api/tts/clone",
+      "requires_microphone": false,
+      "requires_websocket": false,
+      "mode": "tts-only",
+      "audio_format": "wav",
+      "sample_rate": 24000
+    },
     "qwen3-mlx": {
       "name": "Qwen3-TTS (MLX node)",
       "provider_id": "qwen3-mlx",
