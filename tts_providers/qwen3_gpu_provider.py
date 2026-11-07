@@ -32,6 +32,7 @@ Not a default anywhere: a tenant reaches this provider only when its
 
 from __future__ import annotations
 
+import array
 import email.utils
 import hashlib
 import io
@@ -42,6 +43,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import wave
 from pathlib import Path
@@ -269,6 +271,85 @@ def _join_wavs(parts: List[bytes]) -> bytes:
         w.setsampwidth(params.sampwidth)
         w.setframerate(params.framerate)
         w.writeframes(b''.join(frames))
+    return out.getvalue()
+
+
+#: Output loudness target. vcg does not normalise and a clone inherits its
+#: reference's level (J1 2026-11-07: -27.9 LUFS out of a -27.8 LUFS consent
+#: sample, vs -17.0 out of a -16.7 ref), so a quiet consent recording makes a
+#: voice ~11 dB quieter than every stock voice. Host decision: level the synth
+#: OUTPUT here, never rewrite the consent reference.
+_LOUDNORM_I = -17.0      # LUFS integrated (stock-voice level measured on P1)
+_LOUDNORM_TP = -1.5      # dBTP ceiling the gain may not push past
+_LOUDNORM_MAX_GAIN = 20.0  # dB; beyond this we would be amplifying noise
+_LOUDNORM_TIMEOUT_S = 10.0
+
+
+def _measure_loudness(wav: bytes) -> Optional[Tuple[float, float]]:
+    """ffmpeg loudnorm first pass -> (integrated LUFS, true peak dBTP), or
+    None when ffmpeg is absent/fails or the clip is silent/too short to gate."""
+    exe = shutil.which('ffmpeg')
+    if not exe:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, '-hide_banner', '-nostats', '-f', 'wav', '-i', 'pipe:0',
+             '-af', f'loudnorm=I={_LOUDNORM_I}:TP={_LOUDNORM_TP}:LRA=11:print_format=json',
+             '-f', 'null', '-'],
+            input=wav, capture_output=True, timeout=_LOUDNORM_TIMEOUT_S, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    err = out.stderr.decode('utf-8', 'replace')
+    start = err.rfind('{')
+    end = err.rfind('}')
+    if out.returncode != 0 or start < 0 or end < start:
+        return None
+    try:
+        stats = json.loads(err[start:end + 1])
+        i = float(stats['input_i'])
+        tp = float(stats['input_tp'])
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not (-70.0 < i < 0.0) or tp != tp or tp == float('-inf'):
+        return None  # silence / below the gate: nothing meaningful to level
+    return i, tp
+
+
+def _normalise_loudness(wav: bytes) -> bytes:
+    """Apply ONE linear gain toward _LOUDNORM_I, capped by the true-peak
+    ceiling and _LOUDNORM_MAX_GAIN. Same format, rate and frame count; any
+    failure returns the input unchanged (level is not worth a lost reply)."""
+    measured = _measure_loudness(wav)
+    if measured is None:
+        return wav
+    input_i, input_tp = measured
+    gain_db = min(_LOUDNORM_I - input_i, _LOUDNORM_TP - input_tp, _LOUDNORM_MAX_GAIN)
+    if abs(gain_db) < 0.5:
+        return wav
+    try:
+        with wave.open(io.BytesIO(wav), 'rb') as w:
+            params = w.getparams()
+            frames = w.readframes(w.getnframes())
+    except (wave.Error, EOFError):
+        return wav
+    if params.sampwidth != 2:
+        return wav
+    samples = array.array('h')
+    samples.frombytes(frames)
+    if sys.byteorder == 'big':
+        samples.byteswap()
+    g = 10.0 ** (gain_db / 20.0)
+    samples = array.array('h', (max(-32768, min(32767, int(round(s * g)))) for s in samples))
+    if sys.byteorder == 'big':
+        samples.byteswap()
+    out = io.BytesIO()
+    with wave.open(out, 'wb') as w:
+        w.setnchannels(params.nchannels)
+        w.setsampwidth(params.sampwidth)
+        w.setframerate(params.framerate)
+        w.writeframes(samples.tobytes())
+    logger.info('[qwen3-gpu] loudnorm %.1f LUFS / %.1f dBTP -> gain %+.1f dB',
+                input_i, input_tp, gain_db)
     return out.getvalue()
 
 
@@ -753,7 +834,9 @@ class Qwen3GpuProvider(CloneCapableTTSProvider):
                 ra = f' retry-after={exc.retry_after}s' if exc.retry_after else ''
                 raise RuntimeError(f'{PROVIDER_ID} TTS error {http}: {exc.code}{ra}') from None
             parts.append(resp.content)
-        return _join_wavs(parts)
+        # Level the joined reply once (not per chunk) so every chunk of one
+        # answer gets the same gain.
+        return _normalise_loudness(_join_wavs(parts))
 
     # ------------------------------------------------------------------
     # provider interface (network-free: /api/tts/providers and /api/tts/voices
