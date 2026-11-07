@@ -4719,6 +4719,16 @@ _CLONE_ERROR_HTTP = {
     'consent_mismatch': 409,
     'timeout': 504,
     'internal': 500,
+    # GPU wire v0 §4 codes. 'unauthorized' / 'tenant_mismatch' are about
+    # OVU's own upstream credential (a config alarm on this server), not the
+    # caller's session, so the browser gets 503: a 401/403 here would read as
+    # "your Clerk session is bad" to the page.
+    'unauthorized': 503,
+    'tenant_mismatch': 503,
+    'bad_request': 400,
+    'not_found': 404,
+    'disabled': 410,
+    'request_conflict': 409,
 }
 _CLONE_BUSY_RETRY_AFTER_S = 30
 

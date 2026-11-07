@@ -33,6 +33,7 @@ from .supertonic_provider import SupertonicProvider
 from .groq_provider import GroqProvider
 from .qwen3_provider import Qwen3Provider
 from .qwen3_local_provider import Qwen3LocalProvider
+from .qwen3_gpu_provider import Qwen3GpuProvider
 from .qwen3_mlx_provider import Qwen3MlxProvider
 from .resemble_provider import ResembleProvider
 from .elevenlabs_provider import ElevenLabsProvider
@@ -45,6 +46,9 @@ _PROVIDERS = {
     'groq': GroqProvider,
     'qwen3': Qwen3Provider,
     'qwen3-local': Qwen3LocalProvider,
+    # GPU-lane clone provider (vcg). Opt-in per tenant: selected only when a
+    # tenant's _seam/policy.json names it AND its container holds a token.
+    'qwen3-gpu': Qwen3GpuProvider,
     'qwen3-mlx': Qwen3MlxProvider,
     'resemble': ResembleProvider,
     'elevenlabs': ElevenLabsProvider,
@@ -245,6 +249,7 @@ __all__ = [
     'GroqProvider',
     'Qwen3Provider',
     'Qwen3LocalProvider',
+    'Qwen3GpuProvider',
     'Qwen3MlxProvider',
     'ResembleProvider',
     'ElevenLabsProvider',

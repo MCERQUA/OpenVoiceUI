@@ -331,9 +331,13 @@ ALL_FAKE = ['good', 'good2', 'pocketlike', 'inactiveclone', 'notcapable', 'nofea
 
 class TestRegistrySelection:
     def test_real_catalog_is_exactly_the_four(self):
+        # Catalog eligibility = the four + qwen3-gpu (seam PR 2). qwen3-gpu is
+        # eligible but opt-in: with no policy.json the ALLOWED set is still
+        # exactly FOUR (TestPolicy test_absent_policy_is_exactly_todays_four and
+        # tests/test_qwen3_gpu_provider.py::TestRegistration).
         from tts_providers import get_clone_provider_ids
         ids = get_clone_provider_ids()
-        assert sorted(ids) == sorted(FOUR)
+        assert sorted(ids) == sorted(FOUR + ['qwen3-gpu'])
         assert 'pocket' not in ids          # inactive + no class
         assert 'qwen3-mlx' not in ids       # voice-cloning feature, class cannot clone
 
