@@ -60,3 +60,26 @@ def test_auth_off_default_unchanged(client, pages, monkeypatch):
     monkeypatch.setattr(pages, "CANVAS_REQUIRE_AUTH", False)
     _as(monkeypatch, None)
     assert client.get("/pages/plan.json").status_code == 200
+
+
+# Trailing punctuation glued to a page link (2026-11-07, danielle "cortez-post-checklist.html." 404s).
+@pytest.mark.parametrize("bad,clean", [
+    ("slugpage.html.", "slugpage.html"), ("slugpage.html,", "slugpage.html"),
+    ("slugpage.html).", "slugpage.html"), ("slugpage.html’", "slugpage.html"),
+    ("missing.html.", "missing.html"),   # unconditional: the redirect must not reveal which pages exist
+])
+def test_trailing_punctuation_redirects_to_clean_url(client, monkeypatch, bad, clean):
+    _as(monkeypatch, None)
+    r = client.get(f"/pages/{bad}")
+    assert r.status_code == 301 and r.headers["Location"].endswith(f"/pages/{clean}")
+
+
+def test_trailing_punctuation_redirect_keeps_query_string(client, monkeypatch):
+    _as(monkeypatch, None)
+    r = client.get("/pages/slugpage.html.?t=123")
+    assert r.status_code == 301 and r.headers["Location"].endswith("/pages/slugpage.html?t=123")
+
+
+def test_page_backup_is_not_rewritten(client, monkeypatch):
+    _as(monkeypatch, None)
+    assert client.get("/pages/report.html.bak-20260626-002747").status_code == 401
