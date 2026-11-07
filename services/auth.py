@@ -172,12 +172,12 @@ def verify_clerk_token(token: str) -> Optional[str]:
                 return None
             return user_id
         except jwt.ExpiredSignatureError:
-            logger.debug('Token expired')
+            logger.info('Token expired')
             return None
         except jwt.InvalidTokenError:
             continue  # try next key
 
-    logger.debug('Token did not validate against any JWKS key')
+    logger.info('Token did not validate against any JWKS key')
     return None
 
 

@@ -4505,7 +4505,9 @@ connectAiradio();
                     });
 
                     if (!response.ok) {
-                        throw new Error(`API error: ${response.status}`);
+                        const apiErr = new Error(`API error: ${response.status}`);
+                        apiErr.status = response.status;
+                        throw apiErr;
                     }
                     {
                         const _gwId = localStorage.getItem('gateway_id') || 'openclaw';
@@ -5297,6 +5299,22 @@ connectAiradio();
                 window.BigHeadFace?.setThinking(false);
                     } else {
                         console.error('Conversation error:', error);
+                        // Auth failure (stale/expired Clerk session): the agent never saw the
+                        // request, so do NOT blame it and do NOT retry. Same wording family as
+                        // the existing 401/403 handler ('Not signed in — please sign in...').
+                        if (error.status === 401 || error.status === 403) {
+                            this._wasAgentic = false;
+                            this.addSystemMessage('Your sign-in has expired — reload the page and sign in again.');
+                            ActionConsole.addEntry('error', `Error: ${error.message}`);
+                            FaceModule.setMood('sad');
+                            TranscriptPanel.removeThinking();
+                            TranscriptPanel.finalizeStreaming('⚠️ Sign-in expired — reload and sign in again.');
+                            document.getElementById('thought-bubbles')?.classList.remove('active');
+                            window.HaloSmokeFace?.setThinking(false);
+                            window.BigHeadFace?.setThinking(false);
+                            setTimeout(() => FaceModule.setMood('neutral'), 2000);
+                            return;
+                        }
                         // Connection failure auto-retry: if the agent crashed/restarted,
                         // retry the message up to 2 times with backoff instead of dying silently
                         const isNetworkError = (
