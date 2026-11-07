@@ -22,7 +22,11 @@ ENDPOINT_RATE_LIMITS = {
     'conversation.tts_preview':      '10/minute',
     # Voice cloning spends real money (fal/ElevenLabs/Resemble) or GPU time
     # per call and was uncapped before the clone seam (spec S3).
-    'conversation.tts_clone_voice':  '3/minute',
+    # NOT lower than 5/minute: default-pages/voice-studio.html fires ONE POST
+    # PER SELECTED PROVIDER CARD in parallel (5 cards), so a per-minute cap
+    # below the card count 429s part of a single legitimate clone action.
+    # 10/minute = one full fan-out + one retry; 30/hour = 6 full fan-outs.
+    'conversation.tts_clone_voice':  '10/minute;30/hour',
     'upload_file':                   '5/minute',
     'groq_stt':                      '60/minute',
     'local_stt':                     '60/minute',

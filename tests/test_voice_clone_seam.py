@@ -584,7 +584,7 @@ class TestPolicy:
 class TestCloneRateLimit:
     def test_table_entry(self):
         from services.rate_limits import ENDPOINT_RATE_LIMITS
-        assert ENDPOINT_RATE_LIMITS.get('conversation.tts_clone_voice') == '3/minute'
+        assert ENDPOINT_RATE_LIMITS.get('conversation.tts_clone_voice') == '10/minute;30/hour'
 
     def test_table_key_is_the_real_endpoint_of_the_route(self):
         from services.rate_limits import ENDPOINT_RATE_LIMITS
@@ -593,7 +593,7 @@ class TestCloneRateLimit:
         assert endpoints == ['conversation.tts_clone_voice']
         assert endpoints[0] in ENDPOINT_RATE_LIMITS
 
-    def test_fourth_request_in_a_minute_is_429(self, monkeypatch):
+    def test_page_fanout_passes_and_eleventh_in_a_minute_is_429(self, monkeypatch):
         from app import create_app
         from routes.conversation import conversation_bp
         from services.rate_limits import apply_endpoint_rate_limits
@@ -602,8 +602,15 @@ class TestCloneRateLimit:
         applied = apply_endpoint_rate_limits(app)
         assert 'conversation.tts_clone_voice' in applied
         client = app.test_client()
-        codes = [client.post('/api/tts/clone', data={}).status_code for _ in range(4)]
-        assert codes == [400, 400, 400, 429]
+        # voice-studio.html fires one POST per selected provider card, in
+        # parallel; count its cards so the limit can never drop below them.
+        page = open(os.path.join(os.path.dirname(__file__), '..', 'default-pages',
+                                 'voice-studio.html')).read()
+        cards = page.count('class="platform-card" data-provider=')
+        assert cards >= 4
+        codes = [client.post('/api/tts/clone', data={}).status_code for _ in range(11)]
+        assert 429 not in codes[:cards], codes   # one full fan-out is never throttled
+        assert codes == [400] * 10 + [429]
 
     def test_server_applies_the_table(self):
         src = open(os.path.join(os.path.dirname(__file__), '..', 'server.py')).read()
@@ -694,6 +701,71 @@ class TestSeamDirIsolation:
         assert ws._writable_path('Voice-Clones/_seam') is None
         assert ws._writable_path('Voice-Clones/clone_a/../_seam/policy.json') is None
         assert ws._writable_path('Voice-Clones/clone_a/metadata.json') is not None
+
+    def _ws_app(self, tmp_path, monkeypatch):
+        """Workspace browser with the REAL two-path layout: Voice-Clones inside
+        WORKSPACE_DIR is a second view (a bind mount in production; a symlink
+        here) of the same VOICE_CLONES_DIR that holds _seam."""
+        import routes.workspace as ws
+        clones = tmp_path / 'voice-clones'
+        seam = clones / '_seam'
+        seam.mkdir(exist_ok=True)
+        (seam / 'policy.json').write_text('{"clone_requires_code": true}')
+        (seam / 'gpu.token').write_text('vcg1.kid.SECRET')
+        (clones / 'clone_a').mkdir(exist_ok=True)
+        (seam / 'jobs').mkdir(exist_ok=True)
+        (clones / 'clone_a').mkdir(exist_ok=True)
+        (clones / 'clone_a' / 'metadata.json').write_text('{"voice_id": "clone_a"}')
+        wsdir = tmp_path / 'workspace'
+        wsdir.mkdir()
+        # A bind mount resolves IN PLACE (a symlink would resolve out of
+        # WORKSPACE_DIR and be refused for the wrong reason), so model the
+        # second view as a real copy at the workspace path.
+        import shutil
+        shutil.copytree(clones, wsdir / 'Voice-Clones')
+        monkeypatch.setattr(ws, 'WORKSPACE_DIR', wsdir)
+        monkeypatch.setitem(ws._WRITABLE_MAP, 'Voice-Clones', clones)
+        app = Flask(__name__)
+        app.config['TESTING'] = True
+        app.register_blueprint(ws.workspace_bp)
+        return app.test_client()
+
+    @pytest.mark.parametrize('route,path', [
+        ('/api/workspace/file', 'Voice-Clones/_seam/policy.json'),
+        ('/api/workspace/raw', 'Voice-Clones/_seam/gpu.token'),
+        ('/api/workspace/raw', 'Voice-Clones/clone_a/../_seam/gpu.token'),
+        ('/api/workspace/browse', 'Voice-Clones/_seam'),
+        ('/api/workspace/tree', 'Voice-Clones/_seam'),
+    ])
+    def test_workspace_file_api_cannot_read_seam(self, tmp_path, monkeypatch, route, path):
+        c = self._ws_app(tmp_path, monkeypatch)
+        r = c.get(route, query_string={'path': path})
+        if route == '/api/workspace/tree':
+            # tree answers 200 {'dirs': []} for any unresolvable path, by design
+            assert r.status_code == 200 and r.get_json() == {'dirs': []}, r.data
+        else:
+            assert r.status_code in (400, 404), (route, path, r.status_code)
+        assert b'SECRET' not in r.data and b'clone_requires_code' not in r.data
+        assert b'jobs' not in r.data
+
+    def test_workspace_listing_hides_seam_but_shows_clones(self, tmp_path, monkeypatch):
+        c = self._ws_app(tmp_path, monkeypatch)
+        names = [e['name'] for e in c.get('/api/workspace/browse',
+                 query_string={'path': 'Voice-Clones'}).get_json()['entries']]
+        assert 'clone_a' in names and '_seam' not in names
+        r = c.get('/api/workspace/file', query_string={'path': 'Voice-Clones/clone_a/metadata.json'})
+        assert r.status_code == 200  # positive control: ordinary clone files stay readable
+        tree = c.get('/api/workspace/tree', query_string={'path': 'Voice-Clones'}).get_json()
+        assert [d['name'] for d in tree['dirs']] == ['clone_a'], tree
+        top = c.get('/api/workspace/tree', query_string={'path': ''}).get_json()
+        assert '_seam' not in json.dumps(top)
+
+    def test_workspace_put_cannot_write_seam(self, tmp_path, monkeypatch):
+        c = self._ws_app(tmp_path, monkeypatch)
+        r = c.put('/api/workspace/file', json={'path': 'Voice-Clones/_seam/policy.json',
+                                               'content': '{"clone_requires_code": false}'})
+        assert r.status_code >= 400
+        assert 'true' in (tmp_path / 'voice-clones' / '_seam' / 'policy.json').read_text()
 
 
 class TestRetiredClonesLeaveTheList:
