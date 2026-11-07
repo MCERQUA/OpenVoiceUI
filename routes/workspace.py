@@ -60,9 +60,16 @@ def _writable_path(rel: str):
     target = (base / sub).resolve()
     # Safety: ensure it stays within the writable base
     try:
-        target.relative_to(base.resolve())
+        inner = target.relative_to(base.resolve())
     except ValueError:
         return None
+    # Voice-clone seam state (policy now; codes/consent/audit later) lives in
+    # VOICE_CLONES_DIR/_seam and is admin-written, never edited through the
+    # workspace file API (docs/jambot/ovu-voice-clone-seam-spec.md).
+    if prefix == 'Voice-Clones' and inner.parts:
+        from services.paths import VOICE_CLONE_SEAM_DIR
+        if inner.parts[0] == VOICE_CLONE_SEAM_DIR.name:
+            return None
     return target
 
 

@@ -21,7 +21,10 @@ from typing import Optional
 
 import httpx
 
-from .base_provider import TTSProvider
+from .base_provider import (
+    CloneCapableTTSProvider, CloneInfo, CloneRequest, CloneResult,
+    soft_retire_clone_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +83,7 @@ def _fal_download(url: str, timeout: float = 30.0) -> bytes:
         return resp.content
 
 
-class Qwen3Provider(TTSProvider):
+class Qwen3Provider(CloneCapableTTSProvider):
     """
     TTS Provider using Qwen3-TTS via fal.ai.
 
@@ -88,6 +91,11 @@ class Qwen3Provider(TTSProvider):
     Cloned voices: stored locally as .safetensors embeddings, referenced by voice_id
     Output: MP3 audio bytes
     """
+
+    # Clone seam (base_provider.CloneCapableTTSProvider)
+    clone_label = 'Qwen3'
+    clone_input = ('url',)        # fal.ai fetches the reference from a URL
+    clone_languages = ('en', 'zh', 'es', 'fr', 'de', 'it', 'ja', 'ko', 'pt', 'ru')
 
     def __init__(self):
         super().__init__()
@@ -185,6 +193,14 @@ class Qwen3Provider(TTSProvider):
         if not clones_dir.exists():
             return voices
         for voice_dir in sorted(clones_dir.iterdir()):
+            # '_'-prefixed entries are seam state (VOICE_CLONE_SEAM_DIR =
+            # VOICE_CLONES_DIR/_seam), never a voice; voice ids are clone_*.
+            if voice_dir.name.startswith('_'):
+                continue
+            # Retired clones keep their metadata.json (rename, never delete)
+            # but are no longer voices.
+            if voice_dir.name.endswith('.retired'):
+                continue
             meta_path = voice_dir / "metadata.json"
             if meta_path.exists():
                 try:
@@ -195,6 +211,35 @@ class Qwen3Provider(TTSProvider):
                 except Exception as e:
                     logger.warning(f"Bad voice metadata in {voice_dir}: {e}")
         return voices
+
+    # ------------------------------------------------------------------
+    # Clone seam shims — wrap clone_voice exactly as the pre-seam route did
+    # ------------------------------------------------------------------
+
+    def create_clone(self, req: CloneRequest) -> CloneResult:
+        record = self.clone_voice(
+            audio_url=req.audio_url,
+            name=req.name,
+            reference_text=req.reference_text,
+        )
+        voice_ref = ''
+        if record.get('voice_id'):
+            voice_ref = str(_get_clones_dir() / record['voice_id']
+                            / 'embedding.safetensors')
+        return CloneResult.from_legacy('qwen3', req.name, record, voice_ref)
+
+    def list_clones(self, tenant_id: str) -> list:
+        # Clones live in this container's own volume, so every one is this
+        # tenant's (jail-cell rule: one OVU container per tenant).
+        return [
+            CloneInfo(voice_id=c['voice_id'], name=c.get('name', ''),
+                      provider='qwen3', created_at=c.get('created_at', ''),
+                      tenant_id=tenant_id, metadata=c)
+            for c in self.list_cloned_voices() if c.get('voice_id')
+        ]
+
+    def disable_clone(self, tenant_id: str, voice_id: str, reason: str = '') -> None:
+        soft_retire_clone_dir(_get_clones_dir(), voice_id, reason)
 
     def get_clone_embedding_url(self, voice_id: str) -> Optional[str]:
         """Get the fal.ai embedding URL for a cloned voice.
@@ -434,5 +479,6 @@ class Qwen3Provider(TTSProvider):
             'default_voice': 'Vivian',
             'audio_format': 'mp3',
             'sample_rate': 24000,
+            'capabilities': self.clone_capabilities(),
             'error': self._init_error,
         }

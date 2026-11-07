@@ -18,7 +18,10 @@ from typing import Optional
 
 import httpx
 
-from .base_provider import TTSProvider
+from .base_provider import (
+    CloneCapableTTSProvider, CloneInfo, CloneRequest, CloneResult,
+    soft_retire_clone_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +68,16 @@ def _is_available() -> bool:
     return ok
 
 
-class Qwen3LocalProvider(TTSProvider):
+class Qwen3LocalProvider(CloneCapableTTSProvider):
     """
     Qwen3-TTS running on the gpu-laptop RTX 3070 GPU.
     Free, zero API cost. Only available when laptop is on and tunnel is up.
     """
+
+    # Clone seam (base_provider.CloneCapableTTSProvider). clone_voice also
+    # takes bytes/url, but the route has only ever offered it a saved upload.
+    clone_label = 'qwen3-local'
+    clone_input = ('path',)
 
     def __init__(self):
         super().__init__()
@@ -151,6 +159,10 @@ class Qwen3LocalProvider(TTSProvider):
         voices = []
         clones_dir = _get_clones_dir()
         for voice_dir in sorted(clones_dir.iterdir()):
+            # Retired clones keep their metadata.json (rename, never delete)
+            # but are no longer voices.
+            if voice_dir.name.endswith('.retired'):
+                continue
             meta_path = voice_dir / "metadata.json"
             if meta_path.exists():
                 try:
@@ -160,6 +172,30 @@ class Qwen3LocalProvider(TTSProvider):
                 except Exception as e:
                     logger.warning(f"[Qwen3Local] Bad metadata in {voice_dir}: {e}")
         return voices
+
+    # ------------------------------------------------------------------
+    # Clone seam shims — wrap clone_voice exactly as the pre-seam route did
+    # ------------------------------------------------------------------
+
+    def create_clone(self, req: CloneRequest) -> CloneResult:
+        record = self.clone_voice(
+            audio_path=req.audio_path,
+            name=req.name,
+            reference_text=req.reference_text,
+        )
+        return CloneResult.from_legacy('qwen3-local', req.name, record,
+                                       record.get('pt_path', ''))
+
+    def list_clones(self, tenant_id: str) -> list:
+        return [
+            CloneInfo(voice_id=c['voice_id'], name=c.get('name', ''),
+                      provider='qwen3-local', created_at=c.get('created_at', ''),
+                      tenant_id=tenant_id, metadata=c)
+            for c in self.list_cloned_voices() if c.get('voice_id')
+        ]
+
+    def disable_clone(self, tenant_id: str, voice_id: str, reason: str = '') -> None:
+        soft_retire_clone_dir(_get_clones_dir(), voice_id, reason)
 
     def _get_voice_pt(self, voice_id: str) -> Optional[bytes]:
         pt_path = _get_clones_dir() / voice_id / "voice.pt"
@@ -263,5 +299,6 @@ class Qwen3LocalProvider(TTSProvider):
             "model": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
             "tunnel_url": API_URL,
             "available": available,
+            "capabilities": self.clone_capabilities(),
             "error": None if available else "Laptop offline or SSH tunnel down",
         }
