@@ -172,12 +172,14 @@ def create_app(config_override: dict = None):
                                   # to recipients with no app login). Non-sensitive (client's own
                                   # jingles); the /api/music track list is already public anyway.
             '/images/',    # canvas images (individual pages check their own flag)
-            '/uploads/',   # uploaded/generated files — served from VPS filesystem (no secrets)
+            '/uploads/',   # uploaded/generated files — page assets. routes/static_files.py gates it
+                           # itself: always-private areas (field-dock/, sms/) are enforced, the rest
+                           # follows UPLOADS_AUTH_MODE (shadow/enforce)
             '/canvas-data/',  # processed-song media (audio stems) + fixtures for the Suno Studio editor — non-sensitive, served like /uploads/ (added 2026-06-25)
             '/static/',    # PWA icons, app icons
             '/pages/',     # canvas pages — served without auth (CANVAS_REQUIRE_AUTH opt-in)
-            '/api/upload',    # file upload — canvas pages lose Clerk JWT on long sessions; files are non-sensitive
-            '/api/uploads',   # uploads list — files are already public at /uploads/, listing is fine
+            # '/api/upload' (the POST upload) is an EXACT public path below, not a prefix: as a prefix it
+            # also opened '/api/uploads' (the listing of every filename) to anyone (2026-11-09).
             '/api/plugins/assets',  # Plugin face scripts/CSS — fetched by index.html before login.
                                     # All other /api/plugins routes (install/uninstall/restart/config)
                                     # are state-changing admin operations and require admin auth below.
@@ -243,6 +245,8 @@ def create_app(config_override: dict = None):
             '/health/live',
             '/health/ready',
             '/api/auth/check',      # Auth check endpoint — does its own token verification
+            '/api/upload',          # file upload (POST) — canvas pages lose Clerk JWT on long sessions.
+                                    # EXACT match only: /api/uploads (the listing) is NOT public.
             '/api/suno/callback',   # Suno's servers POST here from external IPs (no Clerk token)
             '/api/version',         # Version check — loaded before auth to show update banner
             '/api/config',          # Public client config (Clerk publishable key) — admin.html bootstrap
