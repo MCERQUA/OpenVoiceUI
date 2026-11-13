@@ -11056,5 +11056,19 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
             });
         })();
 
+        // Release all mic/camera tracks on page exit — iOS keeps "active call" indicator
+        // alive until every MediaStreamTrack is explicitly stopped (pagehide fires on iOS;
+        // beforeunload fires on desktop/Android).
+        (function () {
+            function _releaseAllMedia() {
+                try { window._voiceConversation?.stream?.getTracks().forEach(t => t.stop()); } catch (_) {}
+                try { window._sttInstance?.stream?.getTracks().forEach(t => t.stop()); } catch (_) {}
+                try { if (window.wakeDetector) window.wakeDetector.stop(); } catch (_) {}
+                try { if (window.cameraModule?.stream) window.cameraModule.stop(); } catch (_) {}
+            }
+            window.addEventListener('pagehide', _releaseAllMedia);
+            window.addEventListener('beforeunload', _releaseAllMedia);
+        })();
+
         // Start initialization
         init().catch(console.error);
