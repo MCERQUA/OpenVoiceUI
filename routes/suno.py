@@ -37,6 +37,7 @@ from flask import Blueprint, jsonify, request
 
 from services.paths import GENERATED_MUSIC_DIR
 from services import suno_lyrics
+from services import suno_guard
 
 GENERATED_MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_METADATA_FILE = GENERATED_MUSIC_DIR / 'generated_metadata.json'
@@ -110,6 +111,56 @@ def _provider_receipt(op: str, units: str = '1') -> None:
         record_provider_call('suno', endpoint='/generate', op=op, units=units)
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Spend guards (NEWBORN 2026-11-13 — services/suno_guard.py has the why).
+# Daily cap + 3-retry rule are PROBATION: in the default 'shadow' mode they only log
+# "[probation] would-block" and append generated_music/suno-guard-log.jsonl (the host's
+# scripts/suno-spend-guard.py independently re-derives the same verdicts from the task log and
+# alerts host). SUNO_GUARD_MODE=enforce is the single flag that makes them refuse — Mike's go only.
+# ---------------------------------------------------------------------------
+def _spend_guard(op: str, text: str, title: str, body: dict):
+    """Return (refusal_response_or_None, fingerprint). Never raises; a guard fault = allow."""
+    fp = ''
+    try:
+        fp = suno_guard.fingerprint(text, title)
+        owner_ok = str(body.get('owner_confirmed', '')).lower() in ('1', 'true', 'yes')
+        now = time.time()
+        prior = suno_guard.load_submissions(GENERATED_MUSIC_DIR / 'suno-task-log.jsonl',
+                                            since_epoch=now - 2 * 86400)
+        verdict = suno_guard.evaluate(prior, op=op, fp=fp, now=now, owner_confirmed=owner_ok,
+                                      daily_cap=suno_guard.daily_cap())
+        if not verdict['reasons']:
+            return None, fp
+        mode = suno_guard.mode()
+        row = {'ts': datetime.now(timezone.utc).isoformat(timespec='seconds'), 'mode': mode,
+               'op': op, 'fp': fp, 'would_block': verdict['would_block'],
+               'day_count': verdict['day_count'], 'retry_count': verdict['retry_count'],
+               'reasons': verdict['reasons'], 'tenant': _RECEIPT_TENANT}
+        try:
+            with open(GENERATED_MUSIC_DIR / 'suno-guard-log.jsonl', 'a') as f:
+                f.write(json.dumps(row) + '\n')
+        except Exception:
+            pass
+        if not verdict['would_block']:
+            logger.info(f"Suno guard: owner_confirmed past {'; '.join(verdict['reasons'])}")
+            return None, fp
+        logger.warning(f"[probation] would-block suno {op} mode={mode} tenant={_RECEIPT_TENANT} "
+                       f"day_count={verdict['day_count']} retry_count={verdict['retry_count']} "
+                       f"reason={'; '.join(verdict['reasons'])}")
+        if mode != 'enforce':
+            return None, fp
+        return (jsonify({'action': 'error', 'guard': 'suno-spend',
+                         'response': ('Paused before spending more Suno credits: '
+                                      + '; '.join(verdict['reasons'])
+                                      + '. Send the owner the best take so far and ask; resend with '
+                                        'owner_confirmed=true only after the OWNER says to make more. '
+                                        'Every generation already returns 2 versions — do not make '
+                                        'extra variants nobody asked for.')}), 429), fp
+    except Exception as exc:  # a guard bug must never stop a paid-for request
+        logger.warning(f'Suno guard skipped: {exc}')
+        return None, fp
 
 
 def _task_log(event: str, **fields) -> None:
@@ -596,6 +647,18 @@ def _action_generate(_q, body: dict):
     if not prompt and not lyrics and not style:
         return jsonify({'action': 'error', 'response': 'Need a prompt, lyrics, or style — tell me what kind of song to make.'})
 
+    # ACTIVE (2026-11-13): Spanish section labels ([Verso 1], [Coro]) -> English, BEFORE the
+    # lyrics-vs-description check below. That check only knows English labels, so Spanish lyrics
+    # silently went to description mode and Suno wrote its own words (9 wasted takes, 2026-11-11).
+    lyrics, _lab_l = suno_guard.normalize_section_labels(lyrics)
+    prompt, _lab_p = suno_guard.normalize_section_labels(prompt)
+    if _lab_l or _lab_p:
+        logger.info(f'Suno generate: section labels normalised {(_lab_l + _lab_p)[:6]}')
+
+    _refusal, _guard_fp = _spend_guard('song', lyrics or prompt or style, title, body)
+    if _refusal is not None:
+        return _refusal
+
     # Determine mode: custom (explicit lyrics) vs description (Suno writes lyrics)
     if lyrics:
         song_prompt = lyrics
@@ -679,7 +742,7 @@ def _action_generate(_q, body: dict):
                 }
                 _provider_receipt('song')   # live Watch pulse — task accepted, credits committed
                 _task_log('submitted', op='song', task_id=task_id, title=title,
-                          style=style, prompt=(prompt or '')[:300])
+                          style=style, prompt=(prompt or '')[:300], fp=_guard_fp)
                 return jsonify({
                     'action': 'generating',
                     'job_id': job_id,
@@ -851,6 +914,10 @@ def _action_jingle(_q, body: dict):
     if not brand:
         return jsonify({'action': 'error', 'response': "Need a brand/company name to sing."})
 
+    _refusal, _guard_fp = _spend_guard('jingle', f'{brand} jingle', f'{brand} Jingle', body)
+    if _refusal is not None:
+        return _refusal
+
     style_in = (_q('style') or body.get('style', '')).strip()
     vocal_gender = (_q('vocal_gender') or body.get('vocal_gender', 'm')).lower()
     if vocal_gender not in ('m', 'f'):
@@ -969,7 +1036,7 @@ def _action_jingle(_q, body: dict):
         }
         _provider_receipt('jingle')   # live Watch pulse — task accepted, credits committed
         _task_log('submitted', op='jingle', task_id=task_id, title=f'{brand} Jingle',
-                  style=style_descriptor, prompt=(jingle_prompt or '')[:300])
+                  style=style_descriptor, prompt=(jingle_prompt or '')[:300], fp=_guard_fp)
         return jsonify({
             'action': 'generating',
             'job_id': job_id,
