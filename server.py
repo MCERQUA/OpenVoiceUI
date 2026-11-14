@@ -1765,12 +1765,25 @@ def _set_push_client_visible(ws, visible):
 
 
 def _push_user_is_operator(user_id):
-    """True for the platform operator (PLATFORM_ADMIN_USER_IDS, services/auth.py).
+    """True for a user whose open tab must NOT count as the owner having seen a push.
+
+    That is the platform operator (PLATFORM_ADMIN_USER_IDS, services/auth.py) and
+    anyone in PUSH_NON_OWNER_USER_IDS: the sub-host operators jambot-create-user.sh
+    adds to every tenant's ALLOWED_USER_IDS (SUBHOST_CLERK_IDS). Neither is the
+    tenant's owner, so a result reaching only their tab must still be relayed.
+    PUSH_NON_OWNER_USER_IDS grants nothing; it only stops a tab counting as seen.
+    It is read per call (pushes are rare) so the value in the container env is
+    the one used.
 
     Not ADMIN_USER_IDS: that set holds the tenant OWNER too (jambot-create-user.sh
-    writes owner + platform admin), and the owner is exactly who must count."""
+    writes owner + platform admin), and the owner is exactly who must count. No
+    per-tenant owner id exists to compare against (measured 2026-11-14: the first
+    ALLOWED/ADMIN id is the platform admin on 18 of 24 tenants)."""
     if not user_id:
         return False
+    raw = os.getenv("PUSH_NON_OWNER_USER_IDS", "")
+    if user_id in {u.strip() for u in raw.split(",") if u.strip()}:
+        return True
     try:
         from services.auth import is_platform_admin
     except Exception:

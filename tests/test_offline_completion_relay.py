@@ -26,6 +26,7 @@ import ast
 import asyncio
 import json
 import logging
+import os
 import queue
 import re
 import threading
@@ -68,7 +69,7 @@ def _load_push_module(receipt_path, tts_calls):
         return "QVVESU8="
 
     ns = {
-        "json": json, "re": re, "time": time, "queue": queue, "uuid": uuid,
+        "json": json, "re": re, "time": time, "queue": queue, "uuid": uuid, "os": os,
         "threading": threading, "datetime": datetime, "Path": Path,
         "logger": logging.getLogger("test-proactive-push"),
         "_generate_tts_b64": fake_tts,

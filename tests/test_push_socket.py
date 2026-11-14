@@ -26,6 +26,7 @@ test_offline_completion_relay.py) — the code under test is server.py's own.
 import ast
 import json
 import logging
+import os
 import queue
 import re
 import threading
@@ -63,7 +64,7 @@ def _load(receipt_path):
     missing = {"_serve_push_socket", "_set_push_client_visible"} - found
     assert not missing, f"server.py has no {sorted(missing)} — no always-open push socket"
     ns = {
-        "json": json, "re": re, "time": time, "queue": queue, "uuid": uuid,
+        "json": json, "re": re, "time": time, "queue": queue, "uuid": uuid, "os": os,
         "threading": threading, "datetime": datetime, "Path": Path,
         "logger": logging.getLogger("test-push-socket"),
         "_generate_tts_b64": lambda text, voice=None: "QVVESU8=",
@@ -367,3 +368,45 @@ def test_clawdbot_socket_takes_visibility_reports():
     assert ns["_push_client_visible"].get(ws) is not None
     assert not ns["_handle_push_client_frame"](ws, json.dumps({"type": "chat.send"}))
     assert not ns["_handle_push_client_frame"](ws, "not json")
+
+
+# Review follow-up: a sub-host operator (SUBHOST_CLERK_IDS in jambot-create-user.sh)
+# is on every tenant's ALLOWED_USER_IDS and in PLATFORM_ADMIN_USER_IDS on none, so
+# her visible tab counted as the owner having seen a client's result and the
+# offline relay was skipped. PUSH_NON_OWNER_USER_IDS names such ids; it grants
+# nothing (not PLATFORM_ADMIN_USER_IDS, which grants vault platform-setup).
+SUBHOST = "user_subhost_test"
+
+
+def test_subhost_tab_does_not_count_as_seen(tmp_path, monkeypatch):
+    import services.auth as auth
+    monkeypatch.setattr(auth, "_PLATFORM_ADMIN_USER_IDS", {OPERATOR})
+    monkeypatch.setenv("PUSH_NON_OWNER_USER_IDS", f" {SUBHOST} ,user_other")
+    receipt = tmp_path / ".proactive-push.jsonl"
+    ns = _load(receipt)
+    sub = object()
+    q = ns["_register_push_client"](sub, user_id=SUBHOST)
+    ns["_set_push_client_visible"](sub, True)
+    assert ns["push_proactive_message"]("Client job done.", "main") == 0, \
+        "the sub-host's visible tab must not swallow the owner relay"
+    assert not q.empty(), "she still receives the push"
+    row = _receipts(receipt)[-1]
+    assert row["delivered"] == 1 and row["visible"] == 0
+
+    owner = object()
+    ns["_register_push_client"](owner, user_id=OWNER)
+    ns["_set_push_client_visible"](owner, True)
+    assert ns["push_proactive_message"]("again", "main") == 1, "the owner's tab still counts"
+
+
+def test_non_owner_list_grants_nothing_and_unset_changes_nothing(monkeypatch):
+    import services.auth as auth
+    monkeypatch.setattr(auth, "_PLATFORM_ADMIN_USER_IDS", {OPERATOR})
+    monkeypatch.setenv("PUSH_NON_OWNER_USER_IDS", SUBHOST)
+    assert auth.is_platform_admin(SUBHOST) is False
+    ns = _load(Path("/nonexistent"))
+    assert ns["_push_user_is_operator"](SUBHOST) is True
+    assert ns["_push_user_is_operator"](OWNER) is False
+    monkeypatch.delenv("PUSH_NON_OWNER_USER_IDS")
+    assert ns["_push_user_is_operator"](SUBHOST) is False
+    assert ns["_push_user_is_operator"](OPERATOR) is True
