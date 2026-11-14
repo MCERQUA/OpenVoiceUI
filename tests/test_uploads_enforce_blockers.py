@@ -12,8 +12,9 @@ run UPLOADS_AUTH_MODE=enforce, and these tests pin each one:
    invalid, because PyJWT checks the signature before exp.
 2. /uploads/albums/<id>/<file> is a more specific rule than /uploads/<path:filename>, so it wins
    the route match and never reached the uploads gate. It now runs the gate itself.
-3. GET /api/uploads (the listing: every filename + size) sits under app.require_auth's public
-   '/api/upload' prefix. It now runs the gate as a listing: no signed-link grant, JSON 401.
+3. GET /api/uploads (the listing: every filename + size) sat under app.require_auth's public
+   '/api/upload' prefix. It now runs the gate as a listing: no signed-link grant, JSON 401, and since
+   2026-11-09 in every mode (and '/api/upload' is an exact public path, so require_auth gates it too).
 """
 import json
 import time
@@ -220,12 +221,14 @@ def test_listing_served_by_the_gated_blueprint_route(app):
     assert '@app.route("/api/uploads"' not in src
 
 
-def test_listing_shadow_serves_and_logs(client, up, monkeypatch):
+def test_listing_denied_even_in_shadow_and_logged(client, up, monkeypatch):
+    # 2026-11-09: the listing is enforced in every mode (tests/test_uploads_private_areas.py).
     _as(monkeypatch, None)
     r = client.get("/api/uploads")
-    assert r.status_code == 200 and r.get_json()["count"] == 2
+    assert r.status_code == 401 and r.get_json()["code"] == "auth_required"
     rows = _rows(up)
     assert len(rows) == 1 and rows[0]["file"] == "(listing) /api/uploads"
+    assert rows[0]["mode"] == "always-enforce"
     assert rows[0]["enforce_action"] == "401" and "signature" not in rows[0]["grants"]
 
 

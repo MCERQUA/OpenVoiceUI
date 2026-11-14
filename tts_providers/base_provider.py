@@ -12,7 +12,7 @@ Date: 2026-02-11
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -308,6 +308,304 @@ class TTSVoiceNotFoundError(TTSProviderError):
     pass
 
 
+
+# ===========================================================================
+# Voice-clone PROVIDER-SEAM (docs/jambot/ovu-voice-clone-seam-spec.md §2)
+# ===========================================================================
+# A provider that can create a voice clone implements CloneCapableTTSProvider.
+# POST /api/tts/clone selects providers through the registry (catalog feature
+# "voice-cloning" + a class implementing this ABC + availability) instead of a
+# hard-coded tuple, so a new provider (e.g. the GPU lane's qwen3-gpu) plugs in
+# without touching the route.
+
+#: Error enum, spec §2.4, plus the six codes of the GPU wire (mac-claude's
+#: voice-clone-gpu-wire-v0 §4, accepted by host 2026-11-07). Each code maps to
+#: one HTTP status in the route.
+CLONE_ERROR_CODES = (
+    'unavailable', 'busy', 'bad_audio', 'quota',
+    'consent_mismatch', 'timeout', 'internal',
+    # GPU wire v0 §4 additions
+    'unauthorized',      # upstream bearer bad/revoked: a CONFIG alarm
+    'tenant_mismatch',   # this container holds another tenant's token
+    'bad_request',       # client bug: missing tenant_id, bad name/voice_id
+    'not_found',         # unknown or foreign id (no oracle on other tenants)
+    'disabled',          # taken down; never restore
+    'request_conflict',  # same request_id, different audio or name
+)
+
+_CLONE_ERROR_RETRYABLE = {
+    'unavailable': True,
+    'busy': True,
+    'bad_audio': False,
+    'quota': False,
+    'consent_mismatch': False,
+    'timeout': True,
+    'internal': False,
+    'unauthorized': False,
+    'tenant_mismatch': False,
+    'bad_request': False,
+    'not_found': False,
+    'disabled': False,
+    'request_conflict': False,
+}
+
+
+class CloneError(Exception):
+    """A typed clone failure (spec §2.4).
+
+    Raised by ``CloneCapableTTSProvider.create_clone`` (or derived from a
+    ``CloneResult`` with ``status == 'failed'``). The route maps ``code`` to an
+    HTTP status; anything that is NOT a CloneError keeps today's behaviour
+    (RuntimeError -> 500 with its message, anything else -> opaque 500).
+
+    Args:
+        code: one of CLONE_ERROR_CODES.
+        message: human-readable detail (never audio bytes, never an access code).
+        retryable: defaults per code (unavailable/busy/timeout retryable).
+        retry_after: seconds, sent as the Retry-After header when set
+            (always sent for ``busy``; the route defaults it).
+    """
+
+    def __init__(self, code: str, message: str = '',
+                 retryable: Optional[bool] = None,
+                 retry_after: Optional[int] = None):
+        if code not in CLONE_ERROR_CODES:
+            raise ValueError(
+                f"Unknown CloneError code {code!r}; expected one of {CLONE_ERROR_CODES}"
+            )
+        self.code = code
+        self.message = message or code
+        self.retryable = (_CLONE_ERROR_RETRYABLE[code]
+                          if retryable is None else bool(retryable))
+        self.retry_after = retry_after
+        super().__init__(f"[{code}] {self.message}")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {'code': self.code, 'retryable': self.retryable,
+                'message': self.message}
+
+    @classmethod
+    def from_dict(cls, err: Optional[Dict[str, Any]]) -> 'CloneError':
+        err = err or {}
+        code = err.get('code', 'internal')
+        if code not in CLONE_ERROR_CODES:
+            code = 'internal'
+        return cls(code, err.get('message', ''), err.get('retryable'),
+                   err.get('retry_after'))
+
+
+@dataclass
+class CloneRequest:
+    """One clone request (spec §2.2).
+
+    ``tenant_id`` comes from the OVU container env, NEVER from the client body.
+    ``audio_url`` is not in spec §2.2 but is required by the fal.ai qwen3
+    provider, which takes a URL rather than a file; it is the public URL of
+    the same saved upload (or the caller's URL on the JSON path).
+    Fields marked TODO are carried so the shape is stable, but nothing in this
+    release populates or enforces them (access codes: spec §1, consent: §3,
+    duration caps: §3.4).
+    """
+    tenant_id: str
+    request_id: str
+    name: str
+    audio_path: Optional[str] = None
+    audio_url: Optional[str] = None
+    audio_sha256: Optional[str] = None     # TODO spec §2.2/§4
+    duration_s: Optional[float] = None     # TODO spec §3.4 (ffprobe)
+    reference_text: Optional[str] = None
+    language: Optional[str] = None
+    consent_id: Optional[str] = None       # TODO spec §3
+    code_id: Optional[str] = None          # TODO spec §1
+    #: The phrase the speaker was asked to recite (spec §3.3). When set it is
+    #: the preferred reference_text for providers that need a transcript
+    #: (qwen3-gpu). Populated by the consent/recitation PR; None until then.
+    recitation_phrase: Optional[str] = None
+
+
+@dataclass
+class CloneResult:
+    """Outcome of ``create_clone`` / ``get_clone_status`` (spec §2.2).
+
+    ``metadata`` is the provider's own record, verbatim (e.g. the dict the
+    legacy ``clone_voice`` returned); the route reads provider-specific extras
+    such as ``embedding_size`` from it so its success envelope is unchanged.
+    """
+    status: str                       # 'ready' | 'pending' | 'failed'
+    provider: str
+    name: str
+    voice_id: Optional[str] = None
+    job_id: Optional[str] = None
+    created_at: str = ''
+    clone_time_ms: int = 0
+    voice_ref: str = ''               # opaque provider handle, stored verbatim
+    error: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_legacy(cls, provider: str, requested_name: str,
+                    record: Dict[str, Any], voice_ref: str = '') -> 'CloneResult':
+        """Wrap the dict a legacy ``clone_voice`` returned, field-for-field
+        the way the pre-seam route read it (voice_id default '', name default
+        = requested name, created_at default '', clone_time_ms default 0)."""
+        record = record or {}
+        return cls(
+            status='ready',
+            provider=provider,
+            name=record.get('name', requested_name),
+            voice_id=record.get('voice_id', ''),
+            created_at=record.get('created_at', ''),
+            clone_time_ms=record.get('clone_time_ms', 0),
+            voice_ref=voice_ref,
+            metadata=record,
+        )
+
+
+@dataclass
+class CloneInfo:
+    """One stored clone as returned by ``list_clones`` (spec §2.1)."""
+    voice_id: str
+    name: str
+    provider: str
+    created_at: str = ''
+    tenant_id: Optional[str] = None
+    consent_id: Optional[str] = None
+    audio_sha256: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'voice_id': self.voice_id, 'name': self.name,
+            'provider': self.provider, 'created_at': self.created_at,
+            'tenant_id': self.tenant_id, 'consent_id': self.consent_id,
+            'audio_sha256': self.audio_sha256,
+        }
+
+
+class CloneCapableTTSProvider(TTSProvider):
+    """A TTSProvider that can create voice clones (spec §2.1).
+
+    Subclasses set the class attributes below and implement ``create_clone``,
+    ``list_clones`` and ``disable_clone``. ``get_clone_status`` is only needed
+    when ``async_clone`` is True. ``health`` defaults to wrapping
+    ``health_check()``/``is_available()``.
+
+    Class attributes:
+        clone_label: human name used in input-validation errors.
+        clone_input: accepted reference inputs, subset of ('bytes','path','url').
+            The route rejects a request that carries none of them (400).
+        async_clone: True if create_clone may return status 'pending'.
+        min_ref_seconds / max_ref_seconds: reference length bounds or None.
+        clone_languages: languages a clone can speak (empty = unknown).
+    """
+
+    clone_label: str = ''
+    clone_input: tuple = ('path',)
+    async_clone: bool = False
+    min_ref_seconds: Optional[int] = None
+    max_ref_seconds: Optional[int] = None
+    clone_languages: tuple = ()
+
+    def clone_capabilities(self) -> Dict[str, Any]:
+        """The ``get_info()['capabilities']`` clone block (spec §2.1)."""
+        return {
+            'clone': True,
+            'clone_input': list(self.clone_input),
+            'async_clone': bool(self.async_clone),
+            'max_ref_seconds': self.max_ref_seconds,
+            'min_ref_seconds': self.min_ref_seconds,
+            'languages': list(self.clone_languages),
+        }
+
+    def clone_request_error(self, req: CloneRequest) -> Optional[str]:
+        """Return a 400 message if ``req`` carries no input this provider
+        accepts, else None. Checked by the route BEFORE create_clone, so a bad
+        request spends nothing."""
+        label = self.clone_label or self.__class__.__name__
+        accepts = set(self.clone_input)
+        if 'path' in accepts and req.audio_path:
+            return None
+        if 'url' in accepts and req.audio_url:
+            return None
+        if 'path' in accepts:
+            return f'{label} requires audio file upload (multipart form)'
+        return f'{label} requires audio_url'
+
+    @abstractmethod
+    def create_clone(self, req: CloneRequest) -> CloneResult:
+        """Create a clone. Sync providers return status 'ready'; async ones
+        may return 'pending' + job_id. Raise CloneError for typed failures."""
+
+    def get_clone_status(self, job_id: str) -> CloneResult:
+        """Poll an async clone job. Sync providers have no jobs."""
+        raise CloneError(
+            'internal',
+            f'{self.clone_label or self.__class__.__name__} clones synchronously; '
+            f'there is no job {job_id!r}',
+        )
+
+    def synthesize(self, text: str, voice_id: Optional[str] = None, **kwargs) -> bytes:
+        """Alias of generate_speech (spec §2.1) — no new behaviour."""
+        if voice_id is not None:
+            kwargs['voice'] = voice_id
+        return self.generate_speech(text, **kwargs)
+
+    @abstractmethod
+    def list_clones(self, tenant_id: str) -> List[CloneInfo]:
+        """Clones belonging to ``tenant_id`` only."""
+
+    @abstractmethod
+    def disable_clone(self, tenant_id: str, voice_id: str, reason: str = '') -> None:
+        """Soft-retire a clone (rename/flag). NEVER a hard delete."""
+
+    def health(self) -> Dict[str, Any]:
+        """{'state': 'ok'|'degraded'|'down', 'detail': str, 'load': float|None}."""
+        check = getattr(self, 'health_check', None)
+        if callable(check):
+            try:
+                h = check() or {}
+            except Exception as e:  # a health probe must never raise
+                return {'state': 'down', 'detail': str(e), 'load': None}
+            return {'state': 'ok' if h.get('ok') else 'down',
+                    'detail': str(h.get('detail', '')), 'load': None}
+        ok = self.is_available()
+        return {'state': 'ok' if ok else 'down',
+                'detail': '' if ok else 'not available', 'load': None}
+
+
+def soft_retire_clone_dir(base_dir, voice_id: str, reason: str = '') -> 'Path':
+    """Rename ``base_dir/voice_id`` to ``<voice_id>.retired`` (never delete).
+
+    Same rule as DELETE /api/tts/voices/<id>: only ``clone_*`` ids, and the
+    path must stay inside ``base_dir``. Writes a small ``retired.json`` note
+    with the reason into the renamed folder. Returns the new path.
+    """
+    import json as _json
+    import time as _time
+    from pathlib import Path
+
+    if not voice_id or not voice_id.startswith('clone_'):
+        raise CloneError('internal',
+                         f'Can only retire cloned voices (clone_*), got {voice_id!r}')
+    base = Path(base_dir)
+    voice_dir = base / voice_id
+    try:
+        voice_dir.resolve().relative_to(base.resolve())
+    except ValueError:
+        raise CloneError('internal', f'Invalid voice_id {voice_id!r}')
+    if not voice_dir.is_dir():
+        raise CloneError('internal', f'Voice {voice_id} not found')
+    renamed = voice_dir.with_name(voice_dir.name + '.retired')
+    voice_dir.rename(renamed)
+    try:
+        (renamed / 'retired.json').write_text(_json.dumps({
+            'voice_id': voice_id, 'reason': reason,
+            'retired_at': _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime()),
+        }, indent=2))
+    except OSError:
+        pass
+    return renamed
+
 __all__ = [
     'TTSProvider',
     'TTSVoice',
@@ -316,4 +614,11 @@ __all__ = [
     'TTSGenerationError',
     'TTSConfigurationError',
     'TTSVoiceNotFoundError',
+    'CLONE_ERROR_CODES',
+    'CloneError',
+    'CloneRequest',
+    'CloneResult',
+    'CloneInfo',
+    'CloneCapableTTSProvider',
+    'soft_retire_clone_dir',
 ]

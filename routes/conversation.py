@@ -38,6 +38,7 @@ from routes.transcripts import save_conversation_turn
 from routes.music import current_music_state as _music_state
 from services.gateway_manager import gateway_manager
 from services.gateways.compat import is_system_response
+from services.interim_status import DelegatedStatus
 from services.tts import generate_tts_b64 as _tts_generate_b64
 from tts_providers import get_provider, list_providers, invalidate as _tts_invalidate
 
@@ -1153,6 +1154,29 @@ def log_metrics(metrics: dict) -> None:
 # ---------------------------------------------------------------------------
 # Helper: clean text for TTS
 # ---------------------------------------------------------------------------
+
+
+def extract_tts_sentence(text, min_len=40):
+    """Return (sentence, remainder) at the first sentence boundary at or after
+    min_len chars of a STREAMING buffer, or (None, text) when there is none yet.
+
+    A boundary is . ! or ? followed by a space or by the end of the buffer.
+    A period that ends the buffer right after a digit is NOT a boundary: the
+    buffer is still growing, so "$0." is usually the front half of "$0.79"
+    whose digits are in the next delta. Splitting there spoke "79/hr ..." as a
+    fragment. The next delta (or the end-of-turn flush) settles it.
+    """
+    if len(text) < min_len:
+        return None, text
+    for match in re.finditer(r'[.!?](?= |\Z)', text):
+        end = match.end()
+        if end < min_len:
+            continue
+        if (end == len(text) and match.group() == '.'
+                and end >= 2 and text[end - 2].isdigit()):
+            return None, text
+        return text[:end].strip(), text[end:].lstrip()
+    return None, text
 
 
 def _truncate_at_sentence(text: str, max_chars: int) -> str:
@@ -2634,17 +2658,7 @@ def _conversation_inner():
                             return True
                         return False
 
-                    def _extract_sentence(text, min_len=40):
-                        """Return (sentence, remainder) at first sentence boundary
-                        that falls at or after min_len chars. Skips boundaries that
-                        are likely inside abbreviations (e.g. A.I., Mr.)."""
-                        if len(text) < min_len:
-                            return None, text
-                        for match in re.finditer(r'[.!?](?= |\Z)', text):
-                            end = match.end()
-                            if end >= min_len:
-                                return text[:end].strip(), text[end:].lstrip()
-                        return None, text
+                    _extract_sentence = extract_tts_sentence
 
                     # Sticky fallback state — shared across all TTS calls in this response.
                     # If one sentence falls back to a different provider, all subsequent
@@ -2744,6 +2758,13 @@ def _conversation_inner():
                     _tts_buf = ''       # raw incremental text buffer
                     _tts_pending = []   # [(done_event, result_dict), ...]
                     _chunks_sent = 0    # audio chunks already yielded early
+                    # True once THIS answer leg's own text was sent to TTS from
+                    # streamed deltas. _chunks_sent alone cannot answer "was the
+                    # answer already spoken?": it also counts the spoken status
+                    # and the previous leg's acknowledgement, and the whole-reply
+                    # fallbacks below then skipped a reply that arrived without
+                    # deltas — the result went unspoken (pledge 25dfb03c).
+                    _answer_tts_fired = False
 
                     # ── Spoken status updates during long tool execution ──
                     # Prevents dead silence when agent runs tools for 30-90+ seconds.
@@ -2753,6 +2774,20 @@ def _conversation_inner():
                     _last_tool_name = None           # name of the most recent tool
                     _STATUS_SILENCE_THRESHOLD = 45   # long safety net — agent should speak naturally
                     _STATUS_REPEAT_INTERVAL = 90     # almost never repeat
+                    # Delegated (sub-agent) turns get their own status, built
+                    # only from what the stream showed (services/interim_status.py,
+                    # pledge 25dfb03c). It is checked on EVERY loop wake-up, not
+                    # only on gateway heartbeats: while a sub-agent works its
+                    # tool events stream in continuously, so the heartbeat that
+                    # the legacy check waits for never arrives (2026-09-16:
+                    # ~9 min of silence on a delegated research ask).
+                    _delegated_status = DelegatedStatus()
+
+                    def _delegated_status_text():
+                        if _tts_pending:
+                            return None  # real audio is already on its way
+                        return _delegated_status.due(
+                            time.time(), _last_audio_time, tts_enabled=not skip_tts)
 
                     full_response = None
                     _stream_start = time.time()
@@ -2775,6 +2810,11 @@ def _conversation_inner():
                                 yield json.dumps({'type': 'error', 'code': 'timeout'}) + '\n'
                                 break
                             yield json.dumps({'type': 'heartbeat', 'elapsed': elapsed}) + '\n'
+                            _ds_text = _delegated_status_text()
+                            if _ds_text:
+                                logger.info(f"### DELEGATED STATUS TTS ({_delegated_status.spoken}): '{_ds_text}' (queue idle)")
+                                _tts_pending.append(_fire_tts(_ds_text))
+                                _last_audio_time = time.time()
                             continue
 
                         # Proof-of-life on the recovery session — reset the idle
@@ -2785,6 +2825,13 @@ def _conversation_inner():
 
                         if evt['type'] == 'handshake':
                             metrics['handshake_ms'] = evt['ms']
+                            # Forward it NOW: until the first line is written the
+                            # response headers are not sent, the browser's fetch()
+                            # stays pending and the UI shows "connecting" — for a
+                            # gateway that thinks 15-30 s before its first word that
+                            # was the 10 s idle heartbeat on every turn (measured
+                            # 2026-11-14). The browser ignores the event type.
+                            yield json.dumps({'type': 'handshake', 'ms': evt['ms']}) + '\n'
                             continue
 
                         if evt['type'] == 'tts_ready':
@@ -2819,7 +2866,13 @@ def _conversation_inner():
                             # ── Spoken status: break silence during long tool execution ──
                             # If tools are running and user has heard nothing for too long,
                             # speak a brief status so they know the agent is alive.
-                            if not _flushed_audio and _tools_seen > 0 and not skip_tts:
+                            _ds_text = _delegated_status_text()
+                            if _ds_text:
+                                logger.info(f"### DELEGATED STATUS TTS ({_delegated_status.spoken}): '{_ds_text}' (heartbeat)")
+                                _tts_pending.append(_fire_tts(_ds_text))
+                                _last_audio_time = time.time()
+                            elif (not _flushed_audio and _tools_seen > 0 and not skip_tts
+                                    and not _delegated_status.delegated):
                                 _silence_secs = time.time() - _last_audio_time
                                 _threshold = (
                                     _STATUS_SILENCE_THRESHOLD if _status_tts_count == 0
@@ -2844,6 +2897,8 @@ def _conversation_inner():
 
                         if evt['type'] == 'delta':
                             _tts_buf += evt['text']
+                            if (evt.get('text') or '').strip():
+                                _delegated_status.note_answer_text()
                             # Don't fire TTS if buffer looks like a system response
                             # that will be suppressed at text_done. Wait for final
                             # confirmation before speaking.
@@ -2865,6 +2920,7 @@ def _conversation_inner():
                                 if sentence:
                                     logger.info(f"### TTS sentence (streaming): {sentence[:80]}")
                                     _tts_pending.append(_fire_tts(sentence))
+                                    _answer_tts_fired = True
                             yield json.dumps({'type': 'delta', 'text': evt['text']}) + '\n'
                             # Flush any TTS chunks that finished while text was streaming —
                             # play audio as soon as it's ready instead of waiting for text_done
@@ -2883,6 +2939,7 @@ def _conversation_inner():
                             if evt.get('action', {}).get('phase') == 'start':
                                 _tools_seen += 1
                                 _last_tool_name = evt.get('action', {}).get('name', None)
+                            _delegated_status.note_action(evt.get('action'))
                             # Flush any TTS chunks that already finished —
                             # avoids silence during long tool calls (the first
                             # sentence TTS completes ~1s in but would otherwise
@@ -2896,6 +2953,11 @@ def _conversation_inner():
                                     _chunks_sent += 1
                                     _last_audio_time = time.time()
                             yield json.dumps({'type': 'action', 'action': evt['action']}) + '\n'
+                            _ds_text = _delegated_status_text()
+                            if _ds_text:
+                                logger.info(f"### DELEGATED STATUS TTS ({_delegated_status.spoken}): '{_ds_text}' (sub-agent activity)")
+                                _tts_pending.append(_fire_tts(_ds_text))
+                                _last_audio_time = time.time()
                             continue
 
                         if evt['type'] == 'queued':
@@ -2907,6 +2969,7 @@ def _conversation_inner():
                             # Agent spoke but sub-agents still running.
                             # Process TTS for this text but keep stream open.
                             interim_response = evt.get('response', '')
+                            _delegated_status.note_interim()
                             logger.info(
                                 f"### TEXT_INTERIM: {len(interim_response)} chars "
                                 f"— sub-agents still working, stream stays open"
@@ -2934,7 +2997,8 @@ def _conversation_inner():
                             # the list is already empty and this re-spoke the WHOLE
                             # reply a second time (measured live on test-dev
                             # 2026-09-15 — same 217-char sentence TTS'd twice).
-                            if not _tts_pending and _chunks_sent == 0 and interim_response:
+                            if (not _tts_pending and interim_response
+                                    and (_chunks_sent == 0 or not _answer_tts_fired)):
                                 tts_text_interim = clean_for_tts(interim_response)
                                 if tts_text_interim and tts_text_interim.strip():
                                     _tts_pending.append(_fire_tts(tts_text_interim))
@@ -2956,6 +3020,8 @@ def _conversation_inner():
                                     _status_tts_count += 1  # suppress first status fire
                             _tts_pending = []
                             _tts_buf = ''
+                            # What streams next is a NEW answer leg.
+                            _answer_tts_fired = False
 
                             # Tell frontend sub-agents are actively working
                             yield json.dumps({
@@ -3738,7 +3804,8 @@ def _conversation_inner():
                             # reply a second time (double audio, 2026-07-12).
                             # _chunks_sent counts audio actually delivered — if any
                             # went out, streaming TTS already covered the text.
-                            if not _tts_pending and _chunks_sent == 0 and full_response:
+                            if (not _tts_pending and full_response
+                                    and (_chunks_sent == 0 or not _answer_tts_fired)):
                                 tts_text = clean_for_tts(full_response)
                                 if tts_text and tts_text.strip():
                                     _tts_pending.append(_fire_tts(tts_text))
@@ -4650,6 +4717,48 @@ def tts_generate():
 # ---------------------------------------------------------------------------
 
 
+# CloneError code -> HTTP status (spec §2.4).
+_CLONE_ERROR_HTTP = {
+    'unavailable': 503,
+    'busy': 503,
+    'bad_audio': 422,
+    'quota': 429,
+    'consent_mismatch': 409,
+    'timeout': 504,
+    'internal': 500,
+    # GPU wire v0 §4 codes. 'unauthorized' / 'tenant_mismatch' are about
+    # OVU's own upstream credential (a config alarm on this server), not the
+    # caller's session, so the browser gets 503: a 401/403 here would read as
+    # "your Clerk session is bad" to the page.
+    'unauthorized': 503,
+    'tenant_mismatch': 503,
+    'bad_request': 400,
+    'not_found': 404,
+    'disabled': 410,
+    'request_conflict': 409,
+}
+_CLONE_BUSY_RETRY_AFTER_S = 30
+
+
+def _clone_error_response(err, provider_id):
+    """JSON error for a typed CloneError. ``error`` stays a plain string so
+    existing callers (voice-studio reads resp.text) keep working."""
+    status = _CLONE_ERROR_HTTP.get(err.code, 500)
+    resp = jsonify({
+        'error': err.message,
+        'error_code': err.code,
+        'retryable': err.retryable,
+        'provider': provider_id,
+    })
+    resp.status_code = status
+    retry_after = err.retry_after
+    if err.code == 'busy' and not retry_after:
+        retry_after = _CLONE_BUSY_RETRY_AFTER_S
+    if retry_after:
+        resp.headers['Retry-After'] = str(int(retry_after))
+    return resp
+
+
 @conversation_bp.route('/api/tts/clone', methods=['POST'])
 def tts_clone_voice():
     """
@@ -4659,21 +4768,42 @@ def tts_clone_voice():
       - JSON: {"audio_url": "...", "name": "...", "provider": "qwen3", "reference_text": "..."}
       - Multipart form: audio file + name + provider fields
 
-    Provider support:
+    Provider support is REGISTRY-DRIVEN (voice-clone provider seam,
+    docs/jambot/ovu-voice-clone-seam-spec.md §2): a provider is offered when
+    its catalog entry has the "voice-cloning" feature and is active, its class
+    implements CloneCapableTTSProvider, and the tenant policy
+    (VOICE_CLONE_SEAM_DIR/policy.json) allows it. With no policy file the set
+    is exactly qwen3, qwen3-local, elevenlabs, resemble (as before):
       - qwen3: Instant clone via fal.ai (~37s). Needs audio URL.
       - elevenlabs: Instant clone (~5-10s). Needs audio file.
       - resemble: Multi-step clone (~1-5min). Needs audio file.
 
+    A clone runs on exactly ONE provider: a failure is returned to the
+    caller, never silently retried on another provider (spec §2.4).
+
+    TODO spec §1 (access codes), §3 (consent), §3.4 (size/duration caps),
+    §2.3 (async jobs route) — not in this release.
+
     Returns: JSON with voice_id, name, provider, clone metadata.
     """
+    from services.voice_clone import (
+        clone_provider_ids, default_clone_provider, tenant_id as _clone_tenant_id,
+    )
+    from tts_providers.base_provider import (
+        CloneCapableTTSProvider, CloneError, CloneRequest,
+    )
+    import uuid
+
+    provider_id = ''
     try:
         # --- Parse request (JSON or multipart) ---
         save_path = None
         audio_url = None
+        default_provider = default_clone_provider()
 
         if request.is_json:
             data = request.get_json()
-            provider_id = data.get('provider', 'qwen3').strip()
+            provider_id = data.get('provider', default_provider).strip()
             audio_url = data.get('audio_url', '').strip()
             name = data.get('name', '').strip()
             reference_text = data.get('reference_text', '').strip() or None
@@ -4685,9 +4815,8 @@ def tts_clone_voice():
 
         elif 'audio' in request.files:
             from services.paths import UPLOADS_DIR
-            import uuid
 
-            provider_id = request.form.get('provider', 'qwen3').strip()
+            provider_id = request.form.get('provider', default_provider).strip()
             audio_file = request.files['audio']
             name = request.form.get('name', '').strip()
             reference_text = request.form.get('reference_text', '').strip() or None
@@ -4711,8 +4840,8 @@ def tts_clone_voice():
                 'error': 'Send JSON with audio_url or multipart form with audio file'
             }), 400
 
-        # --- Validate provider ---
-        clone_providers = ('qwen3', 'qwen3-local', 'elevenlabs', 'resemble')
+        # --- Validate provider (registry + tenant policy) ---
+        clone_providers = clone_provider_ids()
         if provider_id not in clone_providers:
             return jsonify({
                 'error': f'Voice cloning not supported for provider "{provider_id}". '
@@ -4720,10 +4849,24 @@ def tts_clone_voice():
             }), 400
 
         provider = get_provider(provider_id)
+        if not isinstance(provider, CloneCapableTTSProvider):
+            # Registry says clone-capable but the live instance is not —
+            # a wiring defect, never a client error.
+            logger.error(f"Voice clone: {provider_id} instance is not CloneCapableTTSProvider")
+            return jsonify({'error': 'Internal server error'}), 500
         if not provider.is_available():
             return jsonify({
                 'error': f'{provider_id} provider not available (API key not set)'
             }), 503
+
+        clone_req = CloneRequest(
+            tenant_id=_clone_tenant_id(),
+            request_id=uuid.uuid4().hex,
+            name=name,
+            audio_path=str(save_path) if save_path else None,
+            audio_url=audio_url,
+            reference_text=reference_text,
+        )
 
         # --- Route to provider ---
         logger.info(
@@ -4731,61 +4874,48 @@ def tts_clone_voice():
             f"url={audio_url[:80] if audio_url else 'N/A'}"
         )
 
-        if provider_id == 'qwen3':
-            if not audio_url:
-                return jsonify({'error': 'Qwen3 requires audio_url'}), 400
-            result = provider.clone_voice(
-                audio_url=audio_url,
-                name=name,
-                reference_text=reference_text,
-            )
+        input_error = provider.clone_request_error(clone_req)
+        if input_error:
+            return jsonify({'error': input_error}), 400
 
-        elif provider_id == 'qwen3-local':
-            if not save_path:
-                return jsonify({
-                    'error': 'qwen3-local requires audio file upload (multipart form)'
-                }), 400
-            result = provider.clone_voice(
-                audio_path=str(save_path),
-                name=name,
-                reference_text=reference_text,
-            )
+        result = provider.create_clone(clone_req)
 
-        elif provider_id == 'elevenlabs':
-            if not save_path:
-                return jsonify({
-                    'error': 'ElevenLabs requires audio file upload (multipart form)'
-                }), 400
-            result = provider.clone_voice(
-                audio_path=str(save_path),
-                name=name,
+        if result.status == 'failed':
+            raise CloneError.from_dict(result.error)
+        if result.status != 'ready':
+            # 'pending' needs the async jobs route (spec §2.3), which does not
+            # exist yet. Return the job id so it is not lost, but say plainly
+            # that it cannot be polled here.
+            logger.error(
+                f"Voice clone: {provider_id} returned status={result.status!r} "
+                f"job_id={result.job_id!r}; async clones are not supported yet"
             )
-
-        elif provider_id == 'resemble':
-            if not save_path:
-                return jsonify({
-                    'error': 'Resemble requires audio file upload (multipart form)'
-                }), 400
-            result = provider.clone_voice(
-                audio_path=str(save_path),
-                name=name,
-                reference_text=reference_text,
-            )
+            return jsonify({
+                'error': 'Async voice clones are not supported yet (no jobs route)',
+                'error_code': 'internal',
+                'retryable': False,
+                'provider': provider_id,
+                'status': result.status,
+                'job_id': result.job_id,
+            }), 500
 
         return jsonify({
             'status': 'ok',
             'provider': provider_id,
-            'voice_id': result.get('voice_id', ''),
-            'name': result.get('name', name),
-            'created_at': result.get('created_at', ''),
-            'clone_time_ms': result.get('clone_time_ms', 0),
-            'embedding_size': result.get('embedding_size', 0),
+            'voice_id': result.voice_id or '',
+            'name': result.name,
+            'created_at': result.created_at,
+            'clone_time_ms': result.clone_time_ms,
+            'embedding_size': result.metadata.get('embedding_size', 0),
             'usage': (
-                f'Use voice_id "{result.get("voice_id", "")}" in '
+                f'Use voice_id "{result.voice_id or ""}" in '
                 f'/api/tts/generate with provider={provider_id}'
             ),
         })
 
+    except CloneError as e:
+        logger.error(f"Voice clone failed ({provider_id}): {e}")
+        return _clone_error_response(e, provider_id)
     except RuntimeError as e:
         logger.error(f"Voice clone failed: {e}")
         return jsonify({'error': str(e)}), 500

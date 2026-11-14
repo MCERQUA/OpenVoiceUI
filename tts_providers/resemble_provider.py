@@ -25,7 +25,9 @@ from typing import Optional
 
 import httpx
 
-from .base_provider import TTSProvider
+from .base_provider import (
+    CloneCapableTTSProvider, CloneError, CloneRequest, CloneResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +118,7 @@ def _get_voice_styles() -> dict:
         return {}
 
 
-class ResembleProvider(TTSProvider):
+class ResembleProvider(CloneCapableTTSProvider):
     """
     TTS Provider using Resemble AI's Chatterbox API.
 
@@ -127,6 +129,10 @@ class ResembleProvider(TTSProvider):
     Latency: sub-200ms time-to-first-byte (streaming)
     Cost: pay-as-you-go, character-based
     """
+
+    # Clone seam (base_provider.CloneCapableTTSProvider)
+    clone_label = 'Resemble'
+    clone_input = ('path',)
 
     def __init__(self):
         super().__init__()
@@ -310,6 +316,36 @@ class ResembleProvider(TTSProvider):
             ),
             'clone_time_ms': elapsed_ms,
         }
+
+    # ------------------------------------------------------------------
+    # Clone seam shims — wrap clone_voice exactly as the pre-seam route did
+    # ------------------------------------------------------------------
+
+    def create_clone(self, req: CloneRequest) -> CloneResult:
+        record = self.clone_voice(
+            audio_path=req.audio_path,
+            name=req.name,
+            reference_text=req.reference_text,
+        )
+        return CloneResult.from_legacy('resemble', req.name, record,
+                                       record.get('voice_id', ''))
+
+    def list_clones(self, tenant_id: str) -> list:
+        # Resemble keeps no local clone record and its voice list does not
+        # mark which voices are clones (get_info() has no cloned_voices
+        # either), so there is nothing this provider can attribute.
+        return []
+
+    def disable_clone(self, tenant_id: str, voice_id: str, reason: str = '') -> None:
+        # The vendor's only removal is a hard DELETE of the voice, and this
+        # provider keeps no local clone record to flag. Refuse rather than
+        # delete (never-delete rule); retiring a vendor-side clone is a
+        # deliberate human action in the vendor dashboard.
+        raise CloneError(
+            'internal',
+            f'{self.clone_label} clones cannot be soft-retired from OVU '
+            f'(vendor removal is a hard delete): {voice_id}',
+        )
 
     def get_voice_status(self, voice_uuid: str) -> str:
         """Check the build status of a Resemble voice."""
@@ -628,5 +664,6 @@ class ResembleProvider(TTSProvider):
             'audio_format': 'wav',
             'sample_rate': 24000,
             'models': list(MODELS.keys()),
+            'capabilities': self.clone_capabilities(),
             'error': self._init_error,
         }

@@ -27,12 +27,13 @@ import os
 import threading
 from typing import Optional, Dict, Any, List
 
-from .base_provider import TTSProvider
+from .base_provider import TTSProvider, CloneCapableTTSProvider
 from .hume_provider import HumeProvider
 from .supertonic_provider import SupertonicProvider
 from .groq_provider import GroqProvider
 from .qwen3_provider import Qwen3Provider
 from .qwen3_local_provider import Qwen3LocalProvider
+from .qwen3_gpu_provider import Qwen3GpuProvider
 from .qwen3_mlx_provider import Qwen3MlxProvider
 from .resemble_provider import ResembleProvider
 from .elevenlabs_provider import ElevenLabsProvider
@@ -45,6 +46,9 @@ _PROVIDERS = {
     'groq': GroqProvider,
     'qwen3': Qwen3Provider,
     'qwen3-local': Qwen3LocalProvider,
+    # GPU-lane clone provider (vcg). Opt-in per tenant: selected only when a
+    # tenant's _seam/policy.json names it AND its container holds a token.
+    'qwen3-gpu': Qwen3GpuProvider,
     'qwen3-mlx': Qwen3MlxProvider,
     'resemble': ResembleProvider,
     'elevenlabs': ElevenLabsProvider,
@@ -206,18 +210,52 @@ def list_providers(include_inactive: bool = True,
     return providers
 
 
+def get_clone_provider_ids() -> List[str]:
+    """Provider ids eligible for voice cloning, in catalog order.
+
+    Eligible = ALL of:
+      1. a catalog entry (providers_config.json) whose ``features`` contains
+         "voice-cloning";
+      2. catalog ``status`` is "active" (an inactive entry such as the
+         ``pocket`` placeholder stays hidden until it is activated);
+      3. a registered class in ``_PROVIDERS`` that implements
+         ``CloneCapableTTSProvider`` (a catalog id with no class, or a class
+         that cannot clone — e.g. qwen3-mlx today — is excluded).
+
+    Pure catalog + class check: no instantiation, no network. Runtime
+    availability is checked separately by the caller (is_available()).
+    """
+    providers = _load_config().get('providers', {}) or {}
+    out: List[str] = []
+    for pid, entry in providers.items():
+        if not isinstance(entry, dict):
+            continue
+        if 'voice-cloning' not in (entry.get('features') or []):
+            continue
+        if entry.get('status', 'active') != 'active':
+            continue
+        cls = _PROVIDERS.get(pid)
+        if cls is None or not issubclass(cls, CloneCapableTTSProvider):
+            continue
+        out.append(pid)
+    return out
+
+
 __all__ = [
     'TTSProvider',
+    'CloneCapableTTSProvider',
     'HumeProvider',
     'SupertonicProvider',
     'GroqProvider',
     'Qwen3Provider',
     'Qwen3LocalProvider',
+    'Qwen3GpuProvider',
     'Qwen3MlxProvider',
     'ResembleProvider',
     'ElevenLabsProvider',
     'GrokProvider',
     'get_provider',
+    'get_clone_provider_ids',
     'list_providers',
     'invalidate',
 ]

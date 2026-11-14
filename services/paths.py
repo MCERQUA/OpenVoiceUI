@@ -23,6 +23,14 @@ TRANSCRIPTS_DIR = RUNTIME_DIR / "transcripts"
 DB_PATH = Path(os.getenv("OVUI_DB_PATH", str(RUNTIME_DIR / "usage.db")))
 CANVAS_MANIFEST_PATH = RUNTIME_DIR / "canvas-manifest.json"
 VOICE_CLONES_DIR = RUNTIME_DIR / "voice-clones"
+# Voice-clone PROVIDER-SEAM state (policy.json now; codes/consent/audit/jobs
+# later — docs/jambot/ovu-voice-clone-seam-spec.md). Lives INSIDE
+# VOICE_CLONES_DIR because that is the bind-mounted, per-tenant volume
+# (/mnt/clients/<tenant>/openvoiceui/voice-clones); a plain runtime/ subdir
+# is container-writable-layer only and is lost on recreate. The leading '_'
+# keeps it out of every voice listing (voice ids are clone_*), and the
+# workspace file API refuses writes under it.
+VOICE_CLONE_SEAM_DIR = VOICE_CLONES_DIR / "_seam"
 VOICE_SESSION_FILE = str(RUNTIME_DIR / ".voice-session-counter")
 ACTIVE_PROFILE_FILE = RUNTIME_DIR / "profiles" / ".active-profile"
 WORKSPACE_DIR = Path(os.getenv('WORKSPACE_DIR', str(RUNTIME_DIR / 'workspace')))
