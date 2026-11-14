@@ -480,6 +480,437 @@ def upload_file():
     return jsonify(result)
 
 
+# ---------------------------------------------------------------------------
+# Chunked upload — files larger than one request can carry.
+#
+# Every *.jam-bot.com host is Cloudflare-proxied and the edge refuses any request body over
+# ~100 MB before the origin sees it (measured 2026-11-14: a 131 MB phone .MOV POSTed to
+# /api/upload got `413 ... cloudflare` after 5.3 MB). A phone video is routinely bigger than
+# that, so the client sends the file as sequential slices (each well under the edge cap) and
+# the slice route appends them to one hidden partial file, then renames it into uploads/ when
+# the last byte arrives. Nothing is deleted on the way: the partial IS the final file.
+#
+# Two steps (review of PR #586):
+#
+#   POST /api/upload/chunk/start   JSON or form: name, size[, grant]
+#       -> {upload_id, size, expires}
+#     Needs a credential: a Clerk session (Bearer or __session cookie), the tenant agent key,
+#     or the upload GRANT that routes/canvas.py embeds in a canvas page when it serves that page
+#     to a signed-in viewer. The grant exists because a canvas page holds at best one pushed
+#     60 s Clerk token, and a page opened from a texted link holds none. Start validates and
+#     FREEZES the name, extension and declared size, RESERVES that size against the per-container
+#     cap and the shared-disk floor, creates the empty partial, and returns a SERVER-ISSUED
+#     upload_id signed over (id, size, expiry, tenant).
+#
+#   POST /api/upload/chunk         multipart: upload_id, offset, file[, size]
+#     Public in the auth gate, because a long upload outlives any session token: the signed
+#     upload_id IS the credential. An id this server did not sign, an expired id, or a size
+#     different from the one frozen at start is refused before a byte lands. Only start ever
+#     creates a partial (slices open it without O_CREAT). A retried slice (offset <= bytes
+#     held) truncates back to its offset and rewrites, so a lost response never duplicates
+#     bytes; a slice past the end answers 409 with what is held. Free space is re-checked on
+#     every slice, because /mnt/clients is ONE disk shared by every tenant on the host.
+#
+# Files in uploads/.chunks/ (a dot-dir: never served, never listed):
+#   <id>.meta.json  frozen name/ext/size/expiry      <id>.partial   the bytes so far
+#   <id>.done.json  the finished result, written BEFORE the partial is renamed, so a slice
+#                   that finds the partial gone always finds the result (idempotent finish)
+#   .grant.key      this instance's HMAC key (same volume, so every worker and restart agree)
+# ---------------------------------------------------------------------------
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+_MAX_CHUNKED_TOTAL_BYTES = _env_int('OVU_CHUNKED_UPLOAD_MAX_MB', 4096) * 1024 * 1024
+# Declared sizes of UNFINISHED uploads, reserved at start (not bytes already written, which an
+# opener could keep at one byte each and then fill). An upload whose id has expired stops
+# reserving its declared size but keeps counting the bytes it actually holds on disk, so an
+# abandoned partial still counts until it is finished or an operator moves it out.
+_MAX_CHUNKED_INFLIGHT_BYTES = _env_int('OVU_CHUNKED_INFLIGHT_MAX_MB', 8192) * 1024 * 1024
+# Disk that must stay free after this upload's remaining bytes land, checked at start (against
+# every live reservation) and again on every slice. The per-container cap alone cannot protect
+# a disk that many containers share and that may have less free space than one cap.
+_CHUNK_FREE_FLOOR_BYTES = _env_int('OVU_UPLOAD_FREE_FLOOR_MB', 2048) * 1024 * 1024
+_CHUNK_UPLOAD_TTL_S = _env_int('OVU_CHUNKED_UPLOAD_TTL_H', 24) * 3600   # a started upload
+_CHUNK_GRANT_TTL_S = _env_int('OVU_UPLOAD_GRANT_TTL_H', 12) * 3600      # a page-embedded grant
+
+_CHUNK_TOKEN_RE = re.compile(r'^c1\.([0-9a-f]{24})\.([0-9]{1,13})\.([0-9]{1,12})\.([0-9a-f]{64})$')
+_CHUNK_GRANT_RE = re.compile(r'^g1\.([0-9]{1,12})\.([0-9a-f]{16})\.([0-9a-f]{64})$')
+_CHUNK_CTRL_RE = re.compile(r'[\x00-\x1f\x7f]')
+
+
+def _chunk_dir() -> Path:
+    d = UPLOADS_DIR / '.chunks'
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _chunk_key() -> bytes:
+    """This instance's signing key. Created once with O_EXCL; a reader that catches another
+    worker between create and write waits for the bytes instead of minting a second key."""
+    import secrets
+    import time
+    p = _chunk_dir() / '.grant.key'
+    for _ in range(50):
+        try:
+            raw = p.read_bytes().strip()
+            if len(raw) >= 32:
+                return raw
+        except FileNotFoundError:
+            try:
+                fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                continue
+            with os.fdopen(fd, 'wb') as fh:
+                fh.write(secrets.token_hex(32).encode('ascii'))
+                fh.flush()
+                os.fsync(fh.fileno())
+            continue
+        time.sleep(0.02)
+    raise RuntimeError('chunked upload signing key is unreadable')
+
+
+def _chunk_tenant() -> str:
+    """What a signature is bound to: the tenant name when the container has one, else the host
+    the request came in on. A token minted for one tenant never verifies on another."""
+    t = (os.getenv('JAMBOT_TENANT') or os.getenv('TENANT_NAME') or '').strip().lower()
+    return t or (request.host or '').split(':')[0].lower()
+
+
+def _chunk_sig(*parts) -> str:
+    import hashlib
+    msg = '|'.join(str(p) for p in parts).encode('utf-8')
+    return hmac.new(_chunk_key(), msg, hashlib.sha256).hexdigest()
+
+
+def mint_upload_grant(ttl: int | None = None) -> str:
+    """A short-lived grant to START chunked uploads, for a page served to a signed-in viewer."""
+    import secrets
+    import time
+    exp = int(time.time()) + int(ttl or _CHUNK_GRANT_TTL_S)
+    nonce = secrets.token_hex(8)
+    return f'g1.{exp}.{nonce}.{_chunk_sig("grant", exp, nonce, _chunk_tenant())}'
+
+
+def _upload_grant_ok(token: str) -> bool:
+    import time
+    m = _CHUNK_GRANT_RE.match((token or '').strip())
+    if not m:
+        return False
+    exp, now = int(m.group(1)), time.time()
+    if exp <= now or exp > now + _CHUNK_GRANT_TTL_S + 60:
+        return False
+    return hmac.compare_digest(_chunk_sig('grant', exp, m.group(2), _chunk_tenant()), m.group(3))
+
+
+def _clerk_configured() -> bool:
+    return bool((os.getenv('CLERK_PUBLISHABLE_KEY') or os.getenv('VITE_CLERK_PUBLISHABLE_KEY', '')).strip())
+
+
+def _chunk_start_credential(body: dict) -> str | None:
+    """Name of the credential that may start an upload, or None. Same rules as the app's auth
+    gate (which lets this path through so the page grant can work): no login configured on
+    this install means open, like every other route."""
+    if not _clerk_configured():
+        return 'open'
+    agent_key = os.getenv('AGENT_API_KEY', '').strip()
+    presented = request.headers.get('X-Agent-Key', '')
+    if agent_key and presented and hmac.compare_digest(presented.encode('utf-8'), agent_key.encode('utf-8')):
+        return 'agent-key'
+    if _upload_grant_ok(request.headers.get('X-Upload-Grant') or str(body.get('grant') or '')):
+        return 'grant'
+    from services.auth import verify_clerk_token
+    auth = request.headers.get('Authorization', '')
+    # Bearer first, then the cookie: a canvas page's pushed token expires after 60 s while the
+    # same-origin __session cookie may still be good.
+    for tok in (auth[7:].strip() if auth.startswith('Bearer ') else '', request.cookies.get('__session', '')):
+        if tok and verify_clerk_token(tok):
+            return 'clerk'
+    return None
+
+
+def _chunk_clean_name(raw: str) -> tuple[str, str]:
+    """(original_name, ext) with control characters (NUL included) stripped before anything is
+    written; the extension keeps only [a-z0-9] so it can never fail at rename time."""
+    name = _CHUNK_CTRL_RE.sub('', raw or '').replace('\\', '/').strip()
+    name = (Path(name).name or 'upload')[:255]
+    suffix = Path(name).suffix.lower()
+    ext = re.sub(r'[^a-z0-9]', '', suffix[1:])[:16] if suffix else ''
+    return name, (f'.{ext}' if ext else '')
+
+
+def _chunk_reservations(chunk_dir: Path) -> tuple[int, int]:
+    """(reserved, still_to_write) across every unfinished upload in this container."""
+    import time
+    now = time.time()
+    reserved = pending = 0
+    seen = set()
+    for meta_p in chunk_dir.glob('*.meta.json'):
+        uid = meta_p.name[:-len('.meta.json')]
+        seen.add(uid)
+        if (chunk_dir / f'{uid}.done.json').exists():
+            continue
+        try:
+            held = (chunk_dir / f'{uid}.partial').stat().st_size
+        except FileNotFoundError:
+            continue  # nothing on disk and nothing can be added (slices never create it)
+        try:
+            meta = json.loads(meta_p.read_text(encoding='utf-8'))
+            size, exp = int(meta.get('size', 0)), int(meta.get('exp', 0))
+        except (OSError, ValueError, TypeError):
+            size, exp = 0, 0
+        if exp > now:
+            reserved += max(size, held)
+            pending += max(size - held, 0)
+        else:
+            reserved += held
+    for p in chunk_dir.glob('*.partial'):   # a partial with no meta (never issued by start)
+        if p.name[:-len('.partial')] not in seen:
+            try:
+                reserved += p.stat().st_size
+            except OSError:
+                pass
+    return reserved, pending
+
+
+def _chunk_done_marker(chunk_dir: Path, upload_id: str) -> Path:
+    return chunk_dir / f'{upload_id}.done.json'
+
+
+def _chunk_stored_result(done_marker: Path):
+    try:
+        return json.loads(done_marker.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+
+
+@static_files_bp.route('/api/upload/chunk/start', methods=['POST'])
+def upload_file_chunk_start():
+    """Authorize, validate and reserve one large upload; return its signed upload_id."""
+    import fcntl
+    import secrets
+    import shutil
+    import time
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        body = request.form.to_dict()
+    if not _chunk_start_credential(body):
+        return jsonify({
+            'error': 'Sign in to upload large files — open this page from your app and try again',
+            'code': 'auth_required',
+            'accepted_credentials': [
+                'Authorization: Bearer <Clerk session JWT>', '__session cookie (Clerk)',
+                'X-Agent-Key: <AGENT_API_KEY>', 'grant: <upload grant embedded in the canvas page>',
+            ],
+        }), 401
+    try:
+        size = int(str(body.get('size', '')).strip())
+    except ValueError:
+        return jsonify({'error': 'size must be an integer'}), 400
+    if size <= 0:
+        return jsonify({'error': 'Invalid size'}), 400
+    if size > _MAX_CHUNKED_TOTAL_BYTES:
+        return jsonify({'error': f'File too large ({_MAX_CHUNKED_TOTAL_BYTES // (1024 * 1024)} MB max)'}), 413
+    original_name, ext = _chunk_clean_name(str(body.get('name') or ''))
+    raw_suffix = Path(str(body.get('name') or '')).suffix.lower()
+    if ext in _BLOCKED_EXTENSIONS or raw_suffix in _BLOCKED_EXTENSIONS:
+        return jsonify({'error': f'File type "{ext or raw_suffix}" is not allowed'}), 415
+
+    chunk_dir = _chunk_dir()
+    # One start at a time per container, so two concurrent starts cannot both fit under the cap.
+    with open(chunk_dir / '.reserve.lock', 'a') as lk:
+        fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+        try:
+            reserved, pending = _chunk_reservations(chunk_dir)
+            if reserved + size > _MAX_CHUNKED_INFLIGHT_BYTES:
+                logger.warning('upload: chunked start refused, %d MB reserved + %d MB > cap %d MB',
+                               reserved >> 20, size >> 20, _MAX_CHUNKED_INFLIGHT_BYTES >> 20)
+                return jsonify({'error': 'Too many unfinished large uploads on this server — try again later'}), 507
+            free = shutil.disk_usage(str(chunk_dir)).free
+            if free - pending - size < _CHUNK_FREE_FLOOR_BYTES:
+                logger.warning('upload: chunked start refused, free %d MB - pending %d MB - %d MB < floor %d MB',
+                               free >> 20, pending >> 20, size >> 20, _CHUNK_FREE_FLOOR_BYTES >> 20)
+                return jsonify({'error': 'Not enough storage space for this file'}), 507
+            uid = secrets.token_hex(12)
+            exp = int(time.time()) + _CHUNK_UPLOAD_TTL_S
+            meta = {'id': uid, 'size': size, 'name': original_name, 'ext': ext, 'exp': exp,
+                    'tenant': _chunk_tenant(), 'started': int(time.time())}
+            fd = os.open(str(chunk_dir / f'{uid}.meta.json'), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+                fh.write(json.dumps(meta))
+            os.close(os.open(str(chunk_dir / f'{uid}.partial'), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        finally:
+            fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+
+    token = f'c1.{uid}.{size}.{exp}.{_chunk_sig("upload", uid, size, exp, _chunk_tenant())}'
+    logger.info('upload: chunked upload started %s (%d bytes) id=%s', original_name, size, uid)
+    return jsonify({'ok': True, 'upload_id': token, 'size': size, 'expires': exp})
+
+
+def _chunk_finish(chunk_dir: Path, uid: str, partial: Path, done_marker: Path, meta: dict) -> dict:
+    """Move a complete partial into uploads/. Called holding the partial's lock. The result is
+    written FIRST, then the rename: a slice that finds the partial gone always finds the result,
+    and a crash between the two is finished by the next slice under the same name."""
+    import mimetypes
+    import uuid
+    result = _chunk_stored_result(done_marker)
+    if result is None:
+        original_name, ext = meta['name'], meta['ext']
+        stem_safe = re.sub(r'[^A-Za-z0-9._-]+', '_', Path(original_name).stem)[:80].strip('._-') or 'file'
+        safe_name = f"{stem_safe}__{uuid.uuid4().hex[:8]}{ext}"
+        dest = UPLOADS_DIR / safe_name
+        mime = mimetypes.guess_type(original_name)[0] or ''
+        result = {
+            'original_name': original_name,
+            'path': str(dest),
+            'filename': safe_name,
+            'url': f'/uploads/{safe_name}',
+            'url_full': f"https://{request.host}/uploads/{safe_name}",
+            'agent_path': f'workspace/uploads/{safe_name}',
+            'file_size': int(meta['size']),
+            'mime': mime,
+            'type': 'image' if mime.startswith('image/') else 'file',
+        }
+        tmp = chunk_dir / f'{uid}.done.json.tmp'
+        tmp.write_text(json.dumps(result), encoding='utf-8')
+        os.replace(tmp, done_marker)
+    dest = UPLOADS_DIR / result['filename']
+    os.replace(partial, dest)
+    try:
+        dest.chmod(0o644)
+    except OSError:
+        pass
+    logger.info('upload: chunked upload complete %s (%d bytes) as %s',
+                result['original_name'], result['file_size'], result['filename'])
+    append_upload_index({
+        'at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'filename': result['filename'],
+        'original_name': result['original_name'],
+        'url': result['url_full'],
+        'agent_path': result['agent_path'],
+        'source': 'chat',
+        'from': '',
+        'mime': result.get('mime', ''),
+        'size': result['file_size'],
+        'note': 'chunked',
+    })
+    return result
+
+
+@static_files_bp.route('/api/upload/chunk', methods=['POST'])
+def upload_file_chunk():
+    """Append one slice of a started upload; finalize into uploads/ on the last slice."""
+    import fcntl
+    import shutil
+    import time
+
+    m = _CHUNK_TOKEN_RE.match((request.form.get('upload_id') or '').strip())
+    if not m:
+        return jsonify({'error': 'Invalid upload_id — start the upload first (POST /api/upload/chunk/start)',
+                        'code': 'start_required'}), 400
+    uid, size, exp = m.group(1), int(m.group(2)), int(m.group(3))
+    if not hmac.compare_digest(_chunk_sig('upload', uid, size, exp, _chunk_tenant()), m.group(4)):
+        return jsonify({'error': 'upload_id was not issued by this server', 'code': 'start_required'}), 403
+
+    chunk_dir = _chunk_dir()
+    partial = chunk_dir / f'{uid}.partial'
+    done_marker = _chunk_done_marker(chunk_dir, uid)
+
+    # A slice for an upload that already finished (its response was lost and the client resent
+    # the last slice): answer with the stored result, even after the id expired.
+    if not partial.exists():
+        stored = _chunk_stored_result(done_marker)
+        if stored is not None:
+            return jsonify(stored)
+    if exp <= time.time():
+        return jsonify({'error': 'This upload expired — start it again', 'code': 'start_required'}), 410
+    try:
+        meta = json.loads((chunk_dir / f'{uid}.meta.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        meta = None
+    if not meta or int(meta.get('size', -1)) != size:
+        return jsonify({'error': 'This upload is no longer held — start it again', 'code': 'start_required'}), 410
+
+    declared = (request.form.get('size') or '').strip()
+    if declared and declared != str(size):
+        return jsonify({'error': 'size is fixed when the upload starts', 'size': size}), 400
+    try:
+        offset = int(request.form.get('offset', ''))
+    except ValueError:
+        return jsonify({'error': 'offset must be an integer'}), 400
+    if offset < 0 or offset >= size:
+        return jsonify({'error': 'Invalid offset'}), 400
+
+    piece = request.files.get('file')
+    if piece is None:
+        return jsonify({'error': 'No file provided'}), 400
+    piece.stream.seek(0, 2)
+    piece_len = piece.stream.tell()
+    piece.stream.seek(0)
+    if piece_len <= 0:
+        return jsonify({'error': 'Empty slice — re-attach the file and try again'}), 400
+    if offset + piece_len > size:
+        return jsonify({'error': 'Slice runs past the declared size'}), 400
+
+    # The shared disk, re-checked on every slice: what this upload still has to write must fit
+    # above the floor (other tenants' uploads and the server itself fill the same disk).
+    free = shutil.disk_usage(str(chunk_dir)).free
+    if free - (size - offset) < _CHUNK_FREE_FLOOR_BYTES:
+        logger.warning('upload: chunked slice refused, free %d MB - remaining %d MB < floor %d MB',
+                       free >> 20, (size - offset) >> 20, _CHUNK_FREE_FLOOR_BYTES >> 20)
+        return jsonify({'error': 'Not enough storage space for this file', 'received': offset}), 507
+
+    try:
+        fd = os.open(str(partial), os.O_RDWR)   # never O_CREAT: only start creates a partial
+    except FileNotFoundError:
+        stored = _chunk_stored_result(done_marker)
+        if stored is not None:
+            return jsonify(stored)
+        return jsonify({'error': 'This upload is no longer held — start it again', 'code': 'start_required'}), 410
+
+    with os.fdopen(fd, 'r+b') as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            # Another request may have finished the upload (renamed the partial into uploads/)
+            # while this one waited for the lock: this handle then points at the FINAL file,
+            # which must not be rewritten.
+            try:
+                same = os.fstat(fh.fileno()).st_ino == os.stat(partial).st_ino
+            except FileNotFoundError:
+                same = False
+            if not same:
+                stored = _chunk_stored_result(done_marker)
+                if stored is not None:
+                    return jsonify(stored)
+                return jsonify({'error': 'Upload state changed — retry'}), 409
+            if done_marker.exists():
+                # A finish wrote its result and stopped before the rename: complete THAT finish
+                # (same name) instead of touching the bytes.
+                return jsonify(_chunk_finish(chunk_dir, uid, partial, done_marker, meta))
+            fh.seek(0, 2)
+            held = fh.tell()
+            if offset > held:
+                return jsonify({'error': 'Missing earlier bytes', 'received': held}), 409
+            if offset < held:
+                fh.truncate(offset)  # retried slice: rewrite from its own offset
+            fh.seek(offset)
+            shutil.copyfileobj(piece.stream, fh, 1024 * 1024)
+            fh.flush()
+            os.fsync(fh.fileno())
+            held = fh.tell()
+            if held < size:
+                return jsonify({'ok': True, 'received': held, 'size': size})
+            return jsonify(_chunk_finish(chunk_dir, uid, partial, done_marker, meta))
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
 @static_files_bp.route('/static/emulators/<path:filepath>')
 def serve_emulator(filepath):
     """Serve bundled emulator files (js-dos, etc.) from /app/static/emulators/."""

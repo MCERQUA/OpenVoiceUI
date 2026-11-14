@@ -283,6 +283,13 @@ def create_app(config_override: dict = None):
             '/api/auth/check',      # Auth check endpoint — does its own token verification
             '/api/upload',          # file upload (POST) — canvas pages lose Clerk JWT on long sessions.
                                     # EXACT match only: /api/uploads (the listing) is NOT public.
+            '/api/upload/chunk',    # slices of a file over Cloudflare's ~100 MB edge cap (phone
+                                    # videos). Write-only, no listing; the signed upload_id that
+                                    # /api/upload/chunk/start issued IS the credential, so a long
+                                    # upload survives the session token expiring mid-way.
+            '/api/upload/chunk/start',  # handler SELF-AUTHENTICATES (Clerk Bearer/cookie, agent
+                                    # key, or the upload grant routes/canvas.py embeds in a page
+                                    # served to a signed-in viewer); anonymous -> 401.
             '/api/suno/callback',   # Suno's servers POST here from external IPs (no Clerk token)
             '/api/version',         # Version check — loaded before auth to show update banner
             '/api/config',          # Public client config (Clerk publishable key) — admin.html bootstrap

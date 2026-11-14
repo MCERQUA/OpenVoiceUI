@@ -987,6 +987,28 @@ def _safe_canvas_path(base: str, user_path: str) -> Path | None:
 _TRAILING_PUNCT_PAGE_RE = re.compile('(.+\\.html)[.,;:!)\\]}>\'"\u2019\u201d\u2026]+')
 
 
+def _upload_grant_for_viewer(viewer_id):
+    """A grant to START chunked uploads (routes/static_files.py), embedded in a page only when
+    the viewer is signed in. A canvas page holds at best one pushed 60 s Clerk token and a page
+    opened from a texted link holds none, so the authenticated page serve is the moment to
+    hand over the credential. None when no login is configured (start needs none then) or the
+    viewer is anonymous (a public page never hands an anonymous visitor an upload grant)."""
+    from routes.static_files import _clerk_configured, mint_upload_grant
+    if not _clerk_configured():
+        return None
+    if not viewer_id:
+        from services.auth import get_token_from_request, verify_clerk_token
+        token = get_token_from_request()
+        viewer_id = verify_clerk_token(token) if token else None
+    if not viewer_id:
+        return None
+    try:
+        return mint_upload_grant()
+    except Exception as exc:  # never fail a page serve over the grant
+        logger.warning('[canvas] could not mint upload grant: %s', exc)
+        return None
+
+
 @canvas_bp.route('/pages/<path:path>')
 def canvas_pages_proxy(path):
     """Serve files from Canvas pages directory.
@@ -1017,6 +1039,7 @@ def canvas_pages_proxy(path):
         # longer ship is a latent hole: anything later dropped at that filename in a
         # tenant's canvas-pages would serve unauthenticated.
         _OS_PAGES = {'desktop.html', 'file-explorer.html', 'terminal.html'}
+        _viewer_id = None   # set when the private-page gate below verified a session
         # _data/ under /pages/ bypasses the *.html gate entirely -- gate it here too.
         if CANVAS_REQUIRE_AUTH and (path.startswith('_data/') or '/_data/' in path):
             denied = _canvas_data_denied(path)
@@ -1056,6 +1079,7 @@ def canvas_pages_proxy(path):
                     if request.headers.get('Accept', '').startswith('text/html'):
                         return redirect('/?redirect=/pages/' + path)
                     return 'Unauthorized', 401
+                _viewer_id = user_id
 
         # P7-T3 security: prevent path traversal
         resolved = _safe_canvas_path(str(CANVAS_PAGES_DIR), path)
@@ -1142,7 +1166,14 @@ def canvas_pages_proxy(path):
                     b'window.parent.postMessage({type:"canvas-action",action:"request-auth-token"},"*");'
                     b'</script>'
                 )
-                _inject = _base_css + _error_bridge
+                # Upload grant, only for pages that do sliced uploads (bulk-image-uploader).
+                _grant_js = b''
+                if b'/api/upload/chunk' in content:
+                    _grant = _upload_grant_for_viewer(_viewer_id)
+                    if _grant:
+                        _grant_js = (b'<script id="canvas-upload-grant">window._canvasUploadGrant="'
+                                     + _grant.encode('ascii') + b'";</script>')
+                _inject = _base_css + _error_bridge + _grant_js
                 if b'</head>' in content:
                     content = content.replace(b'</head>', _inject + b'</head>', 1)
                 else:
