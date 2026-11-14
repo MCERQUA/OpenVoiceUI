@@ -93,6 +93,42 @@ def create_app(config_override: dict = None):
     )
     app.limiter = limiter
 
+    # ── WebSocket Origin guard ────────────────────────────────────────────────
+    # A WebSocket upgrade is a GET, so require_auth's CSRF guard (state-changing
+    # methods only) never sees it, while the browser still attaches the
+    # __session cookie (SameSite=Lax, and every *.jam-bot.com tenant is the same
+    # site). Refuse the upgrade before flask_sock accepts it when the Origin's
+    # host differs from the request Host. Runs whether or not Clerk is on: an
+    # open local install is just as reachable from another page. A missing
+    # Origin passes (non-browser clients; see services.auth.websocket_origin_allowed).
+    # /ws/clawdbot and /ws/terminal self-authenticate from the same cookie and
+    # are listed in _PUBLIC_EXACT, so before this guard nothing checked where the
+    # upgrade came from: another tenant's page could drive the user's agent or
+    # get a shell in this container. Their only non-browser callers (X-Agent-Key
+    # on /ws/terminal) send no Origin and still pass.
+    _WS_ORIGIN_CHECKED_PATHS = frozenset({
+        '/ws/push',
+        '/ws/clawdbot',
+        '/ws/terminal',
+        # Operator-scope gateway RPC (admin-only) and the co-browsing screencast:
+        # both self-authenticate from the same cookie; their only clients are the
+        # Control UI SPA and default-pages/browse-viewer.html on this same host.
+        '/openclaw-ui',
+        '/ws/browse-stream',
+    })
+
+    @app.before_request
+    def ws_origin_guard():
+        if request.path not in _WS_ORIGIN_CHECKED_PATHS:
+            return
+        from services.auth import websocket_origin_allowed
+        origin = request.headers.get('Origin')
+        if not websocket_origin_allowed(origin, request.host):
+            logger.warning('WebSocket upgrade refused: Origin %r is not host %r (path=%s)',
+                           origin, request.host, request.path)
+            return jsonify({'error': 'Cross-origin WebSocket blocked',
+                            'code': 'ws_origin_blocked'}), 403
+
     # ── Clerk auth gate ────────────────────────────────────────────────────────
     # Auth is only active when CLERK_PUBLISHABLE_KEY is set in .env.
     # Without it, the app runs fully open (single-user / local mode).
