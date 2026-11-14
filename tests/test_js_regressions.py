@@ -28,6 +28,12 @@ the app opened only on a voice-mode SWITCH; the default mode never switched, so 
 tenant ever connected and every background-job result logged "no connected browsers" (2026-11-14).
 init() must open /ws/push itself and the channel must reconnect on its own.
 
+tests/js/hold-speech-while-thinking.test.js covers speech said while the agent is thinking. WebSpeechSTT
+is deaf from the moment it hands over a transcript until the reply's TTS has played; on a comms-brain tenant
+2026-11-14 (replies take 15-30 s to start) everything the owner said in that window was lost. With the profile
+opt-in conversation.hold_speech_while_thinking the words are held and sent once the reply is over. The test
+fails on an app.js without the change.
+
 Skips only when node is absent, and the skip is visible in pytest output. CI (ubuntu-latest)
 always has node.
 """
@@ -49,6 +55,7 @@ JS_TESTS = Path(__file__).resolve().parent / "js"
     "upload-body-ios.test.js",
     "safe-redirect.test.js",
     "push-channel.test.js",
+    "hold-speech-while-thinking.test.js",
 ])
 def test_js_regression_suite(name: str) -> None:
     node = shutil.which("node")

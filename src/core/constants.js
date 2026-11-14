@@ -25,6 +25,7 @@ export const TTS_PROVIDERS = [
  */
 export const TRANSCRIPT_UPLOAD_ACCEPT = [
     'image/*',
+    'video/*',
     '.pdf', '.docx', '.xlsx', '.pptx',
     '.txt', '.md', '.json', '.csv',
     '.html', '.js', '.py', '.ts', '.css',

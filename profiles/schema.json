@@ -508,6 +508,14 @@
           "maximum": 16000,
           "default": null,
           "description": "Hard cap on AI response before TTS. Truncates at sentence boundary. null = no cap."
+        },
+        "hold_speech_while_thinking": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null,
+          "description": "Keep the mic open while the agent is thinking: words spoken during an in-flight reply are held and sent as the next turn the moment that reply finishes (nothing is sent mid-turn). null/false = platform default (speech during thinking is dropped). Built for slow-thinking gateways such as comms-brain."
         }
       }
     },
