@@ -23,6 +23,12 @@ tests/js/safe-redirect.test.js covers the post-login ?redirect= target. The logi
 browser back there after it refreshes a stale session, and a bare startsWith('/') check let
 protocol-relative targets ('//host', '/\\host', '/<tab>/host') send it to another origin.
 
+tests/js/hold-speech-while-thinking.test.js covers speech said while the agent is thinking. WebSpeechSTT
+is deaf from the moment it hands over a transcript until the reply's TTS has played; on a comms-brain tenant
+2026-11-14 (replies take 15-30 s to start) everything the owner said in that window was lost. With the profile
+opt-in conversation.hold_speech_while_thinking the words are held and sent once the reply is over. The test
+fails on an app.js without the change.
+
 Skips only when node is absent, and the skip is visible in pytest output. CI (ubuntu-latest)
 always has node.
 """
@@ -43,6 +49,7 @@ JS_TESTS = Path(__file__).resolve().parent / "js"
     "transcript-panel-input.test.js",
     "upload-body-ios.test.js",
     "safe-redirect.test.js",
+    "hold-speech-while-thinking.test.js",
 ])
 def test_js_regression_suite(name: str) -> None:
     node = shutil.which("node")
