@@ -516,6 +516,44 @@ UPLOADS_REQUIRE_AUTH = os.getenv('CANVAS_REQUIRE_AUTH', 'false').lower() == 'tru
 UPLOADS_SHADOW_LOG = UPLOADS_DIR / '.uploads-auth-shadow.jsonl'
 _UPLOADS_SHADOW_MAX_BYTES = 5 * 1024 * 1024
 
+# Always-private areas (2026-11-09). The phased mode above still leaves /uploads/ public on every
+# instance (shadow), but some areas are client intake that is never a page asset: Field Dock photos
+# are receipts / work orders / invoices with a Bill-To name, address and phone, and uploads/sms/ is
+# raw inbound MMS. These, and the /api/uploads listing (the index of every filename), are ENFORCED
+# whenever CANVAS_REQUIRE_AUTH is on, whatever UPLOADS_AUTH_MODE says, with the same three grants.
+# Prefixes are relative to UPLOADS_DIR and matched on the RESOLVED path (so '../', './', '//' and
+# symlinks cannot walk around them). An instance adds its own with UPLOADS_PRIVATE_PREFIXES
+# (comma-separated, e.g. "receipts/,leads/"); the built-in ones cannot be removed by env.
+# Top-level sms-*.jpg (sms-router MMS saves) are NOT here: they are deliberately public website
+# assets (sms-router app.py) and are used by public canvas pages; they wait for enforce mode.
+_BUILTIN_PRIVATE_PREFIXES = ('field-dock/', 'sms/')
+
+
+def _private_prefixes():
+    extra = os.getenv('UPLOADS_PRIVATE_PREFIXES', '')
+    out = list(_BUILTIN_PRIVATE_PREFIXES)
+    for p in extra.split(','):
+        p = p.strip().strip('/')
+        if p and not p.startswith('.') and '..' not in p:
+            out.append(p + '/')
+    return tuple(out)
+
+
+def _upload_is_private(rel_path):
+    """True when a path relative to UPLOADS_DIR (posix, already resolved) is in an always-private
+    area. Case-folded so 'Field-Dock/' cannot slip past on a case-insensitive filesystem. The area's
+    own directory ('field-dock', no trailing slash) counts as inside it."""
+    rel = rel_path.strip('/').lower() + '/'
+    return any(rel.startswith(p.lower()) for p in _private_prefixes())
+
+
+def _upload_rel(path):
+    """The resolved path of `path` relative to the resolved UPLOADS_DIR, posix; '' if outside."""
+    try:
+        return Path(os.path.realpath(path)).relative_to(Path(os.path.realpath(UPLOADS_DIR))).as_posix()
+    except (ValueError, OSError):
+        return ''
+
 
 def _upload_has_session():
     from services.auth import get_token_from_request, verify_clerk_token
@@ -601,14 +639,14 @@ def _upload_enforce_action(listing=False):
     return 'login-redirect' if (not listing and _upload_wants_html()) else '401'
 
 
-def _upload_shadow_record(filename, exists, states=None, reason=None, listing=False):
+def _upload_shadow_record(filename, exists, states=None, reason=None, listing=False, mode=None):
     try:
         if UPLOADS_SHADOW_LOG.exists() and UPLOADS_SHADOW_LOG.stat().st_size > _UPLOADS_SHADOW_MAX_BYTES:
             return
         ref = request.headers.get('Referer', '')
         row = {
             'ts': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'file': filename[:200], 'exists': bool(exists), 'mode': UPLOADS_AUTH_MODE,
+            'file': filename[:200], 'exists': bool(exists), 'mode': mode or UPLOADS_AUTH_MODE,
             'ua': request.headers.get('User-Agent', '')[:160],
             'ref_host': re.sub(r'^https?://([^/]+).*$', r'\1', ref)[:120] if ref else '',
             'accept': request.headers.get('Accept', '')[:60],
@@ -625,20 +663,32 @@ def _upload_shadow_record(filename, exists, states=None, reason=None, listing=Fa
         logger.warning('[uploads-auth] shadow record failed: %s', e)
 
 
-def _upload_access_denied(filename, exists, listing=False):
-    """None = serve. Otherwise the deny response (enforce mode only).
+def _upload_access_denied(filename, exists, listing=False, private=False):
+    """None = serve. Otherwise the deny response.
 
     Every route that serves bytes from UPLOADS_DIR calls this BEFORE checking existence:
     serve_upload, routes/albums.py serve_album_photo, and the /api/uploads listing (listing=True,
-    which takes no signed-link grant and always answers JSON)."""
-    if UPLOADS_AUTH_MODE not in ('shadow', 'enforce') or not UPLOADS_REQUIRE_AUTH:
+    which takes no signed-link grant and always answers JSON).
+
+    The listing and private=True (an always-private area, see _BUILTIN_PRIVATE_PREFIXES) are
+    enforced whenever auth is required, in every UPLOADS_AUTH_MODE; everything else is denied in
+    enforce mode only. Their denial rows are logged with mode 'always-enforce' (a real denial,
+    not a would-deny)."""
+    if not UPLOADS_REQUIRE_AUTH:
+        return None
+    # Every caller gets the private-area rule on the path as requested; callers that know the
+    # RESOLVED path (serve_upload, albums) also pass private= for it.
+    private = private or (not listing and _upload_is_private(filename))
+    always = listing or private
+    if not always and UPLOADS_AUTH_MODE not in ('shadow', 'enforce'):
         return None
     granted_by, states = _upload_grants(filename, listing=listing)
     if granted_by:
         return None
     reason = _upload_deny_reason(states)
-    _upload_shadow_record(filename, exists, states, reason, listing=listing)
-    if UPLOADS_AUTH_MODE != 'enforce':
+    _upload_shadow_record(filename, exists, states, reason, listing=listing,
+                          mode='always-enforce' if always else None)
+    if not always and UPLOADS_AUTH_MODE != 'enforce':
         return None
     logger.warning('[uploads-auth] DENIED %s (%s)', filename[:200], reason)
     if _upload_enforce_action(listing) == 'login-redirect':
@@ -655,9 +705,11 @@ _UPLOADS_LISTING = '(listing) /api/uploads'
 def list_uploads():
     """List uploaded files. Optional ?type=image|text filter.
 
-    Moved here from server.py (uploads auth phase 3): app.require_auth treats every path that starts with
-    '/api/upload' as public (the POST upload route), so the listing has to gate itself. It goes
-    through the same uploads gate as the files, as a listing: shadow logs, enforce answers 401.
+    Moved here from server.py (uploads auth phase 3). Since 2026-11-09 the listing is ALWAYS gated
+    when auth is required (every UPLOADS_AUTH_MODE): it is the index that makes every filename on the
+    instance discoverable. app.require_auth also gates it now ('/api/upload' is public as an exact
+    path for the POST only); this route gate stays as defense in depth. Grants: Clerk session
+    (Bearer or __session cookie) or X-Agent-Key; a signed link never opens the index.
     """
     denied = _upload_access_denied(_UPLOADS_LISTING, True, listing=True)
     if denied is not None:
@@ -705,7 +757,9 @@ def serve_upload(filename):
     if upload_path is None:
         return jsonify({"error": "Invalid path"}), 400
     # Uploads auth: decide access BEFORE answering whether the file exists (no 401/404 existence oracle).
-    denied = _upload_access_denied(filename, upload_path.exists())
+    # Private areas are judged on the RESOLVED path, so './', '//', '../' and symlinks cannot dodge them.
+    private = _upload_is_private(_upload_rel(upload_path)) or _upload_is_private(filename)
+    denied = _upload_access_denied(filename, upload_path.exists(), private=private)
     if denied is not None:
         return denied
     if not upload_path.exists():
