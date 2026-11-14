@@ -218,6 +218,16 @@ input[type="file"]{display:none}
 }
 .toast.on{transform:translateX(-50%) translateY(0)}
 
+/* ── Waiting for the phone to hand over the picked file ── */
+.pick-wait{display:none;align-items:center;gap:10px;background:var(--bg-1);border:1px solid rgba(59,130,246,.35);border-radius:var(--r);padding:10px 12px;margin-bottom:20px}
+.pick-wait.on{display:flex}
+.pick-wait .spin{width:18px;height:18px;border:2px solid var(--bg-3);border-top-color:var(--blue);border-radius:50%;animation:pw-spin .8s linear infinite;flex-shrink:0}
+.pick-wait.stuck .spin{animation:none;border-color:var(--amber)}
+.pick-wait .pw-t{flex:1;min-width:0;font-size:.78rem;color:var(--tx)}
+.pick-wait .pw-s{display:block;font-size:.7rem;color:var(--tx-3);margin-top:2px}
+.pick-wait .btn{min-height:36px}
+@keyframes pw-spin{to{transform:rotate(360deg)}}
+
 /* ── Responsive ── */
 @media(max-width:640px){
   body{padding:12px}
@@ -255,14 +265,17 @@ input[type="file"]{display:none}
   <h2>Drop files here</h2>
   <p>Images, documents, audio, video, code</p>
   <div class="drop-btns">
-    <button class="btn pri" onclick="$('fi').click()"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Browse Files</button>
-    <button class="btn" onclick="$('fo').click()"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Folder</button>
+    <button class="btn pri" onclick="pickOpen('fi')"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Browse Files</button>
+    <button class="btn" onclick="pickOpen('fo')"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Folder</button>
     <button class="btn" onclick="urlImport()"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>URL</button>
   </div>
   <div class="drop-hint"><kbd>Ctrl</kbd>+<kbd>V</kbd> to paste from clipboard</div>
   <input type="file" id="fi" multiple>
   <input type="file" id="fo" webkitdirectory multiple>
 </div>
+
+<!-- Waiting for the phone to hand over what was picked (iPhone videos take a while) -->
+<div class="pick-wait" id="pickWait" role="status" aria-live="polite"><div class="spin"></div><div class="pw-t"><span id="pwMsg">Getting your file from your phone...</span><span class="pw-s" id="pwSub"></span></div><button class="btn" onclick="pickDone()">Hide</button></div>
 
 <!-- Upload Queue -->
 <div class="queue" id="queue">
@@ -294,10 +307,10 @@ input[type="file"]{display:none}
 
 <script>
 const $=id=>document.getElementById(id);
-const IMG=new Set('jpg jpeg png gif webp bmp tiff svg'.split(' '));
+const IMG=new Set('jpg jpeg png gif webp bmp tiff svg heic heif avif'.split(' '));
 const DOC=new Set('pdf docx xlsx pptx txt md csv log'.split(' '));
 const AUD=new Set('mp3 wav ogg flac m4a aac'.split(' '));
-const VID=new Set('mp4 webm mov avi mkv'.split(' '));
+const VID=new Set('mp4 webm mov avi mkv m4v 3gp hevc'.split(' '));
 const COD=new Set('py js ts json yaml yml html css'.split(' '));
 const D3D=new Set('glb gltf obj fbx stl 3ds dae ply usdz blend mtl hdr exr'.split(' '));
 
@@ -329,8 +342,44 @@ document.addEventListener('dragenter',e=>{e.preventDefault();dc++;dz.classList.a
 document.addEventListener('dragleave',e=>{e.preventDefault();dc--;if(dc<=0){dc=0;dz.classList.remove('hover')}});
 document.addEventListener('dragover',e=>e.preventDefault());
 document.addEventListener('drop',e=>{e.preventDefault();dc=0;dz.classList.remove('hover');if(e.dataTransfer.files.length)handle(e.dataTransfer.files)});
-$('fi').onchange=e=>{if(e.target.files.length)handle(e.target.files);e.target.value=''};
-$('fo').onchange=e=>{if(e.target.files.length)handle(e.target.files);e.target.value=''};
+// ── File picker ──
+// iPhone: after the checkmark in the Photos picker, iOS still has to get a VIDEO ready (copy it out
+// of the library, download it from iCloud if it is not on the phone) before the page is given the
+// file. Photos come back at once; a video can take many seconds, and if iOS gives up it hands back
+// nothing. The page used to show nothing at all during that wait, so a video looked like a dead tap.
+// Now a "getting your file" row shows once the picker has closed, and stays until the file arrives,
+// the picker reports a cancel, or the person hides it.
+let pick=null;
+function pickOpen(which){pickDone();pick={back:0,t:setInterval(pickTick,500)};$(which).click()}
+function pickTick(){
+  if(!pick)return;
+  if(document.hidden){pick.back=0;return}                 // picker sheet still up
+  if(!pick.back){pick.back=Date.now();return}
+  const s=Math.round((Date.now()-pick.back)/1000);if(s<2)return;
+  const w=$('pickWait');w.classList.add('on');
+  if(s<120){
+    w.classList.remove('stuck');
+    $('pwMsg').textContent='Getting your file from your phone... '+s+'s';
+    $('pwSub').textContent='Videos can take a minute while your phone gets them ready. Keep this page open — the upload starts by itself.';
+  }else{
+    w.classList.add('stuck');
+    $('pwMsg').textContent='Nothing has come through from your phone yet';
+    $('pwSub').textContent='If the video is stored in iCloud, open it in the Photos app first so it downloads, then pick it again.';
+  }
+}
+function pickDone(){if(pick){clearInterval(pick.t);pick=null}const w=$('pickWait');if(w)w.classList.remove('on','stuck')}
+function onPicked(e){
+  const inp=e.target;
+  if(!inp.files||!inp.files.length)return;              // 'input' and 'change' both fire; take the first
+  pickDone();
+  try{handle(inp.files)}catch(err){toast('Could not add that file: '+(err&&err.message||err))}
+  inp.value='';
+}
+['fi','fo'].forEach(k=>{
+  $(k).addEventListener('change',onPicked);
+  $(k).addEventListener('input',onPicked);
+  $(k).addEventListener('cancel',()=>{pickDone();toast('Nothing was selected')});
+});
 
 // ── Clipboard ──
 document.addEventListener('paste',e=>{
@@ -355,7 +404,11 @@ const MAX_CONCURRENT=3;
 let activeUploads=0;
 const pendingQueue=[];
 
-function handle(fl){Array.from(fl).forEach(f=>{const id=++qid;addQI(id,f.name,f.size,cat(ext(f.name)),f);enqueue(f,id)})}
+function handle(fl){Array.from(fl).forEach(f=>{
+  const id=++qid;
+  try{addQI(id,f.name||'upload',f.size,cat(ext(f.name||'')),f);enqueue(f,id)}
+  catch(err){if(!$('qi'+id))addQI(id,f.name||'upload',f.size||0,'oth');setQI(id,0,'err',(err&&err.message)||'Could not add this file')}
+})}
 
 function enqueue(file,id,retries){
   pendingQueue.push({file,id,retries:retries||0});
@@ -374,13 +427,81 @@ function drainQueue(){
 // WebKit bug 319985 (Safari/iOS 26.5+): a picker File handed to fetch/XHR can go out as
 // Content-Length: 0 with no error (iPhone uploads on tenant-i 2026-09-30 all arrived empty).
 // The page can still read the bytes, so send a copy of them, never the File itself.
+// 2026-11-14: a Blob made from those bytes and put in FormData still went out EMPTY on WebKit
+// (iPhone-emulated WebKit, canary tenant: 5 of 10 uploads landed as 0-byte files while the page said
+// "Done", and every >90 MB slice was refused as "Empty slice"). So the request body is now built
+// by hand as one plain byte array (multipart/form-data) — no Blob anywhere on the way out — and
+// a "Done" is only shown when the server says it received the same number of bytes.
 async function readIntoMemory(file){
   const name=file.name||'upload';let buf;
   try{buf=await file.arrayBuffer()}catch(e){throw new Error(name+' could not be read — re-attach it and try again')}
   if(!buf.byteLength)throw new Error(name+' came back empty — re-attach it and try again');
-  return new Blob([buf],{type:file.type||'application/octet-stream'});
+  return buf;
+}
+function multipartBody(fields,fileName,bytes,type){
+  const bd='----ovuUpload'+Array.from(crypto.getRandomValues(new Uint8Array(12)),x=>x.toString(16).padStart(2,'0')).join('');
+  const enc=new TextEncoder(),q=s=>String(s).replace(/["\r\n]/g,'_'),parts=[];
+  fields.forEach(([k,v])=>parts.push(enc.encode(`--${bd}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`)));
+  parts.push(enc.encode(`--${bd}\r\nContent-Disposition: form-data; name="file"; filename="${q(fileName)}"\r\nContent-Type: ${type||'application/octet-stream'}\r\n\r\n`));
+  parts.push(new Uint8Array(bytes));
+  parts.push(enc.encode(`\r\n--${bd}--\r\n`));
+  const out=new Uint8Array(parts.reduce((n,p)=>n+p.byteLength,0));let o=0;
+  parts.forEach(p=>{out.set(p,o);o+=p.byteLength});
+  return{body:out,contentType:'multipart/form-data; boundary='+bd};
+}
+// ── Large files (phone videos): sliced upload ──
+// The front door (Cloudflare) refuses any single request over ~100 MB, so a file bigger than
+// CHUNK_OVER goes up as CHUNK_SIZE slices to /api/upload/chunk, which stitches them together on
+// the server. Each slice is read into memory on its own (same WebKit empty-body workaround as
+// above), so a 1 GB video never has to fit in the phone's memory at once.
+const CHUNK_OVER=90*1024*1024, CHUNK_SIZE=8*1024*1024;
+function uploadChunked(file,id){
+  const uid=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+  const job={id,xhr:null,cancelled:false};ups.push(job);
+  const done=(ok,msg,res)=>{
+    if(job.finished)return;job.finished=true;
+    ups=ups.filter(u=>u.id!==id);activeUploads--;
+    if(ok){
+      setQI(id,100,'ok',null,res);
+      const e=ext(res.original_name||file.name);
+      files.unshift({name:res.original_name||file.name,url:res.url,size:file.size,ext:e,cat:cat(e),modified:Date.now()/1000});
+      renderThrottled();updateStorThrottled();
+    }else setQI(id,0,'err',msg);
+    drainQueue();
+  };
+  const sendSlice=(offset,tries)=>{
+    if(job.cancelled)return done(false,'Cancelled');
+    const end=Math.min(offset+CHUNK_SIZE,file.size);
+    file.slice(offset,end).arrayBuffer().then(buf=>{
+      if(job.cancelled)return done(false,'Cancelled');
+      if(!buf.byteLength)throw new Error(file.name+' came back empty — re-attach it and try again');
+      const xhr=new XMLHttpRequest();job.xhr=xhr;
+      xhr.upload.onprogress=e=>{if(e.lengthComputable)setQI(id,Math.min(99,Math.round((offset+e.loaded)/file.size*100)),'up')};
+      const retry=why=>{if(tries<5){setTimeout(()=>sendSlice(offset,tries+1),1500*(tries+1))}else done(false,why)};
+      xhr.onload=()=>{
+        let r={};try{r=JSON.parse(xhr.responseText)}catch(e){}
+        if(xhr.status===200&&r.url)return done(true,null,r);
+        if(xhr.status===200&&typeof r.received==='number')return sendSlice(r.received,0);
+        if(xhr.status===409&&typeof r.received==='number')return sendSlice(r.received,tries+1);
+        if(xhr.status===404||xhr.status===405)return done(false,'Files over 90 MB need a server update');
+        if(xhr.status>=400&&xhr.status<500&&xhr.status!==408&&xhr.status!==429)return done(false,r.error||('Error '+xhr.status));
+        retry(r.error||('Error '+xhr.status));
+      };
+      xhr.timeout=120000;
+      xhr.ontimeout=()=>retry('Upload timed out');
+      xhr.onerror=()=>retry('Network error');
+      xhr.onabort=()=>done(false,'Cancelled');
+      const mp=multipartBody([['upload_id',uid],['name',file.name],['size',String(file.size)],['offset',String(offset)]],file.name,buf,'application/octet-stream');
+      xhr.open('POST','/api/upload/chunk');
+      xhr.setRequestHeader('Content-Type',mp.contentType);
+      if(window._canvasAuthToken)xhr.setRequestHeader('Authorization','Bearer '+window._canvasAuthToken);
+      xhr.send(mp.body);
+    }).catch(err=>done(false,err.message||(file.name+' could not be read — re-attach it and try again')));
+  };
+  setQI(id,0,'up');sendSlice(0,0);
 }
 function upload(file,id,retries){
+  if(file.size>CHUNK_OVER)return uploadChunked(file,id);
   retries=retries||0;
   const xhr=new XMLHttpRequest();ups.push({id,xhr});
   xhr.upload.onprogress=e=>{if(e.lengthComputable)setQI(id,Math.round(e.loaded/e.total*100),'up')};
@@ -388,8 +509,14 @@ function upload(file,id,retries){
     ups=ups.filter(u=>u.id!==id);
     activeUploads--;
     if(xhr.status>=200&&xhr.status<300){
+      let r=null;try{r=JSON.parse(xhr.responseText)}catch(e){}
+      if(r&&typeof r.size==='number'&&file.size&&r.size!==file.size){
+        // the server got fewer bytes than the file has: never call that "Done"
+        if(retries<2){setQI(id,-1,'up');setTimeout(()=>{enqueue(file,id,retries+1)},1000*(retries+1));return}
+        setQI(id,0,'err','Arrived incomplete — try again');drainQueue();return;
+      }
       try{
-        const r=JSON.parse(xhr.responseText);
+        if(!r)throw new Error('parse');
         setQI(id,100,'ok',null,r);
         const e=ext(r.original_name||file.name);
         files.unshift({name:r.original_name||file.name,url:r.url,size:file.size,ext:e,cat:cat(e),modified:Date.now()/1000});
@@ -416,11 +543,13 @@ function upload(file,id,retries){
     }
     drainQueue();
   };
-  readIntoMemory(file).then(body=>{
+  readIntoMemory(file).then(buf=>{
     if(!ups.some(u=>u.id===id)){activeUploads--;drainQueue();return} // cancelled while reading
-    const fd=new FormData();fd.append('file',body,file.name);xhr.open('POST','/api/upload');
+    const mp=multipartBody([],file.name||'upload',buf,file.type);
+    xhr.open('POST','/api/upload');
+    xhr.setRequestHeader('Content-Type',mp.contentType);
     if(window._canvasAuthToken)xhr.setRequestHeader('Authorization','Bearer '+window._canvasAuthToken);
-    xhr.send(fd);
+    xhr.send(mp.body);
   }).catch(err=>{
     ups=ups.filter(u=>u.id!==id);activeUploads--;
     setQI(id,0,'err',err.message);drainQueue();
@@ -450,7 +579,7 @@ function setQI(id,pct,st,msg,res){
   updQCt();
 }
 
-function cancelQ(id){const u=ups.find(x=>x.id===id);if(u){u.xhr.abort();ups=ups.filter(x=>x.id!==id)}const el=$('qi'+id);if(el)el.remove();updQCt()}
+function cancelQ(id){const u=ups.find(x=>x.id===id);if(u){u.cancelled=true;if(u.xhr)u.xhr.abort();ups=ups.filter(x=>x.id!==id)}const el=$('qi'+id);if(el)el.remove();updQCt()}
 function updQCt(){const active=document.querySelectorAll('.qi-st.up').length;$('qCt').textContent=active;if(!document.querySelectorAll('.qi').length)$('queue').classList.remove('on')}
 
 // ── Tabs ──

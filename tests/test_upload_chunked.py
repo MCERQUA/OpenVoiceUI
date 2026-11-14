@@ -121,3 +121,33 @@ def test_chunk_route_is_public_like_upload():
     import app as app_mod
     src = open(app_mod.__file__, encoding="utf-8").read()
     assert "'/api/upload/chunk'," in src
+
+
+def test_out_of_order_first_slice_creates_nothing(client, up):
+    r = _send(client, b"x" * 10, 10, 20)
+    assert r.status_code == 409 and r.get_json()["received"] == 0
+    assert not list((up / ".chunks").glob("*.partial"))
+
+
+def test_unfinished_uploads_are_capped_as_a_whole(client, up, monkeypatch):
+    import routes.static_files as sf
+    monkeypatch.setattr(sf, "_MAX_CHUNKED_INFLIGHT_BYTES", 25)
+    # first upload: 10 of 20 bytes held, left unfinished
+    assert _send(client, b"a" * 10, 0, 20, uid="u" * 20).status_code == 200
+    # second upload would take held (10) + declared (20) past the cap of 25
+    r = _send(client, b"b" * 10, 0, 20, uid="v" * 20)
+    assert r.status_code == 507
+    assert not (up / ".chunks" / ("v" * 20 + ".partial")).exists()
+    # the held upload can still finish
+    assert _send(client, b"a" * 10, 10, 20, uid="u" * 20).get_json()["file_size"] == 20
+
+
+def test_resent_last_slice_after_finish_returns_same_file(client, up):
+    payload = _blob(20_000)
+    assert _send(client, payload[:10_000], 0, len(payload)).status_code == 200
+    first = _send(client, payload[10_000:], 10_000, len(payload)).get_json()
+    # the response to the last slice was lost; the client sends it again
+    again = _send(client, payload[10_000:], 10_000, len(payload))
+    assert again.status_code == 200 and again.get_json()["filename"] == first["filename"]
+    finals = [p for p in up.iterdir() if p.is_file() and p.name.startswith("IMG_0001__")]
+    assert len(finals) == 1 and finals[0].read_bytes() == payload

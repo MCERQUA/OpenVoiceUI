@@ -503,6 +503,29 @@ try:
 except ValueError:
     _MAX_CHUNKED_TOTAL_BYTES = 4096 * 1024 * 1024
 _CHUNK_FREE_SPACE_MARGIN = 512 * 1024 * 1024
+# The route is public (see header), so the bytes held in UNFINISHED uploads are capped as a
+# whole: without it, anyone could open many upload ids, stop one byte short of each, and fill
+# the volume. A new upload is refused (507) while the partials already held plus its declared
+# size would pass the cap. Nothing is removed automatically: an abandoned partial keeps
+# counting until it is finished or an operator moves it out of uploads/.chunks/.
+try:
+    _MAX_CHUNKED_INFLIGHT_BYTES = int(os.getenv('OVU_CHUNKED_INFLIGHT_MAX_MB', '8192')) * 1024 * 1024
+except ValueError:
+    _MAX_CHUNKED_INFLIGHT_BYTES = 8192 * 1024 * 1024
+
+
+def _chunk_partials_bytes(chunk_dir: Path) -> int:
+    total = 0
+    for p in chunk_dir.glob('*.partial'):
+        try:
+            total += p.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _chunk_done_marker(chunk_dir: Path, upload_id: str) -> Path:
+    return chunk_dir / f'{upload_id}.done.json'
 
 
 @static_files_bp.route('/api/upload/chunk', methods=['POST'])
@@ -545,18 +568,48 @@ def upload_file_chunk():
     chunk_dir = UPLOADS_DIR / '.chunks'
     chunk_dir.mkdir(parents=True, exist_ok=True)
     partial = chunk_dir / f'{upload_id}.partial'
+    done_marker = _chunk_done_marker(chunk_dir, upload_id)
+
+    # A slice for an upload that already finished (its response was lost and the client
+    # resent the last slice): answer with the stored result instead of starting a duplicate.
+    if done_marker.exists() and not partial.exists():
+        try:
+            return jsonify(json.loads(done_marker.read_text(encoding='utf-8')))
+        except (OSError, ValueError):
+            pass
+
+    if not partial.exists():
+        # Checks for a NEW upload run before anything is created, so a refused or
+        # out-of-order first request leaves no file behind.
+        if offset != 0:
+            return jsonify({'error': 'Missing earlier bytes', 'received': 0}), 409
+        free = shutil.disk_usage(str(chunk_dir)).free
+        if free < total + _CHUNK_FREE_SPACE_MARGIN:
+            return jsonify({'error': 'Not enough storage space for this file'}), 507
+        if _chunk_partials_bytes(chunk_dir) + total > _MAX_CHUNKED_INFLIGHT_BYTES:
+            logger.warning('upload: chunked upload refused, unfinished uploads hold too much (cap %d MB)',
+                           _MAX_CHUNKED_INFLIGHT_BYTES // (1024 * 1024))
+            return jsonify({'error': 'Too many unfinished large uploads on this server — try again later'}), 507
 
     with open(partial, 'a+b') as fh:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         try:
+            # Another request for this id may have finished the upload (renamed the partial
+            # into uploads/) while this one waited for the lock: this handle then points at
+            # the FINAL file, which must not be rewritten.
+            try:
+                same = os.fstat(fh.fileno()).st_ino == os.stat(partial).st_ino
+            except FileNotFoundError:
+                same = False
+            if not same:
+                try:
+                    return jsonify(json.loads(done_marker.read_text(encoding='utf-8')))
+                except (OSError, ValueError):
+                    return jsonify({'error': 'Upload state changed — retry'}), 409
             fh.seek(0, 2)
             held = fh.tell()
             if offset > held:
                 return jsonify({'error': 'Missing earlier bytes', 'received': held}), 409
-            if held == 0:
-                free = shutil.disk_usage(str(chunk_dir)).free
-                if free < total + _CHUNK_FREE_SPACE_MARGIN:
-                    return jsonify({'error': 'Not enough storage space for this file'}), 507
             if offset < held:
                 fh.truncate(offset)  # retried slice: rewrite from its own offset
             fh.seek(offset)
@@ -564,24 +617,38 @@ def upload_file_chunk():
             fh.flush()
             os.fsync(fh.fileno())
             held = fh.tell()
+            if held < total:
+                return jsonify({'ok': True, 'received': held, 'size': total})
+
+            # --- Last slice: move the partial into uploads/ under the same naming as
+            #     /api/upload, still holding the lock so no other request can touch it. ---
+            stem_safe = re.sub(r'[^A-Za-z0-9._-]+', '_', Path(original_name).stem)[:80].strip('._-') or 'file'
+            safe_name = f"{stem_safe}__{uuid.uuid4().hex[:8]}{ext}"
+            dest = UPLOADS_DIR / safe_name
+            os.replace(partial, dest)
+            try:
+                dest.chmod(0o644)
+            except OSError:
+                pass
+            mime = mimetypes.guess_type(original_name)[0] or ''
+            url_full = f"https://{request.host}/uploads/{safe_name}"
+            result = {
+                'original_name': original_name,
+                'path': str(dest),
+                'filename': safe_name,
+                'url': f'/uploads/{safe_name}',
+                'url_full': url_full,
+                'agent_path': f'workspace/uploads/{safe_name}',
+                'file_size': total,
+                'type': 'image' if mime.startswith('image/') else 'file',
+            }
+            try:
+                done_marker.write_text(json.dumps(result), encoding='utf-8')
+            except OSError as exc:
+                logger.warning('upload: could not write chunk done-marker for %s: %s', safe_name, exc)
         finally:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
-    if held < total:
-        return jsonify({'ok': True, 'received': held, 'size': total})
-
-    # --- Last slice: move the partial into uploads/ under the same naming as /api/upload ---
-    stem_safe = re.sub(r'[^A-Za-z0-9._-]+', '_', Path(original_name).stem)[:80].strip('._-') or 'file'
-    safe_name = f"{stem_safe}__{uuid.uuid4().hex[:8]}{ext}"
-    dest = UPLOADS_DIR / safe_name
-    os.replace(partial, dest)
-    try:
-        dest.chmod(0o644)
-    except OSError:
-        pass
-
-    mime = mimetypes.guess_type(original_name)[0] or ''
-    url_full = f"https://{request.host}/uploads/{safe_name}"
     logger.info('upload: chunked upload complete %s (%d bytes) as %s', original_name, total, safe_name)
     append_upload_index({
         'at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
@@ -595,16 +662,7 @@ def upload_file_chunk():
         'size': total,
         'note': 'chunked',
     })
-    return jsonify({
-        'original_name': original_name,
-        'path': str(dest),
-        'filename': safe_name,
-        'url': f'/uploads/{safe_name}',
-        'url_full': url_full,
-        'agent_path': f'workspace/uploads/{safe_name}',
-        'file_size': total,
-        'type': 'image' if mime.startswith('image/') else 'file',
-    })
+    return jsonify(result)
 
 
 @static_files_bp.route('/static/emulators/<path:filepath>')

@@ -17,6 +17,10 @@
 //   3. The default pages that upload a picked file to /api/upload need the same fix as 2:
 //      bulk-image-uploader, website-setup, grid-creator, desktop (wallpaper). image-splitter is
 //      not here on purpose: it uploads canvas-encoded blobs, never the picker's File.
+//   4. bulk-image-uploader goes one step further (2026-11-14): even a Blob of read bytes inside
+//      FormData went out EMPTY from iPhone WebKit, so it builds the multipart body itself as one
+//      Uint8Array. Its check parses that body instead of a FormData. Files over CHUNK_OVER go up
+//      as slices to /api/upload/chunk (Cloudflare refuses any request over ~100 MB).
 //
 // No browser, no deps: sw.js runs in a vm with a fake `self`; the TranscriptPanel object is cut
 // out of app.js, and each page's upload functions are cut out of its HTML, then driven with a
@@ -105,7 +109,41 @@ function pickerFile(bytes, name, type) {
 }
 
 async function sentBytes(entry) {
+  if (entry.bytes) return entry.bytes;
   return Buffer.from(await entry.value.arrayBuffer());
+}
+
+// Parse a multipart/form-data body the page built by hand (a Uint8Array): returns the parts as
+// { name, filename, bytes } in order.
+function parseMultipart(u8) {
+  const buf = Buffer.from(u8);
+  const firstNl = buf.indexOf('\r\n');
+  const delim = buf.slice(0, firstNl);           // --boundary
+  const parts = [];
+  let pos = 0;
+  for (;;) {
+    const start = buf.indexOf(delim, pos);
+    if (start < 0) break;
+    const after = start + delim.length;
+    if (buf.slice(after, after + 2).toString() === '--') break;
+    const hdrEnd = buf.indexOf('\r\n\r\n', after);
+    const next = buf.indexOf(Buffer.concat([Buffer.from('\r\n'), delim]), hdrEnd);
+    const head = buf.slice(after + 2, hdrEnd).toString();
+    const name = (/name="([^"]*)"/.exec(head) || [])[1];
+    const filename = (/filename="([^"]*)"/.exec(head) || [])[1];
+    parts.push({ name, filename, bytes: buf.slice(hdrEnd + 4, next) });
+    pos = next + 2;
+  }
+  return parts;
+}
+
+// The 'file' entry of one recorded POST, whichever way the page built the body.
+function fileEntry(post) {
+  if (ArrayBuffer.isView(post.body)) {   // built inside the vm: another realm, so no instanceof
+    const part = parseMultipart(post.body).find((e) => e.name === 'file');
+    return part && { name: 'file', filename: part.filename, bytes: part.bytes, value: post.body, raw: true };
+  }
+  return post.body.entries.find((e) => e.name === 'file');
 }
 
 // ---------- default pages ----------
@@ -145,6 +183,13 @@ function extractFunction(src, name) {
 function pageSandbox(file, names, prelude, stubs) {
   const src = fs.readFileSync(path.join(PAGES, file), 'utf8');
   const fns = names.map((n) => {
+    // multipartBody holds a regex literal (which extractFunction does not parse): it is a
+    // top-level function, so it ends at the first line that is just "}".
+    if (n === 'multipartBody') {
+      const at = src.indexOf('function multipartBody(');
+      if (at < 0) throw new Error(n + ' not found in ' + file);
+      return src.slice(at, src.indexOf('\n}\n', at) + 2);
+    }
     const f = extractFunction(src, n);
     if (!f && n !== 'readIntoMemory') throw new Error(n + ' not found in ' + file);
     return f;
@@ -155,7 +200,7 @@ function pageSandbox(file, names, prelude, stubs) {
     append(name, value, filename) { this.entries.push({ name, value, filename }); }
   }
   const sandbox = Object.assign({
-    window: {}, Blob, FormData: RecordingFormData, setTimeout,
+    window: {}, Blob, FormData: RecordingFormData, setTimeout, TextEncoder, crypto: globalThis.crypto,
     console: { log() {}, warn() {}, error() {} },
     fetch(url, opts) {
       posts.push({ url, body: opts && opts.body });
@@ -180,8 +225,8 @@ const PAGE_CASES = [
         open() {} setRequestHeader() {} abort() {}
         send(fd) { this._posts.push({ url: '/api/upload', body: fd }); }
       }
-      const { sandbox, posts } = pageSandbox('bulk-image-uploader.html', ['readIntoMemory', 'upload'],
-        'var ups=[], activeUploads=1, files=[];', (posts) => {
+      const { sandbox, posts } = pageSandbox('bulk-image-uploader.html', ['readIntoMemory', 'multipartBody', 'upload'],
+        'var ups=[], activeUploads=1, files=[], CHUNK_OVER=90*1024*1024, CHUNK_SIZE=8*1024*1024;', (posts) => {
           FakeXHR.prototype._posts = posts;
           return {
             XMLHttpRequest: FakeXHR,
@@ -254,10 +299,10 @@ async function pageChecks() {
       const { file, reads } = pickerFile(bytes, 'IMG_1640.jpeg', 'image/jpeg');
       await h.send(file); await flush();
       assert.strictEqual(h.posts.length, 1, 'expected one POST, got ' + h.posts.length);
-      const entry = h.posts[0].body.entries.find((e) => e.name === 'file');
+      const entry = fileEntry(h.posts[0]);
       assert.ok(entry, 'no file field appended');
       assert.notStrictEqual(entry.value, file, 'the live File handle was appended');
-      assert.ok(entry.value instanceof Blob, 'appended value is not a Blob');
+      if (!entry.raw) assert.ok(entry.value instanceof Blob, 'appended value is not a Blob');
       assert.strictEqual(reads.n, 1, 'file bytes were not read in the page');
       assert.ok((await sentBytes(entry)).equals(bytes), 'sent bytes differ from the file');
       assert.strictEqual(entry.filename, 'IMG_1640.jpeg', 'original filename not kept');
@@ -282,6 +327,49 @@ async function pageChecks() {
         'no "came back empty" error shown: ' + h.errors.join(' | '));
     });
   }
+}
+
+// bulk-image-uploader: a file over CHUNK_OVER goes up as ordered slices to /api/upload/chunk
+// and is only "Done" when the server answers with the finished file.
+async function chunkedCheck() {
+  await check('page bulk-image-uploader.html: a file over CHUNK_OVER is sent as ordered slices to /api/upload/chunk', async () => {
+    const posts = [], states = [];
+    const total = 250;
+    const bytes = Buffer.from(Array.from({ length: total }, (_, i) => i % 251));
+    class FakeXHR {
+      constructor() { this.upload = {}; }
+      open(m, url) { this._url = url; } setRequestHeader() {} abort() {}
+      send(body) {
+        const parts = parseMultipart(body);
+        const f = Object.fromEntries(parts.filter((p) => p.name !== 'file').map((p) => [p.name, p.bytes.toString()]));
+        const piece = parts.find((p) => p.name === 'file').bytes;
+        posts.push({ url: this._url, offset: Number(f.offset), size: Number(f.size), uid: f.upload_id, piece });
+        const held = Number(f.offset) + piece.length;
+        this.status = 200;
+        this.responseText = JSON.stringify(held >= total
+          ? { url: '/uploads/IMG_1__abc.mov', original_name: 'IMG_1.MOV', file_size: total }
+          : { ok: true, received: held, size: total });
+        setTimeout(() => this.onload(), 0);
+      }
+    }
+    const { sandbox } = pageSandbox('bulk-image-uploader.html', ['readIntoMemory', 'multipartBody', 'uploadChunked', 'upload'],
+      'var ups=[], activeUploads=1, files=[], CHUNK_OVER=100, CHUNK_SIZE=40;', () => ({
+        XMLHttpRequest: FakeXHR,
+        setQI: (id, pct, st, msg) => states.push(st + (msg ? ':' + msg : '')),
+        drainQueue() {}, enqueue() {}, renderThrottled() {}, updateStorThrottled() {},
+        ext: () => 'mov', cat: () => 'vid',
+      }));
+    const file = { name: 'IMG_1.MOV', type: 'video/quicktime', size: total,
+                   slice: (a, b) => ({ arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset + a, bytes.byteOffset + b) }) };
+    sandbox.upload(file, 3, 0);
+    for (let i = 0; i < 50 && !states.includes('ok'); i++) await flush();
+    assert.ok(posts.length === 7, 'expected 7 slices of <=40 bytes, got ' + posts.length);
+    assert.ok(posts.every((p) => p.url === '/api/upload/chunk'), 'a slice went somewhere other than /api/upload/chunk');
+    assert.ok(posts.every((p) => p.uid === posts[0].uid && /^[0-9a-f]{32}$/.test(p.uid)), 'upload_id not stable / not 32 hex');
+    assert.deepStrictEqual(posts.map((p) => p.offset), [0, 40, 80, 120, 160, 200, 240]);
+    assert.ok(Buffer.concat(posts.map((p) => p.piece)).equals(bytes), 'slices do not reassemble to the file');
+    assert.ok(states.includes('ok'), 'never reported Done: ' + states.join(','));
+  });
 }
 
 (async () => {
@@ -352,6 +440,7 @@ async function pageChecks() {
   });
 
   await pageChecks();
+  await chunkedCheck();
 
   if (failed) { console.log(`\n${failed} failed`); process.exit(1); }
   console.log('\nall passed');
