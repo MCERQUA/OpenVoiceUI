@@ -4385,7 +4385,12 @@ connectAiradio();
                 if (!this._pushWake) {
                     this._pushWake = new PushWakeGuard({
                         getDetector: () => window.wakeDetector,
-                        inCall: () => !!(this._voiceActive || this._startingSession),
+                        // Any open call owns the detector: this mode's, a Hume EVI
+                        // call, or a VoiceConversation call.
+                        inCall: () => !!(this._voiceActive || this._startingSession
+                            || window.ModeManager?.humeAdapter?.isConnected
+                            || window.ModeManager?.humeAdapter?.isConnecting
+                            || window._voiceConversation?.isConnected),
                         pttActive: () => !!window.PTTButton?.pttMode,
                         // PTT keeps wake word off; let PTT-off restore it.
                         onPttTakeover: () => { if (window.PTTButton) window.PTTButton._wakeWasRunning = true; },
@@ -6239,6 +6244,9 @@ connectAiradio();
                 if (window.wakeDetector && window.wakeDetector.isListening) {
                     window.wakeDetector.stop();
                     this.restartWakeAfter = true;
+                } else if (window.ModeManager?.clawdbotMode?._pushWake?.takeOver()) {
+                    // Push audio had paused it: this call now owns the restart.
+                    this.restartWakeAfter = true;
                 }
 
                 if (!this.stt.isSupported()) {
@@ -6881,6 +6889,9 @@ connectAiradio();
                 // Pause wake word detector during Hume conversation
                 if (window.wakeDetector && window.wakeDetector.isListening) {
                     window.wakeDetector.stop();
+                    this.restartWakeAfter = true;
+                } else if (window.ModeManager?.clawdbotMode?._pushWake?.takeOver()) {
+                    // Push audio had paused it: this call now owns the restart.
                     this.restartWakeAfter = true;
                 }
 

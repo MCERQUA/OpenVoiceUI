@@ -162,6 +162,19 @@ function harness(m, extra = {}) {
         const tw = appSrc.indexOf('window.toggleWakeWord = async function()');
         assert.match(appSrc.slice(tw, tw + 700), /_pushWake\?\.takeOver\(\)[\s\S]{0,80}wakeDetector\.toggle\(\)/,
             "the user's own toggle must win over the pause");
+        // A Hume EVI call (or a VoiceConversation call) is a call too: without this,
+        // a Hume call started during push audio got wake word restarted mid-call.
+        const inCallLine = g.slice(g.indexOf('inCall:'), g.indexOf('pttActive:'));
+        assert.match(inCallLine, /humeAdapter\?\.isConnected/, 'an open Hume call must count as in-call');
+        assert.match(inCallLine, /humeAdapter\?\.isConnecting/, 'a connecting Hume call must count as in-call');
+        assert.match(inCallLine, /_voiceConversation\?\.isConnected/);
+        for (const marker of ['// Pause wake word detector during Hume conversation',
+                              '// Pause wake word detector during conversation']) {
+            const at = appSrc.indexOf(marker);
+            assert.ok(at >= 0, `missing: ${marker}`);
+            assert.match(appSrc.slice(at, at + 600), /_pushWake\?\.takeOver\(\)\)\s*\{[\s\S]{0,120}restartWakeAfter = true/,
+                `${marker}: a call started during push audio must take over the restart`);
+        }
         assert.strictEqual((appSrc.match(/new (?:\w*)WakeWordDetector\(/g) || []).length, 4,
             'no new wake-word detector may be constructed');
         assert.doesNotMatch(appSrc, /new\s+(?:window\.)?(?:webkit)?SpeechRecognition\(/);
@@ -386,6 +399,19 @@ function harness(m, extra = {}) {
             assert.strictEqual(c.st.wd.starts, 0, "the user's toggle wins");
             const d = guard(); d.g.pause(); d.st.wd.isListening = true; d.g.resume();
             assert.strictEqual(d.st.wd.starts, 0, 'already listening again');
+        });
+
+        await test('wake guard: a Hume call started during push audio blocks the restart', () => {
+            // Mirrors the app's inCall: ClawdBotMode flags OR an open/connecting Hume call.
+            const hume = { isConnected: false, isConnecting: false };
+            const { g, st } = guard({ inCall: () => hume.isConnected || hume.isConnecting });
+            assert.strictEqual(g.pause(), true);
+            hume.isConnecting = true;
+            g.resume();
+            assert.strictEqual(st.wd.starts, 0, 'no restart into a connecting Hume call');
+            const b = guard({ inCall: () => hume.isConnected });
+            hume.isConnecting = false; hume.isConnected = true;
+            assert.strictEqual(b.g.pause(), false, 'a Hume call already owns the detector');
         });
 
         await test('wake guard: a failing start() does not throw, and a hard cap restores it', () => {
