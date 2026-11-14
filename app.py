@@ -110,6 +110,11 @@ def create_app(config_override: dict = None):
         '/ws/push',
         '/ws/clawdbot',
         '/ws/terminal',
+        # Operator-scope gateway RPC (admin-only) and the co-browsing screencast:
+        # both self-authenticate from the same cookie; their only clients are the
+        # Control UI SPA and default-pages/browse-viewer.html on this same host.
+        '/openclaw-ui',
+        '/ws/browse-stream',
     })
 
     @app.before_request

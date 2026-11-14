@@ -21,7 +21,9 @@ from services.auth import websocket_origin_allowed
 # _WS_ORIGIN_CHECKED_PATHS fails here with the attacker's upgrade let through.
 # /ws/clawdbot drives the agent and /ws/terminal is a shell in the container;
 # both self-authenticate from the same cookie, so they had the same hole.
-GUARDED = ["/ws/push", "/ws/clawdbot", "/ws/terminal"]
+# /openclaw-ui relays operator-scope gateway RPC; /ws/browse-stream is the
+# co-browsing screencast.
+GUARDED = ["/ws/push", "/ws/clawdbot", "/ws/terminal", "/openclaw-ui", "/ws/browse-stream"]
 
 
 @pytest.mark.parametrize("path", GUARDED)
