@@ -2825,6 +2825,13 @@ def _conversation_inner():
 
                         if evt['type'] == 'handshake':
                             metrics['handshake_ms'] = evt['ms']
+                            # Forward it NOW: until the first line is written the
+                            # response headers are not sent, the browser's fetch()
+                            # stays pending and the UI shows "connecting" — for a
+                            # gateway that thinks 15-30 s before its first word that
+                            # was the 10 s idle heartbeat on every turn (measured
+                            # 2026-11-14). The browser ignores the event type.
+                            yield json.dumps({'type': 'handshake', 'ms': evt['ms']}) + '\n'
                             continue
 
                         if evt['type'] == 'tts_ready':
@@ -4719,6 +4726,16 @@ _CLONE_ERROR_HTTP = {
     'consent_mismatch': 409,
     'timeout': 504,
     'internal': 500,
+    # GPU wire v0 §4 codes. 'unauthorized' / 'tenant_mismatch' are about
+    # OVU's own upstream credential (a config alarm on this server), not the
+    # caller's session, so the browser gets 503: a 401/403 here would read as
+    # "your Clerk session is bad" to the page.
+    'unauthorized': 503,
+    'tenant_mismatch': 503,
+    'bad_request': 400,
+    'not_found': 404,
+    'disabled': 410,
+    'request_conflict': 409,
 }
 _CLONE_BUSY_RETRY_AFTER_S = 30
 

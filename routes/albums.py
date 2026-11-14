@@ -268,12 +268,15 @@ def serve_album_photo(album_id: str, filename: str):
     (uploads auth phase 3), BEFORE answering whether the file exists, with the path as requested so a
     signed link minted for '/uploads/albums/<id>/<file>' verifies here exactly as elsewhere.
     """
-    from routes.static_files import _upload_access_denied
+    from routes.static_files import _upload_access_denied, _upload_is_private, _upload_rel
     safe_id = ''.join(c for c in album_id if c.isalnum())
     safe_file = Path(filename).name
     dest = ALBUMS_DIR / safe_id / safe_file
     exists = dest.exists() and dest.is_file()
-    denied = _upload_access_denied(f'albums/{album_id}/{filename}', exists)
+    # Always-private areas are judged on the RESOLVED path too: a symlink in an album that points
+    # into uploads/field-dock/ must not serve the photo publicly (2026-11-09).
+    private = _upload_is_private(_upload_rel(dest))
+    denied = _upload_access_denied(f'albums/{album_id}/{filename}', exists, private=private)
     if denied is not None:
         return denied
     if not exists:

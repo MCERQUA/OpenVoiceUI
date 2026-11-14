@@ -10,6 +10,10 @@ import { inject } from './ui/AppShell.js';
 import { initUpdateChecker } from './ui/UpdateBanner.js';
 import { connectAiradio } from './shell/airadio-bridge.js';
 import { safeRedirectTarget } from './core/safeRedirect.js';
+import { PushChannel, PushWakeGuard, makeProactiveDeduper } from './core/pushChannel.js';
+
+// A push frame can arrive on /ws/push AND /ws/clawdbot; play each one once.
+const isNewProactivePush = makeProactiveDeduper();
 
 // Inject the application DOM structure before any module accesses the DOM
 inject();
@@ -3388,14 +3392,25 @@ connectAiradio();
                 } catch (e) { /* session may be gone */ }
             },
 
+            async refreshSessionCookie() {
+                // Write a fresh Clerk token to the __session cookie and return it.
+                // The push socket calls this before each (re)connect: a browser
+                // WebSocket sends cookies but cannot send a Bearer header.
+                if (typeof Clerk === 'undefined') return null;
+                const token = await Clerk.session?.getToken();
+                if (token) {
+                    document.cookie = `__session=${token}; path=/; Max-Age=2592000; SameSite=Lax; Secure`;
+                }
+                return token || null;
+            },
+
             async _syncSessionCookie() {
                 // Clerk tokens expire every ~60s. Sync to __session cookie so
                 // iframe navigations and direct /pages/ URLs carry auth.
                 const _sync = async () => {
                     try {
-                        const token = await Clerk.session?.getToken();
+                        const token = await this.refreshSessionCookie();
                         if (token) {
-                            document.cookie = `__session=${token}; path=/; Max-Age=2592000; SameSite=Lax; Secure`;
                             // Also push fresh token to canvas iframe so long-running
                             // uploads/API calls never hit an expired cookie
                             const iframe = document.getElementById('canvas-iframe');
@@ -3920,6 +3935,10 @@ connectAiradio();
                 // This prevents conflicts with VoiceConversation's STT
                 this.stt = sharedSTT || new WebSpeechSTT();
 
+                // Speech heard while a reply is in flight (profile opt-in
+                // conversation.hold_speech_while_thinking). Sent by _flushHeldSpeech.
+                this._heldSpeech = [];
+
                 // Wake detector state
                 this.restartWakeAfter = false;
 
@@ -3994,6 +4013,29 @@ connectAiradio();
 
             setCallbacks(callbacks) {
                 this.callbacks = { ...this.callbacks, ...callbacks };
+            }
+
+            _holdSpeechEnabled() {
+                return window._activeProfileData?.conversation?.hold_speech_while_thinking === true;
+            }
+
+            // Send what was held while the agent was thinking, once its reply is
+            // completely over: stream closed AND nothing playing. Called from the
+            // onListening path; if the reply is not over yet the speech stays held
+            // and the next onListening (reply TTS end, or the stream-end safety
+            // net) sends it. Never sends after hang-up.
+            _flushHeldSpeech() {
+                if (!this._heldSpeech || this._heldSpeech.length === 0) return false;
+                if (!this._voiceActive) { this._heldSpeech = []; return false; }
+                if (this._fetchAbortController || this._ttsPlaying || this.isPlaying
+                    || (this.audioQueue && this.audioQueue.length > 0)) return false;
+                const text = this._heldSpeech.join(' ').trim();
+                this._heldSpeech = [];
+                if (!text) return false;
+                console.log(`🕒 Sending speech held during the last reply: "${text.substring(0, 60)}"`);
+                this.sendMessage(text, { skipDisplay: true });  // already on screen (onListenFinal)
+                if (this.stt?.resetProcessing) this.stt.resetProcessing();  // keep listening
+                return true;
             }
 
             connect() {
@@ -4150,6 +4192,9 @@ connectAiradio();
                 if (window.wakeDetector && window.wakeDetector.isListening) {
                     window.wakeDetector.stop();
                     this.restartWakeAfter = true;
+                } else if (this._pushWake?.takeOver()) {
+                    // Push audio had paused it: this call now owns the restart.
+                    this.restartWakeAfter = true;
                 }
 
                 // Set up STT callbacks BEFORE greeting so they're ready when STT starts
@@ -4184,8 +4229,27 @@ connectAiradio();
                     }
                     if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     if (transcript && transcript.trim()) {
+                        // Profile opt-in conversation.hold_speech_while_thinking: words
+                        // spoken while a reply is still in flight are HELD and sent the
+                        // moment that reply is finished (_flushHeldSpeech), instead of
+                        // being dropped by the STT's isProcessing gate. Measured
+                        // 2026-11-14: a 15-30 s "thinking" turn swallowed everything the
+                        // owner said during it. The words are already on screen
+                        // (onListenFinal); nothing is sent mid-turn, so a running turn
+                        // is never steered or aborted by it.
+                        if (this._holdSpeechEnabled() && this._fetchAbortController) {
+                            this._heldSpeech.push(transcript.trim());
+                            console.log(`🕒 Held while the agent is thinking: "${transcript.trim().substring(0, 60)}"`);
+                            ActionConsole.addEntry('stt', 'Heard you — sending as soon as this reply finishes');
+                            if (this.stt.resetProcessing) this.stt.resetProcessing();  // keep listening
+                            return;
+                        }
                         console.log('Voice input:', transcript);
                         this.sendMessage(transcript.trim(), { skipDisplay: true });
+                        // Keep the mic open while the agent thinks (the default leaves
+                        // the STT deaf until the reply's TTS ends). TTS still mutes it
+                        // through onSpeaking → stt.mute(), exactly as before.
+                        if (this._holdSpeechEnabled() && this.stt.resetProcessing) this.stt.resetProcessing();
                     }
                 };
 
@@ -4237,6 +4301,7 @@ connectAiradio();
             stopVoiceInput() {
                 this._startingSession = false;
                 this._voiceActive = false;  // Mark call as ended — prevents safety-net restart
+                this._heldSpeech = [];      // never sent after hang-up
                 this._ttsPlaying = false;
                 if (this._ttsGuardTimer) { clearTimeout(this._ttsGuardTimer); this._ttsGuardTimer = null; }
                 // Abort any in-flight fetch so streaming stops immediately
@@ -4280,7 +4345,7 @@ connectAiradio();
                     case 'proactive_message':
                         // Agent-initiated push — a background sub-agent finished
                         // AFTER the original turn ended. Server pre-generated TTS.
-                        this._handleProactiveMessage(data);
+                        if (isNewProactivePush(data.id)) this._handleProactiveMessage(data);
                         break;
 
                     case 'keepalive':
@@ -4347,9 +4412,39 @@ connectAiradio();
 
                 // Play the server-generated TTS through the normal audio queue
                 // (respects text mode, mic muting, ducking via onSpeaking).
+                // Outside a call the wake-word detector is the only listener, so it
+                // is stopped for the playback and started again when the queue
+                // drains (playNextAudio) or is stopped (stopAudio).
                 if (data.audio) {
-                    this.playAudio(data.audio, data.audio_format || 'wav');
+                    const wakePaused = this._pushWakeGuard().pause();
+                    let queued = false;
+                    try {
+                        this.playAudio(data.audio, data.audio_format || 'wav');
+                        queued = this.isPlaying || this.audioQueue.length > 0;
+                    } finally {
+                        // Nothing will play (text mode, a throw): restore it now.
+                        if (wakePaused && !queued) this._pushWake.resume();
+                    }
                 }
+            }
+
+            _pushWakeGuard() {
+                if (!this._pushWake) {
+                    this._pushWake = new PushWakeGuard({
+                        getDetector: () => window.wakeDetector,
+                        // Any open call owns the detector: this mode's, a Hume EVI
+                        // call, or a VoiceConversation call.
+                        inCall: () => !!(this._voiceActive || this._startingSession
+                            || window.ModeManager?.humeAdapter?.isConnected
+                            || window.ModeManager?.humeAdapter?.isConnecting
+                            || window._voiceConversation?.isConnected),
+                        pttActive: () => !!window.PTTButton?.pttMode,
+                        // PTT keeps wake word off; let PTT-off restore it.
+                        onPttTakeover: () => { if (window.PTTButton) window.PTTButton._wakeWasRunning = true; },
+                        log: (msg) => console.log(`[push] ${msg}`),
+                    });
+                }
+                return this._pushWake;
             }
 
             async sendMessage(text, opts = {}) {
@@ -4505,7 +4600,9 @@ connectAiradio();
                     });
 
                     if (!response.ok) {
-                        throw new Error(`API error: ${response.status}`);
+                        const apiErr = new Error(`API error: ${response.status}`);
+                        apiErr.status = response.status;
+                        throw apiErr;
                     }
                     {
                         const _gwId = localStorage.getItem('gateway_id') || 'openclaw';
@@ -5297,6 +5394,22 @@ connectAiradio();
                 window.BigHeadFace?.setThinking(false);
                     } else {
                         console.error('Conversation error:', error);
+                        // Auth failure (stale/expired Clerk session): the agent never saw the
+                        // request, so do NOT blame it and do NOT retry. Same wording family as
+                        // the existing 401/403 handler ('Not signed in — please sign in...').
+                        if (error.status === 401 || error.status === 403) {
+                            this._wasAgentic = false;
+                            this.addSystemMessage('Your sign-in has expired — reload the page and sign in again.');
+                            ActionConsole.addEntry('error', `Error: ${error.message}`);
+                            FaceModule.setMood('sad');
+                            TranscriptPanel.removeThinking();
+                            TranscriptPanel.finalizeStreaming('⚠️ Sign-in expired — reload and sign in again.');
+                            document.getElementById('thought-bubbles')?.classList.remove('active');
+                            window.HaloSmokeFace?.setThinking(false);
+                            window.BigHeadFace?.setThinking(false);
+                            setTimeout(() => FaceModule.setMood('neutral'), 2000);
+                            return;
+                        }
                         // Connection failure auto-retry: if the agent crashed/restarted,
                         // retry the message up to 2 times with backoff instead of dying silently
                         const isNetworkError = (
@@ -5668,8 +5781,13 @@ connectAiradio();
                                 // Truly done — transition to listening
                                 this.currentAudio = null;
                                 this.isPlaying = false;
-                                this.callbacks.onListening();
-                                WaveformModule.setAmplitude(0);
+                                try {
+                                    this.callbacks.onListening();
+                                    WaveformModule.setAmplitude(0);
+                                } finally {
+                                    // Push audio outside a call paused wake word.
+                                    this._pushWake?.resume();
+                                }
                                 if (window._sleepAfterResponse) {
                                     window._sleepAfterResponse = false;
                                     console.log('[Sleep] Farewell audio done — activating wake word mode');
@@ -5812,6 +5930,8 @@ connectAiradio();
                 }
                 this.audioQueue = [];
                 this.isPlaying = false;
+                // A stopped push never reaches the drain timer on the HTMLAudio path.
+                this._pushWake?.resume();
             }
 
             base64ToBlob(base64, mimeType) {
@@ -5909,9 +6029,9 @@ connectAiradio();
                         // the longer STT delivery lag independently.
                         setTimeout(() => {
                             this.clawdbotMode._ttsPlaying = false;
-                            if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt) {
+                            if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt
                                 // Skip resume if PTT mode is on (mic only opens on hold)
-                                if (this.clawdbotMode.stt._micMuted || this.clawdbotMode.stt._pttHolding) return;
+                                && !(this.clawdbotMode.stt._micMuted || this.clawdbotMode.stt._pttHolding)) {
                                 console.log('🎤 Unmuting mic after TTS');
                                 if (this.clawdbotMode.stt.resume) {
                                     this.clawdbotMode.stt.resume();
@@ -5920,6 +6040,9 @@ connectAiradio();
                                     if (!this.clawdbotMode.stt.isListening) this.clawdbotMode.stt.start();
                                 }
                             }
+                            // Reply over → send anything the owner said while it was
+                            // thinking (no-op unless hold_speech_while_thinking held some).
+                            this.clawdbotMode._flushHeldSpeech?.();
                         }, 300);
                     },
                     onMessage: (role, text) => {
@@ -6170,6 +6293,9 @@ connectAiradio();
                 // Pause wake word detector during conversation
                 if (window.wakeDetector && window.wakeDetector.isListening) {
                     window.wakeDetector.stop();
+                    this.restartWakeAfter = true;
+                } else if (window.ModeManager?.clawdbotMode?._pushWake?.takeOver()) {
+                    // Push audio had paused it: this call now owns the restart.
                     this.restartWakeAfter = true;
                 }
 
@@ -6814,6 +6940,9 @@ connectAiradio();
                 if (window.wakeDetector && window.wakeDetector.isListening) {
                     window.wakeDetector.stop();
                     this.restartWakeAfter = true;
+                } else if (window.ModeManager?.clawdbotMode?._pushWake?.takeOver()) {
+                    // Push audio had paused it: this call now owns the restart.
+                    this.restartWakeAfter = true;
                 }
 
                 try {
@@ -7395,6 +7524,8 @@ connectAiradio();
             if (window.PTTButton?.pttMode) return; // wake word blocked while PTT is active
 
             const wakeButton = document.getElementById('wake-button');
+            // The user's choice wins over a push-audio pause.
+            ModeManager.clawdbotMode?._pushWake?.takeOver();
             const isListening = await window.wakeDetector.toggle();
 
             if (isListening) {
@@ -7493,6 +7624,23 @@ connectAiradio();
 
             // Attach shared STT to ModeManager (was initialized early without it)
             ModeManager.clawdbotMode.stt = voiceConversation.stt;
+
+            // Proactive push channel — open it now, in every voice mode.
+            // Background-job results land here the moment they finish. It used to
+            // ride only on the /ws/clawdbot socket, which opens only on a mode
+            // SWITCH, so in the default mode no browser ever connected.
+            const _wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const pushChannel = new PushChannel({
+                url: `${_wsProto}//${window.location.host}/ws/push`,
+                WebSocketImpl: window.WebSocket,
+                onPush: (data) => ModeManager.clawdbotMode?.handleMessage(data),
+                beforeConnect: () => AuthModule.refreshSessionCookie(),
+                isVisible: () => document.visibilityState === 'visible',
+                log: (msg) => console.log(`[push] ${msg}`),
+            });
+            window._pushChannel = pushChannel;
+            document.addEventListener('visibilitychange', () => pushChannel.reportVisibility());
+            pushChannel.start();
 
             // Restore saved mode (default to supertonic).
             // savedMode may be a profile ID (e.g. 'default') or a transport
@@ -11036,6 +11184,20 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     }
                 }
             });
+        })();
+
+        // Release all mic/camera tracks on page exit — iOS keeps "active call" indicator
+        // alive until every MediaStreamTrack is explicitly stopped (pagehide fires on iOS;
+        // beforeunload fires on desktop/Android).
+        (function () {
+            function _releaseAllMedia() {
+                try { window._voiceConversation?.stream?.getTracks().forEach(t => t.stop()); } catch (_) {}
+                try { window._sttInstance?.stream?.getTracks().forEach(t => t.stop()); } catch (_) {}
+                try { if (window.wakeDetector) window.wakeDetector.stop(); } catch (_) {}
+                try { if (window.cameraModule?.stream) window.cameraModule.stop(); } catch (_) {}
+            }
+            window.addEventListener('pagehide', _releaseAllMedia);
+            window.addEventListener('beforeunload', _releaseAllMedia);
         })();
 
         // Start initialization

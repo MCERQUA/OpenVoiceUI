@@ -318,10 +318,19 @@ class TTSVoiceNotFoundError(TTSProviderError):
 # hard-coded tuple, so a new provider (e.g. the GPU lane's qwen3-gpu) plugs in
 # without touching the route.
 
-#: Error enum, spec §2.4. Each code maps to one HTTP status in the route.
+#: Error enum, spec §2.4, plus the six codes of the GPU wire (mac-claude's
+#: voice-clone-gpu-wire-v0 §4, accepted by host 2026-11-07). Each code maps to
+#: one HTTP status in the route.
 CLONE_ERROR_CODES = (
     'unavailable', 'busy', 'bad_audio', 'quota',
     'consent_mismatch', 'timeout', 'internal',
+    # GPU wire v0 §4 additions
+    'unauthorized',      # upstream bearer bad/revoked: a CONFIG alarm
+    'tenant_mismatch',   # this container holds another tenant's token
+    'bad_request',       # client bug: missing tenant_id, bad name/voice_id
+    'not_found',         # unknown or foreign id (no oracle on other tenants)
+    'disabled',          # taken down; never restore
+    'request_conflict',  # same request_id, different audio or name
 )
 
 _CLONE_ERROR_RETRYABLE = {
@@ -332,6 +341,12 @@ _CLONE_ERROR_RETRYABLE = {
     'consent_mismatch': False,
     'timeout': True,
     'internal': False,
+    'unauthorized': False,
+    'tenant_mismatch': False,
+    'bad_request': False,
+    'not_found': False,
+    'disabled': False,
+    'request_conflict': False,
 }
 
 
@@ -402,6 +417,10 @@ class CloneRequest:
     language: Optional[str] = None
     consent_id: Optional[str] = None       # TODO spec §3
     code_id: Optional[str] = None          # TODO spec §1
+    #: The phrase the speaker was asked to recite (spec §3.3). When set it is
+    #: the preferred reference_text for providers that need a transcript
+    #: (qwen3-gpu). Populated by the consent/recitation PR; None until then.
+    recitation_phrase: Optional[str] = None
 
 
 @dataclass
