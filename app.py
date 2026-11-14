@@ -93,6 +93,30 @@ def create_app(config_override: dict = None):
     )
     app.limiter = limiter
 
+    # ── WebSocket Origin guard ────────────────────────────────────────────────
+    # A WebSocket upgrade is a GET, so require_auth's CSRF guard (state-changing
+    # methods only) never sees it, while the browser still attaches the
+    # __session cookie (SameSite=Lax, and every *.jam-bot.com tenant is the same
+    # site). Refuse the upgrade before flask_sock accepts it when the Origin's
+    # host differs from the request Host. Runs whether or not Clerk is on: an
+    # open local install is just as reachable from another page. A missing
+    # Origin passes (non-browser clients; see services.auth.websocket_origin_allowed).
+    _WS_ORIGIN_CHECKED_PATHS = frozenset({
+        '/ws/push',
+    })
+
+    @app.before_request
+    def ws_origin_guard():
+        if request.path not in _WS_ORIGIN_CHECKED_PATHS:
+            return
+        from services.auth import websocket_origin_allowed
+        origin = request.headers.get('Origin')
+        if not websocket_origin_allowed(origin, request.host):
+            logger.warning('WebSocket upgrade refused: Origin %r is not host %r (path=%s)',
+                           origin, request.host, request.path)
+            return jsonify({'error': 'Cross-origin WebSocket blocked',
+                            'code': 'ws_origin_blocked'}), 403
+
     # ── Clerk auth gate ────────────────────────────────────────────────────────
     # Auth is only active when CLERK_PUBLISHABLE_KEY is set in .env.
     # Without it, the app runs fully open (single-user / local mode).

@@ -102,6 +102,40 @@ def is_platform_admin(user_id: Optional[str]) -> bool:
     return bool(user_id) and user_id in _PLATFORM_ADMIN_USER_IDS
 
 # ---------------------------------------------------------------------------
+# WebSocket Origin check
+# ---------------------------------------------------------------------------
+
+def websocket_origin_allowed(origin: Optional[str], host: Optional[str]) -> bool:
+    """May a WebSocket upgrade carrying this Origin header reach this Host?
+
+    A browser WebSocket sends the __session cookie, and the cookie is
+    SameSite=Lax with every *.jam-bot.com tenant counting as the same SITE, so
+    a page on another tenant (or any page that can reach the host) could open
+    the socket as the signed-in user. require_auth's CSRF guard covers only
+    POST/PUT/DELETE/PATCH; a WebSocket upgrade is a GET.
+
+    - No Origin header: allowed. Browsers always send Origin on a WebSocket
+      handshake (RFC 6455 section 4.1, Fetch), so its absence means a
+      non-browser client (an agent with X-Agent-Key, an internal tool). Those
+      carry their own credential and no victim's cookie, and require_auth's
+      CSRF guard treats them the same way.
+    - Origin present: its host[:port] must equal the request Host, compared
+      case-insensitively. "null" (sandboxed iframe, file://) and anything that
+      does not parse to a host are refused.
+    """
+    if origin is None or origin == '':
+        return True
+    from urllib.parse import urlparse
+    try:
+        netloc = urlparse(origin.strip()).netloc
+    except ValueError:
+        return False
+    if not netloc or not host:
+        return False
+    return netloc.lower() == host.strip().lower()
+
+
+# ---------------------------------------------------------------------------
 # JWKS cache
 # ---------------------------------------------------------------------------
 
