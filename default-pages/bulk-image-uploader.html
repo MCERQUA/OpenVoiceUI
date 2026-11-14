@@ -454,9 +454,13 @@ function multipartBody(fields,fileName,bytes,type){
 // CHUNK_OVER goes up as CHUNK_SIZE slices to /api/upload/chunk, which stitches them together on
 // the server. Each slice is read into memory on its own (same WebKit empty-body workaround as
 // above), so a 1 GB video never has to fit in the phone's memory at once.
+// The upload is STARTED first (/api/upload/chunk/start), with the grant the server embedded in
+// this page when it served it to a signed-in viewer (plus the session token / cookie when there
+// is one). Start fixes the file's size and returns a signed upload_id; the slices carry only
+// that id, so an upload that outlives the login token still finishes.
 const CHUNK_OVER=90*1024*1024, CHUNK_SIZE=8*1024*1024;
 function uploadChunked(file,id){
-  const uid=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+  let uid='';
   const job={id,xhr:null,cancelled:false};ups.push(job);
   const done=(ok,msg,res)=>{
     if(job.finished)return;job.finished=true;
@@ -491,14 +495,34 @@ function uploadChunked(file,id){
       xhr.ontimeout=()=>retry('Upload timed out');
       xhr.onerror=()=>retry('Network error');
       xhr.onabort=()=>done(false,'Cancelled');
-      const mp=multipartBody([['upload_id',uid],['name',file.name],['size',String(file.size)],['offset',String(offset)]],file.name,buf,'application/octet-stream');
+      const mp=multipartBody([['upload_id',uid],['size',String(file.size)],['offset',String(offset)]],file.name,buf,'application/octet-stream');
       xhr.open('POST','/api/upload/chunk');
       xhr.setRequestHeader('Content-Type',mp.contentType);
       if(window._canvasAuthToken)xhr.setRequestHeader('Authorization','Bearer '+window._canvasAuthToken);
       xhr.send(mp.body);
     }).catch(err=>done(false,err.message||(file.name+' could not be read — re-attach it and try again')));
   };
-  setQI(id,0,'up');sendSlice(0,0);
+  const start=tries=>{
+    if(job.cancelled)return done(false,'Cancelled');
+    const xhr=new XMLHttpRequest();job.xhr=xhr;
+    const retry=why=>{if(tries<3){setTimeout(()=>start(tries+1),1500*(tries+1))}else done(false,why)};
+    xhr.onload=()=>{
+      let r={};try{r=JSON.parse(xhr.responseText)}catch(e){}
+      if(xhr.status===200&&r.upload_id){uid=r.upload_id;return sendSlice(0,0)}
+      if(xhr.status===404||xhr.status===405)return done(false,'Files over 90 MB need a server update');
+      if(xhr.status>=400&&xhr.status<500&&xhr.status!==408&&xhr.status!==429)return done(false,r.error||('Error '+xhr.status));
+      retry(r.error||('Error '+xhr.status));
+    };
+    xhr.timeout=30000;
+    xhr.ontimeout=()=>retry('Upload timed out');
+    xhr.onerror=()=>retry('Network error');
+    xhr.onabort=()=>done(false,'Cancelled');
+    xhr.open('POST','/api/upload/chunk/start');
+    xhr.setRequestHeader('Content-Type','application/json');
+    if(window._canvasAuthToken)xhr.setRequestHeader('Authorization','Bearer '+window._canvasAuthToken);
+    xhr.send(JSON.stringify({name:file.name,size:file.size,grant:window._canvasUploadGrant||''}));
+  };
+  setQI(id,0,'up');start(0);
 }
 function upload(file,id,retries){
   if(file.size>CHUNK_OVER)return uploadChunked(file,id);

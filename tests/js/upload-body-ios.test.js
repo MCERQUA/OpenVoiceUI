@@ -20,7 +20,9 @@
 //   4. bulk-image-uploader goes one step further (2026-11-14): even a Blob of read bytes inside
 //      FormData went out EMPTY from iPhone WebKit, so it builds the multipart body itself as one
 //      Uint8Array. Its check parses that body instead of a FormData. Files over CHUNK_OVER go up
-//      as slices to /api/upload/chunk (Cloudflare refuses any request over ~100 MB).
+//      as slices to /api/upload/chunk (Cloudflare refuses any request over ~100 MB), after ONE
+//      /api/upload/chunk/start that carries the page's upload grant and returns the signed id
+//      every slice must carry (review of PR #586: no anonymous writes, size fixed at start).
 //
 // No browser, no deps: sw.js runs in a vm with a fake `self`; the TranscriptPanel object is cut
 // out of app.js, and each page's upload functions are cut out of its HTML, then driven with a
@@ -329,17 +331,27 @@ async function pageChecks() {
   }
 }
 
-// bulk-image-uploader: a file over CHUNK_OVER goes up as ordered slices to /api/upload/chunk
-// and is only "Done" when the server answers with the finished file.
+// bulk-image-uploader: a file over CHUNK_OVER is STARTED once (with the page's upload grant),
+// then goes up as ordered slices to /api/upload/chunk carrying the server-issued id, and is only
+// "Done" when the server answers with the finished file.
+const SIGNED_ID = 'c1.0123456789abcdef01234567.250.9999999999.' + 'ab'.repeat(32);
 async function chunkedCheck() {
-  await check('page bulk-image-uploader.html: a file over CHUNK_OVER is sent as ordered slices to /api/upload/chunk', async () => {
-    const posts = [], states = [];
+  await check('page bulk-image-uploader.html: a file over CHUNK_OVER is started with the grant, then sent as ordered slices carrying the signed id', async () => {
+    const posts = [], starts = [], states = [];
     const total = 250;
     const bytes = Buffer.from(Array.from({ length: total }, (_, i) => i % 251));
     class FakeXHR {
-      constructor() { this.upload = {}; }
-      open(m, url) { this._url = url; } setRequestHeader() {} abort() {}
+      constructor() { this.upload = {}; this._hdr = {}; }
+      open(m, url) { this._url = url; } setRequestHeader(k, v) { this._hdr[k] = v; } abort() {}
       send(body) {
+        if (this._url === '/api/upload/chunk/start') {
+          assert.strictEqual(posts.length, 0, 'a slice went out before the upload was started');
+          starts.push({ body: JSON.parse(body), hdr: this._hdr });
+          this.status = 200;
+          this.responseText = JSON.stringify({ ok: true, upload_id: SIGNED_ID, size: total });
+          setTimeout(() => this.onload(), 0);
+          return;
+        }
         const parts = parseMultipart(body);
         const f = Object.fromEntries(parts.filter((p) => p.name !== 'file').map((p) => [p.name, p.bytes.toString()]));
         const piece = parts.find((p) => p.name === 'file').bytes;
@@ -353,7 +365,8 @@ async function chunkedCheck() {
       }
     }
     const { sandbox } = pageSandbox('bulk-image-uploader.html', ['readIntoMemory', 'multipartBody', 'uploadChunked', 'upload'],
-      'var ups=[], activeUploads=1, files=[], CHUNK_OVER=100, CHUNK_SIZE=40;', () => ({
+      'var ups=[], activeUploads=1, files=[], CHUNK_OVER=100, CHUNK_SIZE=40;'
+      + 'window._canvasUploadGrant="g1.9999999999.0123456789abcdef.' + 'cd'.repeat(32) + '";', () => ({
         XMLHttpRequest: FakeXHR,
         setQI: (id, pct, st, msg) => states.push(st + (msg ? ':' + msg : '')),
         drainQueue() {}, enqueue() {}, renderThrottled() {}, updateStorThrottled() {},
@@ -365,7 +378,10 @@ async function chunkedCheck() {
     for (let i = 0; i < 50 && !states.includes('ok'); i++) await flush();
     assert.ok(posts.length === 7, 'expected 7 slices of <=40 bytes, got ' + posts.length);
     assert.ok(posts.every((p) => p.url === '/api/upload/chunk'), 'a slice went somewhere other than /api/upload/chunk');
-    assert.ok(posts.every((p) => p.uid === posts[0].uid && /^[0-9a-f]{32}$/.test(p.uid)), 'upload_id not stable / not 32 hex');
+    assert.strictEqual(starts.length, 1, 'expected exactly one start, got ' + starts.length);
+    assert.deepStrictEqual([starts[0].body.name, starts[0].body.size], ['IMG_1.MOV', total], 'start did not declare name/size');
+    assert.ok(/^g1\./.test(starts[0].body.grant), 'start did not carry the page upload grant');
+    assert.ok(posts.every((p) => p.uid === SIGNED_ID), 'a slice did not carry the server-issued upload_id');
     assert.deepStrictEqual(posts.map((p) => p.offset), [0, 40, 80, 120, 160, 200, 240]);
     assert.ok(Buffer.concat(posts.map((p) => p.piece)).equals(bytes), 'slices do not reassemble to the file');
     assert.ok(states.includes('ok'), 'never reported Done: ' + states.join(','));
