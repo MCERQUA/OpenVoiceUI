@@ -480,6 +480,133 @@ def upload_file():
     return jsonify(result)
 
 
+# ---------------------------------------------------------------------------
+# Chunked upload — files larger than one request can carry.
+#
+# Every *.jam-bot.com host is Cloudflare-proxied and the edge refuses any request body over
+# ~100 MB before the origin sees it (measured 2026-11-14: a 131 MB phone .MOV POSTed to
+# /api/upload got `413 ... cloudflare` after 5.3 MB). A phone video is routinely bigger than
+# that, so the client sends the file as sequential slices (each well under the edge cap) and
+# this route appends them to one hidden partial file, then renames it into uploads/ when the
+# last byte arrives. Nothing is deleted on the way: the partial IS the final file.
+#
+# Fields (multipart): upload_id (client-random, 16-64 [A-Za-z0-9_-]), name (original filename),
+# size (total bytes), offset (byte offset of this slice), file (the slice).
+# A retried slice (offset <= bytes already held) truncates back to its offset and rewrites, so a
+# lost response never duplicates bytes; a slice past the end answers 409 with what is held.
+# Same public posture as /api/upload (canvas pages lose the Clerk JWT on long sessions).
+# ---------------------------------------------------------------------------
+
+_CHUNK_ID_RE = re.compile(r'^[A-Za-z0-9_-]{16,64}$')
+try:
+    _MAX_CHUNKED_TOTAL_BYTES = int(os.getenv('OVU_CHUNKED_UPLOAD_MAX_MB', '4096')) * 1024 * 1024
+except ValueError:
+    _MAX_CHUNKED_TOTAL_BYTES = 4096 * 1024 * 1024
+_CHUNK_FREE_SPACE_MARGIN = 512 * 1024 * 1024
+
+
+@static_files_bp.route('/api/upload/chunk', methods=['POST'])
+def upload_file_chunk():
+    """Append one slice of a large upload; finalize into uploads/ on the last slice."""
+    import fcntl
+    import mimetypes
+    import shutil
+    import uuid
+
+    upload_id = (request.form.get('upload_id') or '').strip()
+    if not _CHUNK_ID_RE.match(upload_id):
+        return jsonify({'error': 'Invalid upload_id'}), 400
+    try:
+        total = int(request.form.get('size', ''))
+        offset = int(request.form.get('offset', ''))
+    except ValueError:
+        return jsonify({'error': 'size and offset must be integers'}), 400
+    if total <= 0 or offset < 0 or offset >= total:
+        return jsonify({'error': 'Invalid size/offset'}), 400
+    if total > _MAX_CHUNKED_TOTAL_BYTES:
+        return jsonify({'error': f'File too large ({_MAX_CHUNKED_TOTAL_BYTES // (1024 * 1024)} MB max)'}), 413
+
+    original_name = Path((request.form.get('name') or '').strip()).name or 'upload'
+    ext = Path(original_name).suffix.lower()
+    if ext in _BLOCKED_EXTENSIONS:
+        return jsonify({'error': f'File type "{ext}" is not allowed'}), 415
+
+    piece = request.files.get('file')
+    if piece is None:
+        return jsonify({'error': 'No file provided'}), 400
+    piece.stream.seek(0, 2)
+    piece_len = piece.stream.tell()
+    piece.stream.seek(0)
+    if piece_len <= 0:
+        return jsonify({'error': 'Empty slice — re-attach the file and try again'}), 400
+    if offset + piece_len > total:
+        return jsonify({'error': 'Slice runs past the declared size'}), 400
+
+    chunk_dir = UPLOADS_DIR / '.chunks'
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    partial = chunk_dir / f'{upload_id}.partial'
+
+    with open(partial, 'a+b') as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            fh.seek(0, 2)
+            held = fh.tell()
+            if offset > held:
+                return jsonify({'error': 'Missing earlier bytes', 'received': held}), 409
+            if held == 0:
+                free = shutil.disk_usage(str(chunk_dir)).free
+                if free < total + _CHUNK_FREE_SPACE_MARGIN:
+                    return jsonify({'error': 'Not enough storage space for this file'}), 507
+            if offset < held:
+                fh.truncate(offset)  # retried slice: rewrite from its own offset
+            fh.seek(offset)
+            shutil.copyfileobj(piece.stream, fh, 1024 * 1024)
+            fh.flush()
+            os.fsync(fh.fileno())
+            held = fh.tell()
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+    if held < total:
+        return jsonify({'ok': True, 'received': held, 'size': total})
+
+    # --- Last slice: move the partial into uploads/ under the same naming as /api/upload ---
+    stem_safe = re.sub(r'[^A-Za-z0-9._-]+', '_', Path(original_name).stem)[:80].strip('._-') or 'file'
+    safe_name = f"{stem_safe}__{uuid.uuid4().hex[:8]}{ext}"
+    dest = UPLOADS_DIR / safe_name
+    os.replace(partial, dest)
+    try:
+        dest.chmod(0o644)
+    except OSError:
+        pass
+
+    mime = mimetypes.guess_type(original_name)[0] or ''
+    url_full = f"https://{request.host}/uploads/{safe_name}"
+    logger.info('upload: chunked upload complete %s (%d bytes) as %s', original_name, total, safe_name)
+    append_upload_index({
+        'at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'filename': safe_name,
+        'original_name': original_name,
+        'url': url_full,
+        'agent_path': f'workspace/uploads/{safe_name}',
+        'source': 'chat',
+        'from': '',
+        'mime': mime,
+        'size': total,
+        'note': 'chunked',
+    })
+    return jsonify({
+        'original_name': original_name,
+        'path': str(dest),
+        'filename': safe_name,
+        'url': f'/uploads/{safe_name}',
+        'url_full': url_full,
+        'agent_path': f'workspace/uploads/{safe_name}',
+        'file_size': total,
+        'type': 'image' if mime.startswith('image/') else 'file',
+    })
+
+
 @static_files_bp.route('/static/emulators/<path:filepath>')
 def serve_emulator(filepath):
     """Serve bundled emulator files (js-dos, etc.) from /app/static/emulators/."""
