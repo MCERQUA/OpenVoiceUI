@@ -115,6 +115,9 @@ class ConversationConfig:
     auto_hangup_silence_ms: Optional[int] = None
     interruption_enabled: Optional[bool] = None
     max_response_chars: Optional[int] = None
+    # Hold speech heard while a reply is in flight and send it when the reply ends
+    # (default: dropped — the STT is deaf from submit until the reply's TTS ends).
+    hold_speech_while_thinking: Optional[bool] = None
 
 
 @dataclass

@@ -2825,6 +2825,13 @@ def _conversation_inner():
 
                         if evt['type'] == 'handshake':
                             metrics['handshake_ms'] = evt['ms']
+                            # Forward it NOW: until the first line is written the
+                            # response headers are not sent, the browser's fetch()
+                            # stays pending and the UI shows "connecting" — for a
+                            # gateway that thinks 15-30 s before its first word that
+                            # was the 10 s idle heartbeat on every turn (measured
+                            # 2026-11-14). The browser ignores the event type.
+                            yield json.dumps({'type': 'handshake', 'ms': evt['ms']}) + '\n'
                             continue
 
                         if evt['type'] == 'tts_ready':

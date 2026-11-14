@@ -3920,6 +3920,10 @@ connectAiradio();
                 // This prevents conflicts with VoiceConversation's STT
                 this.stt = sharedSTT || new WebSpeechSTT();
 
+                // Speech heard while a reply is in flight (profile opt-in
+                // conversation.hold_speech_while_thinking). Sent by _flushHeldSpeech.
+                this._heldSpeech = [];
+
                 // Wake detector state
                 this.restartWakeAfter = false;
 
@@ -3994,6 +3998,29 @@ connectAiradio();
 
             setCallbacks(callbacks) {
                 this.callbacks = { ...this.callbacks, ...callbacks };
+            }
+
+            _holdSpeechEnabled() {
+                return window._activeProfileData?.conversation?.hold_speech_while_thinking === true;
+            }
+
+            // Send what was held while the agent was thinking, once its reply is
+            // completely over: stream closed AND nothing playing. Called from the
+            // onListening path; if the reply is not over yet the speech stays held
+            // and the next onListening (reply TTS end, or the stream-end safety
+            // net) sends it. Never sends after hang-up.
+            _flushHeldSpeech() {
+                if (!this._heldSpeech || this._heldSpeech.length === 0) return false;
+                if (!this._voiceActive) { this._heldSpeech = []; return false; }
+                if (this._fetchAbortController || this._ttsPlaying || this.isPlaying
+                    || (this.audioQueue && this.audioQueue.length > 0)) return false;
+                const text = this._heldSpeech.join(' ').trim();
+                this._heldSpeech = [];
+                if (!text) return false;
+                console.log(`🕒 Sending speech held during the last reply: "${text.substring(0, 60)}"`);
+                this.sendMessage(text, { skipDisplay: true });  // already on screen (onListenFinal)
+                if (this.stt?.resetProcessing) this.stt.resetProcessing();  // keep listening
+                return true;
             }
 
             connect() {
@@ -4184,8 +4211,27 @@ connectAiradio();
                     }
                     if (this.stt._micMuted) return;  // PTT mode — ignore leaked transcripts
                     if (transcript && transcript.trim()) {
+                        // Profile opt-in conversation.hold_speech_while_thinking: words
+                        // spoken while a reply is still in flight are HELD and sent the
+                        // moment that reply is finished (_flushHeldSpeech), instead of
+                        // being dropped by the STT's isProcessing gate. Measured
+                        // 2026-11-14: a 15-30 s "thinking" turn swallowed everything the
+                        // owner said during it. The words are already on screen
+                        // (onListenFinal); nothing is sent mid-turn, so a running turn
+                        // is never steered or aborted by it.
+                        if (this._holdSpeechEnabled() && this._fetchAbortController) {
+                            this._heldSpeech.push(transcript.trim());
+                            console.log(`🕒 Held while the agent is thinking: "${transcript.trim().substring(0, 60)}"`);
+                            ActionConsole.addEntry('stt', 'Heard you — sending as soon as this reply finishes');
+                            if (this.stt.resetProcessing) this.stt.resetProcessing();  // keep listening
+                            return;
+                        }
                         console.log('Voice input:', transcript);
                         this.sendMessage(transcript.trim(), { skipDisplay: true });
+                        // Keep the mic open while the agent thinks (the default leaves
+                        // the STT deaf until the reply's TTS ends). TTS still mutes it
+                        // through onSpeaking → stt.mute(), exactly as before.
+                        if (this._holdSpeechEnabled() && this.stt.resetProcessing) this.stt.resetProcessing();
                     }
                 };
 
@@ -4237,6 +4283,7 @@ connectAiradio();
             stopVoiceInput() {
                 this._startingSession = false;
                 this._voiceActive = false;  // Mark call as ended — prevents safety-net restart
+                this._heldSpeech = [];      // never sent after hang-up
                 this._ttsPlaying = false;
                 if (this._ttsGuardTimer) { clearTimeout(this._ttsGuardTimer); this._ttsGuardTimer = null; }
                 // Abort any in-flight fetch so streaming stops immediately
@@ -5927,9 +5974,9 @@ connectAiradio();
                         // the longer STT delivery lag independently.
                         setTimeout(() => {
                             this.clawdbotMode._ttsPlaying = false;
-                            if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt) {
+                            if (this.clawdbotMode._voiceActive && this.clawdbotMode.stt
                                 // Skip resume if PTT mode is on (mic only opens on hold)
-                                if (this.clawdbotMode.stt._micMuted || this.clawdbotMode.stt._pttHolding) return;
+                                && !(this.clawdbotMode.stt._micMuted || this.clawdbotMode.stt._pttHolding)) {
                                 console.log('🎤 Unmuting mic after TTS');
                                 if (this.clawdbotMode.stt.resume) {
                                     this.clawdbotMode.stt.resume();
@@ -5938,6 +5985,9 @@ connectAiradio();
                                     if (!this.clawdbotMode.stt.isListening) this.clawdbotMode.stt.start();
                                 }
                             }
+                            // Reply over → send anything the owner said while it was
+                            // thinking (no-op unless hold_speech_while_thinking held some).
+                            this.clawdbotMode._flushHeldSpeech?.();
                         }, 300);
                     },
                     onMessage: (role, text) => {
