@@ -1691,20 +1691,33 @@ def _tts_bytes(text: str) -> bytes:
 _push_clients_lock = threading.Lock()
 _push_clients: dict = {}          # ws -> queue.Queue
 _push_client_session: dict = {}   # ws -> last sessionKey the browser declared (WS-9)
-# ws -> is the owner looking at this tab? A hidden tab still receives the push
-# (it shows on return), but only a VISIBLE one counts as delivered, so a tab
-# left open in the background never swallows the offline relay to the owner.
-# Sockets that never report (the /ws/clawdbot bridge) count as visible.
+# ws -> time.monotonic() of the tab's last "I am visible" report. A hidden tab
+# still receives the push (it shows on return), but only a tab that said it was
+# visible within _PUSH_VISIBLE_TTL_S counts as "seen", so a tab left open in the
+# background never swallows the offline relay to the owner. The browser
+# re-reports about every 20 s while connected (src/core/pushChannel.js), so a
+# sleeping laptop's socket stops counting within a minute even while TCP still
+# thinks it is open. A socket that never reports (the /ws/clawdbot bridge, which
+# the client does not report on) is never "seen".
 _push_client_visible: dict = {}
+# ws -> the Clerk user id that opened the socket (None when Clerk is off). The
+# platform operator is on every tenant's ALLOWED_USER_IDS; his tab still gets
+# the push but never counts as the owner having seen it.
+_push_client_user: dict = {}
+_PUSH_VISIBLE_TTL_S = 60.0
 _push_receipt_lock = threading.Lock()  # serialize JSONL appends (WS-10)
 
 
-def _register_push_client(ws, visible=True):
-    """Register a browser socket and return its outbound queue."""
+def _register_push_client(ws, user_id=None):
+    """Register a browser socket and return its outbound queue.
+
+    It starts NOT visible: only a recent visibility report from the browser
+    makes it count as seen."""
     q = queue.Queue()
     with _push_clients_lock:
         _push_clients[ws] = q
-        _push_client_visible[ws] = bool(visible)
+        _push_client_visible.pop(ws, None)
+        _push_client_user[ws] = user_id
         n = len(_push_clients)
     logger.info(f"Proactive push: client registered ({n} connected)")
     return q
@@ -1715,6 +1728,7 @@ def _unregister_push_client(ws):
         q = _push_clients.pop(ws, None)
         _push_client_session.pop(ws, None)
         _push_client_visible.pop(ws, None)
+        _push_client_user.pop(ws, None)
     if q is not None:
         # Wake the socket's writer so it can observe the shutdown and exit.
         try:
@@ -1739,16 +1753,54 @@ def _note_push_client_session(ws, session_key):
 
 
 def _set_push_client_visible(ws, visible):
-    """Record whether the browser says its tab is visible (document.visibilityState)."""
+    """Record the browser's visibility report (document.visibilityState).
+
+    A visible report stamps the time; a hidden one clears it."""
     with _push_clients_lock:
         if ws in _push_clients:
-            _push_client_visible[ws] = bool(visible)
+            if visible:
+                _push_client_visible[ws] = time.monotonic()
+            else:
+                _push_client_visible.pop(ws, None)
+
+
+def _push_user_is_operator(user_id):
+    """True for the platform operator (PLATFORM_ADMIN_USER_IDS, services/auth.py).
+
+    Not ADMIN_USER_IDS: that set holds the tenant OWNER too (jambot-create-user.sh
+    writes owner + platform admin), and the owner is exactly who must count."""
+    if not user_id:
+        return False
+    try:
+        from services.auth import is_platform_admin
+    except Exception:
+        return False
+    return is_platform_admin(user_id)
+
+
+def _push_client_seen(user_id, visible_at, now):
+    """Would the owner have seen a push that reached this socket?"""
+    if visible_at is None or now - visible_at > _PUSH_VISIBLE_TTL_S:
+        return False
+    return not _push_user_is_operator(user_id)
+
+
+def _handle_push_client_frame(ws, msg):
+    """Take one frame a browser sent on a push-registered socket. True if used."""
+    try:
+        data = json.loads(msg)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(data, dict) and data.get("type") == "visibility":
+        _set_push_client_visible(ws, data.get("visible") is True)
+        return True
+    return False
 
 
 _PUSH_KEEPALIVE_S = 25.0
 
 
-def _serve_push_socket(ws, keepalive_s=None):
+def _serve_push_socket(ws, keepalive_s=None, user_id=None):
     """Serve one browser's /ws/push socket until it closes.
 
     The push channel used to ride only on /ws/clawdbot, which the client opens
@@ -1766,7 +1818,7 @@ def _serve_push_socket(ws, keepalive_s=None):
     keepalive_s = _PUSH_KEEPALIVE_S if keepalive_s is None else keepalive_s
     # Hidden until the browser says otherwise: a tab that never reports must
     # not stop the offline relay.
-    q = _register_push_client(ws, visible=False)
+    q = _register_push_client(ws, user_id=user_id)
 
     def _reader():
         try:
@@ -1774,12 +1826,7 @@ def _serve_push_socket(ws, keepalive_s=None):
                 msg = ws.receive()
                 if msg is None:
                     break
-                try:
-                    data = json.loads(msg)
-                except (TypeError, ValueError):
-                    continue
-                if isinstance(data, dict) and data.get("type") == "visibility":
-                    _set_push_client_visible(ws, data.get("visible") is True)
+                _handle_push_client_frame(ws, msg)
         except Exception:
             pass  # socket closed
         finally:
@@ -1817,10 +1864,11 @@ def push_proactive_message(text: str, session_key: str = None, run_id: str = Non
     has declared one, it is delivered only on a match; a client that never
     declared a sessionKey receives everything (backward compatible).
 
-    Returns the number of VISIBLE browsers the message was enqueued to. A
-    hidden tab still gets it but does not count, so a push that only reached
-    background tabs returns 0 and the gateway still relays it through the
-    tenant's own agent. Every call writes a receipt — including delivered=0 when no browser is connected, so
+    Returns the number of browsers that SAW it: sockets whose tab reported
+    visible within _PUSH_VISIBLE_TTL_S and that do not belong to the platform
+    operator. Hidden, stale and operator tabs still get the frame but do not
+    count, so a push only they received returns 0 and the gateway still relays
+    it through the tenant's own agent. Every call writes a receipt — including delivered=0 when no browser is connected, so
     a completion that finished while the owner was away leaves a trace (the
     gateway then relays it through the tenant's own agent).
     """
@@ -1853,6 +1901,8 @@ def push_proactive_message(text: str, session_key: str = None, run_id: str = Non
         targets = list(_push_clients.items())
         sessions = dict(_push_client_session)
         visible = dict(_push_client_visible)
+        users = dict(_push_client_user)
+    now = time.monotonic()
     if not targets:  # last browser left while TTS was generating
         logger.warning("Proactive push: no connected browsers — message not delivered "
                        f"(text: {text[:100]})")
@@ -1867,7 +1917,7 @@ def push_proactive_message(text: str, session_key: str = None, run_id: str = Non
         try:
             q.put_nowait(frame)
             delivered += 1
-            if visible.get(ws, True):
+            if _push_client_seen(users.get(ws), visible.get(ws), now):
                 seen += 1
         except Exception:
             _unregister_push_client(ws)
@@ -1965,11 +2015,12 @@ def push_websocket(ws):
     key also passes that gate, but this channel is for the owner's browser only.
     """
     from flask import current_app, g
-    if current_app.config.get("CLERK_AUTH_ENABLED") and not getattr(g, "clerk_user_id", None):
+    user_id = getattr(g, "clerk_user_id", None)
+    if current_app.config.get("CLERK_AUTH_ENABLED") and not user_id:
         logger.warning("Push socket rejected — no Clerk user session")
         ws.close()
         return
-    _serve_push_socket(ws)
+    _serve_push_socket(ws, user_id=user_id)
 
 
 @sock.route("/ws/clawdbot")
@@ -2001,8 +2052,10 @@ def clawdbot_websocket(ws):
         return
 
     # Register for proactive push (agent-initiated messages) for the life of
-    # this socket — delivery is independent of the gateway bridge below.
-    _register_push_client(ws)
+    # this socket — delivery is independent of the gateway bridge below. It
+    # counts as seen only while it reports visibility (_from_client below); the
+    # app's own /ws/push socket is the one that normally reports.
+    _register_push_client(ws, user_id=user_id)
 
     # Outbound queue for THIS socket. Every frame written to the browser —
     # gateway relays, keepalives, and proactive pushes — goes through here and
@@ -2074,6 +2127,8 @@ def clawdbot_websocket(ws):
                         msg = await loop.run_in_executor(None, ws.receive)
                         if not msg:
                             break
+                        if _handle_push_client_frame(ws, msg):
+                            continue
                         data = json.loads(msg)
                         if data.get("type") == "chat.send":
                             _note_push_client_session(ws, data.get("sessionKey"))

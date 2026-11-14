@@ -43,8 +43,10 @@ SERVER_PY = Path(__file__).resolve().parent.parent / "server.py"
 
 _PUSH_NAMES = {
     "_push_clients_lock", "_push_clients", "_push_client_session",
-    "_push_client_visible", "_push_receipt_lock", "_PUSH_RECEIPT_PATH",
-    "_register_push_client", "_unregister_push_client",
+    "_push_client_visible", "_push_client_user", "_push_receipt_lock",
+    "_PUSH_RECEIPT_PATH", "_PUSH_VISIBLE_TTL_S",
+    "_register_push_client", "_unregister_push_client", "_set_push_client_visible",
+    "_push_user_is_operator", "_push_client_seen",
     "_note_push_client_session", "push_proactive_message", "_write_push_receipt",
 }
 
@@ -112,7 +114,8 @@ class TestProactivePushReceipt:
         tts = []
         ns = _load_push_module(receipt, tts)
         ws = object()
-        q = ns["_register_push_client"](ws)
+        q = ns["_register_push_client"](ws, user_id="user_owner")
+        ns["_set_push_client_visible"](ws, True)  # the tab is in front of the owner
 
         result = ns["push_proactive_message"]("Done. [CANVAS:report]", "main")
 

@@ -40,8 +40,9 @@ APP_PY = ROOT / "app.py"
 
 _NAMES = {
     "_push_clients_lock", "_push_clients", "_push_client_session",
-    "_push_client_visible", "_push_receipt_lock", "_PUSH_RECEIPT_PATH",
-    "_PUSH_KEEPALIVE_S",
+    "_push_client_visible", "_push_client_user", "_push_receipt_lock",
+    "_PUSH_RECEIPT_PATH", "_PUSH_KEEPALIVE_S", "_PUSH_VISIBLE_TTL_S",
+    "_push_user_is_operator", "_push_client_seen", "_handle_push_client_frame",
     "_register_push_client", "_unregister_push_client", "_push_queue_for",
     "_note_push_client_session", "_set_push_client_visible",
     "_serve_push_socket", "push_proactive_message", "_write_push_receipt",
@@ -144,7 +145,7 @@ def test_push_route_exists_and_is_not_a_public_path():
     m = re.search(r'@sock\.route\("/ws/push"\)\s*\ndef (\w+)\(ws\):(.*?)\n\n\n', src, re.S)
     assert m, "server.py must serve the /ws/push socket"
     handler = m.group(2)
-    assert "_serve_push_socket(ws)" in handler
+    assert re.search(r"_serve_push_socket\(ws\b", handler)
     assert "clerk_user_id" in handler, "the push socket must require an owner session"
     # /ws/clawdbot self-authenticates and is listed as public; /ws/push relies on
     # require_auth, so it must NOT be in the public list.
@@ -158,7 +159,7 @@ def test_visible_tab_gets_the_push_and_counts_as_delivered(tmp_path):
     t = _serve(ns, ws)
 
     ws.browser_send({"type": "visibility", "visible": True})
-    assert _wait_until(lambda: ns["_push_client_visible"].get(ws) is True)
+    assert _wait_until(lambda: ns["_push_client_visible"].get(ws) is not None)
 
     assert ns["push_proactive_message"]("Takeoff done. [CANVAS:takeoff]", "main") == 1
     frame = ws.wait_for(lambda f: f["type"] == "proactive_message")[0]
@@ -186,11 +187,11 @@ def test_hidden_tab_still_gets_it_but_the_gateway_still_relays(tmp_path):
     assert row["delivered"] == 1 and row["visible"] == 0
 
     ws.browser_send({"type": "visibility", "visible": True})
-    assert _wait_until(lambda: ns["_push_client_visible"].get(ws) is True)
+    assert _wait_until(lambda: ns["_push_client_visible"].get(ws) is not None)
     assert ns["push_proactive_message"]("Second.", "main") == 1
 
     ws.browser_send({"type": "visibility", "visible": False})
-    assert _wait_until(lambda: ns["_push_client_visible"].get(ws) is False)
+    assert _wait_until(lambda: ws not in ns["_push_client_visible"])
     assert ns["push_proactive_message"]("Third.", "main") == 0
 
     ws.browser_close()
@@ -228,8 +229,138 @@ def test_closed_socket_unregisters_and_push_reports_nobody(tmp_path):
 def test_each_push_has_its_own_id(tmp_path):
     ns = _load(tmp_path / "r.jsonl")
     ws = object()
-    q = ns["_register_push_client"](ws)  # /ws/clawdbot-style: counts as visible
+    q = ns["_register_push_client"](ws)
+    ns["_set_push_client_visible"](ws, True)
     assert ns["push_proactive_message"]("a", "main") == 1
     assert ns["push_proactive_message"]("b", "main") == 1
     ids = {json.loads(q.get_nowait())["id"], json.loads(q.get_nowait())["id"]}
     assert len(ids) == 2
+
+
+# ---------------------------------------------------------------------------
+# Review fixes (PR #585)
+# ---------------------------------------------------------------------------
+# 1. "seen" is owner-only. The platform operator's Clerk id is on every tenant's
+#    ALLOWED_USER_IDS, so his open tab used to count as the owner having seen a
+#    client's result and the owner relay never fired. His tab still RECEIVES it.
+# 2. A visibility report goes stale. The browser re-reports about every 20 s; a
+#    report older than _PUSH_VISIBLE_TTL_S (a sleeping laptop whose TCP socket is
+#    still "open") does not count, and a socket that never reported (/ws/clawdbot)
+#    is not visible.
+
+OPERATOR = "user_operator_test"
+OWNER = "user_owner_test"
+
+
+class _Clock:
+    """A stand-in for the time module whose monotonic() the test moves."""
+
+    def __init__(self):
+        self.t = 1000.0
+
+    def monotonic(self):
+        return self.t
+
+    def time(self):
+        return time.time()
+
+    def sleep(self, s):
+        time.sleep(s)
+
+
+def _with_operator(monkeypatch):
+    import services.auth as auth
+    monkeypatch.setattr(auth, "_PLATFORM_ADMIN_USER_IDS", {OPERATOR})
+
+
+def test_operator_tab_receives_the_push_but_does_not_count_as_seen(tmp_path, monkeypatch):
+    _with_operator(monkeypatch)
+    receipt = tmp_path / ".proactive-push.jsonl"
+    ns = _load(receipt)
+    ws = FakeBrowserSocket()
+    t = threading.Thread(target=ns["_serve_push_socket"], args=(ws,),
+                         kwargs={"keepalive_s": 5.0, "user_id": OPERATOR}, daemon=True)
+    t.start()
+    ws.wait_for(lambda f: f["type"] == "push_ready")
+    ws.browser_send({"type": "visibility", "visible": True})
+    assert _wait_until(lambda: ns["_push_client_visible"].get(ws) is not None)
+
+    assert ns["push_proactive_message"]("Client report ready.", "main") == 0, \
+        "the operator's visible tab must not swallow the owner relay"
+    ws.wait_for(lambda f: f["type"] == "proactive_message")  # he still gets it
+    row = _receipts(receipt)[-1]
+    assert row["delivered"] == 1 and row["visible"] == 0
+
+    ws.browser_close()
+    t.join(3)
+
+
+def test_owner_tab_counts_alongside_an_operator_tab(tmp_path, monkeypatch):
+    _with_operator(monkeypatch)
+    ns = _load(tmp_path / "r.jsonl")
+    op, owner = object(), object()
+    q_op = ns["_register_push_client"](op, user_id=OPERATOR)
+    q_owner = ns["_register_push_client"](owner, user_id=OWNER)
+    ns["_set_push_client_visible"](op, True)
+    ns["_set_push_client_visible"](owner, True)
+    assert ns["push_proactive_message"]("x", "main") == 1
+    assert not q_op.empty() and not q_owner.empty()
+
+
+def test_operator_is_the_platform_admin_set_not_tenant_admins(monkeypatch):
+    # ADMIN_USER_IDS holds the tenant OWNER as well (jambot-create-user.sh), so it
+    # must not be the "not seen" set or the owner's own tab would never count.
+    import services.auth as auth
+    monkeypatch.setattr(auth, "_PLATFORM_ADMIN_USER_IDS", {OPERATOR})
+    monkeypatch.setattr(auth, "_ADMIN_USER_IDS", {OPERATOR, OWNER})
+    ns = _load(Path("/nonexistent"))
+    assert ns["_push_user_is_operator"](OPERATOR) is True
+    assert ns["_push_user_is_operator"](OWNER) is False
+    assert ns["_push_user_is_operator"](None) is False
+
+
+def test_both_socket_routes_record_the_user(tmp_path):
+    src = SERVER_PY.read_text()
+    push = re.search(r'@sock\.route\("/ws/push"\)\s*\ndef \w+\(ws\):(.*?)\n\n\n', src, re.S).group(1)
+    assert re.search(r"_serve_push_socket\(ws,\s*user_id=user_id\)", push)
+    claw = re.search(r'@sock\.route\("/ws/clawdbot"\)\s*\ndef \w+\(ws\):(.*?)\n@sock\.route', src, re.S).group(1)
+    assert re.search(r"_register_push_client\(ws,\s*user_id=user_id\)", claw)
+
+
+def test_a_stale_visible_report_stops_counting(tmp_path):
+    ns = _load(tmp_path / "r.jsonl")
+    clock = _Clock()
+    ns["time"] = clock
+    ws = object()
+    ns["_register_push_client"](ws, user_id=OWNER)
+    ns["_set_push_client_visible"](ws, True)
+    assert ns["push_proactive_message"]("fresh", "main") == 1
+    clock.t += ns["_PUSH_VISIBLE_TTL_S"] - 1
+    assert ns["push_proactive_message"]("still fresh", "main") == 1
+    clock.t += 2  # past the TTL with no new report: the laptop went to sleep
+    assert ns["push_proactive_message"]("stale", "main") == 0
+    ns["_set_push_client_visible"](ws, True)  # it woke and re-reported
+    assert ns["push_proactive_message"]("back", "main") == 1
+
+
+def test_a_socket_that_never_reports_is_not_visible(tmp_path):
+    # /ws/clawdbot used to default to visible forever (visible.get(ws, True)).
+    ns = _load(tmp_path / "r.jsonl")
+    ws = object()
+    q = ns["_register_push_client"](ws)  # exactly how /ws/clawdbot used to register
+    assert ns["push_proactive_message"]("x", "main") == 0
+    assert not q.empty(), "it still receives the frame"
+
+
+def test_clawdbot_socket_takes_visibility_reports():
+    src = SERVER_PY.read_text()
+    claw = re.search(r'@sock\.route\("/ws/clawdbot"\)\s*\ndef \w+\(ws\):(.*?)\n@sock\.route', src, re.S).group(1)
+    reader = re.search(r"async def _from_client\(\):(.*?)async def _from_gateway", claw, re.S).group(1)
+    assert "_handle_push_client_frame(ws, msg)" in reader
+    ns = _load(Path("/nonexistent"))
+    ws = object()
+    ns["_register_push_client"](ws)
+    assert ns["_handle_push_client_frame"](ws, json.dumps({"type": "visibility", "visible": True}))
+    assert ns["_push_client_visible"].get(ws) is not None
+    assert not ns["_handle_push_client_frame"](ws, json.dumps({"type": "chat.send"}))
+    assert not ns["_handle_push_client_frame"](ws, "not json")
