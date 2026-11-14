@@ -23,6 +23,11 @@ tests/js/safe-redirect.test.js covers the post-login ?redirect= target. The logi
 browser back there after it refreshes a stale session, and a bare startsWith('/') check let
 protocol-relative targets ('//host', '/\\host', '/<tab>/host') send it to another origin.
 
+tests/js/push-channel.test.js covers the proactive-push socket. It rode only on /ws/clawdbot, which
+the app opened only on a voice-mode SWITCH; the default mode never switched, so no browser on any
+tenant ever connected and every background-job result logged "no connected browsers" (2026-11-14).
+init() must open /ws/push itself and the channel must reconnect on its own.
+
 Skips only when node is absent, and the skip is visible in pytest output. CI (ubuntu-latest)
 always has node.
 """
@@ -43,6 +48,7 @@ JS_TESTS = Path(__file__).resolve().parent / "js"
     "transcript-panel-input.test.js",
     "upload-body-ios.test.js",
     "safe-redirect.test.js",
+    "push-channel.test.js",
 ])
 def test_js_regression_suite(name: str) -> None:
     node = shutil.which("node")

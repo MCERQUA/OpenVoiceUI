@@ -1,0 +1,208 @@
+// push-channel.test.js — the app must open the proactive-push socket at start, in
+// every voice mode, and keep it open.
+//
+//   node tests/js/push-channel.test.js
+//
+// 2026-11-14: no browser on any tenant had ever connected to the push channel. It
+// rode only on /ws/clawdbot, opened only by ModeManager.switchMode(), and init()
+// skipped switchMode() because the default transport ('supertonic') was already the
+// current one. Every background-job result logged "no connected browsers".
+//
+// Part 1 checks app.js wiring (init() starts a PushChannel on /ws/push, outside
+// switchMode). Part 2 runs src/core/pushChannel.js with a fake WebSocket and timers.
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const ROOT = path.resolve(__dirname, '..', '..');
+const APP = process.env.APP_SRC || path.join(ROOT, 'src', 'app.js');
+const MOD = process.env.PUSH_CHANNEL_SRC || path.join(ROOT, 'src', 'core', 'pushChannel.js');
+
+let failures = 0;
+function test(name, fn) {
+    return Promise.resolve().then(fn).then(
+        () => console.log(`ok   ${name}`),
+        (e) => { failures++; console.log(`FAIL ${name}\n     ${e.message}`); });
+}
+
+// ---- Part 1: app.js wiring --------------------------------------------------
+function initBody(src) {
+    const start = src.indexOf('async function init()');
+    assert.ok(start >= 0, 'app.js has no init()');
+    return src.slice(start, start + 20000);
+}
+
+function switchModeBody(src) {
+    const start = src.indexOf('async switchMode(mode)');
+    assert.ok(start >= 0, 'app.js has no ModeManager.switchMode()');
+    const end = src.indexOf('getCurrentMode()', start);
+    return src.slice(start, end);
+}
+
+// ---- Part 2: the module ------------------------------------------------------
+function loadModule() {
+    assert.ok(fs.existsSync(MOD), `missing ${path.relative(ROOT, MOD)}`);
+    const src = fs.readFileSync(MOD, 'utf8').replace(/^export\s+/gm, '');
+    const ctx = { JSON, Math, console, setTimeout };
+    vm.createContext(ctx);
+    vm.runInContext(src + '\nthis.PushChannel = PushChannel; this.makeProactiveDeduper = makeProactiveDeduper;', ctx);
+    return ctx;
+}
+
+class FakeWS {
+    constructor(url) { this.url = url; this.sent = []; this.closed = false; FakeWS.all.push(this); }
+    send(s) { this.sent.push(JSON.parse(s)); }
+    close() { this.closed = true; }
+    open() { this.onopen && this.onopen(); }
+    msg(obj) { this.onmessage && this.onmessage({ data: JSON.stringify(obj) }); }
+    drop() { this.onclose && this.onclose(); }
+}
+FakeWS.all = [];
+
+const flush = () => new Promise((r) => setImmediate(r));
+
+function harness(m, extra = {}) {
+    FakeWS.all = [];
+    const timers = [];
+    const pushes = [];
+    const order = [];
+    let visible = true;
+    const ch = new m.PushChannel({
+        url: 'wss://tenant.example.com/ws/push',
+        WebSocketImpl: function (url) { order.push('ws'); return new FakeWS(url); },
+        onPush: (d) => pushes.push(d),
+        beforeConnect: async () => { order.push('cookie'); },
+        isVisible: () => visible,
+        setTimer: (fn, ms) => timers.push({ fn, ms }),
+        ...extra,
+    });
+    return { ch, timers, pushes, order, setVisible: (v) => { visible = v; } };
+}
+
+(async () => {
+    const appSrc = fs.readFileSync(APP, 'utf8');
+
+    await test('init() starts a PushChannel on /ws/push', () => {
+        const body = initBody(appSrc);
+        assert.match(body, /new PushChannel\(/, 'init() never creates the push channel');
+        assert.match(body, /\/ws\/push/, 'push channel must use /ws/push');
+        assert.match(body, /pushChannel\.start\(\)/, 'init() never starts the push channel');
+        assert.match(body, /visibilitychange/, 'tab visibility must be reported');
+    });
+
+    await test('the push channel does not depend on a voice-mode switch', () => {
+        assert.doesNotMatch(switchModeBody(appSrc), /PushChannel|pushChannel/);
+        assert.match(appSrc, /import \{[^}]*PushChannel[^}]*\} from '\.\/core\/pushChannel\.js'/);
+    });
+
+    await test('a frame on both sockets is handled once', () => {
+        assert.match(appSrc, /case 'proactive_message':[\s\S]{0,300}isNewProactivePush\(data\.id\)/);
+    });
+
+    await test('no browser storage in the push channel', () => {
+        assert.ok(fs.existsSync(MOD), `missing ${path.relative(ROOT, MOD)}`);
+        assert.doesNotMatch(fs.readFileSync(MOD, 'utf8'), /localStorage|sessionStorage|indexedDB/);
+    });
+
+    let m;
+    try { m = loadModule(); } catch (e) {
+        failures++; console.log(`FAIL load src/core/pushChannel.js\n     ${e.message}`);
+    }
+    if (m) {
+        await test('start() refreshes the cookie, then connects to /ws/push', async () => {
+            const h = harness(m);
+            h.ch.start();
+            await flush();
+            assert.deepStrictEqual(h.order, ['cookie', 'ws']);
+            assert.strictEqual(FakeWS.all[0].url, 'wss://tenant.example.com/ws/push');
+        });
+
+        await test('on open it reports visibility; visibility changes are reported', async () => {
+            const h = harness(m);
+            h.ch.start(); await flush();
+            const ws = FakeWS.all[0];
+            ws.open();
+            assert.deepStrictEqual(ws.sent, [{ type: 'visibility', visible: true }]);
+            h.setVisible(false);
+            h.ch.reportVisibility();
+            assert.deepStrictEqual(ws.sent[1], { type: 'visibility', visible: false });
+        });
+
+        await test('only proactive_message frames reach onPush', async () => {
+            const h = harness(m);
+            h.ch.start(); await flush();
+            const ws = FakeWS.all[0];
+            ws.open();
+            ws.msg({ type: 'push_ready' });
+            ws.msg({ type: 'keepalive' });
+            ws.msg({ type: 'proactive_message', text: 'Done.', id: 'a1' });
+            ws.onmessage({ data: 'not json' });
+            assert.strictEqual(h.pushes.length, 1);
+            assert.strictEqual(h.pushes[0].text, 'Done.');
+        });
+
+        await test('a dropped socket reconnects with capped backoff, reset on success', async () => {
+            const h = harness(m);
+            h.ch.start(); await flush();
+            const delays = [];
+            for (let i = 0; i < 7; i++) {
+                FakeWS.all[FakeWS.all.length - 1].drop();
+                const t = h.timers.shift();
+                assert.ok(t, `no reconnect scheduled after drop ${i + 1}`);
+                delays.push(t.ms);
+                t.fn(); await flush();
+            }
+            assert.deepStrictEqual(delays, [2000, 4000, 8000, 16000, 32000, 60000, 60000]);
+            assert.strictEqual(FakeWS.all.length, 8, 'one new socket per retry');
+            FakeWS.all[7].open();
+            FakeWS.all[7].drop();
+            assert.strictEqual(h.timers.shift().ms, 2000, 'backoff resets after a good connect');
+        });
+
+        await test('the cookie is refreshed before every reconnect', async () => {
+            const h = harness(m);
+            h.ch.start(); await flush();
+            FakeWS.all[0].drop();
+            h.timers.shift().fn(); await flush();
+            assert.deepStrictEqual(h.order, ['cookie', 'ws', 'cookie', 'ws']);
+        });
+
+        await test('a failing cookie refresh does not stop the connect', async () => {
+            const h = harness(m, { beforeConnect: async () => { throw new Error('signed out'); } });
+            h.ch.start(); await flush();
+            assert.strictEqual(FakeWS.all.length, 1);
+        });
+
+        await test('stop() closes and never reconnects', async () => {
+            const h = harness(m);
+            h.ch.start(); await flush();
+            const ws = FakeWS.all[0];
+            ws.open();
+            h.ch.stop();
+            assert.ok(ws.closed);
+            ws.drop();
+            assert.strictEqual(h.timers.length, 0);
+        });
+
+        await test('start() twice opens one socket', async () => {
+            const h = harness(m);
+            h.ch.start(); h.ch.start(); await flush();
+            assert.strictEqual(FakeWS.all.length, 1);
+        });
+
+        await test('deduper: same id once, no id always, bounded', () => {
+            const isNew = m.makeProactiveDeduper(3);
+            assert.strictEqual(isNew('x'), true);
+            assert.strictEqual(isNew('x'), false);
+            assert.strictEqual(isNew(undefined), true);
+            assert.strictEqual(isNew(undefined), true);
+            isNew('a'); isNew('b'); isNew('c');
+            assert.strictEqual(isNew('x'), true, 'oldest id falls out of the window');
+        });
+    }
+
+    if (failures) { console.log(`\n${failures} failing`); process.exit(1); }
+    console.log('\nall push-channel tests passed');
+})();

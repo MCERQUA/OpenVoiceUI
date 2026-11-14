@@ -30,6 +30,7 @@ import queue
 import re
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -42,7 +43,7 @@ SERVER_PY = Path(__file__).resolve().parent.parent / "server.py"
 
 _PUSH_NAMES = {
     "_push_clients_lock", "_push_clients", "_push_client_session",
-    "_push_receipt_lock", "_PUSH_RECEIPT_PATH",
+    "_push_client_visible", "_push_receipt_lock", "_PUSH_RECEIPT_PATH",
     "_register_push_client", "_unregister_push_client",
     "_note_push_client_session", "push_proactive_message", "_write_push_receipt",
 }
@@ -65,7 +66,7 @@ def _load_push_module(receipt_path, tts_calls):
         return "QVVESU8="
 
     ns = {
-        "json": json, "re": re, "time": time, "queue": queue,
+        "json": json, "re": re, "time": time, "queue": queue, "uuid": uuid,
         "threading": threading, "datetime": datetime, "Path": Path,
         "logger": logging.getLogger("test-proactive-push"),
         "_generate_tts_b64": fake_tts,

@@ -10,6 +10,10 @@ import { inject } from './ui/AppShell.js';
 import { initUpdateChecker } from './ui/UpdateBanner.js';
 import { connectAiradio } from './shell/airadio-bridge.js';
 import { safeRedirectTarget } from './core/safeRedirect.js';
+import { PushChannel, makeProactiveDeduper } from './core/pushChannel.js';
+
+// A push frame can arrive on /ws/push AND /ws/clawdbot; play each one once.
+const isNewProactivePush = makeProactiveDeduper();
 
 // Inject the application DOM structure before any module accesses the DOM
 inject();
@@ -3388,14 +3392,25 @@ connectAiradio();
                 } catch (e) { /* session may be gone */ }
             },
 
+            async refreshSessionCookie() {
+                // Write a fresh Clerk token to the __session cookie and return it.
+                // The push socket calls this before each (re)connect: a browser
+                // WebSocket sends cookies but cannot send a Bearer header.
+                if (typeof Clerk === 'undefined') return null;
+                const token = await Clerk.session?.getToken();
+                if (token) {
+                    document.cookie = `__session=${token}; path=/; Max-Age=2592000; SameSite=Lax; Secure`;
+                }
+                return token || null;
+            },
+
             async _syncSessionCookie() {
                 // Clerk tokens expire every ~60s. Sync to __session cookie so
                 // iframe navigations and direct /pages/ URLs carry auth.
                 const _sync = async () => {
                     try {
-                        const token = await Clerk.session?.getToken();
+                        const token = await this.refreshSessionCookie();
                         if (token) {
-                            document.cookie = `__session=${token}; path=/; Max-Age=2592000; SameSite=Lax; Secure`;
                             // Also push fresh token to canvas iframe so long-running
                             // uploads/API calls never hit an expired cookie
                             const iframe = document.getElementById('canvas-iframe');
@@ -4280,7 +4295,7 @@ connectAiradio();
                     case 'proactive_message':
                         // Agent-initiated push — a background sub-agent finished
                         // AFTER the original turn ended. Server pre-generated TTS.
-                        this._handleProactiveMessage(data);
+                        if (isNewProactivePush(data.id)) this._handleProactiveMessage(data);
                         break;
 
                     case 'keepalive':
@@ -7511,6 +7526,23 @@ connectAiradio();
 
             // Attach shared STT to ModeManager (was initialized early without it)
             ModeManager.clawdbotMode.stt = voiceConversation.stt;
+
+            // Proactive push channel — open it now, in every voice mode.
+            // Background-job results land here the moment they finish. It used to
+            // ride only on the /ws/clawdbot socket, which opens only on a mode
+            // SWITCH, so in the default mode no browser ever connected.
+            const _wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const pushChannel = new PushChannel({
+                url: `${_wsProto}//${window.location.host}/ws/push`,
+                WebSocketImpl: window.WebSocket,
+                onPush: (data) => ModeManager.clawdbotMode?.handleMessage(data),
+                beforeConnect: () => AuthModule.refreshSessionCookie(),
+                isVisible: () => document.visibilityState === 'visible',
+                log: (msg) => console.log(`[push] ${msg}`),
+            });
+            window._pushChannel = pushChannel;
+            document.addEventListener('visibilitychange', () => pushChannel.reportVisibility());
+            pushChannel.start();
 
             // Restore saved mode (default to supertonic).
             // savedMode may be a profile ID (e.g. 'default') or a transport
