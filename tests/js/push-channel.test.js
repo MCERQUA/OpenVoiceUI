@@ -110,6 +110,31 @@ function harness(m, extra = {}) {
         assert.match(appSrc, /case 'proactive_message':[\s\S]{0,300}isNewProactivePush\(data\.id\)/);
     });
 
+    // Review item 5: push audio now plays OUTSIDE a call. It must take the same
+    // path as normal TTS, whose onSpeaking mutes the shared STT and raises
+    // _ttsPlaying (STT results are dropped while it is up, then for the 2.5 s echo
+    // cooldown), so the agent cannot hear itself. Nothing here may create or
+    // destroy a SpeechRecognition. (The passive wake-word detector has no pause
+    // hook at all; normal TTS only ever plays after a call start has stopped it.)
+    await test('push audio plays through the normal TTS path that mutes STT', () => {
+        const body = initBody(appSrc);
+        assert.match(body, /onPush:\s*\(data\)\s*=>\s*ModeManager\.clawdbotMode\?\.handleMessage\(data\)/,
+            'pushes must reach ClawdbotMode.handleMessage');
+        const h = appSrc.indexOf('async _handleProactiveMessage(data)');
+        assert.ok(h >= 0, 'no _handleProactiveMessage');
+        const handler = appSrc.slice(h, appSrc.indexOf('async sendMessage(', h));
+        assert.match(handler, /this\.playAudio\(data\.audio/, 'push audio must use ClawdbotMode.playAudio');
+        assert.doesNotMatch(handler, /new Audio\(|SpeechRecognition|\.recognition\b/,
+            'push audio must not bypass the TTS queue or touch recognition');
+        const pn = appSrc.indexOf('async playNextAudio()', appSrc.indexOf('playAudio(base64Audio, format = \'wav\')'));
+        assert.match(appSrc.slice(pn, pn + 4000), /this\.callbacks\.onSpeaking\(\)/,
+            'ClawdbotMode playback must fire onSpeaking');
+        const cb = appSrc.indexOf('this.clawdbotMode.setCallbacks({');
+        const speaking = appSrc.slice(cb, appSrc.indexOf('onListening:', cb));
+        assert.match(speaking, /stt\.mute\(\)/, 'onSpeaking must mute the shared STT');
+        assert.match(speaking, /_ttsPlaying = true/, 'onSpeaking must raise _ttsPlaying');
+    });
+
     await test('no browser storage in the push channel', () => {
         assert.ok(fs.existsSync(MOD), `missing ${path.relative(ROOT, MOD)}`);
         assert.doesNotMatch(fs.readFileSync(MOD, 'utf8'), /localStorage|sessionStorage|indexedDB/);
