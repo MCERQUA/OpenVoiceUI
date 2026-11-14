@@ -101,8 +101,15 @@ def create_app(config_override: dict = None):
     # host differs from the request Host. Runs whether or not Clerk is on: an
     # open local install is just as reachable from another page. A missing
     # Origin passes (non-browser clients; see services.auth.websocket_origin_allowed).
+    # /ws/clawdbot and /ws/terminal self-authenticate from the same cookie and
+    # are listed in _PUBLIC_EXACT, so before this guard nothing checked where the
+    # upgrade came from: another tenant's page could drive the user's agent or
+    # get a shell in this container. Their only non-browser callers (X-Agent-Key
+    # on /ws/terminal) send no Origin and still pass.
     _WS_ORIGIN_CHECKED_PATHS = frozenset({
         '/ws/push',
+        '/ws/clawdbot',
+        '/ws/terminal',
     })
 
     @app.before_request

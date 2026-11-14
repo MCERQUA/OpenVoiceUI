@@ -19,7 +19,9 @@ from services.auth import websocket_origin_allowed
 
 # Each socket the guard must cover. A path missing from app.py's
 # _WS_ORIGIN_CHECKED_PATHS fails here with the attacker's upgrade let through.
-GUARDED = ["/ws/push"]
+# /ws/clawdbot drives the agent and /ws/terminal is a shell in the container;
+# both self-authenticate from the same cookie, so they had the same hole.
+GUARDED = ["/ws/push", "/ws/clawdbot", "/ws/terminal"]
 
 
 @pytest.mark.parametrize("path", GUARDED)
@@ -73,3 +75,9 @@ def test_other_paths_are_not_touched(client):
 ])
 def test_websocket_origin_allowed(origin, host, ok):
     assert websocket_origin_allowed(origin, host) is ok
+
+
+def test_terminal_agent_key_caller_still_passes(client):
+    # /ws/terminal's non-browser path is X-Agent-Key with no Origin header.
+    r = client.get("/ws/terminal", headers={"X-Agent-Key": "k", "Upgrade": "websocket"})
+    assert (r.get_json(silent=True) or {}).get("code") != "ws_origin_blocked"
