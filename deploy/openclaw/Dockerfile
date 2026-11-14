@@ -17,7 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Use pnpm via corepack (handles native modules better than npm)
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# PINNED (was pnpm@latest): a floating pnpm makes every build a different image, and a
+# pnpm major bump has already broken a full openclaw rebuild once. 11.24.0 is the version
+# measured inside the JamBot openclaw image that runs openclaw 2026.5.7 in production
+# (corepack lastKnownGood + every global install's .modules.yaml). Bump deliberately.
+RUN corepack enable && corepack prepare pnpm@11.24.0 --activate
 ENV PNPM_HOME=/usr/local/share/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN mkdir -p $PNPM_HOME
