@@ -42,6 +42,20 @@ Optional text_done flag — 'deferred': True
   {'type': 'text_done', 'response': '', 'deferred': True, 'actions': list}
 """
 
+import contextvars
+
+# Per-turn speaker (who is logged in for THIS request), handed to the gateway OUT OF BAND so a
+# gateway never has to parse identity out of the message text (which the caller's own words are
+# part of). Set by GatewayManager.stream_to_queue(speaker=...) for the duration of one call; each
+# call runs in its own thread, so the value never leaks between turns or users.
+# Shape: {'clerk_id', 'name', 'role', 'tenant', 'home_tenant'} or None (caller passed nothing).
+_TURN_SPEAKER: contextvars.ContextVar = contextvars.ContextVar('ovu_turn_speaker', default=None)
+
+
+def get_turn_speaker():
+    """The speaker dict for the gateway call running in this thread, or None."""
+    return _TURN_SPEAKER.get()
+
 import queue
 from typing import Optional
 
