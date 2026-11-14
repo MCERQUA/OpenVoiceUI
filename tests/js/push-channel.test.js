@@ -68,6 +68,8 @@ function harness(m, extra = {}) {
     const timers = [];
     const pushes = [];
     const order = [];
+    const repeats = [];
+    const clock = { t: 0 };
     let visible = true;
     const ch = new m.PushChannel({
         url: 'wss://tenant.example.com/ws/push',
@@ -76,9 +78,16 @@ function harness(m, extra = {}) {
         beforeConnect: async () => { order.push('cookie'); },
         isVisible: () => visible,
         setTimer: (fn, ms) => timers.push({ fn, ms }),
+        setRepeat: (fn, ms) => {
+            const r = { fn, ms, cancelled: false };
+            repeats.push(r);
+            return () => { r.cancelled = true; };
+        },
+        now: () => clock.t,
+        random: () => 1,  // no jitter unless a test asks for it
         ...extra,
     });
-    return { ch, timers, pushes, order, setVisible: (v) => { visible = v; } };
+    return { ch, timers, pushes, order, repeats, clock, setVisible: (v) => { visible = v; } };
 }
 
 (async () => {
@@ -157,8 +166,78 @@ function harness(m, extra = {}) {
             assert.deepStrictEqual(delays, [2000, 4000, 8000, 16000, 32000, 60000, 60000]);
             assert.strictEqual(FakeWS.all.length, 8, 'one new socket per retry');
             FakeWS.all[7].open();
+            h.clock.t += 30000;
             FakeWS.all[7].drop();
-            assert.strictEqual(h.timers.shift().ms, 2000, 'backoff resets after a good connect');
+            assert.strictEqual(h.timers.shift().ms, 2000, 'backoff resets after a connection held 30 s');
+        });
+
+        // Review fix 4: onopen used to reset the backoff, so a server that accepts
+        // and drops at once (restart loop, expired session) got hit every 2 s.
+        await test('a connection that drops before 30 s does not reset the backoff', async () => {
+            const h = harness(m);
+            h.ch.start(); await flush();
+            const delays = [];
+            for (let i = 0; i < 5; i++) {
+                const ws = FakeWS.all[FakeWS.all.length - 1];
+                ws.open();
+                h.clock.t += 29999;
+                ws.drop();
+                const t = h.timers.shift();
+                delays.push(t.ms);
+                t.fn(); await flush();
+            }
+            assert.deepStrictEqual(delays, [2000, 4000, 8000, 16000, 32000]);
+        });
+
+        await test('reconnect delays carry jitter and never pass the 60 s cap', async () => {
+            let r = 0;
+            const h = harness(m, { random: () => r });
+            h.ch.start(); await flush();
+            FakeWS.all[0].drop();
+            assert.strictEqual(h.timers.shift().ms, 1000, 'random=0 waits half the base delay');
+            r = 0.5;
+            h.ch._retryPending = false;
+            h.ch._scheduleRetry();
+            assert.strictEqual(h.timers.shift().ms, 3000, 'random=0.5 lands between base/2 and base');
+            for (let i = 0; i < 10; i++) {
+                r = Math.random();
+                h.ch._retryPending = false;
+                h.ch._scheduleRetry();
+                const ms = h.timers.shift().ms;
+                assert.ok(ms <= 60000, `delay ${ms} is over the cap`);
+                assert.ok(ms >= 1000, `delay ${ms} is under the floor`);
+            }
+            r = 1;
+            h.ch._retryPending = false;
+            h.ch._scheduleRetry();
+            assert.strictEqual(h.timers.shift().ms, 60000);
+        });
+
+        // Review fix 2: the server ignores a visibility report older than ~60 s, so
+        // the tab must keep reporting while it is connected.
+        await test('visibility is re-reported every 20 s while connected, and stops on close', async () => {
+            const h = harness(m);
+            h.ch.start(); await flush();
+            const ws = FakeWS.all[0];
+            ws.open();
+            assert.strictEqual(h.repeats.length, 1, 'no repeating visibility report');
+            assert.strictEqual(h.repeats[0].ms, 20000);
+            h.repeats[0].fn();
+            h.setVisible(false);
+            h.repeats[0].fn();
+            assert.deepStrictEqual(ws.sent, [
+                { type: 'visibility', visible: true },
+                { type: 'visibility', visible: true },
+                { type: 'visibility', visible: false },
+            ]);
+            ws.drop();
+            assert.ok(h.repeats[0].cancelled, 'the report must stop when the socket closes');
+            h.timers.shift().fn(); await flush();
+            FakeWS.all[1].open();
+            assert.strictEqual(h.repeats.length, 2);
+            assert.ok(!h.repeats[1].cancelled);
+            h.ch.stop();
+            assert.ok(h.repeats[1].cancelled, 'stop() must end the report');
         });
 
         await test('the cookie is refreshed before every reconnect', async () => {

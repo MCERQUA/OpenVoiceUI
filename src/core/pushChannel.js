@@ -10,13 +10,23 @@
 // This socket is opened once at app start, whatever the voice mode, and comes back by
 // itself after server restarts and network drops. It tells the server whether the tab
 // is visible, so a tab left open in the background does not count as "the owner saw
-// it" and the server still relays the result through the tenant's own agent.
+// it" and the server still relays the result through the tenant's own agent. It
+// re-reports every VISIBILITY_REPORT_MS while connected: the server ignores a report
+// older than about 60 s, so a laptop that went to sleep with the tab in front stops
+// counting even while its TCP socket still looks open.
+//
+// Reconnects back off exponentially with jitter, capped at MAX_DELAY_MS. The backoff
+// resets only after a connection has stayed up STABLE_MS: a server that accepts and
+// then drops at once (a restart loop, an expired session) must not be hammered every
+// MIN_DELAY_MS by every open tab at the same moment.
 //
 // Nothing here touches browser storage. All dependencies are passed in so node can
 // test it (tests/js/push-channel.test.js).
 
 const MIN_DELAY_MS = 2000;
 const MAX_DELAY_MS = 60000;
+const STABLE_MS = 30000;
+const VISIBILITY_REPORT_MS = 20000;
 
 export class PushChannel {
     constructor({
@@ -26,6 +36,11 @@ export class PushChannel {
         beforeConnect = null,
         isVisible = () => true,
         setTimer = (fn, ms) => setTimeout(fn, ms),
+        // Returns a cancel function. Separate from setTimer so the repeating
+        // visibility report never competes with a reconnect.
+        setRepeat = (fn, ms) => { const id = setInterval(fn, ms); return () => clearInterval(id); },
+        now = () => Date.now(),
+        random = () => Math.random(),
         log = () => {},
     }) {
         this.url = url;
@@ -34,6 +49,9 @@ export class PushChannel {
         this.beforeConnect = beforeConnect;
         this.isVisible = isVisible;
         this.setTimer = setTimer;
+        this.setRepeat = setRepeat;
+        this.now = now;
+        this.random = random;
         this.log = log;
         this.ws = null;
         this.connected = false;
@@ -41,6 +59,8 @@ export class PushChannel {
         this._stopped = true;
         this._delay = MIN_DELAY_MS;
         this._retryPending = false;
+        this._openedAt = null;
+        this._cancelReport = null;
     }
 
     start() {
@@ -54,12 +74,13 @@ export class PushChannel {
         const ws = this.ws;
         this.ws = null;
         this.connected = false;
+        this._stopReporting();
         if (ws) {
             try { ws.close(); } catch (e) { /* already closed */ }
         }
     }
 
-    // Call on document visibilitychange.
+    // Call on document visibilitychange; also runs every VISIBILITY_REPORT_MS.
     reportVisibility() {
         if (!this.connected || !this.ws) return;
         try {
@@ -90,9 +111,11 @@ export class PushChannel {
         ws.onopen = () => {
             if (this.ws !== ws) return;
             this.connected = true;
-            this._delay = MIN_DELAY_MS;
+            this._openedAt = this.now();
             this.log('push channel connected');
             this.reportVisibility();
+            this._stopReporting();
+            this._cancelReport = this.setRepeat(() => this.reportVisibility(), VISIBILITY_REPORT_MS);
         };
         ws.onmessage = (event) => {
             if (this.ws !== ws) return;
@@ -105,16 +128,33 @@ export class PushChannel {
             if (this.ws !== ws) return;
             this.ws = null;
             this.connected = false;
+            this._stopReporting();
+            // Only a connection that held for STABLE_MS earns a fresh, short backoff.
+            if (this._openedAt !== null && this.now() - this._openedAt >= STABLE_MS) {
+                this._delay = MIN_DELAY_MS;
+            }
+            this._openedAt = null;
             this._scheduleRetry();
         };
     }
 
+    _stopReporting() {
+        const cancel = this._cancelReport;
+        this._cancelReport = null;
+        if (cancel) {
+            try { cancel(); } catch (e) { /* already cancelled */ }
+        }
+    }
+
     _scheduleRetry() {
         if (this._stopped || this._retryPending) return;
-        const delay = this._delay;
-        this._delay = Math.min(delay * 2, MAX_DELAY_MS);
+        const base = this._delay;
+        this._delay = Math.min(base * 2, MAX_DELAY_MS);
+        // Equal jitter: somewhere in [base/2, base], so tabs dropped together by one
+        // server restart do not all come back in the same instant. Never above the cap.
+        const delay = Math.min(MAX_DELAY_MS, Math.round(base / 2 + this.random() * (base / 2)));
         this._retryPending = true;
-        this.log(`push channel reconnecting in ${delay / 1000}s`);
+        this.log(`push channel reconnecting in ${(delay / 1000).toFixed(1)}s`);
         this.setTimer(() => {
             this._retryPending = false;
             this._connect();
