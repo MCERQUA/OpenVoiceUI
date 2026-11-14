@@ -10,7 +10,7 @@ import { inject } from './ui/AppShell.js';
 import { initUpdateChecker } from './ui/UpdateBanner.js';
 import { connectAiradio } from './shell/airadio-bridge.js';
 import { safeRedirectTarget } from './core/safeRedirect.js';
-import { PushChannel, makeProactiveDeduper } from './core/pushChannel.js';
+import { PushChannel, PushWakeGuard, makeProactiveDeduper } from './core/pushChannel.js';
 
 // A push frame can arrive on /ws/push AND /ws/clawdbot; play each one once.
 const isNewProactivePush = makeProactiveDeduper();
@@ -4165,6 +4165,9 @@ connectAiradio();
                 if (window.wakeDetector && window.wakeDetector.isListening) {
                     window.wakeDetector.stop();
                     this.restartWakeAfter = true;
+                } else if (this._pushWake?.takeOver()) {
+                    // Push audio had paused it: this call now owns the restart.
+                    this.restartWakeAfter = true;
                 }
 
                 // Set up STT callbacks BEFORE greeting so they're ready when STT starts
@@ -4362,9 +4365,34 @@ connectAiradio();
 
                 // Play the server-generated TTS through the normal audio queue
                 // (respects text mode, mic muting, ducking via onSpeaking).
+                // Outside a call the wake-word detector is the only listener, so it
+                // is stopped for the playback and started again when the queue
+                // drains (playNextAudio) or is stopped (stopAudio).
                 if (data.audio) {
-                    this.playAudio(data.audio, data.audio_format || 'wav');
+                    const wakePaused = this._pushWakeGuard().pause();
+                    let queued = false;
+                    try {
+                        this.playAudio(data.audio, data.audio_format || 'wav');
+                        queued = this.isPlaying || this.audioQueue.length > 0;
+                    } finally {
+                        // Nothing will play (text mode, a throw): restore it now.
+                        if (wakePaused && !queued) this._pushWake.resume();
+                    }
                 }
+            }
+
+            _pushWakeGuard() {
+                if (!this._pushWake) {
+                    this._pushWake = new PushWakeGuard({
+                        getDetector: () => window.wakeDetector,
+                        inCall: () => !!(this._voiceActive || this._startingSession),
+                        pttActive: () => !!window.PTTButton?.pttMode,
+                        // PTT keeps wake word off; let PTT-off restore it.
+                        onPttTakeover: () => { if (window.PTTButton) window.PTTButton._wakeWasRunning = true; },
+                        log: (msg) => console.log(`[push] ${msg}`),
+                    });
+                }
+                return this._pushWake;
             }
 
             async sendMessage(text, opts = {}) {
@@ -5701,8 +5729,13 @@ connectAiradio();
                                 // Truly done — transition to listening
                                 this.currentAudio = null;
                                 this.isPlaying = false;
-                                this.callbacks.onListening();
-                                WaveformModule.setAmplitude(0);
+                                try {
+                                    this.callbacks.onListening();
+                                    WaveformModule.setAmplitude(0);
+                                } finally {
+                                    // Push audio outside a call paused wake word.
+                                    this._pushWake?.resume();
+                                }
                                 if (window._sleepAfterResponse) {
                                     window._sleepAfterResponse = false;
                                     console.log('[Sleep] Farewell audio done — activating wake word mode');
@@ -5845,6 +5878,8 @@ connectAiradio();
                 }
                 this.audioQueue = [];
                 this.isPlaying = false;
+                // A stopped push never reaches the drain timer on the HTMLAudio path.
+                this._pushWake?.resume();
             }
 
             base64ToBlob(base64, mimeType) {
@@ -7428,6 +7463,8 @@ connectAiradio();
             if (window.PTTButton?.pttMode) return; // wake word blocked while PTT is active
 
             const wakeButton = document.getElementById('wake-button');
+            // The user's choice wins over a push-audio pause.
+            ModeManager.clawdbotMode?._pushWake?.takeOver();
             const isListening = await window.wakeDetector.toggle();
 
             if (isListening) {

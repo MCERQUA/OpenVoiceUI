@@ -175,3 +175,83 @@ export function makeProactiveDeduper(max = 100) {
         return true;
     };
 }
+
+// Wake word during push audio outside a call. A push can speak while no call is
+// open, and the passive WakeWordDetector is then the only thing listening: it could
+// hear the agent say its own wake phrase. Normal TTS never meets this, because a call
+// start stops the detector first. So for push audio we do the same thing the call
+// start does, with the existing instance only (.stop() now, .start() after) — never
+// destroying or recreating a SpeechRecognition (jambot-voice-flow). Its abort/restart
+// loop while listening is normal and is left alone.
+//
+// resume() restarts the detector ONLY if this guard stopped it and it is still
+// wanted: no call has started (a call takes the pause over via takeOver()), push-to-
+// talk is not on (PTT keeps the detector off, so the pause is handed to PTT to
+// restore), the user did not toggle wake word meanwhile (takeOver()), and it is not
+// already listening. A hard cap restarts it even if playback never reported its end.
+export class PushWakeGuard {
+    constructor({
+        getDetector,
+        inCall = () => false,
+        pttActive = () => false,
+        onPttTakeover = () => {},
+        setTimer = (fn, ms) => setTimeout(fn, ms),
+        clearTimer = (id) => clearTimeout(id),
+        maxPauseMs = 5 * 60 * 1000,
+        log = () => {},
+    }) {
+        this.getDetector = getDetector;
+        this.inCall = inCall;
+        this.pttActive = pttActive;
+        this.onPttTakeover = onPttTakeover;
+        this.setTimer = setTimer;
+        this.clearTimer = clearTimer;
+        this.maxPauseMs = maxPauseMs;
+        this.log = log;
+        this.paused = false;
+        this._cap = null;
+    }
+
+    // Before push audio plays. True when the detector is (now) paused for it.
+    pause() {
+        if (this.paused) return true;
+        if (this.inCall()) return false;
+        const wd = this.getDetector();
+        if (!wd || !wd.isListening) return false;
+        wd.stop();
+        this.paused = true;
+        this.log('wake word paused for push audio');
+        this._cap = this.setTimer(() => { this._cap = null; this.resume(); }, this.maxPauseMs);
+        return true;
+    }
+
+    // A call or the user has taken over the detector. Returns whether it was paused.
+    takeOver() {
+        const was = this.paused;
+        this._clear();
+        return was;
+    }
+
+    // After push audio ended, failed or was stopped. Safe to call any number of times.
+    resume() {
+        if (!this.paused) return;
+        this._clear();
+        if (this.inCall()) return;
+        if (this.pttActive()) { this.onPttTakeover(); return; }
+        const wd = this.getDetector();
+        if (!wd || wd.isListening || (wd.isSupported && !wd.isSupported())) return;
+        try {
+            const r = wd.start();
+            if (r && typeof r.catch === 'function') r.catch(() => {});
+            this.log('wake word restored after push audio');
+        } catch (e) { /* already started */ }
+    }
+
+    _clear() {
+        this.paused = false;
+        if (this._cap !== null) {
+            try { this.clearTimer(this._cap); } catch (e) { /* gone */ }
+            this._cap = null;
+        }
+    }
+}

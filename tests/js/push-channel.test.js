@@ -47,7 +47,8 @@ function loadModule() {
     const src = fs.readFileSync(MOD, 'utf8').replace(/^export\s+/gm, '');
     const ctx = { JSON, Math, console, setTimeout };
     vm.createContext(ctx);
-    vm.runInContext(src + '\nthis.PushChannel = PushChannel; this.makeProactiveDeduper = makeProactiveDeduper;', ctx);
+    vm.runInContext(src + '\nthis.PushChannel = PushChannel; this.makeProactiveDeduper = makeProactiveDeduper;'
+        + '\nif (typeof PushWakeGuard !== "undefined") this.PushWakeGuard = PushWakeGuard;', ctx);
     return ctx;
 }
 
@@ -133,6 +134,37 @@ function harness(m, extra = {}) {
         const speaking = appSrc.slice(cb, appSrc.indexOf('onListening:', cb));
         assert.match(speaking, /stt\.mute\(\)/, 'onSpeaking must mute the shared STT');
         assert.match(speaking, /_ttsPlaying = true/, 'onSpeaking must raise _ttsPlaying');
+    });
+
+    // Review follow-up: outside a call the wake-word detector is the only listener
+    // while push audio plays. The app pauses it with the EXISTING instance's
+    // .stop()/.start() (the same thing a call start does) and restores it from
+    // try/finally paths, so a failed play cannot leave wake word off.
+    await test('push audio pauses wake word and every end path restores it', () => {
+        const h = appSrc.indexOf('async _handleProactiveMessage(data)');
+        const handler = appSrc.slice(h, appSrc.indexOf('async sendMessage(', h));
+        assert.match(handler, /_pushWakeGuard\(\)\.pause\(\)[\s\S]*try \{[\s\S]*this\.playAudio\(data\.audio[\s\S]*\} finally \{[\s\S]*_pushWake\.resume\(\)/,
+            'push playback must pause wake word and restore it in a finally');
+        const g = handler.slice(handler.indexOf('_pushWakeGuard() {'));
+        assert.match(g, /new PushWakeGuard\(/);
+        assert.match(g, /getDetector:\s*\(\)\s*=>\s*window\.wakeDetector/, 'must reuse the existing detector');
+        assert.match(g, /inCall:[^\n]*_voiceActive/);
+        assert.match(g, /pttActive:[^\n]*pttMode/);
+        const pn = appSrc.indexOf('async playNextAudio()', appSrc.indexOf("playAudio(base64Audio, format = 'wav')"));
+        assert.match(appSrc.slice(pn, pn + 5000), /Truly done[\s\S]{0,300}try \{[\s\S]{0,200}onListening\(\)[\s\S]{0,200}\} finally \{[\s\S]{0,240}_pushWake\?\.resume\(\)/,
+            'the drained queue must restore wake word even if onListening throws');
+        const sa = appSrc.indexOf('stopAudio() {', pn);
+        assert.match(appSrc.slice(sa, appSrc.indexOf('base64ToBlob(', sa)), /_pushWake\?\.resume\(\)/,
+            'stopAudio must restore wake word (HTMLAudio never fires onended after pause)');
+        const sv = appSrc.indexOf('// Stop wake word detector before starting STT');
+        assert.match(appSrc.slice(sv, sv + 600), /_pushWake\?\.takeOver\(\)\)\s*\{[\s\S]{0,120}restartWakeAfter = true/,
+            'a call started during push audio must take over the restart');
+        const tw = appSrc.indexOf('window.toggleWakeWord = async function()');
+        assert.match(appSrc.slice(tw, tw + 700), /_pushWake\?\.takeOver\(\)[\s\S]{0,80}wakeDetector\.toggle\(\)/,
+            "the user's own toggle must win over the pause");
+        assert.strictEqual((appSrc.match(/new (?:\w*)WakeWordDetector\(/g) || []).length, 4,
+            'no new wake-word detector may be constructed');
+        assert.doesNotMatch(appSrc, /new\s+(?:window\.)?(?:webkit)?SpeechRecognition\(/);
     });
 
     await test('no browser storage in the push channel', () => {
@@ -294,6 +326,80 @@ function harness(m, extra = {}) {
             const h = harness(m);
             h.ch.start(); h.ch.start(); await flush();
             assert.strictEqual(FakeWS.all.length, 1);
+        });
+
+
+        // ---- PushWakeGuard -------------------------------------------------
+        class FakeDetector {
+            constructor(listening = true) { this.isListening = listening; this.stops = 0; this.starts = 0; this.fail = false; }
+            isSupported() { return true; }
+            stop() { this.stops++; this.isListening = false; }
+            start() { this.starts++; if (this.fail) throw new Error('start failed'); this.isListening = true; return Promise.resolve(true); }
+        }
+        function guard(over = {}) {
+            const st = { wd: new FakeDetector(), call: false, ptt: false, ptoTakeover: 0, timers: [], cleared: [] };
+            const g = new m.PushWakeGuard({
+                getDetector: () => st.wd,
+                inCall: () => st.call,
+                pttActive: () => st.ptt,
+                onPttTakeover: () => { st.ptoTakeover++; },
+                setTimer: (fn, ms) => { st.timers.push({ fn, ms }); return st.timers.length; },
+                clearTimer: (id) => st.cleared.push(id),
+                ...over,
+            });
+            return { g, st };
+        }
+
+        await test('wake guard: stops a listening detector outside a call, restarts it after', () => {
+            assert.ok(m.PushWakeGuard, 'pushChannel.js exports no PushWakeGuard');
+            const { g, st } = guard();
+            assert.strictEqual(g.pause(), true);
+            assert.strictEqual(st.wd.stops, 1);
+            assert.strictEqual(st.wd.isListening, false);
+            assert.strictEqual(g.pause(), true, 'a second push while paused');
+            assert.strictEqual(st.wd.stops, 1, 'stop() only once');
+            g.resume();
+            assert.strictEqual(st.wd.starts, 1);
+            g.resume(); g.resume();
+            assert.strictEqual(st.wd.starts, 1, 'resume is idempotent');
+        });
+
+        await test('wake guard: leaves the detector alone in a call or when it was off', () => {
+            const a = guard(); a.st.call = true;
+            assert.strictEqual(a.g.pause(), false);
+            assert.strictEqual(a.st.wd.stops, 0);
+            const b = guard(); b.st.wd.isListening = false;
+            assert.strictEqual(b.g.pause(), false);
+            b.g.resume();
+            assert.strictEqual(b.st.wd.starts, 0, 'never starts a detector it did not stop');
+        });
+
+        await test('wake guard: no restart when a call started, PTT came on, or the user toggled', () => {
+            const a = guard(); a.g.pause(); a.st.call = true; a.g.resume();
+            assert.strictEqual(a.st.wd.starts, 0, 'a call owns the detector now');
+            const b = guard(); b.g.pause(); b.st.ptt = true; b.g.resume();
+            assert.strictEqual(b.st.wd.starts, 0, 'PTT keeps wake word off');
+            assert.strictEqual(b.st.ptoTakeover, 1, 'PTT-off must be told to restore it');
+            const c = guard(); c.g.pause();
+            assert.strictEqual(c.g.takeOver(), true);
+            c.g.resume();
+            assert.strictEqual(c.st.wd.starts, 0, "the user's toggle wins");
+            const d = guard(); d.g.pause(); d.st.wd.isListening = true; d.g.resume();
+            assert.strictEqual(d.st.wd.starts, 0, 'already listening again');
+        });
+
+        await test('wake guard: a failing start() does not throw, and a hard cap restores it', () => {
+            const a = guard(); a.g.pause(); a.st.wd.fail = true;
+            a.g.resume();
+            assert.strictEqual(a.st.wd.starts, 1);
+            const b = guard({ maxPauseMs: 1234 });
+            b.g.pause();
+            assert.strictEqual(b.st.timers.length, 1);
+            assert.strictEqual(b.st.timers[0].ms, 1234);
+            b.st.timers[0].fn();
+            assert.strictEqual(b.st.wd.starts, 1, 'the cap restarts it if playback never reported its end');
+            const c = guard(); c.g.pause(); c.g.resume();
+            assert.deepStrictEqual(c.st.cleared, [1], 'a normal resume clears the cap');
         });
 
         await test('deduper: same id once, no id always, bounded', () => {
