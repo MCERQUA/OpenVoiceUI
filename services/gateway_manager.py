@@ -126,7 +126,14 @@ class GatewayManager:
             event_queue.put({'type': 'error', 'error': err})
             return
 
-        gw.stream_to_queue(event_queue, message, session_key, captured_actions, **kwargs)
+        # Per-turn speaker goes out of band (services.gateways.base.get_turn_speaker), never as a
+        # kwarg: gateways that do not take **kwargs keep working unchanged.
+        from services.gateways.base import _TURN_SPEAKER
+        _tok = _TURN_SPEAKER.set(kwargs.pop('speaker', None))
+        try:
+            gw.stream_to_queue(event_queue, message, session_key, captured_actions, **kwargs)
+        finally:
+            _TURN_SPEAKER.reset(_tok)
 
     def ask(self, gateway_id: str, message: str, session_key: str) -> str:
         """

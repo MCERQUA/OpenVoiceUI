@@ -2260,6 +2260,11 @@ def _conversation_inner():
     # a given Clerk user — they used to repeat ~300-800 chars on EVERY turn
     # (the exact accumulation PR #297 was called out for in issue #94). A user
     # switch or briefing change flips the static-blob hash → full resend.
+    # Per-turn speaker (2026-11-14): the [CURRENT_USER] tag above is STATIC (deduped), so most turns
+    # carry no identity text at all. Gateways get WHO is logged in for THIS request out of band
+    # (gateway_manager.stream_to_queue(speaker=...) -> services.gateways.base.get_turn_speaker()).
+    # Fails closed: no Clerk id -> clerk_id None, and a gateway must not assume the owner.
+    _turn_speaker = {'clerk_id': None, 'name': '', 'role': '', 'tenant': None, 'home_tenant': None}
     try:
         from flask import g as _flask_g
         from services.identity import get_current_user_tag as _get_current_user_tag
@@ -2268,9 +2273,14 @@ def _conversation_inner():
         _user_tag = _get_current_user_tag(_clerk_uid, _tenant)
         try:
             from services.identity import resolve as _resolve_identity
-            _current_user_name = ((_resolve_identity(_clerk_uid) or {}).get('name') or '').strip()
+            _ident = (_resolve_identity(_clerk_uid) or {}) if _clerk_uid else {}
+            _current_user_name = (_ident.get('name') or '').strip()
         except Exception:
+            _ident = {}
             _current_user_name = ''
+        _turn_speaker = {'clerk_id': _clerk_uid or None, 'name': _current_user_name,
+                         'role': (_ident.get('role') or '') if _clerk_uid else '',
+                         'tenant': _tenant, 'home_tenant': _ident.get('tenant') or None}
         if _user_tag:
             static_parts.append(_user_tag)
             logger.info(f'### CURRENT_USER injected: clerk_uid={_clerk_uid} tenant={_tenant}')
@@ -2586,6 +2596,7 @@ def _conversation_inner():
                     event_queue, _msg, _session_key, captured_actions,
                     gateway_id=gateway_id,
                     agent_id=agent_id,
+                    speaker=_turn_speaker,
                 )
 
             t_llm_start = time.time()
@@ -3272,6 +3283,7 @@ def _conversation_inner():
                                         _session_key, captured_actions,
                                         gateway_id=gateway_id,
                                         agent_id=agent_id,
+                                        speaker=_turn_speaker,
                                     )
                                 continue_thread = threading.Thread(
                                     target=_continue_gateway, daemon=True,
@@ -3317,6 +3329,7 @@ def _conversation_inner():
                                             _session_key, captured_actions,
                                             gateway_id=gateway_id,
                                             agent_id=agent_id,
+                                            speaker=_turn_speaker,
                                         )
                                     refire_thread = threading.Thread(
                                         target=_refire_gateway, daemon=True,
@@ -3415,6 +3428,7 @@ def _conversation_inner():
                                         _retry_key, captured_actions,
                                         gateway_id=gateway_id,
                                         agent_id=agent_id,
+                                        speaker=_turn_speaker,
                                     )
                                 retry_thread = threading.Thread(
                                     target=_retry_gateway, daemon=True
