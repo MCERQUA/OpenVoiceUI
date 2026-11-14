@@ -149,7 +149,10 @@ def test_push_route_exists_and_is_not_a_public_path():
     assert "clerk_user_id" in handler, "the push socket must require an owner session"
     # /ws/clawdbot self-authenticates and is listed as public; /ws/push relies on
     # require_auth, so it must NOT be in the public list.
-    assert "'/ws/push'" not in APP_PY.read_text()
+    public = re.search(r"(?<![A-Z_])_PUBLIC_EXACT = \{(.*?)\n\s*\}", APP_PY.read_text(), re.S)
+    assert public, "app.py has no _PUBLIC_EXACT"
+    assert "'/ws/clawdbot'" in public.group(1), "regex no longer finds the public list"
+    assert "'/ws/push'" not in public.group(1)
 
 
 def test_visible_tab_gets_the_push_and_counts_as_delivered(tmp_path):
