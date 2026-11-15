@@ -47,6 +47,7 @@ _NAMES = {
     "_register_push_client", "_unregister_push_client", "_push_queue_for",
     "_note_push_client_session", "_set_push_client_visible",
     "_serve_push_socket", "push_proactive_message", "_write_push_receipt",
+    "_push_tts_args",
 }
 
 
@@ -67,7 +68,7 @@ def _load(receipt_path):
         "json": json, "re": re, "time": time, "queue": queue, "uuid": uuid, "os": os,
         "threading": threading, "datetime": datetime, "Path": Path,
         "logger": logging.getLogger("test-push-socket"),
-        "_generate_tts_b64": lambda text, voice=None: "QVVESU8=",
+        "_generate_tts_b64": lambda text, voice=None, **kw: "QVVESU8=",
     }
     exec(compile(ast.Module(body=body, type_ignores=[]), str(SERVER_PY), "exec"), ns)
     ns["_PUSH_RECEIPT_PATH"] = receipt_path
