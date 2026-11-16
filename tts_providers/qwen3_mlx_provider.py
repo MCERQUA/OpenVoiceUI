@@ -24,6 +24,17 @@ What this provider guarantees:
     A health read that times out on an OPEN port marks the host BUSY: it keeps
     the voices it last reported and is tried after the free hosts. Only a
     refused/unreachable connection marks it DOWN.
+  * STICKY DEMOTION (voice-assets DECISIONS 2026-11-09: "no real line pays to
+    find out if a dead primary is back"). A REAL line that gets no audio from a
+    host (first-byte timeout, or the connection is accepted and closes/drops
+    before any audio) demotes that host for real lines. A demoted host is not
+    health-checked or asked on the reply path, so with one host the reply goes
+    straight to the fallback with no added silence. An OFF-PATH recheck (a
+    background thread, every QWEN_MLX_TTS_RECHECK_S) asks it for a short line,
+    waits for the first audio byte, then aborts; that proof of speech restores
+    it. A bare /health or TCP connect is not proof. A BUSY reading from a /health
+    that hangs while the shared generator works is NOT a demotion: that host
+    stays tryable (the normal shared-generator case).
   * VOICE PRE-CHECK. A host is only asked for a voice its /health listed. A
     voice no reachable host serves raises TTSVoiceNotFoundError, which
     services/tts.py treats as "fall back now" — the servers have no
@@ -58,6 +69,9 @@ profile edit can neither add a host nor widen the voice list):
   QWEN_MLX_TTS_HEALTH_TIMEOUT seconds for a /health read (default 2)
   QWEN_MLX_TTS_CONNECT_TIMEOUT seconds for a TCP connect (default 2)
   QWEN_MLX_TTS_LOCK_TIMEOUT   max seconds to wait for the in-flight slot (default 30, capped by the budget)
+  QWEN_MLX_TTS_DEMOTE_AFTER   consecutive real-line no-audio failures that demote a host (default 1, min 1)
+  QWEN_MLX_TTS_RECHECK_S      seconds between off-path rechecks of a demoted host (default 30)
+  QWEN_MLX_TTS_RECHECK_TEXT   the short line a recheck asks for (default "Checking in.")
   QWEN_MLX_TTS_TOKEN_FILE     optional: file holding a bearer token sent as Authorization on every call
   QWEN_MLX_TTS_TOKEN          optional: the bearer token itself (used when no _FILE is set)
                               Neither set = no Authorization header (the tailnet stream servers take none).
@@ -108,12 +122,21 @@ _INFLIGHT = threading.Lock()
 # The last generate_speech() outcome, for the shadow check (logs + get_info()).
 _LAST: Dict[str, Any] = {}
 
+# Sticky demotion (guarded by _HEALTH_LOCK).
+# base url -> {"since", "reason", "voice", "rechecks", "token"}; a host listed here is
+# never health-checked or asked on a reply's path until an off-path recheck restores it.
+_DEMOTED: Dict[str, Dict[str, Any]] = {}
+# base url -> consecutive real-line no-audio failures (reset by any real success)
+_NOAUDIO_FAILS: Dict[str, int] = {}
+
 
 def reset_state() -> None:
     """Forget every cached health reading and the last outcome (tests, config change)."""
     with _HEALTH_LOCK:
         _HEALTH.clear()
         _LAST.clear()
+        _DEMOTED.clear()          # a running recheck thread sees its token gone and exits
+        _NOAUDIO_FAILS.clear()
 
 
 # ── configuration helpers (read live so an env change is honoured) ───────────
@@ -305,18 +328,24 @@ def _any_host_ok() -> bool:
 class _HostFailure(Exception):
     """One host could not serve one sentence. `kind` steers the host's health state."""
 
-    def __init__(self, kind: str, msg: str):
+    def __init__(self, kind: str, msg: str, no_audio: bool = False):
         super().__init__(msg)
         self.kind = kind  # down | busy | voice | http | stream
+        # True when the host ACCEPTED the connection and gave no audio at all
+        # (first-byte timeout, empty body, dropped before audio): the wedged case.
+        self.no_audio = no_audio
 
 
 def _stream_once(base: str, sentence: str, voice: str, first_byte_ms: int,
-                 deadline: float) -> Tuple[bytes, int, int]:
+                 deadline: float, stop_after_first: bool = False,
+                 purpose: Optional[str] = None) -> Tuple[bytes, int, int]:
     """POST one sentence to one host. Returns (pcm, sample_rate, first_byte_ms).
 
     Raw http.client so the socket timeout can move between phases: connect,
     then the first-byte deadline (headers AND the first audio byte), then a
     rolling between-reads timeout, all clipped to the sentence deadline.
+    stop_after_first: return as soon as the first audio arrives and close the
+    connection (the off-path recheck: proof of speech, audio discarded).
     """
     parts = urlsplit(base)
     port = parts.port or (443 if parts.scheme == "https" else 80)
@@ -330,7 +359,7 @@ def _stream_once(base: str, sentence: str, voice: str, first_byte_ms: int,
     headers = {
         "Content-Type": "application/json",
         "X-Caller": os.getenv("QWEN_MLX_TTS_CALLER", "openvoiceui"),
-        "X-Purpose": os.getenv("QWEN_MLX_TTS_PURPOSE", "voice"),
+        "X-Purpose": purpose or os.getenv("QWEN_MLX_TTS_PURPOSE", "voice"),
         "Content-Length": str(len(body)),
         **_auth_headers(),
     }
@@ -354,9 +383,10 @@ def _stream_once(base: str, sentence: str, voice: str, first_byte_ms: int,
             conn.request("POST", path, body=body, headers=headers)
             resp = conn.getresponse()
         except socket.timeout as e:
-            raise _HostFailure("busy", f"no response within first-byte timeout {first_byte_ms}ms") from e
+            raise _HostFailure("busy", f"no response within first-byte timeout {first_byte_ms}ms",
+                               no_audio=True) from e
         except (OSError, http.client.HTTPException) as e:
-            raise _HostFailure("stream", f"request failed: {type(e).__name__}") from e
+            raise _HostFailure("stream", f"request failed: {type(e).__name__}", no_audio=True) from e
 
         if resp.status != 200:
             try:
@@ -386,24 +416,29 @@ def _stream_once(base: str, sentence: str, voice: str, first_byte_ms: int,
             left = _left(until)
             if left <= 0:
                 if first_ms is None:
-                    raise _HostFailure("busy", f"no audio within first-byte timeout {first_byte_ms}ms")
+                    raise _HostFailure("busy", f"no audio within first-byte timeout {first_byte_ms}ms",
+                                       no_audio=True)
                 raise _HostFailure("stream", "sentence budget exhausted mid-stream")
             try:
                 sock.settimeout(max(0.05, left))
                 part = resp.read1(65536)
             except socket.timeout as e:
                 if first_ms is None:
-                    raise _HostFailure("busy", f"no audio within first-byte timeout {first_byte_ms}ms") from e
+                    raise _HostFailure("busy", f"no audio within first-byte timeout {first_byte_ms}ms",
+                                       no_audio=True) from e
                 raise _HostFailure("stream", "audio stream stalled") from e
             except (OSError, http.client.HTTPException) as e:
-                raise _HostFailure("stream", f"stream broke: {type(e).__name__}") from e
+                raise _HostFailure("stream", f"stream broke: {type(e).__name__}",
+                                   no_audio=first_ms is None) from e
             if not part:
                 break
             if first_ms is None:
                 first_ms = int((time.monotonic() - t0) * 1000)
             buf.extend(part)
+            if stop_after_first:
+                break
         if not buf:
-            raise _HostFailure("stream", "empty audio response")
+            raise _HostFailure("stream", "empty audio response", no_audio=True)
         if len(buf) % 2:
             buf = buf[:-1]  # s16le: drop a dangling half-sample
         return bytes(buf), rate, first_ms or 0
@@ -412,6 +447,99 @@ def _stream_once(base: str, sentence: str, voice: str, first_byte_ms: int,
             conn.close()
         except Exception:
             pass
+
+
+# ── sticky demotion + off-path recheck ───────────────────────────────────────
+
+def is_demoted(base: str) -> bool:
+    with _HEALTH_LOCK:
+        return base in _DEMOTED
+
+
+def demoted_hosts() -> Dict[str, Dict[str, Any]]:
+    """Copy of the demotion table (no thread token)."""
+    with _HEALTH_LOCK:
+        return {b: {k: v for k, v in d.items() if k != "token"} for b, d in _DEMOTED.items()}
+
+
+def _note_real_success(base: str) -> None:
+    with _HEALTH_LOCK:
+        _NOAUDIO_FAILS.pop(base, None)
+
+
+def _note_real_no_audio(base: str, voice: str, reason: str) -> bool:
+    """A REAL line got no audio from `base`. Demote it once the count reaches
+    QWEN_MLX_TTS_DEMOTE_AFTER. Returns True when the host is (now) demoted."""
+    after = max(1, int(_float_env("QWEN_MLX_TTS_DEMOTE_AFTER", 1)))
+    with _HEALTH_LOCK:
+        n = _NOAUDIO_FAILS.get(base, 0) + 1
+        _NOAUDIO_FAILS[base] = n
+        if n < after:
+            return False
+        if base in _DEMOTED:
+            _DEMOTED[base]["reason"] = reason
+            return True
+        token = object()
+        _DEMOTED[base] = {"since": time.time(), "reason": reason, "voice": voice,
+                          "rechecks": 0, "token": token}
+    logger.warning(f"[Qwen3Mlx] host DEMOTED for real lines (sticky until an off-path recheck "
+                   f"speaks): {base}: {reason}")
+    threading.Thread(target=_recheck_loop, args=(base, token), daemon=True,
+                     name="qwen3-mlx-recheck").start()
+    return True
+
+
+def recheck_host(base: str) -> bool:
+    """One off-path proof of speech for a demoted host: a short line, wait for the
+    first AUDIO byte, then abort (audio discarded). Success restores the host for
+    real lines. Never called on a reply's path. Returns True when the host is
+    usable afterwards (restored, or was not demoted)."""
+    with _HEALTH_LOCK:
+        d = _DEMOTED.get(base)
+        if d is None:
+            return True
+        voice = d["voice"]
+        d["rechecks"] += 1
+    fb = next((ms for b, ms in stream_hosts() if b == base), None)
+    if fb is None:  # no longer configured: nothing to restore
+        with _HEALTH_LOCK:
+            _DEMOTED.pop(base, None)
+            _NOAUDIO_FAILS.pop(base, None)
+        return True
+    text = os.getenv("QWEN_MLX_TTS_RECHECK_TEXT", "").strip() or "Checking in."
+    deadline = time.monotonic() + fb / 1000.0 + _float_env("QWEN_MLX_TTS_CONNECT_TIMEOUT", 2.0)
+    try:
+        _, _, first_ms = _stream_once(base, text, voice, fb, deadline,
+                                      stop_after_first=True, purpose="recheck")
+    except _HostFailure as f:
+        with _HEALTH_LOCK:
+            if base in _DEMOTED:
+                _DEMOTED[base]["last_recheck"] = str(f)[:200]
+        logger.info(f"[Qwen3Mlx] recheck: {base} still cannot speak ({f}); stays demoted")
+        return False
+    with _HEALTH_LOCK:
+        _DEMOTED.pop(base, None)
+        _NOAUDIO_FAILS.pop(base, None)
+    logger.warning(f"[Qwen3Mlx] host RESTORED for real lines: {base} spoke on recheck "
+                   f"(first audio {first_ms}ms)")
+    return True
+
+
+def _recheck_loop(base: str, token: object) -> None:
+    """Background: recheck `base` every QWEN_MLX_TTS_RECHECK_S until it speaks or
+    this demotion is gone (restored, reset_state(), re-demoted under a new token)."""
+    pause = threading.Event()   # Event.wait, not time.sleep: never shares a patched sleep
+    while True:
+        pause.wait(max(0.05, _float_env("QWEN_MLX_TTS_RECHECK_S", 30.0)))
+        with _HEALTH_LOCK:
+            d = _DEMOTED.get(base)
+            if d is None or d.get("token") is not token:
+                return
+        try:
+            if recheck_host(base):
+                return
+        except Exception as e:  # noqa: BLE001 — a recheck bug must not kill the loop silently
+            logger.error(f"[Qwen3Mlx] recheck of {base} raised {type(e).__name__}: {e}")
 
 
 class Qwen3MlxProvider(TTSProvider):
@@ -425,12 +553,16 @@ class Qwen3MlxProvider(TTSProvider):
 
     def _hosts_for(self, voice: str) -> List[Tuple[str, int]]:
         """Hosts that may serve `voice`: free ones first, then busy ones (by their
-        last-known voice list). Raises when none can."""
+        last-known voice list). A DEMOTED host is skipped without a health read
+        (that read could itself hang). Raises when none can."""
         hosts = stream_hosts()
         if not hosts:
             raise TTSConfigurationError(PROVIDER_ID, "no stream host set (QWEN_MLX_TTS_URLS / QWEN_MLX_TTS_URL)")
-        free, busy, misses, errors = [], [], [], []
+        free, busy, misses, errors, demoted = [], [], [], [], []
         for base, fb in hosts:
+            if is_demoted(base):
+                demoted.append(base)
+                continue
             st = check_health(base)
             if st["state"] in ("ok", "busy"):
                 if voice in (st.get("voices") or []):
@@ -441,6 +573,10 @@ class Qwen3MlxProvider(TTSProvider):
                 errors.append(f"{base}: {st.get('error')}")
         if free or busy:
             return free + busy
+        if demoted:
+            raise TTSGenerationError(
+                PROVIDER_ID, f"{len(demoted)} stream host(s) demoted after a no-audio real line; "
+                             "sticky fallback until an off-path recheck speaks")
         if misses:
             raise TTSVoiceNotFoundError(
                 PROVIDER_ID, f"voice {voice!r} is not served by any reachable stream host")
@@ -451,14 +587,20 @@ class Qwen3MlxProvider(TTSProvider):
         """One sentence, trying each host in turn until `deadline` (time.monotonic())."""
         failures = []
         for base, fb in hosts:
+            if is_demoted(base):   # demoted by an earlier sentence of this reply
+                failures.append(f"{base}: demoted")
+                continue
             if deadline - time.monotonic() <= 0.05:
                 failures.append("budget exhausted")
                 break
             try:
                 pcm, rate, first_ms = _stream_once(base, sentence, voice, fb, deadline)
+                _note_real_success(base)
                 return pcm, rate, first_ms, base
             except _HostFailure as f:
                 failures.append(f"{base}: {f}")
+                if f.no_audio:
+                    _note_real_no_audio(base, voice, str(f))
                 if f.kind == "down":
                     _set_health(base, state="down", error=str(f))
                 elif f.kind == "busy":
@@ -586,7 +728,8 @@ class Qwen3MlxProvider(TTSProvider):
             "audio_format": "wav",
             "sample_rate": DEFAULT_SAMPLE_RATE,
             # Host URLs (tailnet addresses) stay in the server log; the UI sees order + state.
-            "hosts": [{"n": i + 1, "first_byte_ms": fb, "state": states[b]["state"]}
+            "hosts": [{"n": i + 1, "first_byte_ms": fb,
+                       "state": "demoted" if is_demoted(b) else states[b]["state"]}
                       for i, (b, fb) in enumerate(hosts)],
             "model": next((s.get("model") for s in states.values() if s.get("model")), None),
             "last": {k: (v if k != "host" else next((i + 1 for i, (b, _) in enumerate(hosts) if b == v), None))

@@ -20,13 +20,19 @@ import pytest
 SAMPLE = struct.pack("<h", 1234)
 
 
+def _pause(seconds):
+    """The fake hosts wait with Event.wait, not time.sleep: _spy() patches time.sleep
+    (no-retry guard) and a fake host must not die of that guard."""
+    threading.Event().wait(seconds)
+
+
 def _make_host(**cfg):
     """Start one fake stream host. cfg keys:
     voices, rate (None = no X-Sample-Rate), ctype (None = no Content-Type),
     header_delay, body_delay, stall_after_first, health_delay, chunks, odd_tail, status
     """
     state = {"posts": [], "health_gets": 0}
-    c = {"voices": ["char-a", "char-b", "realperson-x"], "rate": 24000, "ctype": "audio/pcm",
+    c = state["cfg"] = {"voices": ["char-a", "char-b", "realperson-x"], "rate": 24000, "ctype": "audio/pcm",
          "header_delay": 0.0, "body_delay": 0.0, "stall_after_first": 0.0, "health_delay": 0.0,
          "chunks": 3, "odd_tail": False, "status": 200}
     c.update(cfg)
@@ -42,7 +48,7 @@ def _make_host(**cfg):
             if self.path != "/health":
                 self.send_response(404); self.send_header("Content-Length", "0"); self.end_headers(); return
             if c["health_delay"]:
-                time.sleep(c["health_delay"])
+                _pause(c["health_delay"])
             body = json.dumps({"ok": True, "model": "fake", "loaded": True, "voices": c["voices"]}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -55,7 +61,7 @@ def _make_host(**cfg):
             req = json.loads(self.rfile.read(n) or b"{}")
             state["posts"].append((self.path, req, {k.lower(): v for k, v in self.headers.items()}))
             if c["header_delay"]:
-                time.sleep(c["header_delay"])
+                _pause(c["header_delay"])
             if c["status"] != 200:
                 msg = b"unknown voice"
                 self.send_response(c["status"])
@@ -73,7 +79,7 @@ def _make_host(**cfg):
             self.end_headers()
             self.wfile.flush()
             if c["body_delay"]:
-                time.sleep(c["body_delay"])
+                _pause(c["body_delay"])
             try:
                 for i in range(c["chunks"]):
                     payload = SAMPLE * 100
@@ -82,7 +88,7 @@ def _make_host(**cfg):
                     self.wfile.write(f"{len(payload):x}\r\n".encode() + payload + b"\r\n")
                     self.wfile.flush()
                     if i == 0 and c["stall_after_first"]:
-                        time.sleep(c["stall_after_first"])
+                        _pause(c["stall_after_first"])
                 self.wfile.write(b"0\r\n\r\n")
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
@@ -333,6 +339,134 @@ def test_busy_host_is_still_tried_with_its_last_known_voices(env):
     m._set_health(url, state="busy", error="simulated")  # mid-generation: health hangs
     _provider().generate_speech(LINE, voice="char-a")
     assert len(st["posts"]) == 1
+
+
+# ── sticky demotion (voice-assets DECISIONS 2026-11-09) ─────────────────────
+
+def test_wedged_host_costs_one_real_line_then_replies_go_straight_to_fallback(env):
+    """Accepts the connection, never sends audio: the first real line pays the
+    first-byte timeout once; the next line pays ~0 ms and is spoken by the fallback,
+    with no POST and no /health read on the wedged host."""
+    import services.tts as tts
+    from tts_providers import qwen3_mlx_provider as m
+    mp, host = env
+    mp.setenv("QWEN_MLX_TTS_RECHECK_S", "60")          # no recheck inside this test
+    url, st = host(header_delay=3.0)                   # wedged: never answers the stream
+    _urls(mp, (url, 300))
+    seen = _spy(mp, tts)
+    mp.setattr(tts, "_profile_fallback", lambda p, v: ("groq", "austin"))
+
+    t = time.monotonic()
+    out1 = tts.generate_tts_b64(LINE, voice="char-a", tts_provider="qwen3-mlx", fallback_state={})
+    first = time.monotonic() - t
+    assert base64.b64decode(out1) == b"RIFF-fallback-groq"
+    assert 0.25 <= first < 1.5                         # paid the first-byte timeout, once
+    assert m.is_demoted(url)
+    posts, gets = len(st["posts"]), st["health_gets"]
+
+    t = time.monotonic()
+    out2 = tts.generate_tts_b64(LINE, voice="char-a", tts_provider="qwen3-mlx", fallback_state={})
+    second = time.monotonic() - t
+    assert base64.b64decode(out2) == b"RIFF-fallback-groq"
+    assert second < 0.1                                # no silence added on the next reply
+    assert len(st["posts"]) == posts and st["health_gets"] == gets
+    assert seen[-1] == ("groq", "austin")
+    assert _provider().get_info()["hosts"][0]["state"] == "demoted"
+
+
+def test_empty_200_counts_as_no_audio_and_demotes(env):
+    from tts_providers import qwen3_mlx_provider as m
+    from tts_providers.base_provider import TTSGenerationError
+    mp, host = env
+    mp.setenv("QWEN_MLX_TTS_RECHECK_S", "60")
+    url, _ = host(chunks=0)                            # connect OK, 200, zero audio
+    _urls(mp, (url, 2000))
+    with pytest.raises(TTSGenerationError, match="empty audio"):
+        _provider().generate_speech(LINE, voice="char-a")
+    assert m.is_demoted(url)
+
+
+def test_demote_after_knob_counts_consecutive_no_audio_lines(env):
+    from tts_providers import qwen3_mlx_provider as m
+    from tts_providers.base_provider import TTSGenerationError
+    mp, host = env
+    mp.setenv("QWEN_MLX_TTS_RECHECK_S", "60")
+    mp.setenv("QWEN_MLX_TTS_DEMOTE_AFTER", "2")
+    url, st = host(header_delay=3.0)
+    _urls(mp, (url, 200))
+    with pytest.raises(TTSGenerationError):
+        _provider().generate_speech(LINE, voice="char-a")
+    assert not m.is_demoted(url)                       # one failure < 2
+    with pytest.raises(TTSGenerationError):
+        _provider().generate_speech(LINE, voice="char-a")
+    assert m.is_demoted(url)
+    assert len(st["posts"]) == 2
+
+
+def test_offpath_recheck_restores_the_host_only_after_it_speaks(env):
+    from tts_providers import qwen3_mlx_provider as m
+    from tts_providers.base_provider import TTSGenerationError
+    mp, host = env
+    mp.setenv("QWEN_MLX_TTS_RECHECK_S", "0.15")
+    url, st = host(header_delay=3.0)
+    _urls(mp, (url, 300))
+    with pytest.raises(TTSGenerationError):
+        _provider().generate_speech(LINE, voice="char-a")
+    assert m.is_demoted(url)
+
+    # still wedged: background rechecks fail and the host stays demoted
+    end = time.monotonic() + 3.0
+    while time.monotonic() < end and not any(h.get("x-purpose") == "recheck" for _, _, h in st["posts"]):
+        time.sleep(0.05)
+    rechecks = [p for p in st["posts"] if p[2].get("x-purpose") == "recheck"]
+    assert rechecks and rechecks[0][1]["voice"] == "char-a"
+    time.sleep(0.4)
+    assert m.is_demoted(url)
+
+    st["cfg"]["header_delay"] = 0.0                    # the host can speak again
+    end = time.monotonic() + 3.0
+    while time.monotonic() < end and m.is_demoted(url):
+        time.sleep(0.05)
+    assert not m.is_demoted(url)                       # restored by the off-path recheck
+
+    real_before = len([p for p in st["posts"] if p[2].get("x-purpose") != "recheck"])
+    _provider().generate_speech(LINE, voice="char-a")  # a real line is served by the host again
+    real_after = len([p for p in st["posts"] if p[2].get("x-purpose") != "recheck"])
+    assert real_after == real_before + 1 and m._LAST["host"] == url
+
+
+def test_hanging_health_busy_host_stays_tryable_and_is_not_demoted(env):
+    """The normal shared-generator case: /health hangs while the bot generates.
+    That BUSY reading must not demote; the host is still asked and serves the line."""
+    from tts_providers import qwen3_mlx_provider as m
+    mp, host = env
+    mp.setenv("QWEN_MLX_TTS_RECHECK_S", "60")
+    url, st = host()
+    _urls(mp, (url, 2000))
+    assert m.check_health(url)["state"] == "ok"        # voices learned
+    st["cfg"]["health_delay"] = 1.0                    # now /health hangs past the 0.3 s read
+    m._HEALTH[url]["checked_at"] = 0.0                 # cache expired: the reply re-reads health
+    for _ in range(2):
+        _provider().generate_speech(LINE, voice="char-a")
+        assert m._HEALTH[url]["state"] == "busy"
+        assert not m.is_demoted(url)
+        m._HEALTH[url]["checked_at"] = 0.0
+    assert len(st["posts"]) == 2 and m._LAST["host"] == url
+
+
+def test_demoted_host_is_skipped_and_second_host_serves_without_delay(env):
+    from tts_providers import qwen3_mlx_provider as m
+    mp, host = env
+    mp.setenv("QWEN_MLX_TTS_RECHECK_S", "60")
+    wedged, w_st = host(header_delay=3.0)
+    good, g_st = host()
+    _urls(mp, (wedged, 300), (good, 2000))
+    _provider().generate_speech(LINE, voice="char-a")  # pays 300 ms once, served by `good`
+    assert m.is_demoted(wedged) and m._LAST["host"] == good
+    t = time.monotonic()
+    _provider().generate_speech(LINE, voice="char-a")
+    assert time.monotonic() - t < 0.5
+    assert len(w_st["posts"]) == 1 and len(g_st["posts"]) == 2
 
 
 # ── voice pre-check ──────────────────────────────────────────────────────────
