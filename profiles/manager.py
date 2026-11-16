@@ -60,6 +60,10 @@ class VoiceConfig:
     parallel_sentences: Optional[bool] = None
     min_sentence_chars: Optional[int] = None
     inter_sentence_gap_ms: Optional[int] = None
+    # Opt-in: the engine + voice to speak with when tts_provider fails for this
+    # profile (e.g. the tailnet stream host is down). Unset = the global chain.
+    fallback_provider: Optional[str] = None
+    fallback_voice: Optional[str] = None
 
 
 @dataclass
@@ -342,6 +346,10 @@ class ProfileManager:
             mismatch = voice_mismatch(voice.get("tts_provider"), voice.get("voice_id"))
             if mismatch:
                 errors.append(f"voice.voice_id: {mismatch}")
+            if voice.get("fallback_provider"):
+                fb_mismatch = voice_mismatch(voice.get("fallback_provider"), voice.get("fallback_voice"))
+                if fb_mismatch:
+                    errors.append(f"voice.fallback_voice: {fb_mismatch}")
 
         return errors
 
@@ -370,6 +378,11 @@ class ProfileManager:
         mismatch = voice_mismatch(merged_voice.get("tts_provider"), merged_voice.get("voice_id"))
         if mismatch:
             raise ValueError(mismatch)
+        if merged_voice.get("fallback_provider"):
+            fb_mismatch = voice_mismatch(merged_voice.get("fallback_provider"),
+                                         merged_voice.get("fallback_voice"))
+            if fb_mismatch:
+                raise ValueError(f"fallback: {fb_mismatch}")
 
         updated = Profile.from_dict(base)
         self.save_profile(updated)

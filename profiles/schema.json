@@ -188,6 +188,22 @@
           "maximum": 2000,
           "default": null,
           "description": "Silence between TTS audio chunks in playback. null = no gap. Future hook \u2014 not yet wired in frontend."
+        },
+        "fallback_provider": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Opt-in: TTS provider id to speak with when tts_provider fails for this profile (e.g. the tailnet stream host is down or lacks the voice). Tried before the global chain in config/tts-fallback.json. null = chain only."
+        },
+        "fallback_voice": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Voice id on fallback_provider. null = the chain's same-gender mapping."
         }
       }
     },

@@ -81,7 +81,7 @@ def node(monkeypatch):
 
 def _reset_health():
     from tts_providers import qwen3_mlx_provider as m
-    m._HEALTH.update(ok=None, checked_at=0.0, voices=[], model=None, error=None, url=None)
+    m.reset_state()
 
 
 def _provider():
