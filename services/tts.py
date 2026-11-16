@@ -255,6 +255,34 @@ def _map_voice_to_fallback(voice: str, src_provider: str, dst_provider: str) -> 
     return voice  # pass through if we don't know the destination
 
 
+def _profile_fallback(tts_provider: str, voice: str) -> Optional[tuple]:
+    """The ACTIVE profile's own fallback engine + voice for this call, if it set one.
+
+    Opt-in per profile: ``voice.fallback_provider`` (+ ``voice.fallback_voice``). Used only
+    when this call speaks the profile's own engine AND voice, so a preview of some other
+    voice never borrows it. Example: a profile moved onto the tailnet stream (qwen3-mlx)
+    keeps the engine it had before as ``fallback_provider``; when the stream host is down,
+    busy or lacks the voice, the reply is spoken in the voice the owner already knew,
+    not the global chain's generic one. Any problem reading the profile = None (chain only).
+    """
+    try:
+        import routes.profiles as _profiles_mod
+        from profiles.manager import get_profile_manager
+        prof = get_profile_manager().get_profile(_profiles_mod._active_profile_id)
+        v = getattr(prof, "voice", None)
+        if v is None or getattr(v, "tts_provider", None) != tts_provider \
+                or getattr(v, "voice_id", None) != voice:
+            return None
+        fb = (getattr(v, "fallback_provider", None) or "").strip()
+        if not fb or fb == tts_provider:
+            return None
+        fb_voice = (getattr(v, "fallback_voice", None) or "").strip() \
+            or _map_voice_to_fallback(voice, tts_provider, fb)
+        return fb, fb_voice
+    except Exception:  # noqa: BLE001 — never let a profile read break speech
+        return None
+
+
 def _generate_with_provider(tts_provider: str, text: str, voice: str) -> bytes:
     """Generate audio bytes from a single provider (no retry/fallback)."""
     provider = get_provider(tts_provider)
@@ -343,7 +371,12 @@ def generate_tts_b64(
     # (see _generate_with_provider) keeps each request short, so 2 attempts against
     # the now-30s STREAM_TIMEOUT is the sane ceiling. Other cloud providers
     # (groq/elevenlabs/qwen3) also get 2.
-    if tts_provider in ('resemble', 'groq', 'qwen3', 'qwen3-local', 'qwen3-mlx', 'elevenlabs'):
+    # qwen3-mlx gets ONE: the provider already walks its host list inside a per-sentence
+    # budget (first-byte timeout per host); a second pass would double that and push the
+    # fallback past the sentence's TTS window.
+    if tts_provider == 'qwen3-mlx':
+        max_attempts = 1
+    elif tts_provider in ('resemble', 'groq', 'qwen3', 'qwen3-local', 'elevenlabs'):
         max_attempts = 2
     else:
         max_attempts = _MAX_RETRIES + 1
@@ -362,6 +395,8 @@ def generate_tts_b64(
             # its base clone has no equal-voice fallback, so for Resemble we retry a
             # 5xx once instead of dropping straight to silence. (2026-06-07)
             http_class = _classify_http_error(err_str)
+            if type(e).__name__ == 'TTSVoiceNotFoundError':
+                http_class = '4xx'  # the voice is not there; a retry cannot fix that
             if http_class == '4xx' or (http_class == '5xx' and tts_provider != 'resemble'):
                 logger.warning(f"TTS HTTP {http_class}, no retry (provider={tts_provider}): {e} — falling back")
                 break
@@ -385,6 +420,25 @@ def generate_tts_b64(
 
     tried = {tts_provider}
     current = tts_provider
+
+    # Profile-chosen fallback first (opt-in, see _profile_fallback), then the chain.
+    _pf = None if resemble_no_fallback else _profile_fallback(tts_provider, voice)
+    if _pf:
+        fb_id, fb_voice = _pf
+        tried.add(fb_id)
+        logger.info(f"TTS falling back (profile): {tts_provider} → {fb_id}/{fb_voice}")
+        try:
+            audio_bytes = _generate_with_provider(fb_id, text, fb_voice)
+            logger.info(f"TTS fallback OK: provider={fb_id}, voice={fb_voice} (original: {tts_provider}/{voice})")
+            if fallback_state is not None and tts_provider != 'resemble':
+                fallback_state['provider'] = fb_id
+                fallback_state['voice'] = fb_voice
+                logger.info(f"TTS sticky fallback locked: {fb_id}/{fb_voice} for rest of response")
+            return base64.b64encode(audio_bytes).decode('utf-8')
+        except Exception as fb_err:
+            logger.error(f"TTS profile fallback failed (provider={fb_id}): {fb_err} — continuing down chain")
+            current = fb_id
+
     while not resemble_no_fallback:
         fallback_id = get_fallback_chain().get(current)
         if not fallback_id or fallback_id in tried:
