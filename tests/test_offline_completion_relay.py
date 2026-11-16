@@ -48,7 +48,7 @@ _PUSH_NAMES = {
     "_PUSH_RECEIPT_PATH", "_PUSH_VISIBLE_TTL_S",
     "_register_push_client", "_unregister_push_client", "_set_push_client_visible",
     "_push_user_is_operator", "_push_client_seen",
-    "_note_push_client_session", "push_proactive_message", "_write_push_receipt",
+    "_note_push_client_session", "push_proactive_message", "_write_push_receipt", "_push_tts_args",
 }
 
 
@@ -64,7 +64,7 @@ def _load_push_module(receipt_path, tts_calls):
             if any(isinstance(t, ast.Name) and t.id in _PUSH_NAMES for t in targets):
                 body.append(node)
 
-    def fake_tts(text, voice=None):
+    def fake_tts(text, voice=None, **_kw):
         tts_calls.append(text)
         return "QVVESU8="
 

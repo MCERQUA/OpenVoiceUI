@@ -1665,9 +1665,31 @@ def get_zai_direct_response(message: str, session_id: str = None) -> str:
 from services.tts import generate_tts_b64 as _generate_tts_b64
 
 
+def _push_tts_args() -> dict:
+    """The ACTIVE PROFILE's engine + voice for audio the server speaks on its own (pushes, WS proxy).
+
+    These paths used to call _generate_tts_b64(text, voice="M1") with no provider: groq (the default
+    engine) + "M1" (a supertonic MALE voice) -> the speak-time mismatch map -> groq/troy. Every push
+    came out in a male voice whatever the profile said (danielle 2026-11-15: profile groq/autumn,
+    owner on a live call: "You are a male's voice I want Chloe's voice back"). It went unheard until
+    #585 opened the push socket in every voice mode. The browser's own turns already send the profile
+    voice; this makes server-initiated audio match. No profile -> the old call, unchanged.
+    """
+    try:
+        import routes.profiles as _profiles_mod
+        from profiles.manager import get_profile_manager
+        prof = get_profile_manager().get_profile(_profiles_mod._active_profile_id)
+        v = getattr(prof, "voice", None)
+        if v is not None and getattr(v, "voice_id", None):
+            return {"voice": v.voice_id, "tts_provider": getattr(v, "tts_provider", None) or "groq"}
+    except Exception as exc:
+        logger.warning(f"push TTS: active profile voice unavailable ({exc.__class__.__name__}) — default voice")
+    return {"voice": "M1"}
+
+
 def _tts_bytes(text: str) -> bytes:
     """Generate TTS audio bytes for the WebSocket proxy."""
-    b64 = _generate_tts_b64(text, voice="M1")
+    b64 = _generate_tts_b64(text, **_push_tts_args())
     if b64 is None:
         raise RuntimeError("TTS generation returned no audio")
     return base64.b64decode(b64)
@@ -1897,7 +1919,7 @@ def push_proactive_message(text: str, session_key: str = None, run_id: str = Non
     audio_b64 = None
     if spoken:
         try:
-            audio_b64 = _generate_tts_b64(spoken, voice="M1")
+            audio_b64 = _generate_tts_b64(spoken, **_push_tts_args())
         except Exception as e:
             logger.warning(f"Proactive push: TTS failed ({e}) — sending text-only")
     frame = json.dumps({
