@@ -43,3 +43,25 @@ def config():
     """Return the singleton config for testing config loading."""
     from config.loader import Config
     return Config()
+
+
+# Gate-4 re-check #5 probes are committed verbatim as tests/test_claimcheck5_probes{,_b}.py. Part b imports its
+# helpers from the name the re-checker used (tests.test_recheck5_probes); alias that name, never a second copy.
+class _Recheck5Alias:
+    _NAME = 'tests.test_recheck5_probes'
+
+    def find_spec(self, name, path=None, target=None):
+        if name != self._NAME:
+            return None
+        import importlib.util
+        return importlib.util.spec_from_loader(name, self)
+
+    def create_module(self, spec):
+        import importlib
+        return importlib.import_module('tests.test_claimcheck5_probes')
+
+    def exec_module(self, module):
+        return None
+
+
+sys.meta_path.append(_Recheck5Alias())
