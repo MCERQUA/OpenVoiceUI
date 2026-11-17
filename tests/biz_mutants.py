@@ -5,7 +5,7 @@
 Each mutant is a deliberately broken copy of the code (one edit). The named tests MUST fail on
 it; a mutant the tests do not catch is a test that never proved anything. A control run of the
 same tests on an unbroken copy must pass, so a "caught" is not just a broken harness.
-Copies live under /tmp/biz-mutants/<name>; the repo itself is never edited.
+Copies live under /tmp/biz-mutants/<name> and are removed after each run; the repo itself is never edited.
 """
 import os
 import shutil
@@ -308,6 +308,7 @@ def main():
     every_test = sorted({t for _, _, tests in MUTANTS for t in tests})
     ctl = _copy('control')
     rc, tail = _run(ctl, every_test)
+    shutil.rmtree(ctl, ignore_errors=True)          # one copy at a time: the harness must not fill the disk
     print(f'control (unbroken copy, {len(every_test)} tests): rc={rc} {tail}')
     if rc != 0:
         print('CONTROL FAILED: the harness itself is broken, mutants prove nothing')
@@ -323,6 +324,7 @@ def main():
             assert text.count(old) == 1, f'mutant {name}: anchor not unique ({text.count(old)}) in {f}'
             open(path, 'w', encoding='utf-8').write(text.replace(old, new))
         rc, tail = _run(d, tests)
+        shutil.rmtree(d, ignore_errors=True)        # the copy is throwaway; leaving it leaked ~2.3G per full run
         caught = rc != 0
         rows.append((name, caught, len(tests), tail))
         print(f"{'CAUGHT  ' if caught else 'SURVIVED'} {name:32s} tests={len(tests)} {tail}")
