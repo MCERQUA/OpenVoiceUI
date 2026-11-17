@@ -39,6 +39,16 @@
       return m ? m[1] : null;
     } catch (e) { return null; }
   })();
+  // Host ruling H4: a PLATFORM staff page (served from the image at /api/biz/v1/crt/staff/<page>) is given
+  // a per-render token by the server. It goes with every call, so the server knows a staff change came
+  // from the platform's own page. A canvas page never has one, so where a pack needs it, its writes are
+  // refused even with a staff session.
+  var SURFACE = (function () {
+    var s = global.__JB_SURFACE__;
+    try { delete global.__JB_SURFACE__; } catch (e) { global.__JB_SURFACE__ = undefined; }
+    return (s && typeof s.token === 'string') ? { token: s.token, sandbox: s.sandbox || null, base: s.base || null } : null;
+  })();
+  if (SURFACE && SURFACE.sandbox) SANDBOX = SURFACE.sandbox;
 
   function JbError(status, body) {
     body = body || {};
@@ -63,6 +73,7 @@
   function call(method, path, body, headers) {
     var opts = { method: method, headers: Object.assign({ 'Accept': 'application/json' }, headers || {}) };
     if (SANDBOX) opts.headers['X-Biz-Sandbox'] = SANDBOX;
+    if (SURFACE) opts.headers['X-JB-Staff-Surface'] = SURFACE.token;
     if (body !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
@@ -93,6 +104,8 @@
     contract: 'v1',
     JbError: JbError,
     sandbox: SANDBOX,
+    /** On a platform staff page: the base URL of the staff pages (link to them, never to /pages/). Else null. */
+    staffBase: SURFACE ? SURFACE.base : null,
 
     health: function () { return call('GET', '/health'); },
     schema: function (collection) { return call('GET', '/schema' + (collection ? '/' + enc(collection) : '')); },
@@ -256,6 +269,7 @@
         if (opts.source) fd.append('source', JSON.stringify(opts.source));
         var headers = { 'Accept': 'application/json' };
         if (SANDBOX) headers['X-Biz-Sandbox'] = SANDBOX;
+        if (SURFACE) headers['X-JB-Staff-Surface'] = SURFACE.token;
         return doFetch(BASE + '/files', { method: 'POST', headers: headers, body: fd }).then(function (resp) {
           return resp.text().then(function (text) {
             var data = null;
@@ -270,6 +284,7 @@
       open: function (id) {
         var headers = {};
         if (SANDBOX) headers['X-Biz-Sandbox'] = SANDBOX;
+        if (SURFACE) headers['X-JB-Staff-Surface'] = SURFACE.token;
         return doFetch(BASE + '/files/' + enc(id), { method: 'GET', headers: headers }).then(function (resp) {
           if (!resp.ok) return resp.text().then(function (t) { var d = null; try { d = JSON.parse(t); } catch (e) { d = { error: t }; } throw new JbError(resp.status, d); });
           return resp.blob().then(function (b) { return global.URL.createObjectURL(b); });

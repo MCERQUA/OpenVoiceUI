@@ -224,3 +224,22 @@ const f = await jb.files.upload(fileInput.files[0], { source });  // {id, url: '
 await jb.create('document', { title: 'COI', file_url: f.url });
 const blobUrl = await jb.files.open(jb.files.idOf(doc.data.file_url));  // a person's session only
 ```
+
+### Platform staff pages (engine 1.3, host ruling H4)
+
+A pack whose verdict trusts what a *person* wrote (risk-transfer) ships its staff pages in the image. They are
+served at `GET /api/biz/v1/crt/staff/<page>` (sandbox: `?sandbox=<name>`), never from canvas-pages, which the
+agent can write. Opening one by a top-level navigation gives that render a token bound to the staff session;
+`jb.js` sends it on every call (`X-JB-Staff-Surface`) and drops it from `window` at load. Where that pack is on:
+
+* a staff-session write to `crt_*`, `contact`, `document`, `company` or `/crt/...` **without** the token is
+  `403 staff_surface_required` (reads are unaffected), so a canvas page, even one opened by staff, never
+  makes a person-write there;
+* a token from another user, another sandbox, another site (`Sec-Fetch-Site`, `Origin`) or a tampered one is
+  `403 staff_surface_invalid`;
+* the staff page is minted only for `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` (never fetched,
+  framed or embedded), carries `frame-ancestors 'none'`, `Cross-Origin-Opener-Policy: same-origin` and a
+  nonce-only `script-src`;
+* the agent's sandbox `PUT /dev/pages/<file>` refuses a platform page name (`409 platform_page_reserved`).
+  The agent may keep its own read view under another name. `jb.staffBase` is the staff pages' base URL on
+  a platform page and `null` elsewhere: link staff pages with it.

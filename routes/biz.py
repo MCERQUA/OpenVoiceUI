@@ -11,6 +11,10 @@ Auth (in addition to app.py require_auth):
   agent  this tenant's X-Agent-Key (AGENT_API_KEY)          by = agent:<tenant>
          agent writes must carry source = {channel, ref, confidence, words}
   A presented but wrong X-Agent-Key is 403, never a fall-through.
+  staff surface (host ruling H4): where the risk-transfer pack is on, a staff session changes the
+         records its verdict reads (crt_*, contact, document, company, /crt/...) ONLY with the
+         per-render token of a platform staff page (X-JB-Staff-Surface): the page is served from the
+         image by GET /api/biz/v1/crt/staff/<page>, never from canvas-pages, which the agent can write.
 
 GET    /api/biz/v1/health
 GET    /api/biz/v1/schema                  merged registry (core + library adoptions + tenant overlay)
@@ -56,18 +60,22 @@ GET    /jb/v1/jb.js  /jb/v1/shell.js  /jb/v1/shell.css  /jb/v1/sdk.md (also /jb/
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import html as _html
 import json
 import logging
 import os
+import re
+import secrets
 import shutil
 import threading
 import time
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Blueprint, current_app, g, jsonify, redirect, request, send_file
+from flask import Blueprint, Response, current_app, g, jsonify, redirect, request, send_file
 
 from services.biz import sandbox as _sandbox
 from services.biz.pages import FILE_RE, RECORD_PARAM, build_theme, check_file, page_for_record, shell_model
@@ -148,6 +156,107 @@ def _schema_error(exc: SchemaError):
     return jsonify(exc.to_dict()), exc.status
 
 
+# ── the platform staff surface (host ruling H4, 2026-11-17) ──────────────────
+# A page the tenant's agent can write (canvas-pages) runs in the staff browser with the staff session.
+# So a staff session alone never makes a person-write where a verdict reads person-writes: the request
+# must also carry the token a PLATFORM staff page (served from this image, read-only to the agent) got
+# when it was rendered. The token is minted only for a top-level navigation (never for fetch, an iframe
+# or an embed), the page is not frameable and opens in its own browsing-context group (COOP), so a
+# script on another same-origin page can neither fetch it nor reach into it to read the token.
+STAFF_SURFACE_HEADER = 'X-JB-Staff-Surface'
+STAFF_SURFACE_TTL_S = 8 * 3600
+SURFACE_GUARDED_CORE = ('contact', 'document', 'company')
+SURFACE_PACK = 'risk-transfer'
+_SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS')
+# Per process: a restart (or a second worker) only means "reload the staff page" -- it fails closed.
+_SURFACE_SECRET = secrets.token_bytes(32)
+
+
+def _surface_mac(by, sandbox, exp, rnd) -> str:
+    msg = f'v1|{by}|{sandbox or ""}|{exp}|{rnd}'.encode()
+    return hmac.new(_SURFACE_SECRET, msg, hashlib.sha256).hexdigest()
+
+
+def mint_staff_surface(by: str, sandbox: str | None) -> str:
+    exp = int(time.time()) + STAFF_SURFACE_TTL_S
+    rnd = secrets.token_hex(12)
+    return f'v1.{exp}.{rnd}.{_surface_mac(by, sandbox, exp, rnd)}'
+
+
+def staff_surface_token_ok(token, by, sandbox) -> bool:
+    """The token was minted by this process for THIS staff session (user) and THIS sandbox, and is unexpired."""
+    try:
+        v, exp, rnd, mac = str(token).split('.')
+        exp = int(exp)
+    except (ValueError, TypeError):
+        return False
+    if v != 'v1' or exp < time.time() or not re.fullmatch(r'[0-9a-f]{24}', rnd):
+        return False
+    return hmac.compare_digest(mac, _surface_mac(by, sandbox, exp, rnd))
+
+
+def _surface_refusal(token):
+    if not staff_surface_token_ok(token, g.biz_by, g.biz_sandbox):
+        return 'This staff-page token is not valid for this session; reload the staff page'
+    site = request.headers.get('Sec-Fetch-Site')
+    if site is not None and site != 'same-origin':
+        return 'Staff changes come only from this site\'s own staff pages (Sec-Fetch-Site)'
+    origin = request.headers.get('Origin')
+    if origin and origin != 'null' and urlparse(origin).netloc.lower() != (request.host or '').lower():
+        return 'Staff changes come only from this site\'s own staff pages (Origin)'
+    if origin == 'null':
+        return 'Staff changes come only from this site\'s own staff pages (opaque origin)'
+    return None
+
+
+def _surface_guarded(store) -> bool:
+    """A write whose author the risk-transfer verdict reads (its records, or the contacts, documents and
+    company it names), in a business with that pack on."""
+    rel = request.path[len(API):].lstrip('/')
+    first = rel.split('/', 1)[0]
+    if not (first == 'crt' or first.startswith('crt_') or first in SURFACE_GUARDED_CORE):
+        return False
+    try:
+        return store.pack_enabled(SURFACE_PACK)
+    except Exception:
+        return True                     # cannot tell: refuse (fail closed)
+
+
+def platform_page_names() -> set:
+    """Page file names a pack ships in the image: the platform serves these, an agent never writes them."""
+    from services.biz.schema import PACKS_DIR
+    return {p.name for p in Path(PACKS_DIR).glob('*/pages/*.html')}
+
+
+def staff_surface_page(pages_dir: Path, page: str):
+    if not FILE_RE.match(page or '') or not (Path(pages_dir) / page).is_file():
+        raise SchemaError(404, 'not_found', 'No such staff page')
+    if request.headers.get('Sec-Fetch-Mode') != 'navigate' or request.headers.get('Sec-Fetch-Dest') != 'document':
+        raise SchemaError(403, 'staff_surface_navigation_only',
+                          'Staff pages open only as a top-level page in the browser; they are never fetched, '
+                          'framed or embedded by another page')
+    token = mint_staff_surface(g.biz_by, g.biz_sandbox)
+    nonce = secrets.token_urlsafe(18)
+    html = (Path(pages_dir) / page).read_text(encoding='utf-8')
+    html = re.sub(r'<script(?=[\s>])', f'<script nonce="{nonce}"', html)
+    boot = json.dumps({'token': token, 'sandbox': g.biz_sandbox, 'base': f'{API}/crt/staff/'}).replace('</', '<\\/')
+    at = html.find('<script')
+    tag = f'<script nonce="{nonce}">window.__JB_SURFACE__ = {boot};</script>\n'
+    html = html[:at] + tag + html[at:] if at >= 0 else html + tag
+    resp = Response(html, mimetype='text/html')
+    resp.headers['Content-Security-Policy'] = (
+        "default-src 'none'; "
+        f"script-src 'nonce-{nonce}'; "
+        "style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+        "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    resp.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    return resp
+
+
 @biz_bp.after_request
 def _no_store(resp):
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -173,6 +282,8 @@ def _authenticate():
     presented = request.headers.get('X-Agent-Key')
     expected = os.getenv('AGENT_API_KEY', '').strip()
     asked_sandbox = (request.headers.get('X-Biz-Sandbox') or '').strip() or None
+    if asked_sandbox is None and request.method == 'GET' and request.path.startswith(API + '/crt/staff/'):
+        asked_sandbox = (request.args.get('sandbox') or '').strip() or None   # a navigation sends no headers
     sandboxes = _sandbox.configured()
     g.biz_sandbox = None
     if presented is not None:
@@ -223,6 +334,19 @@ def _authenticate():
     if g.biz_role == 'agent':
         g.biz_by = f'agent:{store.tenant}'
     g.biz_store = store
+    g.biz_surface = False
+    if g.biz_role == 'owner':
+        token = request.headers.get(STAFF_SURFACE_HEADER)
+        if token is not None:
+            why = _surface_refusal(token)
+            if why:
+                logger.warning('biz: staff-surface token refused (path=%s): %s', request.path, why)
+                return _fail(403, 'staff_surface_invalid', why)
+            g.biz_surface = True
+        if request.method not in _SAFE_METHODS and not g.biz_surface and _surface_guarded(store):
+            return _fail(403, 'staff_surface_required',
+                         'This business runs the risk-transfer pack: staff change its records only from the '
+                         f'platform staff pages ({API}/crt/staff/...), never from a canvas page (host ruling H4)')
     store.maybe_daily_backup()
     if is_upload:
         if 'tenant' in request.form:
@@ -412,6 +536,16 @@ class PackContext:
             raise SchemaError(403, 'staff_only', f'Only a person (staff session) may {what}; an agent key cannot')
 
     @staticmethod
+    def require_staff_surface():
+        if _agent() or not getattr(g, 'biz_surface', False):
+            raise SchemaError(403, 'staff_surface_required', 'Only the platform staff pages make this change '
+                                                             '(host ruling H4)')
+
+    @staticmethod
+    def staff_surface_page(pages_dir, page):
+        return staff_surface_page(pages_dir, page)
+
+    @staticmethod
     def core_names():
         from services.biz.schema import CORE_DIR, _load_json_dir
         return _load_json_dir(CORE_DIR).keys()
@@ -545,6 +679,11 @@ def dev_pages_list():
 def dev_page_put(file_name):
     _sandbox_only()
     check_file(file_name)
+    if file_name in platform_page_names():
+        raise SchemaError(409, 'platform_page_reserved',
+                          'This page name belongs to a platform staff page, served from the image at '
+                          f'{API}/crt/staff/<page>; publish your own view under another name (host ruling H4)',
+                          file=file_name)
     body = _body()
     page_html = body.get('html')
     if not isinstance(page_html, str) or '<' not in page_html:
