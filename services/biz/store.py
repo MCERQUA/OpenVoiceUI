@@ -281,6 +281,25 @@ class BizStore(PageRegistryMixin):
                 raise _err(422, 'ref_not_found', 'A referenced record does not exist in this business',
                            field=field, collection=target)
 
+    @staticmethod
+    def _staff_guard(spec, collection, *, agent, op, keys=()):
+        """Refuse an agent write the schema reserves for a person (design amendment 2026-11-17).
+
+        A collection with "staff_only": true is written (created, edited, archived, unarchived)
+        only by a person's session. A field with "staff_only": true is set or cleared only by a
+        person, on any collection. The agent key gets 403, never a silent drop.
+        """
+        if not agent:
+            return
+        if spec.get('staff_only'):
+            raise _err(403, 'staff_only', f'Only a person (staff session) may {op} {collection} records; '
+                                          'an agent key cannot', collection=collection, op=op)
+        fields = spec.get('fields') or {}
+        hit = sorted(k for k in keys if (fields.get(k) or {}).get('staff_only'))
+        if hit:
+            raise _err(403, 'staff_only_field', 'Only a person (staff session) may set these fields; '
+                                                'an agent key cannot', collection=collection, fields=hit)
+
     def _activity(self, conn, *, collection, record_id, type_, by, source=None, diff=None):
         conn.execute(
             'INSERT INTO activity(tenant, at, collection, record_id, type, by, channel, ref, diff) '
@@ -292,6 +311,8 @@ class BizStore(PageRegistryMixin):
     def create(self, collection, data, *, by, source=None, agent=False):
         self._writable()
         spec = self._spec_for_write(collection)
+        self._staff_guard(spec, collection, agent=agent, op='create',
+                          keys=data.keys() if isinstance(data, dict) else ())
         source = self.check_source(source, agent=agent)
         clean, refs = self.registry.validate(collection, data, partial=False, engine_too_old=self.engine_too_old)
         clean = {k: v for k, v in clean.items() if v is not None}
@@ -328,6 +349,9 @@ class BizStore(PageRegistryMixin):
     def update(self, collection, rid, patch, *, expected_version, by, source=None, agent=False, clear=None):
         self._writable()
         spec = self._spec_for_write(collection)
+        self._staff_guard(spec, collection, agent=agent, op='edit',
+                          keys=list((patch or {}).keys() if isinstance(patch, dict) else ())
+                          + [c for c in (clear or []) if isinstance(c, str)])
         if spec.get('append_only'):
             raise _err(409, 'append_only', f'{collection} is an append-only ledger: add a correcting entry '
                                            '(reverses_id) instead of editing')
@@ -400,7 +424,8 @@ class BizStore(PageRegistryMixin):
 
     def set_archived(self, collection, rid, archived: bool, *, by, source=None, agent=False):
         self._writable()
-        self._spec_for_write(collection)
+        spec = self._spec_for_write(collection)
+        self._staff_guard(spec, collection, agent=agent, op='archive' if archived else 'unarchive')
         source = self.check_source(source, agent=agent)
         self.get(collection, rid)
         with self._tx() as conn:
