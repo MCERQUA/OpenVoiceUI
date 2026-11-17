@@ -23,12 +23,15 @@ import re
 import subprocess
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 from flask import Blueprint, jsonify, request
 
 from tts_providers import get_provider
 from services.paths import UPLOADS_DIR
+from services.safe_open import Anchored, UnsafePath
+from services.safe_proc import minimal_env
 
 logger = logging.getLogger(__name__)
 audio_clips_bp = Blueprint('audio_clips', __name__)
@@ -42,20 +45,25 @@ DEFAULT_LEADING_SILENCE_MS = 1000
 SAFE_SLUG = re.compile(r'[^a-zA-Z0-9_-]+')
 
 
+def _clips(rel) -> Anchored:
+    """uploads/audio-clips/<rel>, walked no-follow from the uploads MOUNT point
+    (AUDIO_CLIPS_DIR.parent): an `audio-clips -> /elsewhere` symlink is refused."""
+    return Anchored(AUDIO_CLIPS_DIR.parent, f'{AUDIO_CLIPS_DIR.name}/{rel}')
+
+
 def _load_manifest():
-    if not AUDIO_CLIPS_MANIFEST.exists():
-        return {'clips': []}
     try:
-        return json.loads(AUDIO_CLIPS_MANIFEST.read_text())
-    except (json.JSONDecodeError, OSError):
+        mf = _clips(AUDIO_CLIPS_MANIFEST.name)
+        if not mf.is_file():
+            return {'clips': []}
+        return json.loads(mf.read_text(max_bytes=16 * 1024 * 1024))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         logger.warning('audio-clips manifest unreadable, starting fresh')
         return {'clips': []}
 
 
 def _save_manifest(m):
-    tmp = AUDIO_CLIPS_MANIFEST.with_suffix('.json.tmp')
-    tmp.write_text(json.dumps(m, indent=2))
-    tmp.replace(AUDIO_CLIPS_MANIFEST)
+    _clips(AUDIO_CLIPS_MANIFEST.name).atomic_write_text(json.dumps(m, indent=2))  # random O_EXCL temp
 
 
 def _make_id(label: str) -> str:
@@ -72,7 +80,8 @@ def _encode_mp3_with_silence(input_path, mp3_path, leading_silence_ms):
         cmd = ['ffmpeg', '-y', '-loglevel', 'error', '-i', str(input_path),
                '-af', f'adelay={leading_silence_ms}:all=1',
                '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '96k', str(mp3_path)]
-    subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+    # fixed argv (server-built private paths + a clamped int); no shell; no secrets in env
+    subprocess.run(cmd, check=True, capture_output=True, timeout=120, env=minimal_env())
 
 
 def _mp3_duration_ms(path):
@@ -80,7 +89,7 @@ def _mp3_duration_ms(path):
         result = subprocess.run(
             ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
              '-of', 'default=nk=1:nw=1', str(path)],
-            capture_output=True, text=True, check=True, timeout=10
+            capture_output=True, text=True, check=True, timeout=10, env=minimal_env()
         )
         return int(float(result.stdout.strip()) * 1000)
     except Exception:
@@ -122,17 +131,29 @@ def generate_clip():
         return jsonify({'error': f'TTS generation failed: {e}'}), 500
 
     clip_id = _make_id(label)
-    raw_path = AUDIO_CLIPS_DIR / f"{clip_id}.raw"
+    # ffmpeg only ever touches the server-private temp dir (uploads/audio-clips is
+    # agent-writable: a symlink swapped in at the output name would make ffmpeg -y
+    # overwrite any server file). The finished mp3 is then written no-follow.
+    import tempfile
+    work = Path(tempfile.mkdtemp(prefix='clip-'))
+    raw_path = work / 'in.raw'
+    tmp_mp3 = work / 'out.mp3'
     raw_path.write_bytes(audio_bytes)
-
-    final_mp3 = AUDIO_CLIPS_DIR / f"{clip_id}.mp3"
     try:
-        _encode_mp3_with_silence(raw_path, final_mp3, leading_silence_ms)
+        _encode_mp3_with_silence(raw_path, tmp_mp3, leading_silence_ms)
+        duration_ms = _mp3_duration_ms(tmp_mp3)
+        mp3_bytes = tmp_mp3.read_bytes()
     except subprocess.CalledProcessError as e:
         logger.error('ffmpeg failed: %s', e.stderr.decode(errors='replace')[:500])
         return jsonify({'error': 'audio post-processing failed'}), 500
     finally:
-        raw_path.unlink(missing_ok=True)
+        for _f in (raw_path, tmp_mp3):
+            _f.unlink(missing_ok=True)
+        try:
+            work.rmdir()
+        except OSError:
+            pass
+    _clips(f'{clip_id}.mp3').write_bytes(mp3_bytes)
 
     clip_entry = {
         'id': clip_id,
@@ -142,8 +163,8 @@ def generate_clip():
         'text_preview': text[:200],
         'text_full': text,
         'leading_silence_ms': leading_silence_ms,
-        'duration_ms': _mp3_duration_ms(final_mp3),
-        'size_bytes': final_mp3.stat().st_size,
+        'duration_ms': duration_ms,
+        'size_bytes': len(mp3_bytes),
         'created_at': datetime.now(timezone.utc).isoformat(),
         'url': f'/uploads/audio-clips/{clip_id}.mp3',
         'filename': f'{clip_id}.mp3',
@@ -226,11 +247,18 @@ def email_clip():
     if not clip:
         return jsonify({'error': 'clip not found'}), 404
 
-    file_path = AUDIO_CLIPS_DIR / clip['filename']
-    if not file_path.exists():
+    # The manifest lives in uploads/ (agent-writable), so clip['filename'] is
+    # untrusted: one plain name, opened no-follow inside the clips dir. An
+    # absolute name or a planted symlink used to be read and EMAILED out.
+    fname = str(clip.get('filename') or '')
+    if '/' in fname:
+        return jsonify({'error': 'clip file missing on disk'}), 404
+    try:
+        raw = _clips(fname).read_bytes(max_bytes=64 * 1024 * 1024)
+    except (OSError, UnsafePath):
         return jsonify({'error': 'clip file missing on disk'}), 404
 
-    encoded = base64.b64encode(file_path.read_bytes()).decode('ascii')
+    encoded = base64.b64encode(raw).decode('ascii')
 
     text_body = body or f"Audio clip attached: {clip['label']}"
     html_body = '<p>' + text_body.replace('\n\n', '</p><p>').replace('\n', '<br>') + '</p>'

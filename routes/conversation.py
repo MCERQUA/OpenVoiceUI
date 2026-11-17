@@ -50,7 +50,9 @@ logger = logging.getLogger(__name__)
 
 from services.paths import DB_PATH, VOICE_SESSION_FILE
 
-BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
+from services.events_file import EVENTS_PATH as _EVENTS_PATH  # server-private, not /tmp
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
+BRAIN_EVENTS_PATH = Path(_EVENTS_PATH)
 MAX_HISTORY_MESSAGES = 20
 
 # Vision keyword detection — triggers camera frame analysis via GLM-4V
@@ -1076,8 +1078,10 @@ def _notify_brain(event_type: str, **data) -> None:
     try:
         event = {'type': event_type, 'timestamp': datetime.now().isoformat()}
         event.update(data)
-        with open(BRAIN_EVENTS_PATH, 'a') as f:
-            f.write(json.dumps(event) + '\n')
+        # owner-checked, no-follow append (services/events_file.py): /tmp is
+        # shared with the terminal sandbox user
+        from services.events_file import append_event
+        append_event(event, BRAIN_EVENTS_PATH)
     except Exception:
         pass  # Non-critical
 
@@ -2299,7 +2303,7 @@ def _conversation_inner():
             try:
                 _gate_path = '/app/runtime/uploads/.mesh-admin-session'
                 _ts_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-                with open(_gate_path, 'w', encoding='utf-8') as _gf:
+                with Anchored('/app/runtime/uploads', _gate_path).open('w') as _gf:  # no-follow
                     _gf.write(f'admin={_clerk_uid}\nrefreshed_at={_ts_iso}\nsource=conversation.py auto-refresh\n')
             except Exception as _ge:
                 logger.warning(f'mesh-gate refresh failed (non-fatal): {_ge}')
@@ -3478,7 +3482,7 @@ def _conversation_inner():
                                 if _double_empty_restart_count <= _DOUBLE_EMPTY_MAX_RESTARTS:
                                     try:
                                         _flag_path = Path('/app/runtime/uploads/.restart-openclaw.flag')
-                                        _flag_path.write_text(
+                                        Anchored('/app/runtime/uploads', _flag_path).write_text(  # no-follow
                                             f'double-empty at {__import__("datetime").datetime.utcnow().isoformat()}Z'
                                         )
                                         logger.warning(
@@ -4847,7 +4851,8 @@ def tts_clone_voice():
             safe_name = f"voice_clone_{uuid.uuid4().hex[:12]}{ext}"
             UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
             save_path = UPLOADS_DIR / safe_name
-            audio_file.save(str(save_path))
+            with Anchored(UPLOADS_DIR, safe_name).open('wb') as _out:  # no-follow
+                audio_file.save(_out)
             audio_url = f"{request.host_url.rstrip('/')}/uploads/{safe_name}"
         else:
             return jsonify({

@@ -162,6 +162,9 @@ def create_app(config_override: dict = None):
         '/api/services/',   # Service Catalog + per-service health (WO-1.2) — reads
                             # gateway/LLM/TTS/STT descriptors + vault cred status;
                             # admin-only, never public.
+        '/api/version/update',  # self-update: git pull + may spawn a CLI coding agent as the
+                                # server (PR #597 review 2: a process the agent key could
+                                # trigger). Hosted tenants update by fleet roll; admin only.
     )
 
     if not _auth_enabled:

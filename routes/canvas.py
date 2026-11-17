@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import threading
 import time
 from datetime import datetime, timezone
@@ -44,9 +45,14 @@ from services.canvas_versioning import (
 # ---------------------------------------------------------------------------
 
 from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR, CODE_WORKSPACE_DIR
+from services.safe_open import Anchored  # noqa: E402
+from services.safe_open import (
+    UnsafePath, open_beneath as safe_open_beneath, open_dir_beneath as safe_open_dir_beneath,
+    read_fd as safe_read_fd, split_rel as safe_split_rel, write_beneath as safe_write_beneath)
 CANVAS_SSE_PORT = int(os.getenv('CANVAS_SSE_PORT', '3030'))
 CANVAS_SESSION_PORT = int(os.getenv('CANVAS_SESSION_PORT', '3002'))
-BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
+from services.events_file import EVENTS_PATH as _EVENTS_PATH  # server-private, not /tmp
+BRAIN_EVENTS_PATH = Path(_EVENTS_PATH)
 # Self-hosted installs: auth is disabled by default. Set CANVAS_REQUIRE_AUTH=true to enable Clerk JWT checks.
 CANVAS_REQUIRE_AUTH = os.getenv('CANVAS_REQUIRE_AUTH', 'false').lower() == 'true'
 
@@ -134,8 +140,10 @@ def _notify_brain(event_type: str, **data) -> None:
     try:
         event = {'type': event_type, 'timestamp': datetime.now().isoformat()}
         event.update(data)
-        with open(BRAIN_EVENTS_PATH, 'a') as f:
-            f.write(json.dumps(event) + '\n')
+        # owner-checked, no-follow append (services/events_file.py): /tmp is
+        # shared with the terminal sandbox user
+        from services.events_file import append_event
+        append_event(event, BRAIN_EVENTS_PATH)
     except Exception as exc:
         logging.getLogger(__name__).debug(f'Brain notification failed (non-critical): {exc}')
 
@@ -162,7 +170,7 @@ def extract_page_icon(html_content: str) -> str | None:
 def extract_page_icon_from_file(filepath: Path) -> str | None:
     """Read a canvas page HTML file and extract its icon meta tag."""
     try:
-        with open(filepath, 'r', errors='ignore') as f:
+        with Anchored(CANVAS_PAGES_DIR, filepath).open('r', errors='ignore') as f:  # no-follow
             head = f.read(2048)
         return extract_page_icon(head)
     except Exception:
@@ -203,10 +211,10 @@ def extract_canvas_page_content(page_path: str, max_chars: int = 1000) -> str:
     try:
         if page_path.startswith('/pages/'):
             page_path = page_path[7:]
-        full_path = CANVAS_PAGES_DIR / page_path
-        if not full_path.exists():
+        full_path = Anchored(CANVAS_PAGES_DIR, page_path)   # no-follow (agent-writable dir)
+        if not full_path.is_file():
             return ''
-        html_raw = full_path.read_text(errors='ignore')
+        html_raw = full_path.read_text(errors='ignore', max_bytes=8 * 1024 * 1024)
         html_raw = re.sub(r'<script[^>]*>.*?</script>', '', html_raw, flags=re.DOTALL | re.IGNORECASE)
         html_raw = re.sub(r'<style[^>]*>.*?</style>', '', html_raw, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'<[^>]+>', ' ', html_raw)
@@ -583,7 +591,8 @@ def _sync_canvas_manifest_locked() -> dict:
         filepath = CANVAS_PAGES_DIR / filename
         title = existing.get('display_name') or existing.get('title') or page_id.replace('-', ' ').title()
         try:
-            content = filepath.read_text()[:1000]
+            content = Anchored(CANVAS_PAGES_DIR, filepath).read_text(
+                errors='ignore', max_bytes=8 * 1024 * 1024)[:1000]
         except Exception:
             content = ''
         category = existing.get('category') or suggest_category(title, content)
@@ -694,23 +703,16 @@ def _write_page_replacing(filepath: Path, html_content: str) -> None:
     EACCES for this container's uid and the agent sees a bare 500, so a page it
     made last week can no longer be refreshed. The canvas-pages dir is writable
     by every writer, so a rename succeeds whoever owns the old file. It is also
-    atomic: a reader never gets a half-written page. The new file is left
-    group/world-writable so the other writers can still update it in place.
+    atomic: a reader never gets a half-written page.
+
+    canvas-pages is agent-writable, so (review 2 of PR #597): the temp name is
+    random and created O_EXCL|O_NOFOLLOW in a no-follow-pinned dir (it used to be
+    a predictable `.<page>.<pid>.<tid>.tmp` the agent could pre-plant as a symlink
+    to /app/*.py), and the page is left 0644, never 0666 (other writers replace
+    it by rename, as this function does; nothing needs it world-writable).
     """
-    tmp = filepath.with_name(f'.{filepath.name}.{os.getpid()}.{threading.get_ident()}.tmp')
-    try:
-        tmp.write_text(html_content, encoding='utf-8')
-        try:
-            os.chmod(tmp, 0o666)
-        except OSError:
-            pass
-        os.replace(tmp, filepath)
-    except BaseException:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
+    filepath = Path(filepath)   # always CANVAS_PAGES_DIR/<name>: anchored at that mount
+    Anchored(filepath.parent, filepath.name).atomic_write_text(html_content, mode=0o644)
 
 
 def add_page_to_manifest(filename: str, title: str, description: str = '', content: str = '') -> dict:
@@ -1108,9 +1110,18 @@ def canvas_pages_proxy(path):
                 return redirect('/pages/' + path + '.html', code=301)
         if resolved.is_file():
             # HTML files need custom processing (script stripping, CSS/error injection)
+            # canvas-pages is agent-writable: read/serve from ONE no-follow open of
+            # the requested path (review 2 of PR #597, H-C); a symlink is a 404.
+            try:
+                _page = Anchored(CANVAS_PAGES_DIR, path)
+            except UnsafePath:
+                return 'Page not found', 404
             if path.endswith('.html'):
-                with open(resolved, 'rb') as f:
-                    content = f.read()
+                try:
+                    content = _page.read_bytes(max_bytes=32 * 1024 * 1024)
+                    _page_st = _page.lstat()
+                except (OSError, UnsafePath):
+                    return 'Page not found', 404
                 # Tailwind CDN is allowed through — CSP controls script loading.
                 import re as _re
                 content_str = content.decode('utf-8', errors='replace')
@@ -1214,7 +1225,7 @@ def canvas_pages_proxy(path):
                 resp.headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
                 # ETag based on file mtime to force revalidation
                 import os as _os
-                _mtime = str(int(_os.path.getmtime(resolved)))
+                _mtime = str(int(_page_st.st_mtime))
                 resp.headers['ETag'] = '"canvas-' + _mtime + '"'
                 # Canvas-specific CSP: allow inline scripts (interactive pages)
                 # Canvas CSP: allow scripts and styles inline, allow API connections
@@ -1255,10 +1266,9 @@ def canvas_pages_proxy(path):
                 # See docs/jambot/no-cache-policy.md.
                 # NOTE: conditional=True is kept so range requests still work for
                 # audio/video streaming playback; only the cache headers change.
-                resp = send_file(
-                    resolved,
-                    conditional=True,
-                )
+                resp = _page.send(conditional=True)
+                if resp is None:
+                    return 'Page not found', 404
                 resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
                 resp.headers['Pragma'] = 'no-cache'
                 resp.headers['Expires'] = '0'
@@ -1602,7 +1612,7 @@ def handle_page_metadata(page_id):
                         while bak_path.exists():
                             bak_path = filepath.with_name(f'{filepath.stem}.bak.{counter}')
                             counter += 1
-                        filepath.rename(bak_path)
+                        Anchored(CANVAS_PAGES_DIR, filepath).rename(bak_path.name)  # no-follow
                         logger.info(f'Archived canvas page: {filename} -> {bak_path.name}')
                 except Exception as exc:
                     logger.warning(f'Failed to archive file {filename}: {exc}')
@@ -1958,14 +1968,16 @@ def canvas_data(filename):
         return denied
     if not filename.endswith('.json'):
         return jsonify({'error': 'only .json files'}), 400
-    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
-    if resolved and resolved.exists() and resolved.is_file():
-        try:
-            return Response(resolved.read_bytes(), mimetype='application/json',
+    try:
+        f = _canvas_data_file(filename)
+        if f.is_file():
+            return Response(f.read_bytes(max_bytes=32 * 1024 * 1024), mimetype='application/json',
                             headers={'Cache-Control': 'no-cache'})
-        except Exception as exc:
-            logger.error(f'canvas_data read error: {exc}')
-            return jsonify({}), 200
+    except UnsafePath:
+        return jsonify({}), 200
+    except Exception as exc:
+        logger.error(f'canvas_data read error: {exc}')
+        return jsonify({}), 200
     return jsonify({}), 200
 
 
@@ -1980,16 +1992,21 @@ def canvas_data_static(filename):
     denied = _canvas_data_denied(filename)
     if denied:
         return denied
-    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
-    if resolved and resolved.exists() and resolved.is_file():
-        try:
-            return send_file(str(resolved), conditional=True,
-                             download_name=resolved.name,
-                             max_age=0)  # canvas no-cache rule
-        except Exception as exc:
-            logger.error(f'canvas_data_static read error: {exc}')
-            return jsonify({'error': 'read error'}), 500
-    return jsonify({'error': 'not found'}), 404
+    try:
+        resp = _canvas_data_file(filename).send(conditional=True, max_age=0)  # canvas no-cache rule
+    except UnsafePath:
+        resp = None
+    except Exception as exc:
+        logger.error(f'canvas_data_static read error: {exc}')
+        return jsonify({'error': 'read error'}), 500
+    if resp is None:
+        return jsonify({'error': 'not found'}), 404
+    return resp
+
+
+def _canvas_data_file(filename) -> Anchored:
+    """canvas-pages/_data/<filename>, anchored at the canvas-pages MOUNT (no-follow walk)."""
+    return Anchored(_CANVAS_DATA_DIR.parent, f'{_CANVAS_DATA_DIR.name}/{filename}')
 
 
 def _ovu_is_empty(v):
@@ -2019,38 +2036,53 @@ def canvas_data_write(filename):
     data = request.get_json(silent=True)
     if data is None:
         return jsonify({'error': 'invalid json'}), 400
-    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
-    if resolved is None:
+    try:
+        target = _canvas_data_file(filename)
+    except UnsafePath:
         return jsonify({'error': 'invalid path'}), 400
     try:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
+        # canvas-pages/_data is agent-writable: every read, backup copy and write is a
+        # no-follow walk from the canvas-pages mount (a `.backups -> /anywhere` or a
+        # swapped target symlink is refused; review 2 of PR #597, H-C).
+        parent_rel = target.rel.rsplit('/', 1)[0]
+        Anchored(target.root, parent_rel).mkdir(parents=True, exist_ok=True)
         # Scoped protection for the website-setup record: timestamped backup + a merge
         # that never blanks already-populated fields (prevents a full-record save from
         # wiping the stitch design block). All other canvas data keys keep replace.
-        if resolved.name in ('website-setup.json', 'website-creator.json'):
+        if target.name in ('website-setup.json', 'website-creator.json'):
             existing = {}
-            if resolved.exists():
+            if target.is_file():
                 try:
-                    existing = json.loads(resolved.read_text(encoding='utf-8'))
+                    raw_existing = target.read_bytes(max_bytes=32 * 1024 * 1024)
+                    existing = json.loads(raw_existing.decode('utf-8'))
                 except Exception:
-                    existing = {}
+                    raw_existing, existing = None, {}
                 try:
-                    bdir = resolved.parent / '.backups'
+                    bdir = Anchored(target.root, f'{parent_rel}/.backups')
                     bdir.mkdir(parents=True, exist_ok=True)
                     ts = datetime.now().strftime('%Y%m%dT%H%M%S')
-                    stem = resolved.stem  # website-setup | website-creator
-                    shutil.copy2(str(resolved), str(bdir / f'{stem}.{ts}.json'))
-                    baks = sorted(bdir.glob(f'{stem}.*.json'))
+                    stem = target.stem  # website-setup | website-creator
+                    if raw_existing is not None:
+                        bdir.child(f'{stem}.{ts}.json').atomic_write_bytes(raw_existing)
+                    baks = sorted(p for p in bdir.iterdir()
+                                  if p.name.startswith(f'{stem}.') and p.name.endswith('.json'))
                     for old in baks[:-30]:
                         try:
-                            old.unlink()
+                            from services.safe_open import open_dir_beneath as _odb
+                            _bfd = _odb(target.root, bdir.rel)
+                            try:
+                                os.unlink(old.name, dir_fd=_bfd)
+                            finally:
+                                os.close(_bfd)
                         except Exception:
                             pass
                 except Exception as bexc:
                     logger.warning(f'website-setup backup failed (non-fatal): {bexc}')
             if isinstance(existing, dict) and isinstance(data, dict):
                 data = _ovu_merge_preserve(existing, data)
-        resolved.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        # in place (no-follow, O_TRUNC) like before: keeps the owner/mode of a file
+        # the agent created, so the agent can still edit it
+        target.write_text(json.dumps(data, indent=2))
         return jsonify({'ok': True})
     except Exception as exc:
         logger.error(f'canvas_data write error: {exc}')
@@ -2059,12 +2091,21 @@ def canvas_data_write(filename):
 
 # ---------------------------------------------------------------------------
 # Workspace file API — backs the Monaco code-editor canvas block.
-# Scoped to WORKSPACE_DIR (/app/runtime/workspace). NOT under the public
-# /api/canvas/ prefix, so the global Clerk before_request gate protects every
-# read/write when auth is enabled. _safe_canvas_path blocks traversal.
+# Scoped to CODE_WORKSPACE_DIR. NOT under the public /api/canvas/ prefix, so the
+# global Clerk before_request gate protects every read/write when auth is
+# enabled (it is in app.py _ADMIN_ONLY_PREFIXES).
+#
+# In the image this tree is shared with the terminal's `sandbox` user, who owns
+# it and can rename/symlink anything in it at any moment. So the server NEVER
+# resolves-then-opens by name here: every read, write, mkdir and listing walks
+# the path with no-follow fds (services/safe_open.py). A symlink anywhere in the
+# path is refused, and a directory swapped for a symlink mid-request cannot
+# redirect the I/O (review of PR #597, M1).
 # ---------------------------------------------------------------------------
 _WORKSPACE_MAX_BYTES = 5 * 1024 * 1024  # 5MB per-file ceiling for the editor
 _WORKSPACE_SKIP_SEGMENTS = {'.git', 'node_modules', '__pycache__', '.cache'}
+_WORKSPACE_DIR_MODE = 0o2770   # setgid: new entries stay in the sandbox group
+_WORKSPACE_FILE_MODE = 0o664   # editable from the terminal's sandbox user too
 
 
 def _workspace_root() -> Path:
@@ -2072,74 +2113,105 @@ def _workspace_root() -> Path:
     return CODE_WORKSPACE_DIR
 
 
+def _workspace_rel(raw) -> str | None:
+    """The caller's path as a plain relative path, or None (no '..', no absolute)."""
+    try:
+        return '/'.join(safe_split_rel((raw or '').strip()))
+    except UnsafePath:
+        return None
+
+
 @canvas_bp.route('/api/workspace/tree', methods=['GET'])
 def workspace_tree():
-    """Return the workspace file tree (relative paths, dirs + files)."""
+    """Return the workspace file tree (relative paths, dirs + files). Symlinks are not listed."""
     root = _workspace_root()
     entries = []
     try:
-        for p in sorted(root.rglob('*')):
-            rel = p.relative_to(root)
-            parts = rel.parts
-            if any(seg in _WORKSPACE_SKIP_SEGMENTS for seg in parts):
-                continue
-            if len(parts) > 12:  # avoid pathological deep trees
-                continue
-            try:
-                is_dir = p.is_dir()
-                entries.append({
-                    'path': str(rel),
-                    'name': p.name,
-                    'type': 'dir' if is_dir else 'file',
-                    'size': 0 if is_dir else p.stat().st_size,
-                })
-            except OSError:
-                continue
+        for dirpath, dirnames, filenames, dirfd in os.fwalk(str(root), follow_symlinks=False):
+            rel_dir = os.path.relpath(dirpath, str(root))
+            rel_parts = () if rel_dir == '.' else tuple(rel_dir.split('/'))
+            keep = []
+            for name in sorted(dirnames):
+                try:
+                    st = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if not stat.S_ISDIR(st.st_mode) or name in _WORKSPACE_SKIP_SEGMENTS:
+                    continue
+                if len(rel_parts) + 1 > 12:  # avoid pathological deep trees
+                    continue
+                keep.append(name)
+                entries.append({'path': '/'.join(rel_parts + (name,)), 'name': name,
+                                'type': 'dir', 'size': 0})
+            dirnames[:] = keep  # never descend into skipped dirs or symlinks
+            for name in sorted(filenames):
+                try:
+                    st = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if not stat.S_ISREG(st.st_mode) or len(rel_parts) + 1 > 12:
+                    continue  # symlinks / fifos / sockets are not listed (no lstat-of-target leak)
+                entries.append({'path': '/'.join(rel_parts + (name,)), 'name': name,
+                                'type': 'file', 'size': st.st_size})
     except Exception as exc:
         logger.error(f'workspace_tree error: {exc}')
         return jsonify({'error': str(exc)}), 500
+    entries.sort(key=lambda e: e['path'])
     return jsonify({'root': 'workspace', 'entries': entries})
 
 
 @canvas_bp.route('/api/workspace/file', methods=['GET'])
 def workspace_file_read():
     """Read a single workspace file as UTF-8 text for the editor."""
-    rel = request.args.get('path', '').strip()
-    if not rel:
+    raw = request.args.get('path', '').strip()
+    if not raw:
         return jsonify({'error': 'path required'}), 400
-    resolved = _safe_canvas_path(str(_workspace_root()), rel)
-    if resolved is None or not resolved.exists() or not resolved.is_file():
+    rel = _workspace_rel(raw)
+    if rel is None:
         return jsonify({'error': 'not found'}), 404
-    if resolved.stat().st_size > _WORKSPACE_MAX_BYTES:
-        return jsonify({'error': 'file too large to edit'}), 413
     try:
-        content = resolved.read_text(encoding='utf-8')
+        fd = safe_open_beneath(str(_workspace_root()), rel)
+    except (OSError, UnsafePath):
+        return jsonify({'error': 'not found'}), 404
+    try:
+        if os.fstat(fd).st_size > _WORKSPACE_MAX_BYTES:
+            return jsonify({'error': 'file too large to edit'}), 413
+        data = safe_read_fd(fd, _WORKSPACE_MAX_BYTES)
+    except (OSError, UnsafePath):
+        return jsonify({'error': 'file too large to edit'}), 413
+    finally:
+        os.close(fd)
+    try:
+        content = data.decode('utf-8')
     except UnicodeDecodeError:
         return jsonify({'error': 'binary file — not editable'}), 415
-    return jsonify({'path': rel, 'content': content})
+    return jsonify({'path': raw, 'content': content})
 
 
 @canvas_bp.route('/api/workspace/file', methods=['POST'])
 def workspace_file_write():
     """Create or overwrite a workspace file (also creates parent dirs)."""
     data = request.get_json(silent=True) or {}
-    rel = (data.get('path') or '').strip()
+    raw = (data.get('path') or '').strip()
     content = data.get('content')
-    if not rel or content is None:
+    if not raw or content is None:
         return jsonify({'error': 'path and content required'}), 400
     if not isinstance(content, str):
         return jsonify({'error': 'content must be a string'}), 400
-    if len(content.encode('utf-8')) > _WORKSPACE_MAX_BYTES:
+    encoded = content.encode('utf-8')
+    if len(encoded) > _WORKSPACE_MAX_BYTES:
         return jsonify({'error': 'content too large'}), 413
-    resolved = _safe_canvas_path(str(_workspace_root()), rel)
-    if resolved is None:
+    rel = _workspace_rel(raw)
+    if rel is None:
         return jsonify({'error': 'invalid path'}), 400
-    if resolved.exists() and resolved.is_dir():
-        return jsonify({'error': 'path is a directory'}), 400
     try:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(content, encoding='utf-8')
-        return jsonify({'ok': True, 'path': rel, 'bytes': len(content.encode('utf-8'))})
+        safe_write_beneath(str(_workspace_root()), rel, encoded, mode=_WORKSPACE_FILE_MODE,
+                           create_dirs=True, dir_mode=_WORKSPACE_DIR_MODE)
+        return jsonify({'ok': True, 'path': raw, 'bytes': len(encoded)})
+    except IsADirectoryError:
+        return jsonify({'error': 'path is a directory'}), 400
+    except UnsafePath:
+        return jsonify({'error': 'invalid path'}), 400
     except Exception as exc:
         logger.error(f'workspace_file_write error: {exc}')
         return jsonify({'error': str(exc)}), 500
@@ -2149,15 +2221,18 @@ def workspace_file_write():
 def workspace_mkdir():
     """Create a directory inside the workspace."""
     data = request.get_json(silent=True) or {}
-    rel = (data.get('path') or '').strip()
-    if not rel:
+    raw = (data.get('path') or '').strip()
+    if not raw:
         return jsonify({'error': 'path required'}), 400
-    resolved = _safe_canvas_path(str(_workspace_root()), rel)
-    if resolved is None:
+    rel = _workspace_rel(raw)
+    if rel is None:
         return jsonify({'error': 'invalid path'}), 400
     try:
-        resolved.mkdir(parents=True, exist_ok=True)
-        return jsonify({'ok': True, 'path': rel})
+        os.close(safe_open_dir_beneath(str(_workspace_root()), rel, create=True,
+                                       dir_mode=_WORKSPACE_DIR_MODE))
+        return jsonify({'ok': True, 'path': raw})
+    except UnsafePath:
+        return jsonify({'error': 'invalid path'}), 400
     except Exception as exc:
         logger.error(f'workspace_mkdir error: {exc}')
         return jsonify({'error': str(exc)}), 500
@@ -2247,7 +2322,8 @@ def _parse_jsonl_to_lines(jsonl_path):
     import json as _json
     results = []
     try:
-        with open(jsonl_path, encoding='utf-8', errors='replace') as _f:
+        # the agent's own workspace: no-follow walk from the workspace mount
+        with Anchored(WORKSPACE_DIR, jsonl_path).open('r', errors='replace') as _f:
             for raw in _f:
                 raw = raw.strip()
                 if not raw:
@@ -2347,7 +2423,7 @@ def canvas_build_log(project):
         status_path = CANVAS_PAGES_DIR / '_data' / 'builds' / f'{project}-status.json'
         if status_path.exists():
             try:
-                with open(status_path) as _sf:
+                with Anchored(CANVAS_PAGES_DIR, status_path).open('r') as _sf:  # no-follow
                     _sd = _json.load(_sf)
                 build_start_ts = _sd.get('startedAt', '')
             except Exception:

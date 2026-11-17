@@ -29,6 +29,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request, send_from_directory
 
 from services.paths import FACES_DIR, FACE_MANIFEST_PATH, CANVAS_PAGES_DIR, APP_ROOT
+from services.safe_open import Anchored, UnsafePath  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 
@@ -356,9 +357,14 @@ def _perf_dir():
     return d
 
 
+def _write_face_file(dest, data: bytes) -> None:
+    """Write a promoted face into FACES_DIR (the server's own dir; not agent-writable)."""
+    dest.write_bytes(data)
+
+
 def _page_sha(path):
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+    try:   # canvas pages are agent-writable: no-follow read
+        return hashlib.sha256(Anchored(CANVAS_PAGES_DIR, path).read_bytes(max_bytes=32 * 1024 * 1024)).hexdigest()
     except OSError:
         return None
 
@@ -456,10 +462,15 @@ def promote_canvas_to_face():
     else:
         logger.warning("custom-faces: promote FORCED without perf attestation: %s", page_id)
 
-    # Copy to faces dir
+    # Copy to faces dir. The SOURCE is an agent-writable canvas page: read it with
+    # one no-follow open (shutil.copy2 followed a symlinked page to any server file).
+    try:
+        page_bytes = Anchored(CANVAS_PAGES_DIR, src).read_bytes(max_bytes=32 * 1024 * 1024)
+    except (OSError, UnsafePath):
+        return jsonify({"error": f"Canvas page '{page_id}' not found"}), 404
     FACES_DIR.mkdir(parents=True, exist_ok=True)
-    dest = FACES_DIR / src.name
-    shutil.copy2(src, dest)
+    dest = FACES_DIR / Path(src).name
+    _write_face_file(dest, page_bytes)
 
     # Extract metadata and register
     meta = _extract_face_meta(dest)

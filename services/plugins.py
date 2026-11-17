@@ -24,6 +24,7 @@ import json
 import logging
 import importlib.util
 import os
+import re
 import shutil
 import tempfile
 import zipfile
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import requests
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +314,33 @@ def _run_lifecycle_hook(manifest: dict, hook_name: str, config: dict = None) -> 
 # ── Install / Uninstall ────────────────────────────────────────────────
 
 
+_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+
+
+def _copy_into(src: Path, root, dst) -> None:
+    """Copy a plugin-shipped file (server-owned src) to `dst` under an agent-writable
+    `root`, creating parents, with every component of dst walked no-follow."""
+    Anchored(root, dst).write_bytes(Path(src).read_bytes(), create_dirs=True)
+
+
+def _plugin_path(base: Path, plugin_id: str) -> Optional[Path]:
+    """`base/plugin_id` only if plugin_id is a plain name that stays inside base.
+
+    plugin_id arrives from the URL. `..` used to make uninstall rmtree the
+    parent of PLUGIN_DIR (/app); a symlinked plugin dir would point it
+    anywhere. Returns None for anything that is not one directory level below
+    base after resolving symlinks."""
+    if not isinstance(plugin_id, str) or not _PLUGIN_ID_RE.fullmatch(plugin_id) or ".." in plugin_id:
+        return None
+    candidate = base / plugin_id
+    try:
+        if candidate.resolve().parent != base.resolve():
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
 def install_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
     """Install a plugin from the local catalog or remote repo.
 
@@ -323,7 +352,9 @@ def install_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
         config: Optional configuration dict (API keys, provider selection)
                 passed through to the provisioning service for gateway plugins.
     """
-    dest = PLUGIN_DIR / plugin_id
+    dest = _plugin_path(PLUGIN_DIR, plugin_id)
+    if dest is None:
+        return None  # not a valid plugin id
     if dest.exists():
         return None  # Already installed
 
@@ -375,8 +406,9 @@ def install_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
                     rel_from_lore = file_rel[5:] if file_rel.startswith("lore/") else file_rel
                     dst = lore_dest / rel_from_lore
                     if src.is_file() and not dst.exists():
-                        dst.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(src), str(dst))
+                        # the agent workspace is agent-writable: no-follow create (a dangling
+                        # symlink planted at dst used to be written through by copy2)
+                        _copy_into(src, workspace_dir, dst)
                         lore_count += 1
             if lore_count > 0:
                 logger.info(f"Deployed {lore_count} lore files to workspace/{plugin_id}/")
@@ -387,8 +419,8 @@ def install_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
 
 def uninstall_plugin(plugin_id: str) -> bool:
     """Uninstall a plugin by removing its directory."""
-    dest = PLUGIN_DIR / plugin_id
-    if not dest.exists():
+    dest = _plugin_path(PLUGIN_DIR, plugin_id)
+    if dest is None or not dest.is_dir():
         return False
 
     # Run pre_uninstall lifecycle hook (container deprovisioning)
@@ -591,14 +623,15 @@ def load_plugins(app):
                     src = plugin_dir / page_file
                     dst = CANVAS_PAGES_DIR / Path(page_file).name
                     if src.is_file() and not dst.exists():
-                        shutil.copy2(str(src), str(dst))
+                        _copy_into(src, CANVAS_PAGES_DIR, dst)   # canvas-pages: no-follow create
                         logger.info(f"[Plugin:{plugin_id}] Copied page: {Path(page_file).name}")
                         # Register in manifest so icon meta tag gets extracted
                         try:
                             from routes.canvas import add_page_to_manifest
                             page_name = Path(page_file).name
                             title = page_entry.get("title", Path(page_file).stem.replace('-', ' ').title())
-                            content = dst.read_text(errors='ignore')[:2048] if dst.exists() else ''
+                            _dst = Anchored(CANVAS_PAGES_DIR, dst)
+                            content = _dst.read_text(errors='ignore', max_bytes=8 * 1024 * 1024)[:2048] if _dst.is_file() else ''
                             add_page_to_manifest(page_name, title, content=content)
                             logger.info(f"[Plugin:{plugin_id}] Registered {page_name} in manifest")
                         except Exception as e:
@@ -667,9 +700,8 @@ def load_plugins(app):
                             rel_from_lore = file_rel[5:] if file_rel.startswith("lore/") else file_rel
                             dst = lore_dest / rel_from_lore
                             if src.is_file() and not dst.exists():
-                                dst.parent.mkdir(parents=True, exist_ok=True)
                                 try:
-                                    shutil.copy2(str(src), str(dst))
+                                    _copy_into(src, workspace_dir, dst)   # no-follow create
                                     lore_count += 1
                                 except (OSError, PermissionError) as e:
                                     logger.warning(f"[Plugin:{plugin_id}] Cannot copy lore file {file_rel}: {e}")

@@ -26,6 +26,7 @@ import requests as http
 from flask import Blueprint, jsonify, request
 
 from services.paths import UPLOADS_DIR
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 fal_bp = Blueprint('fal', __name__)
@@ -81,7 +82,7 @@ def _save_generated_image(url: str, ext_hint: str = 'jpg') -> str:
     path = UPLOADS_DIR / filename
     r = http.get(url, timeout=60)
     r.raise_for_status()
-    path.write_bytes(r.content)
+    Anchored(UPLOADS_DIR, filename).write_bytes(r.content)  # no-follow
     logger.info('fal: saved generated image → %s (%d bytes)', path, path.stat().st_size)
     return f'/uploads/{filename}'
 

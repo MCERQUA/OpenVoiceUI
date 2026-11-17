@@ -23,6 +23,7 @@ from flask import Blueprint, Response, g, jsonify, request
 
 from services import canvas_styles as store
 from services import tool_jobs
+from services.safe_open import Anchored  # no-follow I/O under agent-writable roots
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ def lint_page(page_id):
     if not path.exists():
         return jsonify({'error': 'page not found'}), 404
     try:
-        issues = store.lint_page_html(path.read_text(encoding='utf-8', errors='replace'))
+        issues = store.lint_page_html(Anchored(CANVAS_PAGES_DIR, path).read_text(encoding='utf-8', errors='replace'))
     except Exception as exc:
         logger.error('lint failed for %s: %s', page_id, exc)
         return jsonify({'error': 'lint failed'}), 500

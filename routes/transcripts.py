@@ -28,6 +28,10 @@ TRANSCRIPTS_DIR = str(_TRANSCRIPTS_DIR_PATH)
 # OVU container at /app/runtime/workspace/Agent. Each message is one markdown
 # file under ledger/sms/<YYYY-MM-DD>/<HH-MM-SS>-<in|out>-<sid>.md.
 SMS_LEDGER_DIR = str(_RUNTIME_DIR / 'workspace' / 'Agent' / 'ledger' / 'sms')
+# no-follow walks start at the workspace dir (its children are the mount points)
+_WORKSPACE_ANCHOR = str(_RUNTIME_DIR / 'workspace')
+
+from services.safe_open import Anchored, UnsafePath  # noqa: E402  no-follow I/O (agent-writable dirs)
 
 
 def _int_arg(name: str, default: int, cap: int) -> int:
@@ -76,7 +80,8 @@ def save_transcript():
         f'{text}\n'
     )
 
-    with open(filepath, 'w', encoding='utf-8') as f:
+    # transcripts/ is agent-writable: no-follow create/truncate (never through a symlink)
+    with Anchored(TRANSCRIPTS_DIR, filepath).open('w', encoding='utf-8') as f:
         f.write(content)
 
     return jsonify({
@@ -105,7 +110,7 @@ def list_transcripts():
             # Read first few lines for metadata
             meta = {'title': fname, 'date': date_dir, 'filename': fname, 'words': 0}
             try:
-                with open(fpath, 'r', encoding='utf-8') as f:
+                with Anchored(TRANSCRIPTS_DIR, fpath).open('r', encoding='utf-8') as f:
                     for line in f:
                         if line.startswith('Title:'):
                             meta['title'] = line[6:].strip()
@@ -155,7 +160,7 @@ def conversation_history():
                 continue
             fpath = os.path.join(day_path, fname)
             try:
-                with open(fpath, encoding='utf-8') as f:
+                with Anchored(TRANSCRIPTS_DIR, fpath).open('r', encoding='utf-8') as f:
                     data = json.load(f)
                 user = (data.get('user') or '').strip()
                 if user == '__session_start__':
@@ -271,7 +276,8 @@ def sms_history():
                 continue
             fpath = os.path.join(day_path, fname)
             try:
-                parsed = _parse_sms_file(Path(fpath).read_text(encoding='utf-8'))
+                parsed = _parse_sms_file(
+                    Anchored(_WORKSPACE_ANCHOR, fpath).read_text(max_bytes=1024 * 1024))
                 if not parsed['body']:
                     continue
                 # Derive a HH:MM:SS from the filename prefix (HH-MM-SS-...) as a fallback.
@@ -310,9 +316,13 @@ def get_transcript(date_dir, filename):
         return jsonify({'error': 'Invalid path'}), 400
     if base not in resolved.parents and resolved != base:
         return jsonify({'error': 'Invalid path'}), 400
-    if not resolved.is_file():
+    # one no-follow read of the requested name (transcripts/ is agent-writable; the
+    # resolve() check above alone was a check-then-open race; review 2 of PR #597, H-C)
+    try:
+        text = Anchored(TRANSCRIPTS_DIR, f'{date_dir}/{filename}').read_text(max_bytes=16 * 1024 * 1024)
+    except (OSError, UnsafePath, UnicodeDecodeError):
         return jsonify({'error': 'Not found'}), 404
-    return resolved.read_text(encoding='utf-8'), 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    return text, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 
 import logging as _transcript_logger
@@ -399,7 +409,7 @@ def save_conversation_turn(
         filename = f'{time_str}_{key}_{session_id}.json'
         filepath = os.path.join(save_dir, filename)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with Anchored(TRANSCRIPTS_DIR, filepath).open('w', encoding='utf-8') as f:  # no-follow
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
         return f'transcripts/{date_str}/{filename}'

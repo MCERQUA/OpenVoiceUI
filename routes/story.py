@@ -9,6 +9,7 @@ Assets are written to the tenant's canvas-pages/stories/{story_id}/ directory.
 """
 
 import os
+import re
 import json
 import time
 import base64
@@ -19,9 +20,14 @@ from pathlib import Path
 import httpx
 from flask import Blueprint, jsonify, request
 
+from services.safe_open import BeneathFile, UnsafePath, open_dir_beneath as safe_open_dir_beneath
+
 logger = logging.getLogger(__name__)
 
 story_bp = Blueprint('story', __name__)
+
+# Ids that become path segments (story dir, sfx file names): slugs only.
+_SAFE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,100}$')
 
 # ── Keys ──────────────────────────────────────────────────────────────────────
 HF_TOKEN        = os.getenv('HF_TOKEN', '')
@@ -207,6 +213,11 @@ def generate_scene():
 
     if not choice_text:
         return jsonify({'error': 'choice_text required'}), 400
+    # story_id names a directory under canvas-pages/stories/: a slug only.
+    # '../../db' or an absolute path previously escaped the stories dir and
+    # chmod 0777'ed whatever it named.
+    if not isinstance(story_id, str) or not _SAFE_ID_RE.fullmatch(story_id):
+        return jsonify({'error': 'story_id must be 1-100 letters, digits, - or _'}), 400
 
     # 1. Generate scene JSON via LLM
     try:
@@ -216,20 +227,31 @@ def generate_scene():
         return jsonify({'error': f'Scene generation failed: {e}'}), 500
 
     scene_id = f'scene_{scene_index:03d}'
-    story_dir = CANVAS_PAGES_DIR / 'stories' / story_id
-    story_dir.mkdir(parents=True, exist_ok=True)
+    # Every write goes through ONE directory fd, opened no-follow at each
+    # component beneath canvas-pages (agent-writable): stories/ or stories/<id>
+    # being (or later becoming) a symlink can never redirect a write. No more
+    # chmod 0777: the server owns these files and serves them itself, so 0755
+    # dirs / 0644 files are all any reader needs (review of PR #597, L4).
     try:
-        story_dir.chmod(0o777)
-        (CANVAS_PAGES_DIR / 'stories').chmod(0o777)
-    except Exception:
-        pass
+        story_dfd = safe_open_dir_beneath(CANVAS_PAGES_DIR, f'stories/{story_id}',
+                                          create=True, dir_mode=0o755)
+    except (OSError, UnsafePath):
+        return jsonify({'error': 'invalid story_id'}), 400
+    try:
+        return _generate_scene_assets(story_dfd, story_id, scene_id, scene_data)
+    finally:
+        os.close(story_dfd)
+
+
+def _generate_scene_assets(story_dfd, story_id, scene_id, scene_data):
+    """Generate the scene's assets into the pinned story dir; build the response."""
 
     # 2. Generate all assets in parallel
     threads = []
     errors = []
 
     # Image
-    image_file = story_dir / f'{scene_id}_image.jpg'
+    image_file = BeneathFile(story_dfd, f'{scene_id}_image.jpg')
     def do_image():
         if not gen_image(scene_data.get('image_prompt', 'dark fantasy scene'), image_file):
             errors.append('image')
@@ -237,7 +259,7 @@ def generate_scene():
 
     # Ambient sound
     ambient = scene_data.get('ambient', {})
-    ambient_file = story_dir / f'{scene_id}_ambient.mp3'
+    ambient_file = BeneathFile(story_dfd, f'{scene_id}_ambient.mp3')
     def do_ambient():
         if not gen_suno_sound(
             ambient.get('prompt', 'dark ambient atmosphere'),
@@ -252,10 +274,12 @@ def generate_scene():
     # prompt but not guaranteed. Backfill missing ids so indexing never KeyErrors.
     sfx_list = scene_data.get('sfx', [])
     for _i, _sfx in enumerate(sfx_list):
-        if not _sfx.get('id'):
+        # The id becomes a filename; it comes from LLM output, so it is a slug
+        # or it is replaced (never a path).
+        if not _sfx.get('id') or not _SAFE_ID_RE.fullmatch(str(_sfx['id'])):
             _sfx['id'] = f'sfx_{_i}'
     for sfx in sfx_list:
-        sfx_file = story_dir / f'{scene_id}_{sfx["id"]}.mp3'
+        sfx_file = BeneathFile(story_dfd, f'{scene_id}_{sfx["id"]}.mp3')
         def do_sfx(s=sfx, f=sfx_file):
             gen_suno_sound(s.get('prompt', 'sound effect'), False, 'Any', f)
         threads.append(threading.Thread(target=do_sfx))
@@ -263,7 +287,7 @@ def generate_scene():
     # TTS lines
     script = scene_data.get('script', [])
     for i, line in enumerate(script):
-        line_file = story_dir / f'{scene_id}_line_{i:02d}.wav'
+        line_file = BeneathFile(story_dfd, f'{scene_id}_line_{i:02d}.wav')
         def do_tts(l=line, lf=line_file):
             gen_tts_line(l.get('text', ''), l.get('character', 'narrator'), lf)
         threads.append(threading.Thread(target=do_tts))
@@ -285,7 +309,7 @@ def generate_scene():
             'volume': ambient.get('volume', 0.35),
         })
     for sfx in sfx_list:
-        sfx_file = story_dir / f'{scene_id}_{sfx["id"]}.mp3'
+        sfx_file = BeneathFile(story_dfd, f'{scene_id}_{sfx["id"]}.mp3')
         if sfx_file.exists():
             sounds.append({
                 'id': sfx['id'],
@@ -299,7 +323,7 @@ def generate_scene():
     # Rebuild script with resolved audio paths
     resolved_script = []
     for i, line in enumerate(script):
-        line_file = story_dir / f'{scene_id}_line_{i:02d}.wav'
+        line_file = BeneathFile(story_dfd, f'{scene_id}_line_{i:02d}.wav')
         resolved_script.append({
             'type':      line.get('type', 'narration'),
             'character': line.get('character', 'narrator'),

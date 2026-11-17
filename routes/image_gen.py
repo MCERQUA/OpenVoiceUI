@@ -22,6 +22,7 @@ import requests as http
 from flask import Blueprint, jsonify, request
 from services.paths import UPLOADS_DIR
 from services.metered_spend import log_spend
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 image_gen_bp = Blueprint('image_gen', __name__)
@@ -152,8 +153,9 @@ AI_DESIGNS_MANIFEST = UPLOADS_DIR / 'ai-designs-manifest.json'
 
 def _load_manifest():
     try:
-        if AI_DESIGNS_MANIFEST.exists():
-            return json.loads(AI_DESIGNS_MANIFEST.read_text())
+        mf = Anchored(UPLOADS_DIR, AI_DESIGNS_MANIFEST)   # no-follow
+        if mf.is_file():
+            return json.loads(mf.read_text(max_bytes=32 * 1024 * 1024))
     except Exception:
         pass
     return []
@@ -166,9 +168,8 @@ def _save_manifest(entries):
     """Atomic write (tmp + replace) so a concurrent reader never sees a
     truncated file. Callers doing read-modify-write hold _manifest_lock."""
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = AI_DESIGNS_MANIFEST.with_suffix('.json.tmp')
-    tmp.write_text(json.dumps(entries, indent=2))
-    tmp.replace(AI_DESIGNS_MANIFEST)
+    # random O_EXCL temp + rename (the fixed '.json.tmp' name could be pre-planted)
+    Anchored(UPLOADS_DIR, AI_DESIGNS_MANIFEST).atomic_write_text(json.dumps(entries, indent=2))
 
 
 def _save_generated_image(mime_type: str, b64_data: str) -> str:
@@ -177,7 +178,7 @@ def _save_generated_image(mime_type: str, b64_data: str) -> str:
     ext = mime_type.split('/')[-1] if '/' in mime_type else 'png'
     filename = f'ai-gen-{int(time.time() * 1000)}.{ext}'
     path = UPLOADS_DIR / filename
-    path.write_bytes(base64.b64decode(b64_data))
+    Anchored(UPLOADS_DIR, filename).write_bytes(base64.b64decode(b64_data))  # no-follow
     logger.info('image_gen: saved generated image → %s (%d bytes)', path, path.stat().st_size)
     return f'/uploads/{filename}'
 

@@ -37,6 +37,8 @@ from flask import Blueprint, jsonify, request
 
 from services.paths import GENERATED_MUSIC_DIR
 from services import suno_lyrics
+from services.safe_open import Anchored  # no-follow I/O under agent-writable roots
+from services.paths import CANVAS_PAGES_DIR as _CANVAS_ROOT  # stems live in canvas-pages/_data
 
 GENERATED_MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_METADATA_FILE = GENERATED_MUSIC_DIR / 'generated_metadata.json'
@@ -127,7 +129,7 @@ def _task_log(event: str, **fields) -> None:
         row = {'ts': datetime.now(timezone.utc).isoformat(timespec='seconds'),
                'event': event}
         row.update({k: v for k, v in fields.items() if v not in (None, '')})
-        with open(GENERATED_MUSIC_DIR / 'suno-task-log.jsonl', 'a') as f:
+        with Anchored(GENERATED_MUSIC_DIR, GENERATED_MUSIC_DIR / 'suno-task-log.jsonl').open('a') as f:
             f.write(json.dumps(row) + '\n')
     except Exception:  # never let telemetry touch the generation path
         pass
@@ -276,7 +278,7 @@ suno_bp.after_request(_surface_submit_rejection)   # SUNO-REJECT-SURFACED — se
 def _load_generated_metadata() -> dict:
     if GENERATED_METADATA_FILE.exists():
         try:
-            with open(GENERATED_METADATA_FILE) as f:
+            with Anchored(GENERATED_MUSIC_DIR, GENERATED_METADATA_FILE).open() as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -285,9 +287,9 @@ def _load_generated_metadata() -> dict:
 
 def _save_generated_metadata(metadata: dict) -> None:
     """Persist generated music metadata (atomic write)."""
-    tmp = GENERATED_METADATA_FILE.with_suffix('.tmp')
-    tmp.write_text(json.dumps(metadata, indent=2))
-    tmp.replace(GENERATED_METADATA_FILE)
+    # random O_EXCL temp + rename (generated_music/ is agent-writable; the fixed '.tmp'
+    # name could be pre-planted as a symlink)
+    Anchored(GENERATED_MUSIC_DIR, GENERATED_METADATA_FILE).atomic_write_text(json.dumps(metadata, indent=2))
 
 
 def _add_song_to_metadata(filename: str, title: str, prompt: str, style: str,
@@ -335,7 +337,7 @@ def _add_song_to_metadata(filename: str, title: str, prompt: str, style: str,
     # falls back to this when metadata is missing the ids.
     try:
         if entry.get('suno_id'):
-            with open(GENERATED_MUSIC_DIR / 'suno-task-log.jsonl', 'a') as _tl:
+            with Anchored(GENERATED_MUSIC_DIR, GENERATED_MUSIC_DIR / 'suno-task-log.jsonl').open('a') as _tl:
                 _tl.write(json.dumps({'ts': datetime.now(timezone.utc).isoformat(timespec='seconds'),
                                       'filename': filename, 'title': title,
                                       'task_id': entry.get('task_id', ''),
@@ -1146,7 +1148,7 @@ def _action_status(job_id: str):
                                         break
                                     chunks.append(chunk)
                                 else:
-                                    save_path.write_bytes(b''.join(chunks))
+                                    Anchored(GENERATED_MUSIC_DIR, save_path).write_bytes(b''.join(chunks))
                                     logger.info(f'Suno downloaded: {song_title} → {filename}')
                             else:
                                 logger.warning(f'Suno download failed: {audio_resp.status_code}')
@@ -1788,7 +1790,7 @@ def _stem_read_pending(name_stem: str) -> dict:
     """Fresh pending marker for this track, or {} (stale/missing/unreadable)."""
     p = _stem_pending_path(name_stem)
     try:
-        info = json.loads(p.read_text())
+        info = json.loads(Anchored(_CANVAS_ROOT, p).read_text())
         if info.get('task_id') and (time.time() - float(info.get('ts', 0))) < _STEM_PENDING_TTL:
             return info
     except (OSError, ValueError):
@@ -1798,7 +1800,7 @@ def _stem_read_pending(name_stem: str) -> dict:
 
 def _stem_write_pending(name_stem: str, task_id: str, sep_type: str):
     try:
-        _stem_pending_path(name_stem).write_text(json.dumps(
+        Anchored(_CANVAS_ROOT, _stem_pending_path(name_stem)).write_text(json.dumps(
             {'task_id': task_id, 'ts': time.time(), 'type': sep_type}))
     except OSError as exc:
         logger.warning(f'stem pending marker write failed ({name_stem}): {exc}')
@@ -1816,7 +1818,7 @@ def _stem_name_from_marker(task_id: str) -> str:
     try:
         for p in _stems_dir().glob('*.pending.json'):
             try:
-                if json.loads(p.read_text()).get('task_id') == task_id:
+                if json.loads(Anchored(_CANVAS_ROOT, p).read_text()).get('task_id') == task_id:
                     return p.name[:-len('.pending.json')]
             except (OSError, ValueError):
                 continue
@@ -1856,7 +1858,7 @@ def _persist_stem_urls(urls: dict, name_stem: str) -> dict:
             try:
                 r = http_requests.get(url, timeout=120)
                 if r.status_code == 200 and 0 < len(r.content) <= SUNO_MAX_DOWNLOAD_BYTES:
-                    p.write_bytes(r.content)
+                    Anchored(_CANVAS_ROOT, p).write_bytes(r.content)
                     logger.info(f'stems: downloaded {kind_key} → {p.name} ({len(r.content)} bytes)')
             except Exception as exc:
                 logger.warning(f'stems: download failed ({kind_key}): {exc}')
@@ -1946,7 +1948,7 @@ def _action_stem_separate(_q, body: dict):
         try:
             log_path = GENERATED_MUSIC_DIR / 'suno-task-log.jsonl'
             if log_path.exists():
-                for line in log_path.read_text().splitlines():
+                for line in Anchored(GENERATED_MUSIC_DIR, log_path).read_text().splitlines():
                     try:
                         row = json.loads(line)
                     except Exception:
@@ -2285,7 +2287,7 @@ def _download_capped(url: str, save_path: Path, require_https: bool = False) -> 
                 return False
             chunks.append(chunk)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        save_path.write_bytes(b''.join(chunks))
+        Anchored(GENERATED_MUSIC_DIR, save_path).write_bytes(b''.join(chunks))
         return True
     except (http_requests.RequestException, OSError, ValueError) as exc:
         logger.warning(f'Suno result download error: {exc}')
@@ -2308,7 +2310,7 @@ def _save_process_result(kind: str, task_id: str, payload, src_filename: str = '
             try:
                 d = _process_dir(kind)
                 d.mkdir(parents=True, exist_ok=True)
-                (d / f'lyrics-{_process_tid(task_id)}.json').write_text(
+                (Anchored(GENERATED_MUSIC_DIR, d / f'lyrics-{_process_tid(task_id)}.json')).write_text(
                     json.dumps({'task_id': task_id, 'lyrics': items}, indent=2))
             except OSError as exc:
                 logger.warning(f'Could not save lyrics for {task_id}: {exc}')
@@ -2904,7 +2906,7 @@ def suno_callback():
                                         break
                                     chunks.append(chunk)
                                 else:
-                                    save_path.write_bytes(b''.join(chunks))
+                                    Anchored(GENERATED_MUSIC_DIR, save_path).write_bytes(b''.join(chunks))
                                     logger.info(f'Callback downloaded: {song_title} → {filename}')
 
                                 # Find matching job
@@ -3032,7 +3034,7 @@ def delete_song(filename):
     # Rename to .deleted instead of removing (NEVER DELETE rule)
     renamed = target.with_suffix(target.suffix + '.deleted')
     try:
-        target.rename(renamed)
+        Anchored(GENERATED_MUSIC_DIR, target).rename(renamed.name)   # no-follow
         logger.info(f'[suno] Archived song: {filename} -> {renamed.name}')
         return jsonify({'ok': True, 'archived': renamed.name})
     except Exception as e:

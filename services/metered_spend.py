@@ -24,6 +24,7 @@ import logging
 import time
 
 from services.paths import UPLOADS_DIR
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ def log_spend(route: str, model: str, n_calls: int = 1, cost_key: str | None = N
             "n": n_calls,
             "est_usd": round(est * n_calls, 4) if est is not None else None,
         }
-        with SPEND_LOG.open("a") as f:
+        with Anchored(UPLOADS_DIR, SPEND_LOG).open("a") as f:   # no-follow (uploads/ is agent-writable)
             f.write(json.dumps(row) + "\n")
     except Exception:  # noqa: BLE001 — tally must never break the feature
         logger.warning("metered_spend: failed to log row", exc_info=True)
