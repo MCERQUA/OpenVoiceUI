@@ -38,7 +38,8 @@
     },
     "source_sha256": {
       "type": "string",
-      "label": "Source file hash"
+      "label": "Source file hash",
+      "format": "sha256"
     },
     "confirmed_by": {
       "type": "string",

@@ -7,7 +7,8 @@
   "required": [
     "crt_project_id",
     "party_contact_id",
-    "requirement_set_id"
+    "requirement_set_id",
+    "requirement_set_version"
   ],
   "fields": {
     "crt_project_id": {
@@ -27,7 +28,14 @@
     "requirement_set_id": {
       "type": "ref",
       "label": "Requirement set",
-      "ref": "crt_requirement_set"
+      "ref": "crt_requirement_set",
+      "staff_only": true
+    },
+    "requirement_set_version": {
+      "type": "integer",
+      "label": "Requirement set version (pinned)",
+      "min": 1,
+      "staff_only": true
     },
     "contract_signed_at": {
       "type": "date",

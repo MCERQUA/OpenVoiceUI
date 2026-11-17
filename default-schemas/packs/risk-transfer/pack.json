@@ -34,7 +34,8 @@
         },
         "crt_sha256": {
           "type": "string",
-          "label": "File hash"
+          "label": "File hash",
+          "format": "sha256"
         }
       },
       "enum_add": {

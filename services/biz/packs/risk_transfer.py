@@ -26,11 +26,12 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.0.0'
+RULE_VERSION = 'crt-rules-1.1.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
     'meets': 'Meets requirements (documents reviewed)',
+    'meets_accepted': 'Meets requirements except contractor-accepted variances (documents reviewed)',
     'expiring_30': 'Meets requirements (documents reviewed), expiring within 30 days',
     'expiring_15': 'Meets requirements (documents reviewed), expiring within 15 days',
     'cant_tell': "Can't tell (needs staff check)",
@@ -51,8 +52,13 @@ PRODUCER_FIELDS = ('producer_name', 'producer_phone', 'producer_email')
 ENDORSEMENT_FIELDS = ('function', 'form', 'edition', 'scheduled_names', 'scheduled_projects', 'blanket',
                       'manuscript', 'document_id')
 AI_FUNCTIONS = ('ai_ongoing', 'ai_completed')
+# Host ruling H4 (2026-11-17): a waiver never clears a MISSING document; only variances are waivable.
 WAIVABLE_PREFIXES = ('NOT_AI', 'LIMIT_LOW', 'WRONG_', 'EXCLUSION', 'PRODUCER_INCOMPLETE', 'PL_NO_TAIL',
-                     'COMPLETED_OPS_LAPSED', 'SCOPE_CHANGED', 'BLANKET_UNBACKED', 'MISSING')
+                     'COMPLETED_OPS_LAPSED', 'SCOPE_CHANGED', 'BLANKET_UNBACKED')
+# Assignment fields the verdict reads: they count only when a person wrote the assignment's current
+# version, or a person confirmed them (claim-check H1).
+ASSIGNMENT_FIELDS = ('crt_project_id', 'party_contact_id', 'requirement_set_id', 'requirement_set_version',
+                     'trade_category', 'scope_changed_at')
 _ANI_RE = re.compile(r'additional\s+named\s+insured', re.I)
 _SUFFIXES = {'llc', 'inc', 'co', 'corp', 'corporation', 'company', 'ltd', 'the', 'lp', 'llp', 'pllc', 'pc'}
 
@@ -254,9 +260,11 @@ class _Confirmed:
                 continue
             self.by_record.setdefault(c['data'].get('record_id'), []).append(c)
 
-    def doc_ok(self, did) -> bool:
+    def doc_ok(self, did, kind=None) -> bool:
         doc = self.i['documents'].get(did)
         fid = _file_id(doc)
+        if kind is not None and (doc or {}).get('data', {}).get('kind') != kind:
+            return False
         return bool(fid and self.i['files_ok'].get(fid))
 
     def _valid(self, c, rec, collection, field, need_source):
@@ -300,11 +308,17 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             unconfirmed.append(code)
         return code
 
-    # the set: approved by staff at its current version
+    # the assignment itself: a person wrote it (or confirmed these fields) -- claim-check H1
+    for f in ASSIGNMENT_FIELDS:
+        if not conf.ok(asg, 'crt_assignment', f, need_source=False, person_ok=True):
+            unc('crt_assignment', f)
+    # the set: approved by staff at its current version, and the version the assignment pinned
     items = []
     if not s_rec or s_rec['archived_at']:
         unc('crt_assignment', 'requirement_set_id')
     else:
+        if asg['data'].get('requirement_set_version') != s_rec['version']:
+            unc('crt_assignment', 'requirement_set_version')
         approved = s_rec['data'].get('status') == 'APPROVED' and \
             conf.ok(s_rec, 'crt_requirement_set', 'status', need_source=False) and \
             conf.ok(s_rec, 'crt_requirement_set', 'items', need_source=False)
@@ -384,6 +398,15 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 missing.append(code)
             cells[item_id] = code
             return None
+        eff, exp = _d(pol['data'].get('effective')), _d(pol['data'].get('expiration'))
+        if eff is None or exp is None:                       # claim-check H3: no dates, no verdict
+            unc('crt_policy', 'effective' if eff is None else 'expiration')
+            cells[item_id] = 'UNCONFIRMED'
+            return None
+        if eff > today:                                      # next term's certificate, sent early
+            _add(missing, f'NOT_IN_FORCE:{line}')
+            cells[item_id] = f'NOT_IN_FORCE:{line}'
+            return None
         checked_policies[pol['id']] = pol
         return pol
 
@@ -412,8 +435,8 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 if umb is not None and all(pol_ok(umb, f) for f in POLICY_BASE_FIELDS) and \
                         conf.doc_ok(umb['data'].get('source_document_id')):
                     uv = (umb['data'].get('limits') or {}).get('each_occurrence') or 0
-                    u_exp = _d(umb['data'].get('expiration'))
-                    if u_exp and u_exp > today and val + uv >= comb.get('gl_occ_plus_umbrella_min', 0):
+                    u_exp, u_eff = _d(umb['data'].get('expiration')), _d(umb['data'].get('effective'))
+                    if u_exp and u_exp > today and u_eff and u_eff <= today and val + uv >= comb.get('gl_occ_plus_umbrella_min', 0):
                         ok = True
                         notes.append(f'{iid}: met by the combined GL + umbrella test')
             if not ok:
@@ -522,8 +545,9 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                         unc('crt_endorsement', f)
                     item_codes.append('UNCONFIRMED')
                     continue
-                if not conf.doc_ok(e['data'].get('document_id')):
-                    item_codes.append(f'MISSING:{fn}')
+                if not conf.doc_ok(e['data'].get('document_id'), kind='endorsement') or \
+                        e['data'].get('document_id') == pol['data'].get('source_document_id'):
+                    item_codes.append(f'MISSING:{fn}')      # the certificate is a summary; the endorsement is the proof
                     continue
                 ed_year = _edition_year(e['data'].get('edition'))
                 if ed_year is not None and ed_year < 2004:
@@ -574,7 +598,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
 
     # named insured + producer on every policy the verdict read
     for pol in checked_policies.values():
-        if party_name and not names_match(party_name, [pol['data'].get('named_insured')]):
+        if party_name and norm_name(party_name) != norm_name(pol['data'].get('named_insured')):
             if 'WRONG_INSURED' not in variances:
                 variances.append('WRONG_INSURED')
         prod_bad = [f for f in PRODUCER_FIELDS if not pol_ok(pol, f)]
@@ -611,7 +635,8 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
     for w in inputs['waivers']:
         wd = w['data']
         exp_w = _d(wd.get('expires'))
-        if w['archived_at'] or not exp_w or exp_w <= today or not conf.doc_ok(wd.get('acceptance_document_id')):
+        if w['archived_at'] or not exp_w or exp_w <= today or \
+                not conf.doc_ok(wd.get('acceptance_document_id'), kind='contractor_waiver_ok'):
             continue
         live_waivers[wd.get('variance_code')] = w
     for lst in (missing, variances):
@@ -636,6 +661,8 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         state = 'expiring_30'
     else:
         state = 'meets'
+    if accepted and state in ('meets', 'expiring_15', 'expiring_30'):
+        state = 'meets_accepted'           # host ruling H4: never plain Meets when a variance was accepted
     codes = unconfirmed + missing + variances + expired
     stale = True
     if last_review:
@@ -726,6 +753,20 @@ def check_write(store, op, collection, data, current, *, by, agent, via_pack):
             raise _err(422, 'bad_link', 'An account cannot be linked to itself')
         return
     if collection == 'crt_assignment' and op in ('create', 'edit'):
+        sid = data.get('requirement_set_id')
+        if op == 'create' or sid != (current or {}).get('data', {}).get('requirement_set_id') or \
+                data.get('requirement_set_version') != (current or {}).get('data', {}).get('requirement_set_version'):
+            s_rec = store.get('crt_requirement_set', sid)
+            if data.get('requirement_set_version') != s_rec['version']:
+                raise _err(422, 'set_version_mismatch', 'Pin the requirement set version you read '
+                                                        '(requirement_set_version = the set record\'s version)',
+                           field='requirement_set_version', current_version=s_rec['version'])
+        if agent and current:
+            old = current['data'].get('scope_changed_at')
+            new = data.get('scope_changed_at')
+            if old and (not new or new < old):
+                raise _err(403, 'scope_change_needs_person', 'Only a person may clear or back-date a scope change',
+                           field='scope_changed_at')
         project = store.get('crt_project', data.get('crt_project_id'))
         if not _active_link(store, project['data'].get('crt_account_id'), data.get('party_contact_id')):
             raise _err(422, 'party_not_linked', "This sub has no active link to the project's account "
@@ -746,7 +787,11 @@ def check_write(store, op, collection, data, current, *, by, agent, via_pack):
                        field='crt_account_id')
         return
     if collection == 'crt_waiver' and op in ('create', 'edit'):
-        _private_doc(store, data.get('acceptance_document_id'), 'acceptance_document_id')
+        doc = _private_doc(store, data.get('acceptance_document_id'), 'acceptance_document_id')
+        if doc['data'].get('kind') != 'contractor_waiver_ok':
+            raise _err(422, 'not_a_waiver_document', "The acceptance must be the contractor's written OK "
+                                                     "(a document of kind contractor_waiver_ok)",
+                       field='acceptance_document_id')
         return
 
 

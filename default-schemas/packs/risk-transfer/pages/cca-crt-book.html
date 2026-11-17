@@ -16,7 +16,7 @@ h1{font-size:1.35rem;margin:4px 0 2px} h2{font-size:1.05rem;margin:22px 0 8px}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .chip{display:inline-block;border-radius:999px;padding:3px 10px;font-size:.8rem;font-weight:600;white-space:nowrap}
-.s-meets,.s-OK{background:var(--ok-bg);color:var(--ok)} .s-expiring_30,.s-expiring_15,.s-SUGGESTED{background:var(--warn-bg);color:var(--warn)}
+.s-meets,.s-OK{background:var(--ok-bg);color:var(--ok)} .s-meets_accepted{background:var(--warn-bg);color:var(--warn)} .s-expiring_30,.s-expiring_15,.s-SUGGESTED{background:var(--warn-bg);color:var(--warn)}
 .s-variance,.s-missing,.s-expired,.s-bad{background:var(--bad-bg);color:var(--bad)} .s-cant_tell,.s-UNCONFIRMED{background:var(--info-bg);color:var(--info)}
 .s-NA,.s-muted{background:var(--grey-bg);color:var(--muted)}
 button,.btn{min-height:44px;border-radius:8px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);
@@ -65,8 +65,10 @@ Readings count only after staff confirm them against the stored document. Nothin
     [].concat(kids || []).forEach(function (c) { if (c !== null && c !== undefined) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return n;
   }
-  var LABEL = {meets: 'Meets requirements (documents reviewed)', expiring_30: 'Meets, expiring within 30 days',
-    expiring_15: 'Meets, expiring within 15 days', cant_tell: "Can't tell (needs staff check)", missing: 'Missing documents',
+  var LABEL = {meets: 'Meets requirements (documents reviewed)',
+    meets_accepted: 'Meets requirements except contractor-accepted variances (documents reviewed)',
+    expiring_30: 'Meets requirements (documents reviewed), expiring within 30 days',
+    expiring_15: 'Meets requirements (documents reviewed), expiring within 15 days', cant_tell: "Can't tell (needs staff check)", missing: 'Missing documents',
     variance: 'Variance', expired: 'Expired'};
   function chip(state, text) {
     var cls = state === 'N/A' ? 'NA' : String(state || 'muted').split(':')[0];
@@ -94,7 +96,7 @@ Readings count only after staff confirm them against the stored document. Nothin
       if (!res.accounts.length) { box.appendChild(el('div', {'class': 'card muted', text: 'No contractor accounts yet. Add one below.'})); return; }
       res.accounts.forEach(function (a) {
         var st = a.states, chips = el('div', {'class': 'row'});
-        ['meets', 'expiring_30', 'expiring_15', 'variance', 'missing', 'expired', 'cant_tell'].forEach(function (s) {
+        ['meets', 'meets_accepted', 'expiring_30', 'expiring_15', 'variance', 'missing', 'expired', 'cant_tell'].forEach(function (s) {
           if (st[s]) chips.appendChild(U.chip(s, U.LABEL[s].split(' (')[0] + ': ' + st[s]));
         });
         box.appendChild(el('div', {'class': 'card'}, [

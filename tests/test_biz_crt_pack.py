@@ -154,14 +154,15 @@ def world(h, template='mep', trade='electrical', today=TODAY, policies=None, end
     # documents forwarded by staff and filed by the agent, into the private store
     h.agent()
     files = {k: h.upload(pdf(f'{k}-{party_name}-{template}'), f'{k}.pdf') for k in
-             ('contract', 'cert', 'e_ongoing', 'e_completed', 'e_pnc', 'e_other')}
+             ('contract', 'cert', 'e_ongoing', 'e_completed', 'e_pnc', 'e_other', 'waiver_ok')}
 
     def doc(k, kind):
         return h.mk('document', {'title': k, 'file_url': files[k]['url'], 'kind': kind,
                                  'crt_account_id': w['account']['id'], 'contact_id': w['party']['id']})
     w['docs'] = {'contract': doc('contract', 'contract_excerpt'), 'cert': doc('cert', 'coi_acord25'),
                  'e_ongoing': doc('e_ongoing', 'endorsement'), 'e_completed': doc('e_completed', 'endorsement'),
-                 'e_pnc': doc('e_pnc', 'endorsement'), 'e_other': doc('e_other', 'endorsement')}
+                 'e_pnc': doc('e_pnc', 'endorsement'), 'e_other': doc('e_other', 'endorsement'),
+                 'waiver_ok': doc('waiver_ok', 'contractor_waiver_ok')}
     w['files'] = files
     # the requirement set: DRAFT from the template (agent may draft), approved by staff
     w['set'] = h.ok(h.post('/crt/requirement-sets/from-template', {'template_key': template}), 201)['record']
@@ -175,8 +176,11 @@ def world(h, template='mep', trade='electrical', today=TODAY, policies=None, end
              'contract_document_id': w['docs']['contract']['id']}
     pdata.update(project or {})
     w['project'] = h.mk('crt_project', pdata)
-    w['asg'] = h.mk('crt_assignment', {'crt_project_id': w['project']['id'], 'party_contact_id': w['party']['id'],
-                                       'requirement_set_id': w['set']['id'], 'trade_category': trade})
+    asg = {'crt_project_id': w['project']['id'], 'party_contact_id': w['party']['id'],
+           'requirement_set_id': w['set']['id'], 'trade_category': trade}
+    if 'requirement_set_version' in h.ok(h.get('/schema/crt_assignment'))['fields']:   # lets these tests run on 093f758 too
+        asg['requirement_set_version'] = w['set']['version']
+    w['asg'] = h.mk('crt_assignment', asg)
     # the agent proposes readings (unconfirmed until staff check them)
     h.agent()
     prod = {'producer_name': 'Desert Risk Partners', 'producer_contact': 'Pat Lee',
@@ -261,7 +265,7 @@ def test_tb1_files_are_private(h):
     h.staff()
     assert h.get(f'/files/{fid}').status_code == 200
     docs = h.ok(h.get('/document?limit=500'))['records']
-    assert len(docs) == 6 and sum(1 for d in docs if d['data']['file_url'].startswith('/uploads/')) == 0
+    assert len(docs) == 7 and sum(1 for d in docs if d['data']['file_url'].startswith('/uploads/')) == 0
 
 
 def test_tb1_pack_documents_cannot_point_at_uploads(h):
@@ -302,7 +306,7 @@ def test_tb2c_agent_cannot_create_a_waiver(h):
     h.agent()
     r = h.post('/crt_waiver', {'data': {'crt_assignment_id': w['asg']['id'], 'variance_code': 'WRONG_PARTY',
                                         'accepted_by_contractor': 'A', 'expires': '2027-01-01',
-                                        'acceptance_document_id': w['docs']['e_other']['id']}})
+                                        'acceptance_document_id': w['docs']['waiver_ok']['id']}})
     assert r.status_code == 403 and r.get_json()['code'] == 'staff_only'
 
 
@@ -362,7 +366,7 @@ def test_tb2h_agent_cannot_archive_or_unarchive_evidence_of_a_verdict(h, coll):
     else:
         rid = h.mk('crt_waiver', {'crt_assignment_id': w['asg']['id'], 'variance_code': 'WRONG_PARTY',
                                   'accepted_by_contractor': 'Acme PM', 'expires': '2027-06-01',
-                                  'acceptance_document_id': w['docs']['e_other']['id']})['id']
+                                  'acceptance_document_id': w['docs']['waiver_ok']['id']})['id']
     h.agent()
     r = h.post(f'/{coll}/{rid}/archive')
     assert r.status_code == 403 and r.get_json()['code'] == 'staff_only'
@@ -635,12 +639,15 @@ def test_waiver_unexpired_accepts_and_expired_returns_the_variance(h):
     h.staff()
     h.mk('crt_waiver', {'crt_assignment_id': w['asg']['id'], 'variance_code': 'WRONG_PARTY',
                         'accepted_by_contractor': 'Acme Builders PM (written OK on file)',
-                        'acceptance_document_id': w['docs']['e_other']['id'], 'recorded_by': 'clerk:' + STAFF_1,
+                        'acceptance_document_id': w['docs']['waiver_ok']['id'], 'recorded_by': 'clerk:' + STAFF_1,
                         'reason': 'GC renamed mid-job', 'compensating_control': 'contract indemnity',
                         'expires': iso(TODAY + timedelta(days=60))})
     ev = h.state(w['asg']['id'])
-    assert ev['state'] == 'meets' and ev['codes'] == []
+    assert ev['state'] == 'meets_accepted' and ev['codes'] == []
+    assert ev['label'] == 'Meets requirements except contractor-accepted variances (documents reviewed)'
     assert [a['code'] for a in ev['accepted']] == ['WRONG_PARTY']
+    rv = h.ok(h.post(f'/crt/assignment/{w["asg"]["id"]}/review'), 201)['review']['data']
+    assert rv['state'] == 'meets_accepted' and rv['label'] == ev['label'] and rv['accepted_codes'] == ['WRONG_PARTY']
     late = h.state(w['asg']['id'], TODAY + timedelta(days=61))
     assert late['state'] == 'variance' and codes(late) == ['WRONG_PARTY'] and late['accepted'] == []
 
@@ -731,7 +738,8 @@ def test_a_sub_must_be_linked_to_the_account_to_be_assigned(h):
     w = world(h)
     stranger = h.mk('contact', {'name': 'Unlinked Drywall', 'type': 'subcontractor'})
     r = h.post('/crt_assignment', {'data': {'crt_project_id': w['project']['id'], 'party_contact_id': stranger['id'],
-                                            'requirement_set_id': w['set']['id']}})
+                                            'requirement_set_id': w['set']['id'],
+                                            'requirement_set_version': w['set']['version']}})
     assert r.status_code == 422 and r.get_json()['code'] == 'party_not_linked'
 
 

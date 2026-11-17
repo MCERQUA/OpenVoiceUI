@@ -16,7 +16,7 @@ h1{font-size:1.35rem;margin:4px 0 2px} h2{font-size:1.05rem;margin:22px 0 8px}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .chip{display:inline-block;border-radius:999px;padding:3px 10px;font-size:.8rem;font-weight:600;white-space:nowrap}
-.s-meets,.s-OK{background:var(--ok-bg);color:var(--ok)} .s-expiring_30,.s-expiring_15,.s-SUGGESTED{background:var(--warn-bg);color:var(--warn)}
+.s-meets,.s-OK{background:var(--ok-bg);color:var(--ok)} .s-meets_accepted{background:var(--warn-bg);color:var(--warn)} .s-expiring_30,.s-expiring_15,.s-SUGGESTED{background:var(--warn-bg);color:var(--warn)}
 .s-variance,.s-missing,.s-expired,.s-bad{background:var(--bad-bg);color:var(--bad)} .s-cant_tell,.s-UNCONFIRMED{background:var(--info-bg);color:var(--info)}
 .s-NA,.s-muted{background:var(--grey-bg);color:var(--muted)}
 button,.btn{min-height:44px;border-radius:8px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);
@@ -68,8 +68,10 @@ Readings count only after staff confirm them against the stored document. Nothin
     [].concat(kids || []).forEach(function (c) { if (c !== null && c !== undefined) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return n;
   }
-  var LABEL = {meets: 'Meets requirements (documents reviewed)', expiring_30: 'Meets, expiring within 30 days',
-    expiring_15: 'Meets, expiring within 15 days', cant_tell: "Can't tell (needs staff check)", missing: 'Missing documents',
+  var LABEL = {meets: 'Meets requirements (documents reviewed)',
+    meets_accepted: 'Meets requirements except contractor-accepted variances (documents reviewed)',
+    expiring_30: 'Meets requirements (documents reviewed), expiring within 30 days',
+    expiring_15: 'Meets requirements (documents reviewed), expiring within 15 days', cant_tell: "Can't tell (needs staff check)", missing: 'Missing documents',
     variance: 'Variance', expired: 'Expired'};
   function chip(state, text) {
     var cls = state === 'N/A' ? 'NA' : String(state || 'muted').split(':')[0];
@@ -131,7 +133,7 @@ Readings count only after staff confirm them against the stored document. Nothin
       return Promise.all(res[0].records.map(function (ln) { return jb.get('contact', ln.data.party_contact_id); })).then(function (cs) {
         cs.forEach(function (c) { ss.appendChild(el('option', {value: c.id, text: U.name(c)})); });
         res[1].records.filter(function (s) { return s.data.status === 'APPROVED'; }).forEach(function (s) {
-          rs.appendChild(el('option', {value: s.id, text: s.data.name + ' (v' + (s.data.set_version || 1) + ')'}));
+          rs.appendChild(el('option', {value: s.id, 'data-version': String(s.version), text: s.data.name + ' (v' + (s.data.set_version || 1) + ')'}));
         });
         if (!rs.options.length) rs.appendChild(el('option', {value: '', text: 'No approved sets yet: approve one on the requirements page'}));
       });
@@ -140,7 +142,9 @@ Readings count only after staff confirm them against the stored document. Nothin
   document.getElementById('adda').addEventListener('submit', function (ev) {
     ev.preventDefault();
     var v = function (id) { return document.getElementById(id).value; };
+    var opt = document.getElementById('ar').selectedOptions[0];
     jb.create('crt_assignment', {crt_project_id: pid, party_contact_id: v('as'), requirement_set_id: v('ar'),
+      requirement_set_version: opt ? parseInt(opt.getAttribute('data-version'), 10) : undefined,
       trade_category: v('at') || undefined, contract_signed_at: v('ac') || undefined})
       .then(function () { U.say('Sub added to the project', true); return load(); }).catch(U.fail);
   });
