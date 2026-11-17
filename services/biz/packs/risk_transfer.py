@@ -909,6 +909,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             code = f'MISSING:{line}'
             if code not in missing:
                 missing.append(code)
+            occur(code, item_id, None)       # every code has its place (ruling W), waivable or not
             cells[item_id] = code
             return None
         bad = [f for f in POLICY_BASE_FIELDS if not pol_ok(pol, f)]
@@ -927,6 +928,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             code = f'MISSING:{line}_certificate'
             if code not in missing:
                 missing.append(code)
+            occur(code, item_id, pol['data'].get('source_document_id'))
             cells[item_id] = code
             return None
         eff, exp = _d(pol['data'].get('effective')), _d(pol['data'].get('expiration'))
@@ -936,6 +938,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             return None
         if eff > today:                                      # next term's certificate, sent early
             _add(missing, f'NOT_IN_FORCE:{line}')
+            occur(f'NOT_IN_FORCE:{line}', item_id, pol['data'].get('source_document_id'))
             cells[item_id] = f'NOT_IN_FORCE:{line}'
             return None
         checked_policies[pol['id']] = pol
@@ -1241,6 +1244,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         if party_name and norm_name(party_name) != norm_name(pol['data'].get('named_insured')):
             if 'WRONG_INSURED' not in variances:
                 variances.append('WRONG_INSURED')
+            occur('WRONG_INSURED', 'insured:' + str(pol['data'].get('line')), pol['data'].get('source_document_id'))
         prod_bad = [f for f in PRODUCER_FIELDS if not pol_ok(pol, f)]
         if prod_bad:
             for f in prod_bad:
@@ -1257,6 +1261,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             line = pol['data'].get('line')
             if days <= 0:
                 expired.append(f'EXPIRED:{line}')
+                occur(f'EXPIRED:{line}', 'expiry:' + str(line), pol['data'].get('source_document_id'))
             elif expiring is None or days < expiring['days']:
                 expiring = {'line': line, 'days': days, 'expiration': exp.isoformat(), 'policy_id': pol['id']}
 

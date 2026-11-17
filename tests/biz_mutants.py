@@ -426,8 +426,8 @@ MUTANTS = [
     ('low-today-agent-allowed', [(RT, "            if ctx.is_agent():          # LOW ruling", "            if False:          # LOW ruling")],
      [T_C3 + 'test_low_today_is_a_staff_what_if_only']),
     ('low-newer-set-silent', [(RT, "    if newer:\n", "    if False:\n")],
-     [T_C3 + 'test_low_a_newer_approved_set_is_noted_on_the_label_and_never_applied',
-      T_P3 + 'test_x7_superseded_set_still_meets_silently']),
+     # rules 1.6.0: the verbatim probe x7 approves without diff_sha256, refused by X4 (an intended failure now)
+     [T_C3 + 'test_low_a_newer_approved_set_is_noted_on_the_label_and_never_applied']),
     ('h4-surface-guard-off', [(RB, "        if request.method not in _SAFE_METHODS and not g.biz_surface and _surface_guarded(store):",
                                "        if False:")],
      [T_C3 + 'test_h4_a_page_the_agent_wrote_served_to_staff_cannot_person_write']),
