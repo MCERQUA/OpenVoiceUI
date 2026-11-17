@@ -19,6 +19,10 @@ SBX = 'josh'
 SBX_KEY = 'sbx-josh-' + 'j' * 40
 SBX_KEY_OTHER = 'sbx-foam-' + 'f' * 40
 B = '/api/biz/v1'
+# R1 (rules 1.4.0): the staff surface is its own origin. The bridge-handed JWT a canvas page holds carries
+# azp = the tenant origin; only a JWT Clerk minted for a page ON the staff origin carries azp = STAFF_ORIGIN.
+STAFF_ORIGIN = 'https://crt-staff-test-dev.jam-bot.com'
+CANVAS_ORIGIN = 'https://test-dev.jam-bot.com'
 SRC = {'channel': 'email', 'ref': 'fwd-from-staff-1', 'confidence': 0.8,
        'words': 'certificate forwarded by CCA staff'}
 TODAY = date(2026, 11, 17)
@@ -52,14 +56,25 @@ class H:
         self.who = None
         self.surface_ready = False          # set once the pack is on: staff then act through the staff pages
         self.surface = {}
+        self.signed_in = None
         self.staff()
 
     def staff(self, user=STAFF_1):
         import services.auth as auth
         self.mp.setattr(auth, 'get_token_from_request', lambda: 'tok')
-        self.mp.setattr(auth, 'verify_clerk_token', lambda t: user)
+        self.mp.setattr(auth, 'verify_clerk_claims', lambda t: claims_for(t, user))
+        self.mp.setattr(auth, 'verify_clerk_token', lambda t: (claims_for(t, user) or {}).get('sub'))
         self.who = ('staff', user)
         return self
+
+    def signin(self, user):
+        """Sign in on the staff origin the real way: a JWT Clerk minted for the staff origin, exchanged."""
+        if self.signed_in == user:
+            return
+        r = self.c.post(f'{B}/crt/staff/session', json={'token': f'staffjwt:{user}'}, base_url=STAFF_ORIGIN,
+                        headers={'Origin': STAFF_ORIGIN, 'Sec-Fetch-Site': 'same-origin', 'X-JB-Staff-Signin': '1'})
+        assert r.status_code == 200, (r.status_code, r.data[:300])
+        self.signed_in = user
 
     def agent(self):
         self.who = ('agent', None)
@@ -71,10 +86,11 @@ class H:
         user = user or self.who[1]
         if not self.surface_ready:
             return None
+        self.signin(user)
         if user not in self.surface:
-            r = self.c.get(f'{B}/crt/staff/cca-crt-intake.html?sandbox={SBX}',
-                           headers={'Authorization': 'Bearer tok', 'Sec-Fetch-Mode': 'navigate',
-                                    'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Site': 'none'})
+            r = self.c.get(f'{B}/crt/staff/cca-crt-intake.html?sandbox={SBX}', base_url=STAFF_ORIGIN,
+                           headers={'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document',
+                                    'Sec-Fetch-Site': 'none'})
             assert r.status_code == 200, (r.status_code, r.data[:300])
             self.surface[user] = re.search(rb'"token": "([^"]+)"', r.data).group(1).decode()
         return self.surface[user]
@@ -84,7 +100,13 @@ class H:
         if self.who[0] == 'agent':
             return {'X-Agent-Key': SBX_KEY}
         tok = self.surface_token()
-        return {'X-Biz-Sandbox': SBX, **({'X-JB-Staff-Surface': tok, 'Sec-Fetch-Site': 'same-origin'} if tok else {})}
+        return {'X-Biz-Sandbox': SBX, **({'X-JB-Staff-Surface': tok, 'Sec-Fetch-Site': 'same-origin',
+                                          'Origin': STAFF_ORIGIN} if tok else {})}
+
+    @property
+    def base(self):
+        """Staff act on the staff origin once the pack is on; the agent (and staff before that) on the tenant's."""
+        return STAFF_ORIGIN if self.who[0] == 'staff' and self.surface_ready else 'http://localhost'
 
     def _src(self, body):
         if self.who[0] == 'agent' and isinstance(body, dict) and 'source' not in body:
@@ -92,13 +114,17 @@ class H:
         return body
 
     def get(self, path, **kw):
-        return self.c.get(B + path, headers=self.h, **kw)
+        hdr = self.h
+        return self.c.get(B + path, headers=hdr, base_url=self.base, **kw)
 
     def post(self, path, body=None):
-        return self.c.post(B + path, json=self._src(body if body is not None else {}), headers=self.h)
+        hdr = self.h
+        return self.c.post(B + path, json=self._src(body if body is not None else {}), headers=hdr, base_url=self.base)
 
     def patch(self, path, body, version):
-        return self.c.patch(B + path, json=self._src(body), headers={**self.h, 'If-Match': str(version)})
+        hdr = self.h
+        return self.c.patch(B + path, json=self._src(body), headers={**hdr, 'If-Match': str(version)},
+                            base_url=self.base)
 
     def ok(self, resp, code=(200, 201)):
         assert resp.status_code in ((code,) if isinstance(code, int) else code), resp.get_json()
@@ -111,7 +137,8 @@ class H:
         data = {'file': (io.BytesIO(blob), name)}
         if self.who[0] == 'agent':
             data['source'] = json.dumps(SRC)
-        r = self.c.post(B + '/files', data=data, headers=self.h, content_type='multipart/form-data')
+        hdr = self.h
+        r = self.c.post(B + '/files', data=data, headers=hdr, content_type='multipart/form-data', base_url=self.base)
         return self.ok(r)
 
     def state(self, aid, today=TODAY):
@@ -137,6 +164,7 @@ def h(dirs, monkeypatch):
     monkeypatch.setenv('BIZ_SANDBOXES', 'josh,foam')
     monkeypatch.setenv('BIZ_SANDBOX_KEY_JOSH', SBX_KEY)
     monkeypatch.setenv('BIZ_SANDBOX_KEY_FOAM', SBX_KEY_OTHER)
+    monkeypatch.setenv('BIZ_STAFF_ORIGIN', STAFF_ORIGIN)
     monkeypatch.setattr(canvas, 'CANVAS_PAGES_DIR', dirs['pages'])
     monkeypatch.setattr(canvas, 'CANVAS_REQUIRE_AUTH', True)
     monkeypatch.setattr(canvas, 'load_canvas_manifest', lambda: {'pages': {}})
@@ -154,6 +182,16 @@ def h(dirs, monkeypatch):
     for store in list(app.extensions.get('biz', {}).values()):
         if hasattr(store, 'close'):
             store.close()
+
+
+def claims_for(token, user):
+    """The mocked Clerk verifier: 'staffjwt:<user>' is a JWT Clerk minted for a page on the staff origin; any
+    other token is the one the canvas bridge hands every canvas page (azp = the tenant origin)."""
+    if not token:
+        return None
+    if str(token).startswith('staffjwt:'):
+        return {'sub': str(token).split(':', 1)[1], 'azp': STAFF_ORIGIN}
+    return {'sub': user, 'azp': CANVAS_ORIGIN}
 
 
 def pdf(tag):
@@ -927,9 +965,12 @@ def test_pages_publish_register_and_serve_in_the_sandbox(h):
         r = h.c.put(f'{B}/dev/pages/{p}', json={'html': html, 'source': SRC}, headers=h.h)
         assert r.status_code == 409 and r.get_json()['code'] == 'platform_page_reserved', r.get_json()
     h.staff()
-    nav = {'Authorization': 'Bearer tok', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document'}
+    nav = {'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document'}
+    h.signin(STAFF_1)                    # rules 1.4.0 (R1): the staff pages live on the staff origin only
     for p in PAGES:
-        r = h.c.get(f'{B}/crt/staff/{p}?sandbox={SBX}', headers=nav)
+        r = h.c.get(f'{B}/crt/staff/{p}?sandbox={SBX}', headers={'Authorization': 'Bearer tok', **nav})
+        assert r.status_code == 302 and r.headers['Location'].startswith(STAFF_ORIGIN + f'{B}/crt/staff/{p}'), p
+        r = h.c.get(f'{B}/crt/staff/{p}?sandbox={SBX}', headers=nav, base_url=STAFF_ORIGIN)
         assert r.status_code == 200, (p, r.status_code)
         body = r.get_data(as_text=True)
         assert 'window.__JB_SURFACE__' in body and '"sandbox": "josh"' in body

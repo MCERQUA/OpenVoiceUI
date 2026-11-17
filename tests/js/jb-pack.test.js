@@ -12,8 +12,9 @@ const vm = require('vm');
 const SDK = fs.readFileSync(path.join(__dirname, '..', '..', 'jb', 'v1', 'jb.js'), 'utf8');
 
 let lastCtx = null;
-function loadSdk(pathname, calls, surface) {
+function loadSdk(pathname, calls, surface, documentStub) {
     const ctx = { location: { pathname }, console };
+    if (documentStub) ctx.document = documentStub;
     if (surface) ctx.__JB_SURFACE__ = surface;      // what a platform staff page's server-rendered boot script sets
     ctx.window = ctx;
     ctx.FormData = class { constructor() { this.parts = []; } append(k, v, n) { this.parts.push([k, v, n]); } };
@@ -80,6 +81,17 @@ async function test(name, fn) {
         }
         assert.strictEqual(jb.staffBase, '/api/biz/v1/crt/staff/');
         assert.strictEqual('__JB_SURFACE__' in lastCtx, false);   // nothing later on the page can read it
+    });
+    await test('rules 1.4.0 (review M2): the boot script node that held the token is taken out of the DOM', async () => {
+        const removed = [];
+        const boot = { id: 'jb-surface-boot' };
+        boot.parentNode = { removeChild: (n) => { removed.push(n); } };
+        const doc = { getElementById: (id) => (id === 'jb-surface-boot' ? boot : null) };
+        const jb = loadSdk('/api/biz/v1/crt/staff/cca-crt-intake.html', [],
+                           { token: 'v2.1.abc.def', sandbox: 'josh', base: '/api/biz/v1/crt/staff/' }, doc);
+        assert.strictEqual(removed.length, 1);
+        assert.strictEqual(removed[0], boot);
+        assert.strictEqual(jb.staffBase, '/api/biz/v1/crt/staff/');
     });
     await test('a canvas page (no platform boot) never sends a surface token', async () => {
         const calls = [];

@@ -22,6 +22,7 @@ import pytest
 
 from tests.test_biz_crt_pack import (  # noqa: F401  (fixtures)
     B, M, NAMED, POLICY_FIELDS, SBX, SBX_KEY, SRC, STAFF_1, STAFF_2, TODAY, _ends, codes, confirm, dirs, h, iso, world,
+    END_FIELDS, STAFF_ORIGIN,
 )
 from tests.test_biz_crt_tools import _forge_meets, _watch
 
@@ -224,12 +225,26 @@ def test_h3_the_confirmed_form_number_must_be_a_listed_form(h, end, state, code)
     assert ev['state'] == state and codes(ev) == ([code] if code else []), ev
 
 
+def _confirm_wording(h, w):
+    """Rules 1.4.0 (R3): staff confirm, on the staff surface, the manuscript's completed-operations wording."""
+    h.staff()
+    e = w['end']['ai_completed']
+    cur = h.ok(h.get(f'/crt_endorsement/{e["id"]}'))
+    h.ok(h.patch(f'/crt_endorsement/{e["id"]}', {'data': {'completed_ops_wording': True}}, cur['version']))
+    confirm(h, 'crt_endorsement', cur, END_FIELDS + ['completed_ops_wording'], cur['data']['document_id'])
+
+
 @pytest.mark.parametrize('control', [{'form': 'ACME-COMP-OPS 7', 'manuscript': True},   # rests on staff
                                      {'form': 'cg2037'}])                              # same number, respelled
 def test_h3_a_manuscript_or_respelled_listed_form_counts_but_cg_20_10_never_does(h, control):
     ends = _ends()
     ends['ai_completed'] = {**ends['ai_completed'], **control}
-    assert h.state(world(h, endorsements=ends)['asg']['id'])['state'] == 'meets'
+    w = world(h, endorsements=ends)
+    if control.get('manuscript'):        # rules 1.4.0 (R3): only with its completed-ops wording staff-confirmed
+        ev = h.state(w['asg']['id'])
+        assert ev['state'] == 'cant_tell' and codes(ev) == ['UNCONFIRMED:crt_endorsement.completed_ops_wording'], ev
+        _confirm_wording(h, w)
+    assert h.state(w['asg']['id'])['state'] == 'meets'
     ends['ai_completed'] = {**ends['ai_completed'], 'form': 'CG 20 10', 'manuscript': False}
     ev = h.state(world(h, endorsements=ends, party_name='Second Sub Inc')['asg']['id'])
     assert codes(ev) == ['MISSING:ai_completed'], ev
@@ -350,8 +365,10 @@ NAV = {'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Si
 
 
 def _staff_page(h, page='cca-crt-intake.html', user=STAFF_1, sandbox=SBX, **hdr):
+    """Rules 1.4.0 (R1): a staff page is opened on the staff origin, signed in there."""
     h.staff(user)
-    return h.c.get(f'{B}/crt/staff/{page}?sandbox={sandbox}', headers={'Authorization': 'Bearer tok', **hdr})
+    h.signin(user)
+    return h.c.get(f'{B}/crt/staff/{page}?sandbox={sandbox}', headers=hdr, base_url=STAFF_ORIGIN)
 
 
 def _token(resp):
@@ -380,8 +397,7 @@ def test_h4_a_page_the_agent_wrote_served_to_staff_cannot_person_write(h):
                                   'source_document_id': w['docs']['cert']['id']}),
         ('POST', f'/crt/requirement-sets/{w["set"]["id"]}/approve', {}),
         ('POST', f'/crt/assignment/{w["asg"]["id"]}/review', {}),
-        ('POST', '/contact', {'data': {'name': 'Planted Inc', 'type': 'subcontractor'}}),
-        ('POST', '/document', {'data': {'title': 'x', 'kind': 'note'}}),
+        ('POST', '/crt_policy', {'data': {'line': 'gl'}}),
         ('POST', f'/crt_policy/{pol["id"]}/archive', None),
     ]
     for method, path, body in tries:
@@ -391,6 +407,10 @@ def test_h4_a_page_the_agent_wrote_served_to_staff_cannot_person_write(h):
     r = h.c.patch(f'{B}/crt_assignment/{a["id"]}', json={'data': {'trade_category': 'roofing'}},
                   headers={**page, 'If-Match': str(a['version'])})
     assert r.status_code == 403 and r.get_json()['code'] == 'staff_surface_required'
+    # rules 1.4.0 (review H1): contact / document / company stay writable from any page (other apps need them);
+    # the write is stamped off-surface, so the verdict never counts it as a person's
+    r = h.c.post(f'{B}/contact', json={'data': {'name': 'Planted Inc', 'type': 'subcontractor'}}, headers=page)
+    assert r.status_code == 201
     assert h.c.get(f'{B}/crt/assignment/{w["asg"]["id"]}/state', headers=page).status_code == 200   # reads: fine
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'cant_tell' and 'UNCONFIRMED:crt_policy.line' in codes(ev)     # nothing got confirmed
@@ -405,6 +425,8 @@ def test_h4_the_platform_page_is_minted_only_on_a_top_level_navigation(h):
     h.agent()
     r = h.c.get(f'{B}/crt/staff/cca-crt-intake.html', headers={**h.h, **NAV})
     assert r.status_code == 403 and r.get_json()['code'] == 'staff_only'
+    r = h.c.get(f'{B}/crt/staff/cca-crt-intake.html', headers={**h.h, **NAV}, base_url=STAFF_ORIGIN)
+    assert r.status_code == 403 and r.get_json()['code'] == 'staff_only'           # never on the staff origin
     assert _staff_page(h, page='no-such-page.html', **NAV).status_code == 404
     r = _staff_page(h, **NAV)
     assert r.status_code == 200
@@ -424,28 +446,31 @@ def test_h4_the_token_is_bound_to_the_session_the_sandbox_and_the_site(h):
 
     def confirm_with(user, token, **extra):
         h.staff(user)
-        cur = h.c.get(f'{B}/crt_policy/{pol["id"]}', headers={'Authorization': 'Bearer tok', 'X-Biz-Sandbox': SBX})
+        h.signin(user)
+        cur = h.c.get(f'{B}/crt_policy/{pol["id"]}', headers={'X-Biz-Sandbox': SBX}, base_url=STAFF_ORIGIN)
         body = {'record_collection': 'crt_policy', 'record_id': pol['id'], 'record_version': cur.get_json()['version'],
                 'fields': ['line'], 'source_document_id': w['docs']['cert']['id']}
-        return h.c.post(f'{B}/crt/confirm', json=body, headers={'Authorization': 'Bearer tok', 'X-Biz-Sandbox': SBX,
-                                                                'X-JB-Staff-Surface': token, **extra})
+        return h.c.post(f'{B}/crt/confirm', json=body, base_url=STAFF_ORIGIN,
+                        headers={'X-Biz-Sandbox': SBX, 'X-JB-Staff-Surface': token, **extra})
     bad = [
         (STAFF_2, tok1, {}),                                                      # another staff user's page
         (STAFF_1, tok1[:-4] + ('0000' if not tok1.endswith('0000') else '1111'), {}),   # tampered
-        (STAFF_1, 'v1.9999999999.' + 'a' * 24 + '.' + 'b' * 64, {}),             # forged
+        (STAFF_1, 'v2.9999999999.' + 'a' * 24 + '.' + 'b' * 64, {}),             # forged
         (STAFF_1, tok1, {'Sec-Fetch-Site': 'cross-site'}),                       # another site
+        (STAFF_1, tok1, {'Sec-Fetch-Site': 'same-site'}),                        # the tenant origin, same site
         (STAFF_1, tok1, {'Origin': 'https://evil.example'}),
+        (STAFF_1, tok1, {'Origin': 'https://test-dev.jam-bot.com'}),             # the canvas origin
         (STAFF_1, tok1, {'Origin': 'null'}),                                     # an opaque (sandboxed) origin
     ]
     for user, token, extra in bad:
         r = confirm_with(user, token, **extra)
         assert r.status_code == 403 and r.get_json()['code'] == 'staff_surface_invalid', (user, extra, r.get_json())
-    r = confirm_with(STAFF_1, tok1, **{'Sec-Fetch-Site': 'same-origin', 'Origin': 'http://localhost'})
+    r = confirm_with(STAFF_1, tok1, **{'Sec-Fetch-Site': 'same-origin', 'Origin': STAFF_ORIGIN})
     assert r.status_code == 201 and r.get_json()['data']['confirmed_by'] == 'clerk:' + STAFF_1
     # a token from the josh sandbox's page is not the foam sandbox's
     h.staff(STAFF_1)
-    r = h.c.post(f'{B}/contact', json={'data': {'name': 'x', 'type': 'commercial'}},
-                 headers={'Authorization': 'Bearer tok', 'X-Biz-Sandbox': 'foam', 'X-JB-Staff-Surface': tok1})
+    r = h.c.post(f'{B}/contact', json={'data': {'name': 'x', 'type': 'commercial'}}, base_url=STAFF_ORIGIN,
+                 headers={'X-Biz-Sandbox': 'foam', 'X-JB-Staff-Surface': tok1, 'Origin': STAFF_ORIGIN})
     assert r.status_code == 403 and r.get_json()['code'] == 'staff_surface_invalid'
 
 
