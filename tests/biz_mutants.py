@@ -1018,6 +1018,70 @@ _REBASE_1_8_0 = {
 }
 MUTANTS = [(n, _REBASE_1_8_0.get(n, e), t) for n, e, t in MUTANTS]
 
+# ── rules 1.9.0 (gate-4 re-check #9): L the ASCII look-alike map + edit distance (engine and watcher), P the pre-2004
+# refusal reads the applied edition. Each names the regression test (or verbatim probe) that must catch it.
+T_C9 = 'tests/test_biz_crt_claimcheck9.py::'
+T_P9 = 'tests/test_claimcheck9_probes.py::'
+MUTANTS += [
+    # L, engine: the map, the as-written reading, the edit distance, the set side
+    ('l9-no-lookalike-map', [(RT, "LOOKALIKE_DIGITS = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}", "LOOKALIKE_DIGITS = {}")],
+     [T_P9 + 'test_R9_L1_HOLE_an_ascii_look_alike_iso_number_never_counts_for_completed_ops',
+      T_C9 + 'test_l_an_ascii_look_alike_is_never_invited_as_a_manuscript']),
+    ('l9-marks-dropped', [(RT, "LOOKALIKE_DIGITS = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}",
+                           "LOOKALIKE_DIGITS = {'I': '1', 'L': '1', 'O': '0'}")],
+     [T_C9 + 'test_l_an_ascii_look_alike_is_never_invited_as_a_manuscript', T_C9 + 'test_l_the_map_reads_what_the_ruling_names']),
+    ('l9-near-on-squashed', [(RT, "    return iso_distance(lookalike_reading(s)) <= 1", "    return iso_distance(_squash(s)) <= 1")],
+     [T_C9 + 'test_l_an_ascii_look_alike_is_never_invited_as_a_manuscript', T_C9 + 'test_l_the_map_reads_what_the_ruling_names']),
+    ('l9-substitutions-only', [(RT, "            nxt.append(min(col[i - 1] + (0 if hit else 1), col[i] + 1, nxt[i - 1] + 1))",
+                                "            nxt.append(col[i - 1] + (0 if hit else 1))")],
+     [T_C9 + 'test_l_an_ascii_look_alike_is_never_invited_as_a_manuscript', T_C9 + 'test_l_the_map_reads_what_the_ruling_names']),
+    ('l9-no-insertions', [(RT, "            nxt.append(min(col[i - 1] + (0 if hit else 1), col[i] + 1, nxt[i - 1] + 1))",
+                           "            nxt.append(min(col[i - 1] + (0 if hit else 1), col[i] + 1))")],
+     [T_C9 + 'test_l_the_map_reads_what_the_ruling_names']),
+    ('l9-no-deletions', [(RT, "            nxt.append(min(col[i - 1] + (0 if hit else 1), col[i] + 1, nxt[i - 1] + 1))",
+                          "            nxt.append(min(col[i - 1] + (0 if hit else 1), nxt[i - 1] + 1))")],
+     [T_C9 + 'test_l_the_map_reads_what_the_ruling_names']),
+    ('l9-set-map-off', [(RT, "    return _o_is_zero(k) != k or _lookalike_changes_reading(raw)", "    return _o_is_zero(k) != k")],
+     [T_C9 + 'test_l_a_set_refuses_an_ascii_look_alike_in_a_form_list', T_C9 + 'test_l_a_stored_ascii_look_alike_in_a_sets_form_list_reads_cant_tell']),
+    ('l9-set-near-gain-off', [(RT, "    if d <= 1 and d < iso_distance(plain):\n        return True", "    if False:\n        return True")],
+     [T_C9 + 'test_l_a_set_refuses_an_ascii_look_alike_in_a_form_list']),
+    ('l9-set-iso-gain-off', [(RT, "    if iso_numbers_in(mapped) - iso_numbers_in(raw) or (is_iso_form(mapped) and not is_iso_form(raw)):\n        return True",
+                              "    if False:\n        return True")],
+     [T_C9 + 'test_l_a_set_refuses_an_ascii_look_alike_in_a_form_list']),
+    ('l9-set-edition-gain-off', [(RT, "        if got is not None and got != read(raw):\n            return True", "        if False:\n            return True")],
+     [T_C9 + 'test_l_a_set_refuses_an_ascii_look_alike_in_a_form_list', T_C9 + 'test_l_a_set_refuses_a_look_alike_edition_and_keeps_month_names']),
+    # L, watcher (RL9): its own copy
+    ('watch-l9-no-map', [(WA, "_DIGIT_LIKE = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}", "_DIGIT_LIKE = {}")],
+     [T_C9 + 'test_l_watch_a_meets_on_a_look_alike_manuscript_is_not_backed', T_C9 + 'test_l_engine_and_watcher_agree_on_a_look_alike_generator']),
+    ('watch-l9-bang-not-mapped', [(WA, "_DIGIT_LIKE = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}",
+                                   "_DIGIT_LIKE = {'I': '1', 'L': '1', '|': '1', 'O': '0'}")],
+     [T_C9 + 'test_l_engine_and_watcher_agree_on_a_look_alike_generator']),
+    ('watch-l9-substitutions-only', [(WA, "            new.append(min(row[j - 1] + (not same), row[j] + 1, new[j - 1] + 1))",
+                                      "            new.append(row[j - 1] + (not same))")],
+     [T_C9 + 'test_l_engine_and_watcher_agree_on_a_look_alike_generator']),
+    ('watch-l9-near-on-squashed', [(WA, "    return _gap_to_iso(_as_digits(s)) <= 1", "    return _gap_to_iso(_squash(s)) <= 1")],
+     [T_C9 + 'test_l_watch_a_meets_on_a_look_alike_manuscript_is_not_backed', T_C9 + 'test_l_engine_and_watcher_agree_on_a_look_alike_generator']),
+    ('watch-l9-refold-map-off', [(WA, "    f = _fold(s)\n    if not set(f) & set(_DIGIT_LIKE):\n        return False",
+                                  "    f = _fold(s)\n    if True:\n        return False")],
+     [T_C9 + 'test_l_watch_a_stored_ascii_look_alike_in_a_sets_form_list_is_below_the_floor',
+      T_C9 + 'test_l_engine_and_watcher_agree_on_a_look_alike_generator']),
+    # P: the applied edition
+    ('p9-field-only', [(RT, "            applied = item_edition(it)[0]               # rules 1.9.0 (P)",
+                        "            applied = _edition_key(it.get('edition'))  # rules 1.9.0 (P)")],
+     [T_P9 + 'test_R9_P1_HOLE_a_pre_2004_edition_in_the_form_list_is_refused', T_C9 + 'test_p_a_pre_2004_edition_in_the_form_list_is_refused_on_revise']),
+    ('p9-floor-off', [(RT, "        elif item_edition(it)[0] and item_edition(it)[0][1] < 2004:", "        elif False:")],
+     [T_C9 + 'test_p_a_stored_pre_2004_requirement_reads_cant_tell', T_C9 + 'test_p_the_approval_page_names_a_pre_2004_draft_and_refuses_to_approve_it']),
+    ('watch-p9-floor-off', [(WA, "        elif _item_ed(it)[0] is not None and _item_ed(it)[0][1] < 2004:            # RP9",
+                             "        elif False:            # RP9")],
+     [T_C9 + 'test_p_watch_a_stored_pre_2004_requirement_is_below_the_floor']),
+]
+
+# rules 1.9.0 (re-check #9): anchors the 1.9.0 engine rewrote, rebased onto the new lines (same intent)
+_REBASE_1_9_0 = {
+    'pre-2004-allowed': [(RT, "            if applied is not None and applied[1] < 2004:", "            if False:")],
+}
+MUTANTS = [(n, _REBASE_1_9_0.get(n, e), t) for n, e, t in MUTANTS]
+
 
 def _copy(name):
     dest = os.path.join(SCRATCH, name)

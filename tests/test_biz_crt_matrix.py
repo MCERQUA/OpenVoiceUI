@@ -908,6 +908,10 @@ def _seq_world(h, kind, n):
         e = _ends()
         e.pop('ai_completed')
         return world(h, endorsements=e, party_name=f'Seq {n} Inc')
+    if kind.startswith('lookalike_completed:'):  # rules 1.9.0 (L): the sub's completed-ops form, filed as it looks
+        e = _ends()
+        e['ai_completed'] = dict(e['ai_completed'], form=kind.split(':', 1)[1])
+        return world(h, endorsements=e, party_name=f'Seq {n} Inc')
     if kind == 'old_edition_completed':        # rules 1.8.0 (E): the sub's CG 20 37 is the 07 04 edition
         e = _ends()
         e['ai_completed'] = dict(e['ai_completed'], edition='07 04')
@@ -1012,6 +1016,16 @@ def _seq_revise(change_fn, second=({},)):
     return run
 
 
+def _seq_list_and_map(form, fn='ai_completed'):
+    """rules 1.9.0 (L): one revision lists `form` for the item and maps it to the item's function in the set's table."""
+    def run(h, w, a):
+        s = _get(h, 'crt_requirement_set', w['set']['id'])
+        items = [dict(it, forms=list(it.get('forms') or []) + [form]) if it['id'] == fn else it for it in s['data']['items']]
+        return _revise_steps(a, s['id'], [{'items': items,
+                                           'form_functions': dict(s['data'].get('form_functions') or {}, **{form: fn})}])
+    return run
+
+
 def _seq_decoy(h, w, a):
     s = _get(h, 'crt_requirement_set', w['set']['id'])
     r = a.post('/crt_requirement_set', {'data': {'name': s['data']['name'], 'trade_category': s['data']['trade_category'],
@@ -1077,6 +1091,10 @@ SEQS = {
     'revise-form-lookalike': ('missing_completed', _seq_revise(lambda s: _items(
         s, 'ai_completed', {'forms': ['\u0421G 20 37']})), 'not_meets'),
     'decoy-create-then-revise': ('missing_completed', _seq_decoy, 'visible'),
+    # rules 1.9.0 (L): an ASCII look-alike of CG 20 10 / 20 11, listed and mapped to completed operations, never makes
+    # the sub's look-alike paper count (refused at the set: 422 form_lookalike)
+    **{f'revise-ascii-lookalike-completed:{f}': (f'lookalike_completed:{f}', _seq_list_and_map(f), 'not_meets')
+       for f in ('CG 20 |0', 'CG 20 IO', 'CG 20 lO', 'CG 20 lI', 'CG 20 1|')},
     'agent-revise-then-staff-revise': ('missing_completed', _seq_then_staff, 'visible'),
 }
 ARCHIVE_SEQ_TARGETS = ('company', 'account', 'party', 'link', 'project', 'assignment', 'policy', 'endorsement',

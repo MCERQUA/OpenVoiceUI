@@ -561,4 +561,4 @@ def test_watch_x4_an_approval_that_names_no_diff_is_not_backed(h, dirs):
 
 def test_rules_version_is_1_6_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.8.0'          # rules 1.7.0 / 1.8.0 (re-checks #7, #8) keep every 1.6.0 rule
+    assert rt.RULE_VERSION == 'crt-rules-1.9.0'          # rules 1.7.0-1.9.0 (re-checks #7-#9) keep every 1.6.0 rule
