@@ -64,6 +64,12 @@ ALLOWLIST = {
         'opens the uploads MOUNT POINT itself as a directory fd (only on an image without '
         'services/safe_open); every file below it is then opened no-follow relative to that fd. '
         'The mount point\'s own path is not agent-replaceable (same as safe_open.open_root)',
+    # ── review 5 of PR #597 (follow-up): the bighead plugin route module, now in the repo ──
+    'plugins/bhb-animated-characters/routes/bighead.py::_root_fd::os.open':
+        'opens the anchoring root itself (the workspace dir, or RUNTIME_DIR for bighead/) as a '
+        'directory fd with O_DIRECTORY|O_NOFOLLOW, only on an image without services/safe_open; '
+        'every directory and file below it is opened no-follow relative to that fd, and the '
+        'request id is a [A-Za-z0-9_-]{1,64} slug. Same as wan_video::_uploads_fd',
     # ── review 4 of PR #597: the tenant-mounted wan-video-studio plugin, now in the repo ──
     'plugins/wan-video-studio/routes/wan_video.py::_uploads_fd::os.open':
         'opens the uploads MOUNT POINT itself as a directory fd (O_DIRECTORY|O_NOFOLLOW); '
@@ -212,15 +218,14 @@ def test_scanner_flags_the_review4_wan_video_plugin(tmp_path):
 KNOWN_TENANT_PLUGIN_MODULES_WITHOUT_REPO_MANIFEST = {
     'desktop-native/routes.py', 'ovui-core/routes.py', 'housecall-pro/routes/housecall_pro.py',
     'client-history-admin/routes/client_history_admin.py',
+    # gateway_manager loads <plugin>/gateway.py in-process (provides: gateway)
+    'comms-brain/gateway.py', 'hermes-brain/gateway.py',
 }
 # Known tenant-loaded modules whose code is NOT in this repo yet, so the guard has never
 # scanned them. Follow-up (review 4, R4-B2 part 3): bring each into plugins/ (then remove
 # it here; test_unscanned_plugin_list_is_not_stale enforces that) or gate rollouts on a
 # host-side scan of /mnt/clients/*/openvoiceui/plugins.
 UNSCANNED_TENANT_PLUGIN_MODULES = {
-    'bhb-animated-characters/routes/bighead.py':
-        'catalog stub only (plugin.json + README); review 4: .write_text x3 in create_agent, '
-        'request id unvalidated, reaches only within the cell (LOW)',
     'hermes-agent/routes/hermes.py': 'catalog stub only; review 4 scan: no finding',
     'seo-platform/routes/seo.py': 'catalog stub only; review 4 scan: no finding',
     'twenty-crm/routes/crm.py': 'catalog stub only; review 4 scan: no finding',
@@ -228,6 +233,9 @@ UNSCANNED_TENANT_PLUGIN_MODULES = {
     'ovui-core/routes.py': 'not in the repo (3 tenant variants); review 4 scan: no finding',
     'housecall-pro/routes/housecall_pro.py': 'not in the repo; review 4 scan: no finding',
     'client-history-admin/routes/client_history_admin.py': 'not in the repo; review 4 scan: no finding',
+    'comms-brain/gateway.py': 'gateway plugin (13 tenants); review 5 scan: no finding, HTTP only',
+    'hermes-agent/gateway.py': 'gateway plugin (4 tenants); review 5 scan: no finding (docker exec, no socket mounted)',
+    'hermes-brain/gateway.py': 'gateway plugin (1 tenant); review 5 scan: no finding',
 }
 
 
@@ -235,9 +243,12 @@ def _repo_manifest_route_modules(root):
     import json
     out = set()
     for pj in sorted((root / 'plugins').glob('*/plugin.json')):
-        for r in json.loads(pj.read_text()).get('routes', []):
+        m = json.loads(pj.read_text())
+        for r in m.get('routes', []):
             if r.get('module'):
                 out.add(f'{pj.parent.name}/{r["module"]}')
+        if m.get('provides') == 'gateway':   # services/gateway_manager.py execs <plugin>/gateway.py
+            out.add(f'{pj.parent.name}/gateway.py')
     return out
 
 
@@ -252,8 +263,9 @@ def _unscanned_plugin_modules(root):
 
 def test_every_known_tenant_plugin_module_is_scanned():
     scanned = _scanned_plugin_modules(ROOT)
-    # the two plugins rolled to tenants by sha-gated scripts (booking, wan-video-studio)
-    assert {'booking/routes/booking.py', 'wan-video-studio/routes/wan_video.py'} <= scanned
+    # the plugins rolled to tenants by sha-gated scripts (booking, wan-video-studio, bighead)
+    assert {'booking/routes/booking.py', 'wan-video-studio/routes/wan_video.py',
+            'bhb-animated-characters/routes/bighead.py'} <= scanned
     unscanned = _unscanned_plugin_modules(ROOT)
     assert not unscanned, (
         'tenant-loadable plugin route module(s) the I/O guard never scans (their code is not '
