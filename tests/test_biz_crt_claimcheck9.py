@@ -95,7 +95,8 @@ def test_l_a_set_refuses_a_look_alike_edition_and_keeps_month_names(h, edition):
     x = _set(h, w['set']['id'])
     h.staff()
     r = h.post(f'/crt/requirement-sets/{x["id"]}/revise', {'items': _items_with(x, 'ai_completed', {'edition': edition})})
-    assert r.status_code == 422 and r.get_json()['code'] == 'form_lookalike', r.get_json()
+    # rules 1.10.0 (FP1): a gained edition counts as a look-alike only beside an ISO number; a bare one is no date (422)
+    assert r.status_code == 422 and r.get_json()['code'] in ('form_lookalike', 'bad_requirement_items'), r.get_json()
     ok = h.post(f'/crt/requirement-sets/{x["id"]}/revise', {'items': _items_with(x, 'ai_completed', {'edition': 'JUL 2013'})})
     assert ok.status_code == 201, ok.get_json()
 
@@ -153,6 +154,8 @@ def _look_alike_spelling(rnd):
     spots = [i for i in range(start + 3, start + 8) if s[i] in _LOOK]
     for i in rnd.sample(spots, rnd.randint(1, len(spots))):
         s[i] = rnd.choice(_LOOK[s[i]])
+    if any(c.upper() in 'QDSZBG' for c in s[start + 2:start + 8]):
+        return ''.join(s)                             # rules 1.10.0 (FP1): the 1.9.1 letters count only exactly
     op = rnd.random()
     i = rnd.randrange(len(s) + 1)
     if op < 0.25:
@@ -250,7 +253,7 @@ def test_p_watch_a_stored_pre_2004_requirement_is_below_the_floor(h, dirs):
 
 def test_rules_version_is_1_9_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.9.1'          # rules 1.9.1 (host ruling: widened map) keeps every 1.9.0 rule
+    assert rt.RULE_VERSION == 'crt-rules-1.10.0'         # rules 1.9.1 / 1.10.0 keep every 1.9.0 rule
 
 
 # ═════════════════════════ 1.9.1 (host ruling): the widened map, S 5 / Z 2 / B 8 / G 6 / Q and D 0 ═════════════════
@@ -353,6 +356,6 @@ def test_w_engine_and_watcher_agree_on_the_widened_map():
 def test_w_the_cg_prefix_keeps_its_g():
     from services.biz.packs import risk_transfer as rt
     assert rt.lookalike_reading('CG 2D 3G') == 'CG 20 36' and rt.lookalike_reading('C G Z0 1O') == 'C G 20 10'
-    assert rt.form_key(rt.lookalike_reading('CG 20 37 I1 13')) == 'CG2037' and rt.RULE_VERSION == 'crt-rules-1.9.1'
+    assert rt.form_key(rt.lookalike_reading('CG 20 37 I1 13')) == 'CG2037' and rt.RULE_VERSION == 'crt-rules-1.10.0'
     # the class distance: 6 fills the G, two look-alike marks are two digits (never dropped first)
     assert rt.iso_distance('C6 20 10') == 0 and rt.near_iso_number('CG 20 |!') and rt.iso_distance('CG 20 |!') == 0

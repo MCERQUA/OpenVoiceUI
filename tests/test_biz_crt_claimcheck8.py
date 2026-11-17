@@ -455,4 +455,4 @@ def test_g_watch_a_stored_items_edition_holding_a_form_number_is_below_the_floor
 
 def test_rules_version_is_1_8_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.9.1'          # rules 1.9.0 / 1.9.1 (re-check #9) keep every 1.8.0 rule
+    assert rt.RULE_VERSION == 'crt-rules-1.10.0'         # rules 1.9.0-1.10.0 (re-checks #9, #10) keep every 1.8.0 rule

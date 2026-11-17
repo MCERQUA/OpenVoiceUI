@@ -567,7 +567,7 @@ def test_r4_an_unapproved_change_to_the_equivalences_is_cant_tell(h):
     assert ex.value.status == 403
     store.update('crt_requirement_set', s['id'], {'form_functions': dict(s['data']['form_functions'], **{'ACME 99': 'pnc'})},
                  expected_version=s['version'], by='clerk:' + STAFF_1, agent=False, via_pack=True, surface=True)
-    assert rt.RULE_VERSION == 'crt-rules-1.9.1'          # rules 1.7.0-1.9.1 (re-checks #7-#9) keep every 1.4.0 rule
+    assert rt.RULE_VERSION == 'crt-rules-1.10.0'         # rules 1.7.0-1.10.0 (re-checks #7-#10) keep every 1.4.0 rule
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'cant_tell', ev
 

@@ -1122,6 +1122,83 @@ MUTANTS += [
     ('watch-w91-cg-prefix-off', [(WA, "        keep = ch == 'G' and before[-1:] == ['C']", '        keep = False')], [_W_AGREE]),
 ]
 
+# ── rules 1.10.0 (gate-4 re-check #10, host rulings M / FP1 / X1 / N2) ──
+T_C10 = 'tests/test_biz_crt_claimcheck10.py::'
+T_P10 = 'tests/test_claimcheck10_probes.py::'
+MUTANTS += [
+    # M: month-word editions in the form list (engine, watcher RM10)
+    ('m10-no-month-word-split', [(RT, "    fb = _number_then_edition(s)\n    if fb and fb[1] is not None:\n        return fb[0], fb[1]\n", "")],
+     [T_P10 + 'test_R10_P2_HOLE_a_pre_2004_month_word_edition_in_the_form_list_is_refused',
+      T_C10 + 'test_m_a_pre_2004_month_word_edition_in_the_form_list_is_refused']),
+    ('m10-unreadable-is-any-edition', [(RT, "        if fb and fb[2]:\n            return None, f'its form list carries an edition that cannot be read ({f})'",
+                                        "        if False:\n            return None, f'its form list carries an edition that cannot be read ({f})'")],
+     [T_C10 + 'test_m_an_unreadable_month_word_edition_is_refused_never_any_edition',
+      T_C10 + 'test_m_a_stored_month_word_edition_that_breaks_the_floor_reads_cant_tell']),
+    ('m10-whole-words-off', [(RT, "    if len(digits) != 4 or j >= len(words):\n        return None\n    rest = words[j:]",
+                              "    if len(digits) < 4 or j >= len(words):\n        return None\n    rest = words[j:]")],
+     [T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    ('watch-m10-no-month-word-split', [(WA, "    nb = _num_ed(s)                                       # RM10: a month-word / one-digit-month edition after it\n    if nb and nb[1] is not None:\n        return nb[0], nb[1]\n", "")],
+     [T_C10 + 'test_m_watch_a_meets_against_a_month_word_edition_is_not_backed', T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    ('watch-m10-unreadable-is-any', [(WA, "        if isinstance(f, str) and (_num_ed(f) or (0, 0, False))[2]:", "        if False:")],
+     [T_C10 + 'test_m_watch_a_stored_month_word_edition_is_below_the_floor', T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    # FP1: the narrowed near test and edition gain (engine, watcher RF10)
+    ('f10-near-reads-the-full-map-with-an-edit', [(RT, "    return _indel_distance(s, _MAP_1_9_0)\n", "    return _indel_distance(s, LOOKALIKE_DIGITS)\n")],
+     [T_C10 + 'test_fp1_a_carrier_cg_letter_number_is_a_manuscript_again_and_a_set_may_list_it',
+      T_P10 + 'test_R10_FP1_WATCH_a_carrier_cg_letter_series_number_is_a_dead_end']),
+    ('f10-edition-gain-any-form', [(RT, "        if got is not None and got != read(raw)[1] and form and is_iso_number(form):",
+                                    "        if got is not None and got != read(raw)[1]:")],
+     [T_C10 + 'test_fp1_a_carrier_cg_letter_number_is_a_manuscript_again_and_a_set_may_list_it',
+      T_C10 + 'test_fp1_the_dead_end_rate_is_back_and_the_strong_look_alikes_stay_closed']),
+    ('watch-f10-edition-gain-any-form', [(WA, "    if em not in (None, _form_parts(s)[1]) and _iso_key(fm):", "    if em not in (None, _form_parts(s)[1]):")],
+     [T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    ('watch-f10-near-full-map', [(WA, "    one = {'I', 'L', '|', '!'} if look or map190 else set()", "    one = set(_DIGIT_LIKE) if look or map190 else set()")],
+     [T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    # X1: each weak-glyph group (engine, watcher RX10)
+    ('x10-c-weak-off', [(RT, "_WEAK_AT = ('(<[{', '&9C', '?7', 'UC689')", "_WEAK_AT = ('', '&9C', '?7', 'UC689')")],
+     [T_C10 + 'test_x1_two_weak_glyphs_never_reach_a_manuscript_meets']),
+    ('x10-g-weak-off', [(RT, "_WEAK_AT = ('(<[{', '&9C', '?7', 'UC689')", "_WEAK_AT = ('(<[{', '', '?7', 'UC689')")],
+     [T_C10 + 'test_x1_two_weak_glyphs_never_reach_a_manuscript_meets', T_C10 + 'test_x1_no_two_glyph_spelling_escapes_and_printed_digits_list_honestly']),
+    ('x10-2-weak-off', [(RT, "_WEAK_AT = ('(<[{', '&9C', '?7', 'UC689')", "_WEAK_AT = ('(<[{', '&9C', '', 'UC689')")],
+     [T_C10 + 'test_x1_two_weak_glyphs_never_reach_a_manuscript_meets']),
+    ('x10-0-weak-off', [(RT, "_WEAK_AT = ('(<[{', '&9C', '?7', 'UC689')", "_WEAK_AT = ('(<[{', '&9C', '?7', '')")],
+     [T_C10 + 'test_x1_two_weak_glyphs_never_reach_a_manuscript_meets', T_C10 + 'test_x1_no_two_glyph_spelling_escapes_and_printed_digits_list_honestly']),
+    ('x10-1-weak-off', [(RT, "_EXACT_DIGIT = dict(LOOKALIKE_DIGITS, **{']': '1', '[': '1', 'J': '1', 'T': '1', '/': '1', \"'\": '1',",
+                         "_EXACT_DIGIT = dict(LOOKALIKE_DIGITS, **{")],
+     [T_C10 + 'test_x1_two_weak_glyphs_never_reach_a_manuscript_meets']),
+    ('x10-pairs-off', [(RT, "_EXACT_PAIRS = ('()', '[]')", "_EXACT_PAIRS = ()")],
+     [T_C10 + 'test_x1_two_weak_glyphs_never_reach_a_manuscript_meets']),
+    ('x10-printed-digit-folds', [(RT, "            walk(i + 1, p + 1, got, weak + (c in _EXACT_DIGIT_GLYPHS[p]))",
+                                  "            walk(i + 1, p + 1, got, weak)")],
+     [T_C10 + 'test_x1_no_two_glyph_spelling_escapes_and_printed_digits_list_honestly']),
+    ('watch-x10-weak-off', [(WA, "_WEAK = {0: '(<[{', 1: '&9C', 2: '?7', 3: 'UC689'}", "_WEAK = {0: '', 1: '', 2: '', 3: ''}")],
+     [T_C10 + 'test_x1_watch_a_meets_on_two_weak_glyphs_is_not_backed', T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    ('watch-x10-1-weak-off', [(WA, "_EXACT_ONE = {']': '1', '[': '1', 'J': '1', 'T': '1', '/': '1', \"'\": '1', 'U': '0', 'C': '0', '?': '2'}",
+                               "_EXACT_ONE = {'U': '0', 'C': '0', '?': '2'}")],
+     [T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    ('watch-x10-pairs-off', [(WA, "            if p >= 3 and f[i:i + 2] in ('()', '[]'):", "            if False:")],
+     [T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    ('watch-x10-printed-digit-folds', [(WA, "                stack.append((i + 1, p + 1, got, wk + (1 if ch in _EXACT_DIGIT_AT[p] else 0)))",
+                                        "                stack.append((i + 1, p + 1, got, wk))")],
+     [T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
+    # N2
+    ('n10-note-names-the-squashed-key', [(RT, "{fk if iso else iso_exact_reading(e_form) or form_key(lookalike_reading(e_form))}",
+                                          "{fk if iso else form_key(lookalike_reading(e_form))}")],
+     [T_C10 + 'test_n2_the_fold_note_names_the_cg_20_xx_it_reads_as']),
+]
+
+# rules 1.10.0: the 1.9.1 anchors the 1.10.0 rewrite moved (same intent)
+_REBASE_1_10_0 = {
+    'l9-set-edition-gain-off': [(RT, "        if got is not None and got != read(raw)[1] and form and is_iso_number(form):\n            return True",
+                                 "        if False:\n            return True")],
+    'watch-l9-refold-map-off': [(WA, '    m = _as_digits(s)\n    if _fold_gap(s) <= 1',
+                                 '    return False\n    m = _as_digits(s)\n    if _fold_gap(s) <= 1')],
+    'l9-substitutions-only': [(RT, "            nxt.append(min(col[i - 1] + (0 if hit else 1), col[i] + 1, nxt[i - 1] + 1))",
+                               "            nxt.append(col[i - 1] + (0 if hit else 1))")],
+    'w91-g-not-six-at-the-g': [(RT, "frozenset('G6' + _WEAK_AT[1])", "frozenset('G' + _WEAK_AT[1])")],
+    'watch-w91-g-not-six': [(WA, "set('G6') | set(_WEAK[1])", "set('G') | set(_WEAK[1])")],
+}
+MUTANTS = [(n, _REBASE_1_10_0.get(n, e), t) for n, e, t in MUTANTS]
+
 
 def _copy(name):
     dest = os.path.join(SCRATCH, name)
