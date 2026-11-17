@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from flask import Blueprint, jsonify, request, send_file
 from services.paths import RUNTIME_DIR
+from services.safe_open import Anchored, UnsafePath  # no-follow I/O (agent-writable dirs)
 
 workspace_bp = Blueprint('workspace', __name__)
 
@@ -71,6 +72,27 @@ def _writable_path(rel: str):
         if inner.parts[0] == VOICE_CLONE_SEAM_DIR.name:
             return None
     return target
+
+
+def _ws(rel: str) -> Anchored:
+    """WORKSPACE_DIR/<rel> for a no-follow walk. WORKSPACE_DIR's children are the
+    mount points (Agent = the agent's own workspace, Uploads, Canvas, ...), whose
+    content the agent writes; nothing below them is ever followed (review 2 of
+    PR #597, H-C)."""
+    return Anchored(WORKSPACE_DIR, rel.strip('/'))
+
+
+def _writable_anchored(rel: str):
+    """The writable target of `rel` as a no-follow Anchored path, or None (read-only/seam)."""
+    if _writable_path(rel) is None:      # keeps the area map + seam rules in one place
+        return None
+    parts = rel.strip('/').split('/', 1)
+    base = _WRITABLE_MAP[parts[0]]
+    sub = parts[1] if len(parts) > 1 else ''
+    try:
+        return Anchored(base.parent, f'{base.name}/{sub}' if sub else base.name)
+    except UnsafePath:
+        return None
 
 
 def _is_seam(p: Path) -> bool:
@@ -162,9 +184,15 @@ def browse():
         return jsonify({'error': 'Not a directory'}), 400
 
     try:
+        listed = {c.name for c in _ws(rel).iterdir()} if rel.strip('/') else None
+    except (OSError, UnsafePath):
+        return jsonify({'error': 'Path not found'}), 404
+    try:
         entries = []
         for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-            if _is_hidden(item.name) or _is_seam(item):
+            if _is_hidden(item.name) or _is_seam(item) or item.is_symlink():
+                continue   # symlinks are never followed or described
+            if listed is not None and item.name not in listed:
                 continue
             try:
                 entries.append(_entry(item))
@@ -245,7 +273,7 @@ def read_file():
         return jsonify({'error': 'Binary file — no preview available', 'binary': True})
 
     try:
-        content = target.read_text(encoding='utf-8', errors='replace')
+        content = _ws(rel).read_text(errors='replace', max_bytes=MAX_FILE_SIZE)  # no-follow
         return jsonify({
             'path': rel,
             'name': target.name,
@@ -279,7 +307,9 @@ def raw_file():
     try:
         # NO-CACHE: workspace files are agent-edited continuously. See
         # docs/jambot/no-cache-policy.md.
-        resp = send_file(str(target), conditional=True)
+        resp = _ws(rel).send(conditional=True)   # one no-follow open
+        if resp is None:
+            return jsonify({'error': 'File not found'}), 404
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         resp.headers['Pragma'] = 'no-cache'
         resp.headers['Expires'] = '0'
@@ -312,7 +342,7 @@ def mkdir():
         return jsonify({'error': 'Already exists'}), 409
 
     try:
-        target.mkdir(parents=True, exist_ok=False)
+        _writable_anchored(rel).mkdir(parents=True, exist_ok=False)   # no-follow walk
         return jsonify({'path': rel, 'created': True})
     except PermissionError:
         return jsonify({'error': 'Permission denied'}), 403
@@ -327,7 +357,7 @@ def write_file():
     if not rel:
         return jsonify({'error': 'Missing path parameter'}), 400
 
-    target = _writable_path(rel)
+    target = _writable_anchored(rel)
     if target is None:
         return jsonify({'error': 'Cannot write here (read-only area)'}), 403
 
@@ -337,9 +367,10 @@ def write_file():
         return jsonify({'error': 'Missing content field'}), 400
 
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding='utf-8')
+        target.write_text(content, create_dirs=True)   # no-follow walk, creates parents
         return jsonify({'ok': True, 'path': rel, 'size': len(content)})
+    except UnsafePath:
+        return jsonify({'error': 'Cannot write here (symlinked path)'}), 403
     except PermissionError:
         return jsonify({'error': 'Permission denied'}), 403
     except Exception as e:
@@ -353,7 +384,7 @@ def delete_file():
     if not rel:
         return jsonify({'error': 'Missing path parameter'}), 400
 
-    target = _writable_path(rel)
+    target = _writable_anchored(rel)
     if target is None:
         return jsonify({'error': 'Cannot delete here (read-only area)'}), 403
 
@@ -364,8 +395,8 @@ def delete_file():
         return jsonify({'error': 'Cannot delete directories'}), 400
 
     try:
-        renamed = target.with_suffix(target.suffix + '.deleted')
-        target.rename(renamed)
+        renamed = target.sibling(target.name + '.deleted')
+        target.rename(renamed)   # parents pinned, nothing followed
         return jsonify({'ok': True, 'archived': renamed.name})
     except Exception as e:
         return jsonify({'error': str(e)}), 500

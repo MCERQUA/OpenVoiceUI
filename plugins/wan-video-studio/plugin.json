@@ -1,0 +1,27 @@
+{
+  "id": "wan-video-studio",
+  "name": "Video Studio",
+  "version": "1.0.0",
+  "description": "Image-to-video studio powered by our own HuggingFace Space (Wan 2.2 14B, ZeroGPU). Upload an image, describe the motion, and generate a short cinematic clip — saved permanently to the server.",
+  "author": "jambot",
+  "type": "page",
+  "license": "MIT",
+  "requires": "openvoiceui >= 1.0",
+  "repository": "https://github.com/MCERQUA/openvoiceui-plugins",
+
+  "pages": [
+    {
+      "file": "pages/wan-video-studio.html",
+      "name": "Video Studio",
+      "icon": "video"
+    }
+  ],
+
+  "routes": [
+    {
+      "module": "routes/wan_video.py",
+      "blueprint": "wan_video_bp",
+      "prefix": "/api/wan-video"
+    }
+  ]
+}

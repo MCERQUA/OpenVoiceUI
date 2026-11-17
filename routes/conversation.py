@@ -48,9 +48,11 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-from services.paths import DB_PATH, VOICE_SESSION_FILE
+from services.paths import DB_PATH, UPLOADS_DIR, VOICE_SESSION_FILE
 
-BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
+from services.events_file import EVENTS_PATH as _EVENTS_PATH  # server-private, not /tmp
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
+BRAIN_EVENTS_PATH = Path(_EVENTS_PATH)
 MAX_HISTORY_MESSAGES = 20
 
 # Vision keyword detection — triggers camera frame analysis via GLM-4V
@@ -1076,8 +1078,10 @@ def _notify_brain(event_type: str, **data) -> None:
     try:
         event = {'type': event_type, 'timestamp': datetime.now().isoformat()}
         event.update(data)
-        with open(BRAIN_EVENTS_PATH, 'a') as f:
-            f.write(json.dumps(event) + '\n')
+        # owner-checked, no-follow append (services/events_file.py): /tmp is
+        # shared with the terminal sandbox user
+        from services.events_file import append_event
+        append_event(event, BRAIN_EVENTS_PATH)
     except Exception:
         pass  # Non-critical
 
@@ -1780,18 +1784,22 @@ def _conversation_inner():
     # Vision: if user uploaded an image, analyze it with vision model
     if image_path:
         try:
-            _img_file = Path(image_path).resolve()
-            # Security: only allow files inside uploads/ directories
-            if 'uploads' not in _img_file.parts:
-                raise ValueError(f'Path traversal blocked: {image_path}')
-            if _img_file.is_file() and _img_file.stat().st_size < 20_000_000:  # 20MB safety cap
+            # Security (review 3 of PR #597, B2): image_path comes from the request and
+            # uploads/ is agent-writable. It must be LEXICALLY under the uploads mount
+            # (no resolve(): that follows the agent's symlinks), and every read/write of
+            # the image and its .image-intel sidecar is a no-follow, beneath-root one.
+            # The old check (`'uploads' in resolved.parts`, then I/O by name) let a
+            # planted `uploads/.image-intel -> <any dir>` symlink overwrite any *.json the
+            # server can write with the sidecar.
+            _img_file = Anchored(UPLOADS_DIR, image_path)   # UnsafePath if not under uploads/
+            _intel_file = _img_file.sibling('.image-intel').child(_img_file.name + '.json')
+            if _img_file.is_file() and _img_file.lstat().st_size < 20_000_000:  # 20MB safety cap
                 # Check .image-intel cache first — avoids live API call when image was pre-analyzed
-                _intel_path = _img_file.parent / '.image-intel' / (_img_file.name + '.json')
                 _upload_desc = None
-                if _intel_path.is_file():
+                if _intel_file.is_file():
                     try:
                         import json as _json
-                        _intel = _json.loads(_intel_path.read_text())
+                        _intel = _json.loads(_intel_file.read_text(max_bytes=2_000_000))
                         _cached = _intel.get('analysis', {}).get('description', '').strip()
                         if _cached:
                             _kw = _intel.get('analysis', {}).get('keywords', [])
@@ -1820,7 +1828,8 @@ def _conversation_inner():
                                 '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
                                 '.webp': 'image/webp', '.gif': 'image/gif',
                             }.get(_img_file.suffix.lower(), 'image/jpeg')
-                            _b64 = base64.b64encode(_img_file.read_bytes()).decode()
+                            _img_bytes = _img_file.read_bytes(max_bytes=20_000_000)
+                            _b64 = base64.b64encode(_img_bytes).decode()
                             _gr = _rq.post(
                                 'https://generativelanguage.googleapis.com/v1beta/models/'
                                 f'gemini-2.5-flash:generateContent?key={_gem_key}',
@@ -1846,19 +1855,19 @@ def _conversation_inner():
                                 try:
                                     import hashlib as _hl
                                     import json as _json
-                                    _intel_path.parent.mkdir(exist_ok=True)
-                                    _intel_path.write_text(_json.dumps({
+                                    _intel_file.atomic_write_text(_json.dumps({
                                         'schema': 1,
                                         'file': _img_file.name,
                                         'tenant': os.getenv('JAMBOT_TENANT', ''),
-                                        'sha256': _hl.sha256(_img_file.read_bytes()).hexdigest(),
-                                        'size': _img_file.stat().st_size,
+                                        'sha256': _hl.sha256(_img_bytes).hexdigest(),
+                                        'size': len(_img_bytes),
                                         'source': 'gemini-sync',
                                         'original_name': _img_file.name,
                                         'analyzed_at': datetime.utcnow().isoformat() + 'Z',
                                         'analysis': {'description': _gtxt, 'keywords': [],
                                                      'text_in_image': ''},
-                                    }, indent=1))
+                                    }, indent=1), create_dirs=True,
+                                        mode=None)   # keep an existing sidecar's mode (main wrote in place)
                                 except Exception as _we:
                                     logger.debug('Could not write gemini-sync sidecar: %s', _we)
                         except Exception as _ge:
@@ -2299,7 +2308,7 @@ def _conversation_inner():
             try:
                 _gate_path = '/app/runtime/uploads/.mesh-admin-session'
                 _ts_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-                with open(_gate_path, 'w', encoding='utf-8') as _gf:
+                with Anchored('/app/runtime/uploads', _gate_path).open('w') as _gf:  # no-follow
                     _gf.write(f'admin={_clerk_uid}\nrefreshed_at={_ts_iso}\nsource=conversation.py auto-refresh\n')
             except Exception as _ge:
                 logger.warning(f'mesh-gate refresh failed (non-fatal): {_ge}')
@@ -3478,7 +3487,7 @@ def _conversation_inner():
                                 if _double_empty_restart_count <= _DOUBLE_EMPTY_MAX_RESTARTS:
                                     try:
                                         _flag_path = Path('/app/runtime/uploads/.restart-openclaw.flag')
-                                        _flag_path.write_text(
+                                        Anchored('/app/runtime/uploads', _flag_path).write_text(  # no-follow
                                             f'double-empty at {__import__("datetime").datetime.utcnow().isoformat()}Z'
                                         )
                                         logger.warning(
@@ -4847,7 +4856,8 @@ def tts_clone_voice():
             safe_name = f"voice_clone_{uuid.uuid4().hex[:12]}{ext}"
             UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
             save_path = UPLOADS_DIR / safe_name
-            audio_file.save(str(save_path))
+            with Anchored(UPLOADS_DIR, safe_name).open('wb') as _out:  # no-follow
+                audio_file.save(_out)
             audio_url = f"{request.host_url.rstrip('/')}/uploads/{safe_name}"
         else:
             return jsonify({

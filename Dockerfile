@@ -36,6 +36,14 @@ RUN mkdir -p runtime/uploads runtime/canvas-pages runtime/known_faces runtime/mu
 
 # Run as non-root user
 RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
+
+# Terminal sandbox: the terminal canvas block's shell runs as its own `sandbox`
+# user (uid 1500) through a setuid helper, never as appuser — so it cannot read
+# the server's env/secrets, /app (db, vault, uploads) or the /mnt key mounts.
+# See deploy/terminal-sandbox/install.sh.
+RUN sh /app/deploy/terminal-sandbox/install.sh
+ENV CODE_WORKSPACE_DIR=/srv/code-workspace
+
 USER appuser
 
 # Allow git operations in /app (owner may differ between build and runtime)

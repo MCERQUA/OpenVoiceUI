@@ -243,9 +243,11 @@ def _get_git_sha(repo_url: str) -> str:
 
     # 1. Local git (works in dev/host installs)
     try:
+        # fixed argv, fixed cwd; scrubbed env (this route is public)
+        from services.safe_proc import minimal_env
         return subprocess.check_output(
             ['git', 'rev-parse', 'HEAD'],
-            cwd=app_root, stderr=subprocess.DEVNULL
+            cwd=app_root, stderr=subprocess.DEVNULL, env=minimal_env()
         ).decode().strip()
     except Exception:
         pass

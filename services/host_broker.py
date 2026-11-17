@@ -203,11 +203,17 @@ def queue_vision_task_legacy(tenant: str, subject: str, body: str) -> bool:
     CHECK THE RETURN CODE: a mesh-send that exited non-zero queued nothing, and the user
     must not be told an analysis is coming."""
     import subprocess
+    # the subject travels as a positional argument ("$1"), never spliced into the shell
+    # text; it is also pre-sanitised to [A-Za-z0-9._-] (safe_subject)
     cmd = (f"AGENT_URI=openvoiceui@mesh /mnt/shared-skills/agent-mesh/bin/mesh-send "
-           f"--to {MESH_TASK_TO} --kind task --subject {subject}")
+           f"--to {MESH_TASK_TO} --kind task --subject \"$1\"")
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", subject or "") or not re.fullmatch(r"[a-z0-9-]{1,64}", tenant or ""):
+        logger.error("[host-broker] legacy vision queue refused: unsafe subject/tenant")
+        return False
+    from services.safe_proc import minimal_env
     try:
-        r = subprocess.run(["docker", "exec", "-i", f"openclaw-{tenant}", "bash", "-c", cmd],
-                           input=body.encode(), timeout=8, capture_output=True)
+        r = subprocess.run(["docker", "exec", "-i", f"openclaw-{tenant}", "bash", "-c", cmd, "_", subject],
+                           input=body.encode(), timeout=8, capture_output=True, env=minimal_env())
     except Exception as exc:
         logger.warning("[host-broker] legacy vision queue failed to run for %s: %s", tenant, exc)
         return False

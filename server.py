@@ -140,9 +140,11 @@ from services.paths import DEFAULT_PAGES_DIR
 _VERSION_RE = re.compile(r'<!--\s*openvoiceui-version:\s*(\S+)\s*-->')
 
 def _extract_page_version(path, max_lines=5):
-    """Read version stamp from the first few lines of an HTML file."""
+    """Read version stamp from the first few lines of an HTML file (no-follow open:
+    the runtime copy lives in agent-writable canvas-pages)."""
+    from services.safe_open import Anchored as _Anchored
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with _Anchored(Path(path).parent, Path(path).name).open('r', encoding='utf-8') as f:
             for _, line in zip(range(max_lines), f):
                 m = _VERSION_RE.search(line)
                 if m:
@@ -157,13 +159,15 @@ if DEFAULT_PAGES_DIR.is_dir():
         if not src.is_file():
             continue
         dest = CANVAS_PAGES_DIR / src.name
+        from services.safe_open import Anchored as _Anchored
+        _dest = _Anchored(CANVAS_PAGES_DIR, src.name)   # no-follow (canvas-pages is agent-writable)
         # A single non-writable tenant page (e.g. a canvas-pages copy owned by a
         # different uid with restrictive perms) must NOT crash the whole server boot.
         # Log-and-skip so seeding stays best-effort. (host 2026-06-28 — fleet-roll fix:
         # tenant-k crash-looped here when website-creator.html was uid-1000/664 vs appuser 1001.)
         try:
-            if not dest.exists():
-                shutil.copy2(src, dest)
+            if not _dest.exists():
+                _dest.write_bytes(src.read_bytes())
                 logger.info("Seeded default page: %s", src.name)
             else:
                 # Re-seed if the shipped version is newer than the runtime copy
@@ -171,7 +175,7 @@ if DEFAULT_PAGES_DIR.is_dir():
                 if src_ver is not None:
                     dest_ver = _extract_page_version(dest)
                     if dest_ver != src_ver:
-                        shutil.copy2(src, dest)
+                        _dest.write_bytes(src.read_bytes())
                         logger.info(
                             "Re-seeded default page %s (version %s -> %s)",
                             src.name, dest_ver, src_ver,
@@ -494,6 +498,17 @@ init_db()
 # ---------------------------------------------------------------------------
 
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+# /tmp is shared with the terminal sandbox user, so nothing of the server's
+# lives there: every tempfile.mkstemp/NamedTemporaryFile (and TMPDIR for child
+# processes) goes to the server-private 0700 dir, and the Brain events file
+# (conversation text) is created 0600 there, or a planted one is refused.
+from services.private_dir import set_process_tempdir as _set_private_tempdir
+try:
+    _set_private_tempdir()
+except Exception as _ptd_e:
+    logger.error(f'server-private tempdir unavailable ({_ptd_e}); temp files stay in the default dir')
+from services.events_file import ensure_private as _ensure_private_events
+_ensure_private_events()
 
 
 # ---------------------------------------------------------------------------
@@ -590,12 +605,14 @@ def get_version():
         data["update_available"] = False
         if current != "unknown" and latest.get("sha"):
             app_dir = Path(__file__).parent
-            if (app_dir / ".git").is_dir():
+            if (app_dir / ".git").is_dir() and re.fullmatch(r"[0-9a-f]{7,40}", latest["sha"] or ""):
                 try:
+                    # argv is fixed except a hex sha (validated: never an option); scrubbed env
+                    from services.safe_proc import minimal_env as _minimal_env
                     result = subprocess.run(
                         ["git", "merge-base", "--is-ancestor",
                          latest["sha"], "HEAD"],
-                        cwd=str(app_dir), capture_output=True, timeout=5,
+                        cwd=str(app_dir), capture_output=True, timeout=5, env=_minimal_env(),
                     )
                     # returncode 0 = release is ancestor of HEAD (up to date)
                     # returncode 1 = release is NOT ancestor (need update)
@@ -1260,10 +1277,13 @@ def local_stt():
 
     try:
         wav_path = tmp_path.replace(".webm", ".wav")
+        # fixed argv over server-private temp files (tempfile -> private dir); scrubbed env
+        from services.safe_proc import minimal_env as _minimal_env
         result = subprocess.run(
             ["ffmpeg", "-y", "-i", tmp_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
             capture_output=True,
             timeout=10,
+            env=_minimal_env(),
         )
         if result.returncode != 0:
             logger.warning(f"FFmpeg conversion failed, transcribing original: {result.stderr.decode()}")
@@ -1543,12 +1563,16 @@ def run_command():
 
     cmd_info = ALLOWED_COMMANDS[matched]
     try:
+        # fixed, whitelisted argv only (the caller picks a KEY, never text that reaches
+        # argv); no shell; and no server secrets in the child's environment
+        from services.safe_proc import minimal_env as _minimal_env
         result = subprocess.run(
             cmd_info["cmd"],
             capture_output=True,
             text=True,
             timeout=30,
             cwd=str(Path(__file__).parent),
+            env=_minimal_env(),
         )
         output = (result.stdout.strip() or result.stderr.strip())[:1500]
         return jsonify({
@@ -1598,7 +1622,9 @@ def upload_file():
     safe_name = re.sub(r"[^\w\-.]", "_", file.filename)[:80]
     save_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
     save_path = UPLOADS_DIR / save_name
-    file.save(save_path)
+    from services.safe_open import Anchored as _Anchored
+    with _Anchored(UPLOADS_DIR, save_name).open('wb') as _out:   # no-follow (uploads/ is agent-writable)
+        file.save(_out)
 
     is_image = ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
     result = {
@@ -1611,7 +1637,8 @@ def upload_file():
     }
     if not is_image and ext != ".pdf":
         try:
-            result["content_preview"] = save_path.read_text(encoding="utf-8", errors="replace")[:2000]
+            with _Anchored(UPLOADS_DIR, save_name).open('r', errors='replace') as _pf:
+                result["content_preview"] = _pf.read(2000)
         except Exception:
             pass
 
@@ -1983,7 +2010,10 @@ def _write_push_receipt(text, session_key, delivered, clients, run_id=None, visi
             "text": text[:300],
         }) + "\n"
         with _push_receipt_lock:
-            with open(receipt_path, "a") as f:
+            # transcripts/ is agent-writable: append through a no-follow open of the
+            # receipt in its (mount-point) directory
+            from services.safe_open import Anchored as _Anchored
+            with _Anchored(Path(receipt_path).parent, Path(receipt_path).name).open("a") as f:
                 f.write(line)
     except Exception as e:
         logger.debug(f"Proactive push receipt write failed: {e}")
@@ -2570,12 +2600,21 @@ def browse_stream_websocket(ws):
 # Spawns a login shell inside THIS container, cwd'd to the dedicated code
 # sandbox (CODE_WORKSPACE_DIR). Gated by the Clerk __session cookie (same as
 # /ws/clawdbot) OR the internal X-Agent-Key. Pure-Python pty — no node-pty.
+#
+# The shell is a SANDBOX, not the server's identity: in the image it runs as
+# the unprivileged `sandbox` user via deploy/terminal-sandbox/ovu-sandbox-shell
+# with no inherited environment, so it cannot read the server's secrets,
+# /proc/1/environ, /app (db, vault, code) or the /mnt key mounts. On a hosted
+# tenant a missing helper refuses the terminal (services/terminal_sandbox.py).
 
 @sock.route("/ws/terminal")
 def terminal_websocket(ws):
     import pty, select, struct, fcntl, termios, signal, threading
     from services.auth import verify_clerk_token, get_token_from_request
     from services.paths import CODE_WORKSPACE_DIR
+    from services.terminal_sandbox import (
+        TerminalSandboxUnavailable, exec_terminal_child, plan_terminal_child,
+        session_closed, session_opened)
 
     # --- auth: valid Clerk session OR internal agent key ---
     token = get_token_from_request()
@@ -2597,22 +2636,27 @@ def terminal_websocket(ws):
     except Exception:
         pass
 
-    pid, master_fd = pty.fork()
-    if pid == 0:
-        # --- child: become the login shell ---
-        os.environ["TERM"] = "xterm-256color"
+    # Everything the child execs is decided BEFORE fork (no work in the child).
+    try:
+        child_plan = plan_terminal_child(CODE_WORKSPACE_DIR)
+    except TerminalSandboxUnavailable as e:
+        logger.error(f"Terminal WS refused: {e}")
         try:
-            os.chdir(str(CODE_WORKSPACE_DIR))
+            ws.send(json.dumps({"type": "error", "message": "Terminal sandbox unavailable on this server"}))
+            ws.close()
         except Exception:
             pass
-        shell = os.environ.get("SHELL") or "/bin/bash"
-        try:
-            os.execvp(shell, [shell, "-l"])
-        except Exception:
-            try:
-                os.execvp("/bin/sh", ["/bin/sh"])
-            except Exception:
-                os._exit(1)
+        return
+
+    session_opened()
+    try:
+        pid, master_fd = pty.fork()
+    except Exception:
+        session_closed(child_plan)
+        raise
+    if pid == 0:
+        # --- child: become the sandboxed login shell (never returns) ---
+        exec_terminal_child(child_plan)
 
     # --- parent: bridge pty <-> websocket ---
     stop = threading.Event()
@@ -2666,6 +2710,9 @@ def terminal_websocket(ws):
         logger.error(f"Terminal WS error: {e}")
     finally:
         stop.set()
+        # A sandboxed shell runs as another uid, so this kill is refused
+        # (EPERM) there; closing the pty master hangs up the session instead
+        # (the kernel sends SIGHUP, the shell reads EIO and exits).
         try:
             os.kill(pid, signal.SIGKILL)
         except Exception:
@@ -2674,10 +2721,20 @@ def terminal_websocket(ws):
             os.close(master_fd)
         except Exception:
             pass
-        try:
-            os.waitpid(pid, 0)
-        except Exception:
-            pass
+
+        # When the last terminal session closes, the helper's --reap mode kills
+        # every sandbox process, including setsid/nohup survivors the hangup
+        # never reaches (review of PR #597, L1).
+        session_closed(child_plan)
+
+        # Reap off the handler thread: never block it on a child that is slow
+        # to die (a sandboxed one cannot be SIGKILLed from here).
+        def _reap(child=pid):
+            try:
+                os.waitpid(child, 0)
+            except Exception:
+                pass
+        threading.Thread(target=_reap, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -2689,12 +2746,21 @@ def terminal_websocket(ws):
 _GAME_CATALOG_PATH = os.getenv("GAME_CATALOG_PATH", "/app/runtime/game-catalog.json")
 _GAME_SERVER_URL = os.getenv("GAME_SERVER_URL", "http://172.19.0.1:6360")
 
+def _open_trusted_catalog(path):
+    """The mounted catalog file (a host bind mount, not agent-writable)."""
+    return open(path)
+
+
 def _load_game_catalog():
     """Load catalog from mounted file. Returns list or None on failure."""
     # Check primary path, then uploads fallback (uploads/ is always mounted)
+    from services.safe_open import Anchored as _Anchored
     for path in [_GAME_CATALOG_PATH, "/app/runtime/uploads/game-catalog.json"]:
         try:
-            with open(path) as f:
+            # the uploads fallback is agent-writable: no-follow open there
+            fh = (_Anchored("/app/runtime/uploads", path).open() if path.startswith("/app/runtime/uploads/")
+                  else _open_trusted_catalog(path))
+            with fh as f:
                 return json.load(f)
         except Exception:
             continue

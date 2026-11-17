@@ -30,6 +30,7 @@ from pathlib import Path
 from flask import Blueprint, request, jsonify
 
 from services.paths import RUNTIME_DIR, UPLOADS_DIR
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 grid_gen_bp = Blueprint('grid_gen', __name__)
 
@@ -62,11 +63,13 @@ def _sanitize_refs(raw) -> list:
 
 
 def _orders_dir() -> Path:
-    ORDERS_DIR.mkdir(parents=True, exist_ok=True)
+    orders = Anchored(UPLOADS_DIR, ORDERS_DIR)   # uploads/grid-orders, walked no-follow
+    orders.mkdir(parents=True, exist_ok=True)
     # This route usually creates the dir first (order placed before the Mac ever sees it); make
     # it world-writable so the Mac (different uid) can drop status markers into the same dir.
+    # fchmod on the no-follow fd: a `grid-orders -> /anywhere` symlink is refused, never chmod'ed.
     try:
-        os.chmod(ORDERS_DIR, 0o777)
+        orders.chmod(0o777)
     except OSError:
         pass
     return ORDERS_DIR
@@ -94,7 +97,7 @@ def create_order():
         'status': 'queued',
         'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
-    (_orders_dir() / f'{rid}.json').write_text(json.dumps(order))
+    Anchored(UPLOADS_DIR, _orders_dir() / f'{rid}.json').write_text(json.dumps(order))  # no-follow
     return jsonify({'ok': True, 'request_id': rid, 'refs': order['refs']})
 
 
@@ -123,14 +126,14 @@ def list_orders():
         if f.name.endswith('.status.json'):
             continue
         try:
-            order = json.loads(f.read_text())
+            order = json.loads(Anchored(UPLOADS_DIR, f).read_text(max_bytes=1024 * 1024))
         except (OSError, json.JSONDecodeError):
             continue
         # Merge the Mac's status marker if present (it wins on status/files/error).
         marker = d / f"{order.get('request_id')}.status.json"
         if marker.exists():
             try:
-                st = json.loads(marker.read_text())
+                st = json.loads(Anchored(UPLOADS_DIR, marker).read_text(max_bytes=1024 * 1024))
                 for k in ('status', 'files', 'error', 'done', 'updated_at'):
                     if k in st:
                         order[k] = st[k]

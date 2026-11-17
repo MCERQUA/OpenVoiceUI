@@ -34,6 +34,7 @@ from routes.static_files import _safe_path
 # ---------------------------------------------------------------------------
 
 from services.paths import DB_PATH, MUSIC_DIR, GENERATED_MUSIC_DIR
+from services.safe_open import Anchored, UnsafePath  # no-follow I/O (agent-writable dirs)
 
 MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_MUSIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -176,7 +177,7 @@ def load_music_metadata():
     metadata_file = MUSIC_DIR / "music_metadata.json"
     if metadata_file.exists():
         try:
-            with open(metadata_file, "r") as f:
+            with Anchored(MUSIC_DIR, metadata_file).open("r") as f:  # no-follow
                 return json.load(f)
         except Exception as e:
             print(f"Error loading music metadata: {e}")
@@ -188,7 +189,7 @@ def load_generated_music_metadata():
     metadata_file = GENERATED_MUSIC_DIR / "generated_metadata.json"
     if metadata_file.exists():
         try:
-            with open(metadata_file, "r") as f:
+            with Anchored(GENERATED_MUSIC_DIR, metadata_file).open("r") as f:  # no-follow
                 return json.load(f)
         except Exception as e:
             print(f"Error loading generated music metadata: {e}")
@@ -197,18 +198,15 @@ def load_generated_music_metadata():
 
 def save_music_metadata(metadata):
     """Persist library playlist metadata (atomic write — safe against mid-write crashes)."""
-    metadata_file = MUSIC_DIR / "music_metadata.json"
-    tmp = metadata_file.with_suffix('.tmp')
-    tmp.write_text(json.dumps(metadata, indent=2))
-    tmp.replace(metadata_file)
+    # random O_EXCL temp + rename in a no-follow-pinned dir (music/ is agent-writable;
+    # the old fixed '.tmp' name could be pre-planted as a symlink)
+    Anchored(MUSIC_DIR, "music_metadata.json").atomic_write_text(json.dumps(metadata, indent=2))
 
 
 def save_generated_music_metadata(metadata):
     """Persist AI-generated playlist metadata (atomic write — safe against mid-write crashes)."""
-    metadata_file = GENERATED_MUSIC_DIR / "generated_metadata.json"
-    tmp = metadata_file.with_suffix('.tmp')
-    tmp.write_text(json.dumps(metadata, indent=2))
-    tmp.replace(metadata_file)
+    Anchored(GENERATED_MUSIC_DIR, "generated_metadata.json").atomic_write_text(
+        json.dumps(metadata, indent=2))
 
 
 def load_playlist_order(playlist):
@@ -217,7 +215,7 @@ def load_playlist_order(playlist):
     order_file = music_dir / "order.json"
     if order_file.exists():
         try:
-            with open(order_file, "r") as f:
+            with Anchored(music_dir, "order.json").open("r") as f:  # no-follow
                 return json.load(f)
         except Exception:
             pass
@@ -227,10 +225,7 @@ def load_playlist_order(playlist):
 def save_playlist_order(playlist, order):
     """Persist track order for the given playlist (atomic write)."""
     music_dir = GENERATED_MUSIC_DIR if playlist == "generated" else MUSIC_DIR
-    order_file = music_dir / "order.json"
-    tmp = order_file.with_suffix('.tmp')
-    tmp.write_text(json.dumps(order, indent=2))
-    tmp.replace(order_file)
+    Anchored(music_dir, "order.json").atomic_write_text(json.dumps(order, indent=2))
 
 
 def get_music_files(playlist="library"):
@@ -394,12 +389,16 @@ def serve_music_file(filename):
     if music_path is None or not music_path.exists():
         return jsonify({"error": "Track not found"}), 404
     mime_type = _AUDIO_MIME_TYPES.get(music_path.suffix.lower(), "audio/mpeg")
+    # music/ is agent-writable and /music/ is public: serve from ONE no-follow open
+    # of the requested name (review 2 of PR #597, H-C); a symlink is a 404.
     if request.args.get("download"):
-        return send_file(
-            music_path, mimetype=mime_type, as_attachment=True,
+        resp = Anchored(MUSIC_DIR, filename).send(
+            mimetype=mime_type, as_attachment=True,
             download_name=_download_name_for(MUSIC_DIR, music_path, load_music_metadata),
         )
-    return send_file(music_path, mimetype=mime_type)
+    else:
+        resp = Anchored(MUSIC_DIR, filename).send(mimetype=mime_type)
+    return resp if resp is not None else (jsonify({"error": "Track not found"}), 404)
 
 
 @music_bp.route("/generated_music/<filename>")
@@ -410,12 +409,14 @@ def serve_generated_music_file(filename):
         return jsonify({"error": "Generated track not found"}), 404
     mime_type = _AUDIO_MIME_TYPES.get(music_path.suffix.lower(), "audio/mpeg")
     if request.args.get("download"):
-        return send_file(
-            music_path, mimetype=mime_type, as_attachment=True,
+        resp = Anchored(GENERATED_MUSIC_DIR, filename).send(
+            mimetype=mime_type, as_attachment=True,
             download_name=_download_name_for(
                 GENERATED_MUSIC_DIR, music_path, load_generated_music_metadata),
         )
-    return send_file(music_path, mimetype=mime_type)
+    else:
+        resp = Anchored(GENERATED_MUSIC_DIR, filename).send(mimetype=mime_type)
+    return resp if resp is not None else (jsonify({"error": "Generated track not found"}), 404)
 
 
 # Generated files that are not songs live in fixed subfolders of generated_music/
@@ -436,10 +437,12 @@ def serve_generated_subdir_file(subdir, filename):
     if file_path is None or not file_path.is_file():
         return jsonify({"error": "Generated file not found"}), 404
     mime_type = _GENERATED_SUBDIR_MIME_TYPES.get(file_path.suffix.lower(), "application/octet-stream")
+    f = Anchored(GENERATED_MUSIC_DIR, f"{subdir}/{filename}")  # no-follow from the mount
     if request.args.get("download"):
-        return send_file(file_path, mimetype=mime_type, as_attachment=True,
-                         download_name=file_path.name)
-    return send_file(file_path, mimetype=mime_type)
+        resp = f.send(mimetype=mime_type, as_attachment=True, download_name=f.name)
+    else:
+        resp = f.send(mimetype=mime_type)
+    return resp if resp is not None else (jsonify({"error": "Generated file not found"}), 404)
 
 
 @music_bp.route("/api/music", methods=["GET"])
@@ -897,7 +900,11 @@ def upload_music():
     safe_name = safe_name[:50] + ext
 
     save_path = MUSIC_DIR / safe_name
-    file.save(save_path)
+    try:
+        with Anchored(MUSIC_DIR, safe_name).open("wb") as out:   # no-follow (music/ is agent-writable)
+            file.save(out)
+    except (OSError, UnsafePath):
+        return jsonify({"error": "Cannot save that file name"}), 400
 
     return jsonify({
         "status": "success",
@@ -964,7 +971,7 @@ def delete_track(playlist, filename):
     if renamed.exists():
         renamed = track_path.with_suffix(track_path.suffix + f".{int(time.time())}.deleted")
     try:
-        track_path.rename(renamed)
+        Anchored(music_dir, track_path).rename(renamed.name)  # no-follow
         print(f"🎵 Archived track: {safe_filename} -> {renamed.name}")
     except Exception as e:
         print(f"Error archiving track {safe_filename}: {e}")

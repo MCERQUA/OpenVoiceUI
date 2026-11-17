@@ -330,11 +330,11 @@ def test_result_is_written_before_the_partial_is_renamed(client, up, monkeypatch
     seen = []
     real = os.replace
 
-    def spy(src, dst):
+    def spy(src, dst, **kw):   # finish now renames via pinned dir fds (PR #597 review 2)
         if str(src).endswith(".partial"):
             rid = os.path.basename(str(src))[:-len(".partial")]
             seen.append((up / ".chunks" / f"{rid}.done.json").exists())
-        return real(src, dst)
+        return real(src, dst, **kw)
     monkeypatch.setattr(sf.os, "replace", spy)
     u = _uid(client, 10)
     assert _send(client, b"a" * 10, 0, u).status_code == 200
@@ -355,11 +355,11 @@ def test_finish_interrupted_after_result_is_completed_by_next_slice(client, up, 
     real = os.replace
     calls = {"n": 0}
 
-    def crash_on_rename(src, dst):
+    def crash_on_rename(src, dst, **kw):   # finish renames via pinned dir fds (PR #597 review 2)
         if str(src).endswith(".partial") and calls["n"] == 0:
             calls["n"] += 1
             raise OSError("simulated crash between result and rename")
-        return real(src, dst)
+        return real(src, dst, **kw)
     monkeypatch.setattr(sf.os, "replace", crash_on_rename)
     payload = os.urandom(20)
     u = _uid(client, 20)

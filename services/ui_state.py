@@ -123,25 +123,11 @@ def write_ui_state(uploads_dir: Path, static_blob: str,
 
         uploads_dir = Path(uploads_dir)
         uploads_dir.mkdir(parents=True, exist_ok=True)
-        target = uploads_dir / UI_STATE_FILENAME
-        # Atomic: write to a tmp file in the SAME dir, then rename over.
-        fd, tmp_path = tempfile.mkstemp(
-            prefix='.UI_STATE.', suffix='.tmp', dir=str(uploads_dir))
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(doc)
-            os.replace(tmp_path, target)
-        except Exception:
-            # Best-effort tmp cleanup — never leave droppings in uploads/.
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-        try:
-            os.chmod(target, 0o664)
-        except OSError:
-            pass
+        # Atomic: random O_EXCL temp in the SAME dir, fchmod, then rename over. All
+        # through a no-follow pinned dir fd (uploads/ is agent-writable): the old
+        # post-rename os.chmod(target) followed a symlink swapped in at the name.
+        from services.safe_open import Anchored
+        Anchored(uploads_dir, UI_STATE_FILENAME).atomic_write_text(doc, mode=0o664)
         with _last_hash_lock:
             _last_hash = digest
         return True

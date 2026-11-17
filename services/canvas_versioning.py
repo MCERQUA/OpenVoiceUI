@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from services.paths import CANVAS_PAGES_DIR
+from services.safe_open import Anchored  # no-follow I/O under agent-writable roots
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ def _save_version(filename: str, old_content: bytes) -> Path | None:
         timestamp = int(time.time())
         version_name = f'{stem}.{timestamp}{suffix}'
         version_path = _versions_dir() / version_name
-        version_path.write_bytes(old_content)
+        Anchored(CANVAS_PAGES_DIR, version_path).write_bytes(old_content)
         logger.info(f'Canvas version saved: {version_name} ({len(old_content)} bytes)')
         _cleanup_versions(stem, suffix)
         return version_path
@@ -99,7 +100,9 @@ def _cleanup_versions(page_stem: str, suffix: str = '.html') -> None:
     )
     for old_version in versions[MAX_VERSIONS_PER_PAGE:]:
         try:
-            old_version.unlink()
+            # no-follow walk: a `.versions` swapped for a symlink after the glob cannot
+            # redirect the prune into another directory (review 3 of PR #597)
+            Anchored(CANVAS_PAGES_DIR, old_version).unlink()
             logger.debug(f'Pruned old version: {old_version.name}')
         except Exception:
             pass
@@ -115,7 +118,7 @@ def _initial_scan() -> None:
         try:
             if page_path.stat().st_size > MAX_VERSION_BYTES:
                 continue
-            content = page_path.read_bytes()
+            content = Anchored(CANVAS_PAGES_DIR, page_path).read_bytes()
             _file_hashes[page_path.name] = _content_hash(content)
             _file_contents[page_path.name] = content
         except Exception as exc:
@@ -139,7 +142,7 @@ def _check_for_changes() -> None:
             continue
         current_files.add(filename)
         try:
-            content = page_path.read_bytes()
+            content = Anchored(CANVAS_PAGES_DIR, page_path).read_bytes()
             new_hash = _content_hash(content)
 
             if filename in _file_hashes:
@@ -241,12 +244,12 @@ def restore_version(page_id: str, timestamp: int) -> bool:
 
     # Save current as a version before restoring
     if current_file.exists():
-        current_content = current_file.read_bytes()
+        current_content = Anchored(CANVAS_PAGES_DIR, current_file).read_bytes()
         _save_version(current_file.name, current_content)
 
     # Restore the old version
-    restored_content = version_file.read_bytes()
-    current_file.write_bytes(restored_content)
+    restored_content = Anchored(CANVAS_PAGES_DIR, version_file).read_bytes()
+    Anchored(CANVAS_PAGES_DIR, current_file).write_bytes(restored_content)
 
     # Update tracking
     _file_hashes[current_file.name] = _content_hash(restored_content)
@@ -260,5 +263,5 @@ def get_version_content(page_id: str, timestamp: int) -> bytes | None:
     """Get the content of a specific version."""
     version_file = _versions_dir() / f'{page_id}.{timestamp}.html'
     if version_file.exists():
-        return version_file.read_bytes()
+        return Anchored(CANVAS_PAGES_DIR, version_file).read_bytes()
     return None

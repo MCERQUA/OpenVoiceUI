@@ -19,6 +19,7 @@ from pathlib import Path
 from flask import Blueprint, jsonify, request, send_file
 
 from services.paths import UPLOADS_DIR
+from services.safe_open import Anchored, UnsafePath
 
 logger = logging.getLogger(__name__)
 
@@ -30,48 +31,43 @@ ALBUMS_INDEX = ALBUMS_DIR / 'index.json'
 ALLOWED_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp', '.gif'}
 
 
+# uploads/ (and so uploads/albums/) is read-write in the tenant agent's container:
+# every album file is reached by a no-follow walk from the uploads MOUNT POINT
+# (ALBUMS_DIR.parent), so an `albums -> /app/runtime` or `<id> -> /anywhere`
+# symlink is refused, never followed (review 2 of PR #597, H-B / H-C).
+def _album(rel: str = '') -> Anchored:
+    return Anchored(ALBUMS_DIR.parent, f'{ALBUMS_DIR.name}/{rel}' if rel else ALBUMS_DIR.name)
+
+
 def _ensure_albums_dir():
-    ALBUMS_DIR.mkdir(parents=True, exist_ok=True)
+    _album().mkdir(parents=True, exist_ok=True)
 
 
 def _load_index() -> list:
-    _ensure_albums_dir()
-    if not ALBUMS_INDEX.exists():
-        return []
     try:
-        return json.loads(ALBUMS_INDEX.read_text(encoding='utf-8'))
+        _ensure_albums_dir()
+        return json.loads(_album('index.json').read_text(max_bytes=16 * 1024 * 1024))
     except Exception:
         return []
 
 
 def _save_index(index: list) -> None:
     _ensure_albums_dir()
-    ALBUMS_INDEX.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding='utf-8')
-    try:
-        ALBUMS_INDEX.chmod(0o666)
-    except OSError:
-        pass
+    idx = _album('index.json')
+    idx.atomic_write_text(json.dumps(index, indent=2, ensure_ascii=False), mode=0o666)
 
 
 def _load_album(album_id: str) -> dict | None:
-    album_file = ALBUMS_DIR / album_id / 'album.json'
-    if not album_file.exists():
-        return None
     try:
-        return json.loads(album_file.read_text(encoding='utf-8'))
+        return json.loads(_album(f'{album_id}/album.json').read_text(max_bytes=16 * 1024 * 1024))
     except Exception:
         return None
 
 
 def _save_album(album_id: str, data: dict) -> None:
-    album_dir = ALBUMS_DIR / album_id
-    album_dir.mkdir(parents=True, exist_ok=True)
-    album_file = album_dir / 'album.json'
-    album_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
-    try:
-        album_file.chmod(0o666)
-    except OSError:
-        pass
+    _album(album_id).mkdir(parents=True, exist_ok=True)
+    _album(f'{album_id}/album.json').atomic_write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), mode=0o666)
 
 
 def _update_index_entry(album_id: str, data: dict) -> None:
@@ -195,25 +191,25 @@ def upload_photo(album_id: str):
     photo_id = uuid.uuid4().hex[:12]
     now = datetime.now(timezone.utc).isoformat(timespec='seconds')
     safe_name = f'photo-{photo_id}{ext}'
-    album_dir = ALBUMS_DIR / album_id
-    album_dir.mkdir(parents=True, exist_ok=True)
-    dest = album_dir / safe_name
-    f.save(str(dest))
     try:
+        _album(album_id).mkdir(parents=True, exist_ok=True)
+        dest = _album(f'{album_id}/{safe_name}')
+        with dest.open('wb', perm=0o666) as out:
+            f.save(out)
         dest.chmod(0o666)
-    except OSError:
-        pass
+    except (OSError, UnsafePath):
+        return jsonify({'error': 'album not writable'}), 400
 
     # HEIC → JPG conversion
     if ext in ('.heic', '.heif'):
         jpg_name = f'photo-{photo_id}.jpg'
-        jpg_dest = album_dir / jpg_name
+        jpg_dest = _album(f'{album_id}/{jpg_name}')
         try:
             import pillow_heif
             from PIL import Image as _Image
             pillow_heif.register_heif_opener()
-            with _Image.open(str(dest)) as _img:
-                _img.convert('RGB').save(str(jpg_dest), 'JPEG', quality=90)
+            with dest.open('rb') as _src, _Image.open(_src) as _img, jpg_dest.open('wb', perm=0o666) as _out:
+                _img.convert('RGB').save(_out, 'JPEG', quality=90)
             dest = jpg_dest
             safe_name = jpg_name
             ext = '.jpg'
@@ -281,7 +277,11 @@ def serve_album_photo(album_id: str, filename: str):
         return denied
     if not exists:
         return 'Not found', 404
-    resp = send_file(str(dest))
+    # One no-follow open (uploads/albums is agent-writable): a symlinked album
+    # dir or photo is refused, never followed, and cannot be swapped in later.
+    resp = _album(f'{safe_id}/{safe_file}').send() if safe_id and safe_file else None
+    if resp is None:
+        return 'Not found', 404
     resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     return resp
