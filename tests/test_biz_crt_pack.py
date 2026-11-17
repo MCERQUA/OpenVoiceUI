@@ -26,7 +26,8 @@ POLICY_FIELDS = ['line', 'policy_number', 'effective', 'expiration', 'limits', '
                  'source_document_id', 'producer_is_cca', 'producer_name', 'producer_phone', 'producer_email',
                  'certificate_holder', 'exclusions', 'occurrence_or_claims_made', 'tail', 'carrier']
 END_FIELDS = ['function', 'form', 'edition', 'scheduled_names', 'scheduled_projects', 'blanket', 'manuscript',
-              'document_id']
+              'document_id', 'crt_policy_id']          # rules 1.2.0 (N4): staff name the policy it attaches to
+DOC_FIELDS = ['kind', 'crt_account_id', 'contact_id', 'file_url']   # rules 1.2.0 (N2/L3): staff check the paper itself
 
 
 def iso(d):
@@ -218,6 +219,9 @@ def world(h, template='mep', trade='electrical', today=TODAY, policies=None, end
         w['end'][k] = h.mk('crt_endorsement', {'crt_account_id': w['account']['id'],
                                                 'crt_policy_id': w['pol'][pol_key]['id'], **ed})
     if confirm_all:
+        # the agent filed these documents: staff check each one's kind, account, sub and file (rules 1.2.0)
+        for d in w['docs'].values():
+            confirm(h, 'document', d, DOC_FIELDS)
         users = [STAFF_1, STAFF_2] if second_confirmer else [STAFF_1]
         for u in users:
             for p in w['pol'].values():
@@ -754,11 +758,16 @@ def test_agent_created_project_needs_staff_before_it_counts(h):
 
 
 def test_an_agent_edit_to_the_account_name_needs_staff_before_it_counts(h):
-    # contacts carry no confirmations, so only the person-written rule can make this "can't tell"
+    # contacts carry no confirmations, so only the person-written rule can make this "can't tell".
+    # rules 1.2.0 (ruling N1): provenance is PER FIELD. The agent's edit of the NAME (to a spelling that
+    # still normalises the same, so provenance is the only reason) is what makes it "can't tell"; the
+    # agent editing an unrelated field (phone) no longer does.
     w = world(h)
     acct = h.ok(h.get(f'/contact/{w["account"]["id"]}'))
     h.agent()
-    h.ok(h.patch(f'/contact/{acct["id"]}', {'data': {'phone': '602-555-0199'}}, acct['version']))
+    acct = h.ok(h.patch(f'/contact/{acct["id"]}', {'data': {'phone': '602-555-0199'}}, acct['version']))
+    assert h.state(w['asg']['id'])['state'] == 'meets'
+    h.ok(h.patch(f'/contact/{acct["id"]}', {'data': {'name': 'ACME Builders, LLC'}}, acct['version']))
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'cant_tell' and codes(ev) == ['UNCONFIRMED:contact.name']
     # a person on staff confirms the name: it counts again

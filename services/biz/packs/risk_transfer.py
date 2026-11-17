@@ -6,9 +6,16 @@ follows is cited per value in default-schemas/packs/risk-transfer/templates.json
 The verdict reads ONLY confirmed inputs (rule 1, ruling b):
   - evidence fields (crt_policy, crt_endorsement, and the contract fields of crt_project) count
     only when a crt_confirmation covers that field at the record's CURRENT version and names a
-    source document whose private file still hashes to the confirmation's source_sha256;
-  - set-up fields a person types (account and sub names, project name / GC / owner / dates)
-    count when a person wrote the record's current version, or a confirmation covers them;
+    source document whose private file still hashes to the confirmation's source_sha256, and that
+    document was received for THIS account and THIS sub (host rulings L3/N3/N4, 2026-11-17);
+  - set-up fields a person types (account and sub names, project name / account / dates, the
+    assignment's project, sub, set, trade and scope) count PER FIELD: the last logged write that set
+    or changed THAT field was a person's, or a person confirmed that field at the record's current
+    version (host ruling N1). A staff touch to another field, a hold, an archive or a note never
+    turns an agent-written field into a person-written one;
+  - a backing document (certificate, endorsement, contractor's written OK) counts only when its
+    kind, account, sub and file were written or confirmed by a person; an endorsement document whose
+    file is a certificate's file is never the endorsement (host ruling N2);
   - a requirement set counts only when APPROVED and confirmed by staff at its current version;
   - when we (the agency) are the sub's producer, evidence needs two different staff confirmers.
 Anything else is "Can't tell (needs staff check)", code UNCONFIRMED:<collection>.<field>.
@@ -26,7 +33,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.1.0'
+RULE_VERSION = 'crt-rules-1.2.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -39,26 +46,39 @@ LABELS = {
     'variance': 'Variance',
     'expired': 'Expired',
 }
+# host ruling N9: an accepted variance never hides that the evidence is about to expire
+ACCEPTED_EXPIRING_LABELS = {
+    15: 'Meets requirements except contractor-accepted variances (documents reviewed), expiring within 15 days',
+    30: 'Meets requirements except contractor-accepted variances (documents reviewed), expiring within 30 days',
+}
 UNMET_STATES = ('cant_tell', 'missing', 'variance', 'expired')
+PERSON_PREFIXES = ('clerk:', 'local:')
 REVIEW_STALE_DAYS = 30
 TEMPLATES_PATH = Path(__file__).resolve().parents[3] / 'default-schemas' / 'packs' / 'risk-transfer' / 'templates.json'
 
 EVIDENCE = {'crt_policy', 'crt_endorsement'}
 PROJECT_CONTRACT_FIELDS = ('contract_requires_ai', 'contract_ai_parties')
-CONFIRMABLE = {'crt_policy', 'crt_endorsement', 'crt_project', 'contact', 'crt_account_party', 'crt_assignment'}
+CONFIRMABLE = {'crt_policy', 'crt_endorsement', 'crt_project', 'contact', 'crt_account_party', 'crt_assignment',
+               'document'}
+# what makes a document "this sub's paper": a person wrote or confirmed each of these (rulings N2, L3)
+DOC_IDENTITY_FIELDS = ('kind', 'crt_account_id', 'contact_id', 'file_url')
 POLICY_BASE_FIELDS = ('line', 'policy_number', 'effective', 'expiration', 'limits', 'named_insured', 'addl_insd',
                       'source_document_id', 'producer_is_cca')
 PRODUCER_FIELDS = ('producer_name', 'producer_phone', 'producer_email')
 ENDORSEMENT_FIELDS = ('function', 'form', 'edition', 'scheduled_names', 'scheduled_projects', 'blanket',
-                      'manuscript', 'document_id')
+                      'manuscript', 'document_id', 'crt_policy_id')   # N4: staff name the policy it attaches to
 AI_FUNCTIONS = ('ai_ongoing', 'ai_completed')
 # Host ruling H4 (2026-11-17): a waiver never clears a MISSING document; only variances are waivable.
 WAIVABLE_PREFIXES = ('NOT_AI', 'LIMIT_LOW', 'WRONG_', 'EXCLUSION', 'PRODUCER_INCOMPLETE', 'PL_NO_TAIL',
                      'COMPLETED_OPS_LAPSED', 'SCOPE_CHANGED', 'BLANKET_UNBACKED')
+# Host ruling N10: a certificate for a different company is never waivable, same as MISSING.
+NEVER_WAIVABLE = ('WRONG_INSURED',)
 # Assignment fields the verdict reads: they count only when a person wrote the assignment's current
 # version, or a person confirmed them (claim-check H1).
 ASSIGNMENT_FIELDS = ('crt_project_id', 'party_contact_id', 'requirement_set_id', 'requirement_set_version',
                      'trade_category', 'scope_changed_at')
+LINK_FIELDS = ('crt_account_id', 'party_contact_id', 'status')
+CONTACT_NAME_FIELDS = ('name', 'company_name')
 _ANI_RE = re.compile(r'additional\s+named\s+insured', re.I)
 _SUFFIXES = {'llc', 'inc', 'co', 'corp', 'corporation', 'company', 'ltd', 'the', 'lp', 'llp', 'pllc', 'pc'}
 
@@ -74,6 +94,41 @@ def norm_name(s) -> str:
     s = s.lower().replace('&', ' and ')
     words = [w for w in re.split(r'[^a-z0-9]+', s) if w and w not in _SUFFIXES]
     return ' '.join(words)
+
+
+def is_person(by) -> bool:
+    return str(by or '').startswith(PERSON_PREFIXES)
+
+
+def names_equal(wanted, candidates) -> bool:
+    """True when one candidate IS the wanted name after normalising (host ruling N8: no containment)."""
+    w = norm_name(wanted)
+    return bool(w) and any(norm_name(c) == w for c in (candidates or []))
+
+
+def field_writers(events, rec) -> dict:
+    """Who last set or changed each field of rec, from its append-only activity log (host ruling N1).
+
+    {field: by}, plus '' -> the record's creator. A field whose current value is not the value its
+    last logged write left (a write the log does not explain) maps to None: nobody vouches for it.
+    """
+    who, val, creator = {}, {}, None
+    for ev in events or []:
+        d = ev.get('diff') or {}
+        if ev.get('type') == 'created':
+            creator = ev.get('by')
+            for k, v in (d.get('set') or {}).items():
+                who[k], val[k] = ev.get('by'), v
+        elif ev.get('type') == 'updated':
+            for k, ch in (d.get('changed') or {}).items():
+                if isinstance(ch, list) and len(ch) == 2:
+                    who[k], val[k] = ev.get('by'), ch[1]
+    data = (rec or {}).get('data') or {}
+    out = {k: (who[k] if val[k] == data.get(k) else None) for k in who}
+    for k in data:
+        out.setdefault(k, None)
+    out[''] = creator
+    return out
 
 
 def names_match(wanted, candidates) -> bool:
@@ -190,6 +245,13 @@ def _get(store, collection, rid):
         return None
 
 
+def _writers(store, collection, rec):
+    try:
+        return field_writers(store.timeline(collection, rec['id']), rec)
+    except SchemaError:
+        return {}
+
+
 def gather(store, assignment_id) -> dict:
     """Everything one verdict reads, scoped to the project's account."""
     asg = store.get('crt_assignment', assignment_id)
@@ -208,6 +270,7 @@ def gather(store, assignment_id) -> dict:
         'policies': [], 'endorsements': [], 'documents': {}, 'files_ok': {}, 'confirmations': [],
         'waivers': _all(store, 'crt_waiver', {'crt_assignment_id': assignment_id}),
         'reviews': _all(store, 'crt_review', {'crt_assignment_id': assignment_id}),
+        'account_id': account_id, 'party_id': party_id, 'writers': {}, 'cert_files': set(),
     }
     if account_id and party_id:
         inputs['policies'] = _all(store, 'crt_policy', {'party_contact_id': party_id, 'crt_account_id': account_id})
@@ -240,6 +303,25 @@ def gather(store, assignment_id) -> dict:
             fid = _file_id(doc)
             if fid and fid not in inputs['files_ok']:
                 inputs['files_ok'][fid] = store.file_verified(fid)
+    # a person's confirmation of a document's kind / account / sub / file (rulings N2, L3)
+    dids = sorted(inputs['documents'])
+    for i in range(0, len(dids), 200):
+        inputs['confirmations'] += _all(store, 'crt_confirmation', {'record_id': {'$in': dids[i:i + 200]}})
+    # every certificate file on this sub-for-this-account: an endorsement document is never one of them (N2)
+    if account_id and party_id:
+        for d in _all(store, 'document', {'crt_account_id': account_id, 'contact_id': party_id}, archived=True):
+            if d['data'].get('kind') == 'coi_acord25' and _file_id(d):
+                inputs['cert_files'].add(_file_id(d))
+    for p in inputs['policies']:
+        src = _get(store, 'document', p['data'].get('source_document_id'))
+        if _file_id(src):
+            inputs['cert_files'].add(_file_id(src))
+    # per-field provenance of every set-up record and document the verdict reads (ruling N1)
+    for coll, recs in (('crt_assignment', [asg]), ('crt_project', [project]), ('contact', [inputs['account'], inputs['party']]),
+                       ('crt_account_party', inputs['links']), ('document', list(inputs['documents'].values()))):
+        for r in recs:
+            if r:
+                inputs['writers'][r['id']] = _writers(store, coll, r)
     return inputs
 
 
@@ -255,17 +337,41 @@ class _Confirmed:
         self.i = inputs
         self.used = set()
         self.by_record = {}
+        self.doc_codes = {}
         for c in inputs['confirmations']:
             if c['archived_at']:
                 continue
             self.by_record.setdefault(c['data'].get('record_id'), []).append(c)
 
-    def doc_ok(self, did, kind=None) -> bool:
+    def person_wrote(self, rec, field) -> bool:
+        """The last logged write that set or changed THIS field was a person's (ruling N1)."""
+        ws = (self.i.get('writers') or {}).get(rec['id'])
+        if not ws:
+            return False
+        if field in ws:
+            return is_person(ws[field])
+        return is_person(ws.get(''))           # never written: whoever created the record left it blank
+
+    def doc_check(self, did, *, kind=None, party=True) -> str:
+        """'' when the document backs THIS sub's verdict for THIS account; else why not:
+        'missing' (no such live, hash-verified paper of that kind), 'foreign' (another account's or
+        sub's paper, rulings L3/N3), 'unconfirmed' (its kind / account / sub / file is agent-written)."""
         doc = self.i['documents'].get(did)
         fid = _file_id(doc)
-        if kind is not None and (doc or {}).get('data', {}).get('kind') != kind:
-            return False
-        return bool(fid and self.i['files_ok'].get(fid))
+        if not doc or not fid or not self.i['files_ok'].get(fid):
+            return 'missing'
+        dd = doc['data']
+        if dd.get('crt_account_id') != self.i.get('account_id') or \
+                (party and dd.get('contact_id') != self.i.get('party_id')):
+            return 'foreign'
+        if kind is not None and dd.get('kind') != kind:
+            return 'missing'
+        fields = [f for f in DOC_IDENTITY_FIELDS if (f != 'kind' or kind is not None) and (f != 'contact_id' or party)]
+        bad = [f for f in fields if not self.ok(doc, 'document', f, need_source=False, person_ok=True)]
+        if bad:
+            self.doc_codes[did] = [f'UNCONFIRMED:document.{f}' for f in bad]
+            return 'unconfirmed'
+        return ''
 
     def _valid(self, c, rec, collection, field, need_source):
         d = c['data']
@@ -278,12 +384,14 @@ class _Confirmed:
             fid = _file_id(doc)
             if not fid or fid != d.get('source_sha256') or not self.i['files_ok'].get(fid):
                 return False
+            if self.doc_check(d.get('source_document_id'), party=collection in EVIDENCE) != '':
+                return False                  # read from another account's / sub's paper (L3)
         return True
 
     def ok(self, rec, collection, field, *, need_source=True, two=False, person_ok=False) -> bool:
         if rec is None:
             return False
-        if person_ok and not str(rec.get('updated_by') or '').startswith('agent:'):
+        if person_ok and self.person_wrote(rec, field):
             return True
         hits = [c for c in self.by_record.get(rec['id'], []) if self._valid(c, rec, collection, field, need_source)]
         people = {c['data'].get('confirmed_by') or c['created_by'] for c in hits}
@@ -308,7 +416,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             unconfirmed.append(code)
         return code
 
-    # the assignment itself: a person wrote it (or confirmed these fields) -- claim-check H1
+    # the assignment itself: a person wrote (or confirmed) EACH of these fields -- claim-check H1, ruling N1
     for f in ASSIGNMENT_FIELDS:
         if not conf.ok(asg, 'crt_assignment', f, need_source=False, person_ok=True):
             unc('crt_assignment', f)
@@ -328,22 +436,29 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
     if not project:
         unc('crt_assignment', 'crt_project_id')
     account, party = inputs['account'], inputs['party']
-    if not [ln for ln in inputs['links'] if ln['data'].get('status', 'active') == 'active']:
+    active = [ln for ln in inputs['links'] if ln['data'].get('status', 'active') == 'active']
+    if not active:
         unc('crt_account_party', 'status')
+    else:
+        # the link itself: each field a person wrote or confirmed (ruling N1); report the closest link's gaps
+        gaps = min(([f for f in LINK_FIELDS if not conf.ok(ln, 'crt_account_party', f, need_source=False, person_ok=True)]
+                    for ln in active), key=len)
+        for f in gaps:
+            unc('crt_account_party', f)
 
     pd = (project or {}).get('data', {})
-    # set-up fields a person types: person-written, or confirmed
+    # set-up fields a person types: each one person-written, or confirmed (ruling N1)
     acct_name = party_name = None
+
+    def contact_name(c):
+        bad = [f for f in CONTACT_NAME_FIELDS if not conf.ok(c, 'contact', f, need_source=False, person_ok=True)]
+        for f in bad:
+            unc('contact', f)
+        return None if bad else (c['data'].get('company_name') or c['data'].get('name'))
     if account:
-        if conf.ok(account, 'contact', 'name', need_source=False, person_ok=True):
-            acct_name = account['data'].get('company_name') or account['data'].get('name')
-        else:
-            unc('contact', 'name')
+        acct_name = contact_name(account)
     if party:
-        if conf.ok(party, 'contact', 'name', need_source=False, person_ok=True):
-            party_name = party['data'].get('company_name') or party['data'].get('name')
-        else:
-            unc('contact', 'name')
+        party_name = contact_name(party)
 
     def proj(field):
         if project and conf.ok(project, 'crt_project', field, need_source=False, person_ok=True):
@@ -392,7 +507,13 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 unc('crt_policy', f)
             cells[item_id] = 'UNCONFIRMED'
             return None
-        if not conf.doc_ok(pol['data'].get('source_document_id')):
+        src_state = conf.doc_check(pol['data'].get('source_document_id'))
+        if src_state == 'unconfirmed':
+            for c in conf.doc_codes.get(pol['data'].get('source_document_id'), []):
+                _add(unconfirmed, c)
+            cells[item_id] = 'UNCONFIRMED'
+            return None
+        if src_state:
             code = f'MISSING:{line}_certificate'
             if code not in missing:
                 missing.append(code)
@@ -414,6 +535,8 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         return [e for e in inputs['endorsements'] if e['data'].get('crt_policy_id') == pol['id']
                 and e['data'].get('function') == function]
 
+    if project:
+        proj('crt_account_id')       # which account's evidence is read at all (ruling N1)
     sc, sc_ok = (proj('substantial_completion') if project else (None, False))
     sc_d = _d(sc) if sc_ok else None
     trade = str(asg['data'].get('trade_category') or '').lower()
@@ -433,7 +556,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             if not ok and comb and line == 'gl' and isinstance(val, (int, float)) and val >= comb.get('gl_occ_floor', 0):
                 umb = current('umbrella')
                 if umb is not None and all(pol_ok(umb, f) for f in POLICY_BASE_FIELDS) and \
-                        conf.doc_ok(umb['data'].get('source_document_id')):
+                        conf.doc_check(umb['data'].get('source_document_id')) == '':
                     uv = (umb['data'].get('limits') or {}).get('each_occurrence') or 0
                     u_exp, u_eff = _d(umb['data'].get('expiration')), _d(umb['data'].get('effective'))
                     if u_exp and u_exp > today and u_eff and u_eff <= today and val + uv >= comb.get('gl_occ_plus_umbrella_min', 0):
@@ -465,7 +588,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             if not pol_ok(pol, 'certificate_holder'):
                 unc('crt_policy', 'certificate_holder')
                 cells[iid] = 'UNCONFIRMED'
-            elif acct_name and names_match(acct_name, [pol['data'].get('certificate_holder')]):
+            elif acct_name and names_equal(acct_name, [pol['data'].get('certificate_holder')]):
                 cells[iid] = 'OK'
             else:
                 variances.append('WRONG_HOLDER')
@@ -545,8 +668,15 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                         unc('crt_endorsement', f)
                     item_codes.append('UNCONFIRMED')
                     continue
-                if not conf.doc_ok(e['data'].get('document_id'), kind='endorsement') or \
-                        e['data'].get('document_id') == pol['data'].get('source_document_id'):
+                e_doc = e['data'].get('document_id')
+                e_state = conf.doc_check(e_doc, kind='endorsement')
+                if e_state == 'unconfirmed':                # an agent's "endorsement" label alone never counts (N2)
+                    for c in conf.doc_codes.get(e_doc, []):
+                        _add(unconfirmed, c)
+                    item_codes.append('UNCONFIRMED')
+                    continue
+                if e_state or e_doc == pol['data'].get('source_document_id') or \
+                        _file_id(inputs['documents'].get(e_doc)) in inputs.get('cert_files', ()):
                     item_codes.append(f'MISSING:{fn}')      # the certificate is a summary; the endorsement is the proof
                     continue
                 ed_year = _edition_year(e['data'].get('edition'))
@@ -576,7 +706,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                             continue
                         sched = e['data'].get('scheduled_names') or []
                         wanted = [acct_name] + list(pd.get('contract_ai_parties') or [])
-                        if not all(names_match(w, sched) for w in wanted):
+                        if not all(names_equal(w, sched) for w in wanted):     # N8: exact, like M3
                             item_codes.append('WRONG_PARTY')
                             continue
                         if not names_match(pname, e['data'].get('scheduled_projects') or []):
@@ -636,12 +766,12 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         wd = w['data']
         exp_w = _d(wd.get('expires'))
         if w['archived_at'] or not exp_w or exp_w <= today or \
-                not conf.doc_ok(wd.get('acceptance_document_id'), kind='contractor_waiver_ok'):
-            continue
+                conf.doc_check(wd.get('acceptance_document_id'), kind='contractor_waiver_ok', party=False) != '':
+            continue                      # N3: the written OK of THIS assignment's contractor account only
         live_waivers[wd.get('variance_code')] = w
     for lst in (missing, variances):
         for code in list(lst):
-            if code in live_waivers and code.startswith(WAIVABLE_PREFIXES):
+            if code in live_waivers and code.startswith(WAIVABLE_PREFIXES) and code not in NEVER_WAIVABLE:
                 lst.remove(code)
                 accepted.append({'code': code, 'waiver_id': live_waivers[code]['id'],
                                  'accepted_by_contractor': live_waivers[code]['data'].get('accepted_by_contractor'),
@@ -663,6 +793,9 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         state = 'meets'
     if accepted and state in ('meets', 'expiring_15', 'expiring_30'):
         state = 'meets_accepted'           # host ruling H4: never plain Meets when a variance was accepted
+    label = LABELS[state]
+    if state == 'meets_accepted' and expiring and expiring['days'] <= 30:
+        label = ACCEPTED_EXPIRING_LABELS[15 if expiring['days'] <= 15 else 30]
     codes = unconfirmed + missing + variances + expired
     stale = True
     if last_review:
@@ -675,7 +808,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
     if stale:
         why.append('no staff review in the last 30 days' if last_review else 'never reviewed by staff')
     return {
-        'assignment_id': asg['id'], 'state': state, 'label': LABELS[state], 'codes': codes,
+        'assignment_id': asg['id'], 'state': state, 'label': label, 'codes': codes,
         'accepted': accepted, 'suggestions': suggestions, 'notes': notes, 'items': cells,
         'expiring': expiring, 'hold_suggested': hold_suggested, 'hold_suggested_because': why,
         'hold': bool(asg['data'].get('hold')), 'hold_reason': asg['data'].get('hold_reason'),
@@ -889,6 +1022,17 @@ def register_routes(bp, api, ctx):
         if not isinstance(fields, list) or not fields or not all(isinstance(f, str) for f in fields) or \
                 any(f not in schema_fields for f in fields) or len(fields) > 60:
             raise _err(422, 'bad_request', '"fields" must list fields of this record that you checked')
+        if coll == 'document' and 'kind' in fields and rec['data'].get('kind') == 'endorsement':
+            fid = _file_id(rec)
+            acct, party = rec['data'].get('crt_account_id'), rec['data'].get('contact_id')
+            certs = {_file_id(d) for d in _all(store, 'document', {'crt_account_id': acct, 'contact_id': party},
+                                               archived=True) if d['data'].get('kind') == 'coi_acord25'}
+            for p in _all(store, 'crt_policy', {'crt_account_id': acct, 'party_contact_id': party}):
+                certs.add(_file_id(_get(store, 'document', p['data'].get('source_document_id'))))
+            if fid and fid in certs:
+                raise _err(422, 'endorsement_is_the_certificate',
+                           "This file is the sub's certificate. The certificate is a summary; the endorsement "
+                           'is its own document (host ruling N2)', field='kind')
         did, sha = body.get('source_document_id'), None
         needs_doc = coll in EVIDENCE or (coll == 'crt_project' and set(fields) & set(PROJECT_CONTRACT_FIELDS))
         if needs_doc or did:

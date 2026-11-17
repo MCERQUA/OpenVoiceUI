@@ -109,7 +109,8 @@ Readings count only after staff confirm them against the stored document. Nothin
   var POLICY_FIELDS = ['line', 'policy_number', 'carrier', 'effective', 'expiration', 'limits', 'named_insured', 'certificate_holder',
     'addl_insd', 'subr_wvd', 'exclusions', 'occurrence_or_claims_made', 'tail', 'producer_name', 'producer_phone', 'producer_email',
     'producer_is_cca', 'source_document_id'];
-  var END_FIELDS = ['function', 'form', 'edition', 'scheduled_names', 'scheduled_projects', 'blanket', 'manuscript', 'document_id'];
+  var END_FIELDS = ['function', 'form', 'edition', 'scheduled_names', 'scheduled_projects', 'blanket', 'manuscript', 'document_id', 'crt_policy_id'];
+  var DOC_FIELDS = ['kind', 'crt_account_id', 'contact_id', 'file_url'];
   function show(v) { return v === undefined || v === null ? '(blank)' : typeof v === 'object' ? JSON.stringify(v) : String(v); }
   function confirmBox(coll, rec, fields, defaultDoc) {
     var form = el('form', {'class': 'card'});
@@ -118,16 +119,21 @@ Readings count only after staff confirm them against the stored document. Nothin
       form.appendChild(el('label', {style: 'display:flex;gap:8px;align-items:center;color:inherit'}, [cb, el('span', {}, [el('strong', {text: f.replace(/_/g, ' ') + ': '}), show(rec.data[f])])]));
       return cb;
     });
-    var dsel = el('select', {});
-    docs.forEach(function (d) { dsel.appendChild(el('option', {value: d.id, text: d.data.title || d.data.kind, selected: d.id === defaultDoc ? 'selected' : null})); });
-    form.appendChild(U.field('Checked against this stored document', dsel));
+    var dsel = null;
+    if (defaultDoc !== false) {          // a document checks itself: no source to pick
+      dsel = el('select', {});
+      docs.forEach(function (d) { dsel.appendChild(el('option', {value: d.id, text: d.data.title || d.data.kind, selected: d.id === defaultDoc ? 'selected' : null})); });
+      form.appendChild(U.field('Checked against this stored document', dsel));
+    }
     form.appendChild(el('p', {'class': 'row'}, [el('button', {type: 'submit', text: 'Confirm checked fields'}),
       el('button', {type: 'button', 'class': 'ghost', text: 'Tick all', on: {click: function () { boxes.forEach(function (b) { b.checked = true; }); }}})]));
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var fs = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
       if (!fs.length) { U.say('Tick the fields you checked'); return; }
-      U.api.post('confirm', {record_collection: coll, record_id: rec.id, record_version: rec.version, fields: fs, source_document_id: dsel.value})
+      var body = {record_collection: coll, record_id: rec.id, record_version: rec.version, fields: fs};
+      if (dsel) body.source_document_id = dsel.value;
+      U.api.post('confirm', body)
         .then(function () { U.say('Confirmed ' + fs.length + ' fields (version ' + rec.version + ')', true); load(); }).catch(U.fail);
     });
     return form;
@@ -145,6 +151,13 @@ Readings count only after staff confirm them against the stored document. Nothin
       docs.forEach(function (d) { ds.appendChild(el('option', {value: d.id, text: d.data.title || d.data.kind})); });
       var confirmedAt = {};
       r[3].records.forEach(function (c) { (confirmedAt[c.data.record_id] = confirmedAt[c.data.record_id] || []).push(c.data); });
+      // each stored paper: a person checks its kind, account, sub and file before anything read from it counts
+      docs.forEach(function (d) {
+        var cur = (confirmedAt[d.id] || []).filter(function (c) { return c.record_version === d.version; });
+        box.appendChild(el('h2', {}, ['Document ' + (d.data.title || '') + ' (' + (d.data.kind || 'no kind') + ') ',
+          cur.length ? U.chip('meets', 'checked') : d.updated_by.indexOf('agent:') === 0 ? U.chip('cant_tell', 'filed by the agent: check it') : null]));
+        box.appendChild(confirmBox('document', d, DOC_FIELDS, false));
+      });
       var pols = r[1].records, pids = pols.map(function (p) { return p.id; });
       if (!pols.length) box.appendChild(el('p', {'class': 'muted', text: 'No readings yet.'}));
       pols.forEach(function (p) {
