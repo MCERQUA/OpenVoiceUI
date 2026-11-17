@@ -208,7 +208,8 @@ def test_R10_X1_WATCH_two_weak_glyphs_outside_the_map_reach_meets_as_a_manuscrip
     v = None
     if ev['state'] in ('meets', 'meets_accepted'):
         v, _rv = _review_and_watch(h, dirs, w, f'X1[{label}]')
-    assert ev['state'] == 'meets' and v == 'PASS', (ev['state'], v)
+    # WATCH flipped by the host ruling (rules 1.10.0, X1: the weak glyphs join the map): never a manuscript, never Meets
+    assert ev['state'] in ('cant_tell', 'missing') and v is None, (ev['state'], v)
 
 
 # ───── R10-FP: false positives of the widened map (fail-closed; scope the host has to rule on) ─────
@@ -227,8 +228,9 @@ def test_R10_FP1_WATCH_a_carrier_cg_letter_series_number_is_a_dead_end(h, label)
     _x, r = _revise_ongoing(h, w, forms=['CG 20 10', form, 'CG 20 33', 'CG 20 38'])
     print('FP1', label, repr(form), 'endorsement', ev['state'], codes(ev), '| set revise', r.status_code,
           (r.get_json() or {}).get('code'))
-    assert ev['state'] == 'cant_tell' and 'UNCONFIRMED:crt_endorsement.form' in codes(ev), ev
-    assert r.status_code == 422 and (r.get_json() or {}).get('code') == 'form_lookalike', r.get_json()
+    # WATCH flipped by the host ruling (rules 1.10.0, FP1 narrow): the carrier number reads as it did before 1.9.1
+    assert ev['state'] == 'meets', ev
+    assert r.status_code == 201, r.get_json()
 
 
 # ───── pure readings: honest footers, the strong-glyph space, the two copies ─────
@@ -325,5 +327,6 @@ def test_R10_R0_WATCH_the_two_form_readers_disagree_on_a_month_word_edition():
     s = 'CG 20 37 Nov 1985'
     got = (rt.edition_parts(s), rt.form_parts(s), wt._edition_read(s), wt._form_parts(s))
     print('R0', got)
-    assert rt.edition_parts(s) == ('CG2037', (11, 1985)) and rt.form_parts(s) == ('CG2037NOV1985', None)
-    assert wt._form_parts(s) == ('CG2037NOV1985', None)
+    # WATCH flipped by the host ruling (rules 1.10.0, M fixed): the two readers agree, in both copies
+    assert rt.edition_parts(s) == ('CG2037', (11, 1985)) and rt.form_parts(s) == ('CG2037', (11, 1985))
+    assert wt._form_parts(s) == ('CG2037', (11, 1985))
