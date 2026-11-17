@@ -824,6 +824,99 @@ MUTANTS += [
 ]
 
 
+# ── rules 1.7.0 (gate-4 re-check #7): A required, B lapse binding, C form numbers, D dev pages ──
+T_C7 = 'tests/test_biz_crt_claimcheck7.py::'
+T_P7 = 'tests/test_claimcheck7_probes.py::'
+T_MX = 'tests/test_biz_crt_matrix.py::'
+MUTANTS += [
+    ('a-required-truthy', [(RT, "        required = required_applied(it)          # rules 1.7.0 (A): only false is \"not required\"",
+                            "        required = it.get('required', True)")],
+     [T_C7 + 'test_a_a_stored_non_boolean_required_reads_cant_tell_never_meets']),
+    ('a-revise-keeps-non-bool', [(RT, "            d['items'], req_warnings = canonical_required(body['items'])",
+                                  "            d['items'], req_warnings = body['items'], []")],
+     [T_C7 + 'test_a_a_non_boolean_required_is_stored_as_required_and_said', T_P7 + 'test_R7_A1_HOLE_required_falsy_never_drops_a_required_item']),
+    ('a-create-keeps-non-bool', [(RT, "            data['items'] = canonical_required(data.get('items'))[0]\n", "            pass\n")],
+     [T_C7 + 'test_a_a_generic_create_stores_a_non_boolean_required_as_true']),
+    ('a-validate-allows-non-bool', [(RT, "        if 'required' in it and not isinstance(it['required'], bool):\n            # rules 1.7.0 (A): only true / false",
+                                     "        if False:\n            # rules 1.7.0 (A): only true / false")],
+     [T_C7 + 'test_a_a_staff_edit_with_a_non_boolean_required_is_refused']),
+    ('a-floor-ignores-required', [(RT, "        if isinstance(it, dict) and 'required' in it and not isinstance(it.get('required'), bool):",
+                                   "        if False:")],
+     [T_C7 + 'test_a_a_stored_non_boolean_required_reads_cant_tell_never_meets']),
+    ('a-diff-no-required-applied', [(RT, "    v['required_applied'] = required_applied(it) if it.get('kind') == 'endorsement' else True\n", "")],
+     [T_C7 + 'test_a_the_diff_shows_what_the_verdict_applies_for_required']),
+    ('a-page-null-is-a-dash', [(RQ, "      if (key !== 'required') return val(v);", "      return val(v);")],
+     [T_C7 + 'test_a_the_page_renders_a_null_required_as_required_never_a_dash']),
+    ('watch-a-required-any', [(WA, "            if 'required' in it and not isinstance(it['required'], bool):      # RA (rules 1.7.0)",
+                               "            if False:      # RA (rules 1.7.0)")],
+     [T_C7 + 'test_watch_a_a_stored_non_boolean_required_meets_is_not_backed']),
+    ('b-lapse-paperless', [(RT, "                occur(code, fn, pol['data'].get('source_document_id'))\n                cells[iid] = code",
+                            "                occur(code, fn, None)\n                cells[iid] = code")],
+     [T_C7 + 'test_b_a_lapse_waiver_binds_to_the_terms_certificate', T_P7 + 'test_R7_B1_HOLE_completed_ops_lapsed_is_raised_again_on_a_renewal']),
+    ('b-paperless-binding-covers', [(RT, "(code not in EVENT_BOUND_CODES and (o[1] is None or o[2] is None))", "False")],
+     [T_C7 + 'test_b_a_waiver_bound_to_no_paper_covers_nothing']),
+    ('watch-b-lapse-unbound', [(WA, "_waived(st, asg, 'COMPLETED_OPS_LAPSED', on, acct, fn, p['data'].get('source_document_id'))",
+                                "any(x['data'].get('variance_code') == 'COMPLETED_OPS_LAPSED' for x in st.all('crt_waiver'))")],
+     [T_C7 + 'test_watch_b_already_held_a_lapse_waiver_bound_to_no_paper_never_backs_the_meets']),
+    ('watch-b-no-rb', [(WA, "            if not good and fn == 'ai_completed' and sc and on and on > sc and isinstance(repose, int) and \\",
+                        "            if False and \\")],
+     [T_C7 + 'test_watch_b_positive_control_the_honest_lapse_waiver_passes']),
+    ('c-form-key-whole', [(RT, "    m = _ISO_STYLE_RE.match(k)\n", "    m = None\n")],
+     [T_C7 + 'test_c_never_completed_ops_however_written', T_P7 + 'test_R7_C1_HOLE_iso_number_with_edition_never_counts_for_completed_ops']),
+    ('c-no-iso-in', [(RT, "    return {n for n in _ISO_IN_RE.findall(_squash(s)) if n in ISO_FLOOR",
+                      "    return {n for n in [] if n in ISO_FLOOR")],
+     [T_C7 + 'test_c_never_completed_ops_however_written']),
+    ('c-edition-clash-ignored', [(RT, "                elif form_ed is not None and form_ed != _edition_key(e['data'].get('edition')):",
+                                  "                elif False:")],
+     [T_C7 + 'test_c_a_number_printed_with_another_edition_reads_cant_tell']),
+    ('c-table-whole-key', [(RT, "        clash = iso_floor_clash(k, v)\n        if clash == 'never completed operations':\n            raise",
+                            "        clash = None\n        if clash == 'never completed operations':\n            raise")],
+     [T_C7 + 'test_c_the_sets_table_reads_the_number_however_written']),
+    ('c-diff-no-forms-read-as', [(RT, "        v['forms_read_as'] = [form_key(f) for f in it['forms']]", "        pass")],
+     [T_C7 + 'test_c_the_diff_shows_each_form_as_the_verdict_reads_it']),
+    ('watch-c-form-whole', [(WA, "    body = k[3:] if k.startswith('ISO') and len(k) > 3 else k\n", "    return k, None\n")],
+     [T_C7 + 'test_watch_c_an_iso_number_with_its_edition_as_manuscript_meets_is_not_backed', T_C7 + 'test_c_one_reading_in_engine_and_watcher']),
+    ('watch-c-no-iso-in', [(WA, "        if n.startswith('CG') and n[2:].isdigit() and", "        if False and")],
+     [T_C7 + 'test_c_one_reading_in_engine_and_watcher']),
+    ('watch-c-edition-clash', [(WA, "                if form_my is not None and form_my != _edition_my(ed.get('edition')):", "                if False:")],
+     [T_C7 + 'test_watch_c_already_held_a_number_printed_with_another_edition_is_not_backed']),
+    ('d-put-follows-link', [(RB, "        if st is not None and not _stat.S_ISREG(st.st_mode):", "        if False:"),
+                            (RB, "            old = Anchored(root, rel).read_bytes()", "            old = (_pages_dir(g.biz_sandbox) / file_name).read_bytes()")],
+     [T_C7 + 'test_d_publishing_over_a_planted_link_is_refused_and_copies_nothing',
+      T_P7 + 'test_R7_D1_HOLE_dev_page_publish_copies_the_staff_surface_key_into_the_agents_canvas_folder']),
+    ('d-get-follows-link', [(RB, "    path = Anchored(_canvas_dir(), _page_rel(g.biz_sandbox, file_name))     # no-follow (PR #597 class, D1)",
+                             "    path = _pages_dir(g.biz_sandbox) / file_name")],
+     [T_C7 + 'test_d_reading_a_planted_link_returns_nothing']),
+    ('matrix-fs-mark-blind-to-safe-open', [('tests/test_biz_crt_matrix.py', "r'\\bAnchored\\(|\\b(open|read|write|atomic_write|append|open_dir|lstat|scandir|chmod|rename|send_file)'\n                      r'_beneath\\(|\\.(atomic_write_text|atomic_write_bytes|append_text|append_bytes)\\(')",
+                                            "r'NEVERMATCH')")],
+     [T_MX + 'test_every_route_of_the_full_app_is_classified_by_side_effect']),
+]
+
+# rules 1.7.0 (re-check #7): anchors the 1.7.0 engine / watcher rewrote (C: one reading of a form number), rebased onto
+# the new lines (same intent)
+_REBASE_1_7_0 = {
+    'r3-cg2010-set-allowed': [(RT, "            if it.get('function') == 'ai_completed' and any(form_key(f) in NEVER_COMPLETED_OPS or\n",
+                               "            if False and any(form_key(f) in NEVER_COMPLETED_OPS or\n")],
+    'r3-cg2010-map-allowed': [(RT, "        if v == 'ai_completed' and (form_key(k) in NEVER_COMPLETED_OPS or iso_numbers_in(k) & set(NEVER_COMPLETED_OPS)):",
+                               "        if False:")],
+    'watch-r3-cg2010': [(WA, "                if fn == 'ai_completed' and _never_completed(ed.get('form')):     # RG\n"
+                             "                    continue", '                if False:\n                    continue'),
+                        (WA, "                if ed.get('manuscript') is not True or fkey in table or iso:",
+                         "                if ed.get('manuscript') is not True:")],
+    'f5-table-floor-off': [(RT, "        if clash:\n            raise _err(422, 'iso_form_floor'", "        if False:\n            raise _err(422, 'iso_form_floor'")],
+    'f5-not-completed-list-off': [(RT, "        if clash == 'never completed operations':\n            raise",
+                                   "        if False:\n            raise")],
+    'g-iso-read-as-manuscript': [(RT, '                iso = is_iso_form(e_form)', '                iso = False')],
+    'g-cg2026-completed-ops': [(RT, "                if fn == 'ai_completed' and never_completed_ops(e_form):",
+                                "                if fn == 'ai_completed' and fk in NEVER_COMPLETED_OPS:")],
+    'watch-g-iso-manuscript': [(WA, "                if fn == 'ai_completed' and _never_completed(ed.get('form')):     # RG",
+                                "                if fn == 'ai_completed' and fkey == _NEVER_COMPLETED:"),
+                               (WA, "                iso = fkey in _ISO_FLOOR or fkey in _NOT_COMPLETED or bool(_ISO_AI.match(fkey or '')) or \\\n"
+                                    "                    bool(_iso_in(ed.get('form')))", '                iso = False')],
+}
+MUTANTS = [(n, _REBASE_1_7_0.get(n, e), t) for n, e, t in MUTANTS]
+
+
 def _copy(name):
     dest = os.path.join(SCRATCH, name)
     if os.path.exists(dest):

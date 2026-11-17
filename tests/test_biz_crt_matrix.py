@@ -717,14 +717,22 @@ _EXEC_MARK = re.compile(r'\bpty\.|\bsubprocess\.|\bos\.system\(|\bos\.exec\w*\(|
                         r'\bos\.fork\(|create_subprocess_\w+\(')
 _FS_MARK = re.compile(r'\bopen\(|send_file\(|send_from_directory\(|\bshutil\.|'
                       r'\bos\.(remove|unlink|rename|replace|makedirs|mkdir|chmod|listdir|scandir|walk|rmdir)\(|'
-                      r'\.(write_text|write_bytes|read_text|read_bytes|unlink|mkdir|rename|iterdir|glob|rglob|rmdir)\(')
+                      r'\.(write_text|write_bytes|read_text|read_bytes|unlink|mkdir|rename|iterdir|glob|rglob|rmdir)\(|'
+                      # rules 1.7.0: PR #597's no-follow file access (services/safe_open.py, services/events_file.py)
+                      # is file I/O too
+                      r'\bappend_event\(|'
+                      r'\bAnchored\(|\b(open|read|write|atomic_write|append|open_dir|lstat|scandir|chmod|rename|send_file)'
+                      r'_beneath\(|\.(atomic_write_text|atomic_write_bytes|append_text|append_bytes)\(')
 _REQ_MARK = re.compile(r'\brequest\.(json|args|form|files|get_json|values|data|view_args|headers)\b|\bws\.receive\(')
 # re-check #6 platform findings (NOT this pack's: a separate platform PR). The classifier must see each one as a
 # route that runs a process or touches a path the caller names (its positive control).
-PLATFORM_FINDINGS = {'terminal_websocket': 'T: /ws/terminal opens a login shell as the app uid (reaches the db dir)',
-                     'airadio.push_song': 'side audit: cover_path reads any absolute path',
-                     'story.generate_scene': 'side audit: story_id is an unconfined path',
-                     'plugins.uninstall': 'side audit: plugin_id reaches shutil.rmtree'}
+# Rules 1.7.0: PR #597 (merged into this branch, 44fd830) closes all four -- the terminal execs the setuid sandbox helper
+# (another uid, fresh env), cover_path / story_id / plugin ids are confined -- and the routes still run a process or
+# touch a path the caller names, so they stay the classifier's positive control.
+PLATFORM_FINDINGS = {'terminal_websocket': 'T (closed by #597): /ws/terminal runs the sandbox helper, not the app uid',
+                     'airadio.push_song': 'side audit (closed by #597): cover_path confined',
+                     'story.generate_scene': 'side audit (closed by #597): story_id confined',
+                     'plugins.uninstall': 'side audit (closed by #597): plugin_id confined before shutil.rmtree'}
 
 
 def _route_source(fn):
@@ -945,6 +953,13 @@ def _visible(d, pinned, now_set):
                 r = rows.get(iid, {}).get(k)
                 if not r or not r.get('changed') or r.get('was') != a.get(k) or r.get('now') != b.get(k):
                     return False
+    # rules 1.7.0 (A): the page's own summary agrees with the verdict: every item's required-applied row says what the
+    # engine reads (only false is suggested), and the page's item list says "Suggested" exactly then
+    for iid, b in now.items():
+        r = rows.get(iid, {}).get('required_applied')
+        want = b.get('required') is not False if b.get('kind') == 'endorsement' else True
+        if not r or r.get('now') is not want:
+            return False
     ff = d.get('form_functions') or {}
     return ff.get('was') == (pinned['data'].get('form_functions') or {}) and \
         ff.get('now') == (now_set['data'].get('form_functions') or {})
@@ -1032,6 +1047,15 @@ SEQS = {
                               'not_meets'),
     'revise-lower-floor-and-min': ('low_gl', _seq_revise(lambda s: _items(s, 'gl_occ', {'min': 200_000,
                                                                                        'floor': 200_000})), 'visible'),
+    # rules 1.7.0 (A): a falsy / non-boolean `required` never drops a required endorsement (only false is suggested)
+    'revise-required-null': ('missing_completed', _seq_revise(lambda s: _items(s, 'ai_completed', {'required': None})),
+                             'not_meets'),
+    'revise-required-zero': ('missing_completed', _seq_revise(lambda s: _items(s, 'ai_completed', {'required': 0})),
+                             'not_meets'),
+    'revise-required-empty': ('missing_completed', _seq_revise(lambda s: _items(s, 'ai_completed', {'required': ''})),
+                              'not_meets'),
+    'revise-required-false': ('missing_completed', _seq_revise(lambda s: _items(s, 'ai_completed', {'required': False})),
+                              'visible'),
     'decoy-create-then-revise': ('missing_completed', _seq_decoy, 'visible'),
     'agent-revise-then-staff-revise': ('missing_completed', _seq_then_staff, 'visible'),
 }

@@ -99,5 +99,22 @@ test('"the version in use" names only an approved set; drafts in between are sai
     assert.ok(tpl.includes('the MEP trades template') && !tpl.includes('version in use'), tpl);
 });
 
+test('required is shown as the verdict reads it: only false is suggested, null is never a bare dash (rules 1.7.0 A)', () => {
+    const item = (now) => ({ id: 'ai_completed', change: 'changed', changed_fields: ['required'],
+        was: { required: true }, now: { required: now },
+        rows: ROWS([['required', true, now], ['required_applied', true, now !== false]]) });
+    const cell = (now) => {
+        const d = { against: { kind: 'set', approved: true, set_version: 1 }, unapproved_between: [], items: [item(now)],
+            form_functions: {}, name: {}, trade_category: {}, notes: {}, floor_violations: [] };
+        return render(d).rows().find((r) => r[0] === 'required');
+    };
+    assert.strictEqual(cell(null)[2], 'required (default)');
+    assert.strictEqual(cell(0)[2], 'required (0 reads as required)');
+    assert.strictEqual(cell('')[2], 'required ( reads as required)');
+    assert.strictEqual(cell(false)[2], 'false (suggested)');
+    assert.strictEqual(cell(true)[1], 'true');
+    assert.ok(![null, 0, ''].some((v) => cell(v)[2] === '-'));
+});
+
 if (failed) { console.log(failed + ' failed'); process.exit(1); }
 console.log('all passed');

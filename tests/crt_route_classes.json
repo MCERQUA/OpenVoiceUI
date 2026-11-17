@@ -294,7 +294,7 @@
  "music.serve_music_file": "fs-caller-path",
  "music.soundcloud_resolve": "no-fs",
  "music.update_track_metadata": "no-fs",
- "music.upload_music": "no-fs",
+ "music.upload_music": "fs-caller-path",
  "onboarding.get_state": "fs-fixed",
  "onboarding.save_state": "fs-caller-path",
  "openclaw_ui_websocket": "no-fs",
