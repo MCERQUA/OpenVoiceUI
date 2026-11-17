@@ -35,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.6.0'
+RULE_VERSION = 'crt-rules-1.7.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -76,6 +76,9 @@ WAIVABLE_PREFIXES = ('NOT_AI', 'LIMIT_LOW', 'WRONG_', 'EXCLUSION', 'PRODUCER_INC
                      'COMPLETED_OPS_LAPSED', 'SCOPE_CHANGED', 'BLANKET_UNBACKED')
 # Host ruling N10: a certificate for a different company is never waivable, same as MISSING.
 NEVER_WAIVABLE = ('WRONG_INSURED',)
+# Rules 1.7.0 (B): every waivable code is raised by a piece of paper (a document and its file hash) and a waiver covers
+# it only on that paper. The one exception is bound to an event instead: SCOPE_CHANGED (its scope_changed_at time).
+EVENT_BOUND_CODES = ('SCOPE_CHANGED',)
 # Assignment fields the verdict reads: they count only when a person wrote the assignment's current
 # version, or a person confirmed them (claim-check H1).
 ASSIGNMENT_FIELDS = ('crt_project_id', 'party_contact_id', 'requirement_set_id', 'requirement_set_version',
@@ -140,6 +143,87 @@ _ISO_AI_RE = re.compile(r'^CG20\d\d$')
 def is_iso_number(fk) -> bool:
     """An ISO number (built-in floor, ISO_NOT_COMPLETED, or any CG 20 xx): never read as a manuscript (ruling G)."""
     return bool(fk) and (fk in ISO_FLOOR or fk in ISO_NOT_COMPLETED or bool(_ISO_AI_RE.match(fk)))
+
+
+# Rules 1.7.0 (C, gate-4 re-check #7): an ISO number is read the same however it is written: with its edition after it
+# (how the form footer prints it: 'CG 20 10 04 13', 'CG 20 10 (04/13)', 'CG 20 10 ed. 04 13') or with an 'ISO' prefix
+# ('ISO CG 20 10'). form_key() is the ONE reading of a form number (endorsement form, item forms, the set's table);
+# iso_numbers_in() finds every ISO additional-insured number written anywhere inside a form field, so a spelling the
+# parser does not know never turns CG 20 10 / 20 26 / 20 11 into completed operations or a manuscript. The watcher
+# (tools/biz/crt-verdict-watch.py) and the approval page (the diff's forms_read_as row) read the same way.
+_ISO_STYLE_RE = re.compile(r'^(?:ISO)?([A-Z]{2}\d{4})(?:ED(?:ITION)?)?(\d{4}|\d{6})?$')
+_ISO_IN_RE = re.compile(r'(?=(CG\d{4}))')
+NEVER_COMPLETED_ANY = frozenset(NEVER_COMPLETED_OPS) | frozenset(ISO_NOT_COMPLETED)
+
+
+def _squash(s) -> str:
+    return re.sub(r'[^A-Z0-9]', '', unicodedata.normalize('NFKC', str(s or '')).upper())
+
+
+def form_parts(s):
+    """(form key, (month, year) of an edition written after the number, or None)."""
+    k = _squash(s)
+    m = _ISO_STYLE_RE.match(k)
+    if m:
+        ed = m.group(2)
+        if ed is None:
+            return m.group(1), None
+        ek = _edition_key(ed)
+        if ek is not None:
+            return m.group(1), ek
+    return k, None
+
+
+def form_key(s) -> str:
+    """A form number as one key (rules 1.7.0, C): 'CG 20 10', 'CG 20 10 04 13', 'ISO CG 20 10' -> 'CG2010'."""
+    return form_parts(s)[0]
+
+
+def iso_numbers_in(s) -> set:
+    """Every ISO additional-insured number (CG 20 xx, or a built-in ISO number) written anywhere in a form field."""
+    return {n for n in _ISO_IN_RE.findall(_squash(s)) if n in ISO_FLOOR or n in ISO_NOT_COMPLETED or _ISO_AI_RE.match(n)}
+
+
+def is_iso_form(s) -> bool:
+    """The form field names an ISO number (however written): never read as a manuscript (rulings G, C)."""
+    return is_iso_number(form_key(s)) or bool(iso_numbers_in(s))
+
+
+def never_completed_ops(s) -> bool:
+    """The form field names CG 20 10 / 20 26 / 20 11 anywhere: never completed operations, by any route (R3, G, C)."""
+    return form_key(s) in NEVER_COMPLETED_ANY or bool(iso_numbers_in(s) & NEVER_COMPLETED_ANY)
+
+
+def iso_floor_clash(s, function):
+    """Why mapping form field s to `function` would loosen the ISO floor (ruling F, read per rules 1.7.0 C), or None."""
+    for n in sorted({form_key(s)} | iso_numbers_in(s)):
+        if n in ISO_FLOOR and ISO_FLOOR[n] != function:
+            return f'ISO {ISO_FLOOR[n]}'
+    if function == 'ai_completed' and never_completed_ops(s):
+        return 'never completed operations'
+    return None
+
+
+# Rules 1.7.0 (A, gate-4 re-check #7): an item's `required` is read ONE way everywhere: only `false` makes it suggested.
+# null, 0, "" or anything else is required (the engine's default for an absent key), never "not required". A new set
+# (draft, revision, generic create) stores it canonical (true / false); a stored non-boolean breaks the floor.
+def required_applied(it) -> bool:
+    return (it or {}).get('required') is not False
+
+
+def canonical_required(items):
+    """(items with every present `required` made true / false, [warnings]) -- non-boolean reads as required."""
+    if not isinstance(items, list):
+        return items, []
+    out, warns = [], []
+    for it in items:
+        if isinstance(it, dict) and 'required' in it and not isinstance(it['required'], bool):
+            warns.append({'item': it.get('id'), 'warning': f"required was {json.dumps(it['required'])[:20]}; read and "
+                                                          'stored as required (true). Only false makes an item '
+                                                          'suggested (rules 1.7.0)'})
+            it = dict(it, required=True)
+        out.append(it)
+    return out, warns
 
 
 # Host ruling M (rules 1.6.0): the keys an item may carry. Anything else (a typo, a renamed key) is refused on write,
@@ -213,10 +297,6 @@ def exclusion_classes(values):
         else:
             unmapped.append(str(v)[:120])
     return classes, unmapped
-
-
-def form_key(s) -> str:
-    return re.sub(r'[^A-Z0-9]', '', unicodedata.normalize('NFKC', str(s or '')).upper())
 
 
 def is_person(by) -> bool:
@@ -340,16 +420,18 @@ def validate_form_functions(ff):
         if not isinstance(k, str) or not form_key(k) or v not in FORM_FUNCTIONS:
             raise _err(422, 'bad_form_functions', 'each form_functions entry is "<form number>": one of '
                        + ', '.join(FORM_FUNCTIONS), form=str(k)[:30])
-        if form_key(k) in NEVER_COMPLETED_OPS and v == 'ai_completed':
+        # rules 1.7.0 (C): the number is read however it is written (edition after it, 'ISO' before it, inside text)
+        if v == 'ai_completed' and (form_key(k) in NEVER_COMPLETED_OPS or iso_numbers_in(k) & set(NEVER_COMPLETED_OPS)):
             raise _err(422, 'cg2010_never_completed_ops', 'CG 20 10 covers ongoing operations only; it never '
                                                           'satisfies completed operations (host ruling R3)')
-        if form_key(k) in ISO_NOT_COMPLETED and v == 'ai_completed':
+        clash = iso_floor_clash(k, v)
+        if clash == 'never completed operations':
             raise _err(422, 'iso_form_floor', f'{k} is an ISO form that never covers completed operations (host '
                                               'ruling F safety floor)', form=str(k)[:30])
-        if form_key(k) in ISO_FLOOR and v != ISO_FLOOR[form_key(k)]:
-            raise _err(422, 'iso_form_floor', f'{k} is an ISO {ISO_FLOOR[form_key(k)]} form; no requirement set can '
+        if clash:
+            raise _err(422, 'iso_form_floor', f'{k} is an {clash} form; no requirement set can '
                                               'map it to another kind of coverage (host ruling F safety floor)',
-                       form=str(k)[:30], iso_function=ISO_FLOOR[form_key(k)])
+                       form=str(k)[:30], iso_function=clash[4:])
 
 
 def set_form_functions(set_data) -> dict:
@@ -371,14 +453,18 @@ def floor_violations(set_data) -> list:
     if isinstance(ff, dict):
         for k, v in ff.items():
             fk = form_key(k)
-            if fk in ISO_FLOOR and v != ISO_FLOOR[fk]:
-                out.append(f'form_functions maps {k} to {v}; it is ISO {ISO_FLOOR[fk]}')
-            if fk in ISO_NOT_COMPLETED and v == 'ai_completed':
+            clash = iso_floor_clash(k, v)               # rules 1.7.0 (C): however the number is written
+            if clash == 'never completed operations':
                 out.append(f'form_functions maps {k} to completed operations; it never is')
+            elif clash:
+                out.append(f'form_functions maps {k} to {v}; it is {clash}')
             table[fk] = v
     elif ff is not None:
         out.append('form_functions is not a table')
     for it in d.get('items') or []:
+        if isinstance(it, dict) and 'required' in it and not isinstance(it.get('required'), bool):
+            # rules 1.7.0 (A): a stored non-boolean `required` (written around the API) reads Can't tell
+            out.append(f"item {it.get('id')}: required is {json.dumps(it.get('required'))[:20]}, not true or false")
         if isinstance(it, dict) and it.get('kind') == 'limit':
             # plan S2 / ruling M (rules 1.6.0): min_* is the floor unless staff RAISE it; never below it, never absent
             mn, fl = it.get('min'), it.get('floor')
@@ -396,8 +482,10 @@ def floor_violations(set_data) -> list:
             continue
         for f in forms:
             fk = form_key(f)
-            if fk in ISO_FLOOR and ISO_FLOOR[fk] != fn:
-                out.append(f"item {it.get('id')} ({fn}) lists {f}, an ISO {ISO_FLOOR[fk]} form")
+            clash = iso_floor_clash(f, fn)              # rules 1.7.0 (C): however the number is written
+            if clash:
+                out.append(f"item {it.get('id')} ({fn}) lists {f}, an {clash} form" if clash.startswith('ISO') else
+                           f"item {it.get('id')} ({fn}) lists {f}, which is {clash}")
             elif fn == 'ai_completed' and fk not in ISO_FLOOR and table.get(fk) != 'ai_completed':
                 out.append(f"item {it.get('id')} (completed operations) lists {f}, which the set's table does not "
                            'list as a completed-operations form')
@@ -437,6 +525,10 @@ def validate_items(items, trade_category=None) -> list:
         if not isinstance(iid, str) or not iid or iid in ids:
             raise _err(422, 'bad_requirement_items', 'each item needs a unique id')
         ids.add(iid)
+        if 'required' in it and not isinstance(it['required'], bool):
+            # rules 1.7.0 (A): only true / false; the draft and revise routes store a non-boolean as true first
+            raise _err(422, 'required_not_boolean', 'required is true or false (false = suggested); anything else '
+                                                    'reads as required (rules 1.7.0)', item=iid)
         unknown = sorted(str(k)[:40] for k in it if k not in ITEM_KEYS)
         if unknown:                     # host ruling M: a key the approval page cannot name never reaches a verdict
             raise _err(422, 'unknown_item_key', 'Requirement items carry only these keys: ' + ', '.join(ITEM_KEYS)
@@ -461,7 +553,9 @@ def validate_items(items, trade_category=None) -> list:
                 raise _err(422, 'forms_required', 'An endorsement item lists the form numbers it accepts, e.g. '
                                                   '["CG 20 37"]; an empty list is never allowed (host ruling F)',
                            item=iid)
-            if it.get('function') == 'ai_completed' and any(form_key(f) in NEVER_COMPLETED_OPS for f in forms or []):
+            if it.get('function') == 'ai_completed' and any(form_key(f) in NEVER_COMPLETED_OPS or
+                                                            iso_numbers_in(f) & set(NEVER_COMPLETED_OPS)
+                                                            for f in forms or []):
                 raise _err(422, 'cg2010_never_completed_ops', 'CG 20 10 covers ongoing operations only; it never '
                                                               'satisfies completed operations (host ruling R3)',
                            item=iid)
@@ -968,7 +1062,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
 
     for it in items:
         iid, kind, line = it.get('id'), it.get('kind'), it.get('line')
-        required = it.get('required', True)
+        required = required_applied(it)          # rules 1.7.0 (A): only false is "not required"
         if kind == 'limit':
             need = limit_need(it)                # ruling M: a missing / null min is the floor, never $0
             if need is None:
@@ -1118,8 +1212,9 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             if not ends:
                 code = 'COMPLETED_OPS_LAPSED' if lapsed_rule else f'MISSING:{fn}'
                 _add(variances if lapsed_rule else missing, code)
-                if lapsed_rule:
-                    occur(code, fn, None)
+                # B (rules 1.7.0): the lapse is raised by THIS term's paper (the policy's certificate), so a waiver of
+                # it covers this term only; a renewal (new certificate) raises it again (ruling W)
+                occur(code, fn, pol['data'].get('source_document_id'))
                 cells[iid] = code
                 continue
             two = is_cca(pol)
@@ -1154,9 +1249,12 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 # always keeps its ISO category.
                 # G (rules 1.6.0): an ISO number (the floor, CG 20 26 / 20 11, any CG 20 xx) is that ISO form whatever
                 # its manuscript flag says; CG 20 26 / 20 11 are never completed operations, like CG 20 10.
-                fk = form_key(e['data'].get('form'))
-                iso = is_iso_number(fk)
-                if fn == 'ai_completed' and (fk in NEVER_COMPLETED_OPS or fk in ISO_NOT_COMPLETED):
+                # C (rules 1.7.0): the number is read however it is written ('CG 20 10 04 13', 'ISO CG 20 10', a
+                # CG 20 xx inside other text): one reading (form_key / iso_numbers_in), as in the watcher
+                e_form = e['data'].get('form')
+                fk, form_ed = form_parts(e_form)
+                iso = is_iso_form(e_form)
+                if fn == 'ai_completed' and never_completed_ops(e_form):
                     ec(f'MISSING:{fn}')
                 elif e['data'].get('manuscript') is not True or fk in form_fn or iso:
                     accepted = {form_key(f) for f in it.get('forms') or []}
@@ -1181,6 +1279,11 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 want_ed = _edition_key(it.get('edition')) if it.get('edition') else None
                 if ed_year is None:                     # MED ruling: an empty or unreadable edition is no pass
                     ec('UNCONFIRMED:crt_endorsement.edition')
+                elif form_ed is not None and form_ed != _edition_key(e['data'].get('edition')):
+                    # C (rules 1.7.0): the form number carries one edition and the edition field another
+                    ec('UNCONFIRMED:crt_endorsement.edition')
+                    notes.append(f"{iid}: the form number {e_form} carries edition {form_ed[0]:02d}/{form_ed[1]} but "
+                                 f"the edition reads {e['data'].get('edition')}; staff check which it is")
                 else:
                     if ed_year < 2004:
                         ec(f'WRONG_FORM:{fn}')
@@ -1296,7 +1399,10 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                      for w in live_waivers[code] for b in (w['data'].get('bound_evidence') or [])
                      if isinstance(b, dict)}
             need = [(o['function'], o['document_id'], o['sha256']) for o in raised.get(code) or []]
-            uncovered = [o for o in need if o not in bound]
+            # B (rules 1.7.0): a place with no paper (no document, no file hash) matches every later term, so a waiver
+            # never covers it; only an event-bound code (the scope change, bound to its timestamp) has no paper
+            uncovered = [o for o in need if o not in bound or
+                         (code not in EVENT_BOUND_CODES and (o[1] is None or o[2] is None))]
             if not need or uncovered:
                 notes.append(f'{code}: the contractor accepted this on other paper; it is raised again here '
                              '(' + ', '.join(f'{fn_} on document {d_ or "-"}' for fn_, d_, _s in uncovered[:3])
@@ -1421,6 +1527,9 @@ def check_write(store, op, collection, data, current, *, by, agent, via_pack):
                 raise _err(409, 'set_field_server_only', 'supersedes, template_key and set_version are set by the '
                                                          'draft and revise routes only (host ruling D)',
                            fields=moved)
+        if op == 'create':
+            # rules 1.7.0 (A): a non-boolean `required` is stored as what it reads as (true), never as "not required"
+            data['items'] = canonical_required(data.get('items'))[0]
         if op == 'edit' and current:
             check_item_identity(current['data'].get('items'), data.get('items'))
         if agent and op in ('edit', 'archive', 'unarchive'):
@@ -1542,6 +1651,12 @@ def _item_view(it):
     v = {k: it.get(k) for k in sorted(it, key=str)}
     if it.get('kind') == 'limit':
         v['minimum_applied'] = limit_need(it)          # a missing / null min reads as the floor (ruling M)
+    # rules 1.7.0 (A): what the verdict applies, beside what is stored: only false is "suggested" (endorsement items;
+    # every other kind is always checked)
+    v['required_applied'] = required_applied(it) if it.get('kind') == 'endorsement' else True
+    if it.get('kind') == 'endorsement' and isinstance(it.get('forms'), list):
+        # rules 1.7.0 (C): each listed form as the verdict reads it ('CG 20 37 04 13' -> 'CG2037')
+        v['forms_read_as'] = [form_key(f) for f in it['forms']]
     return v
 
 
@@ -1702,8 +1817,9 @@ def register_routes(bp, api, ctx):
         store = ctx.store()
         old = store.get('crt_requirement_set', sid)
         d = dict(old['data'])
+        req_warnings = []
         if body.get('items') is not None:
-            d['items'] = body['items']
+            d['items'], req_warnings = canonical_required(body['items'])  # rules 1.7.0 (A): null/0/"" -> required
             check_item_identity(old['data'].get('items'), d['items'])     # ruling M: no key swap under one id
         if body.get('form_functions') is not None:          # R4: equivalences change per set version
             validate_form_functions(body['form_functions'])
@@ -1716,7 +1832,7 @@ def register_routes(bp, api, ctx):
         d.update({'set_version': int(old['data'].get('set_version') or 1) + 1, 'supersedes': sid})
         rec = store.create('crt_requirement_set', d, by=ctx.by(), agent=ctx.is_agent(),
                            source=body.get('source'), via_pack=True, surface=ctx.surface())
-        return jsonify({'record': rec, 'warnings': warnings}), 201
+        return jsonify({'record': rec, 'warnings': req_warnings + warnings}), 201
 
     @route('/confirm', ['POST'], 'confirm')
     def confirm():

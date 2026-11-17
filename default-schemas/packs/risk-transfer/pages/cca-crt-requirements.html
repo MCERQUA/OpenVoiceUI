@@ -132,9 +132,18 @@ Readings count only after staff confirm them against the stored document. Nothin
       if (v.was !== v.now) box.appendChild(el('p', {}, [U.chip('bad', 'Changed'), ' set ' + k.replace(/_/g, ' ') + ': ' + val(v.was) + ' -> ' + val(v.now)]));
     });
     // host ruling M (rules 1.6.0): every key of every item, then and now; a changed key is marked, never a bare chip
+    // rules 1.7.0 (A): `required` is shown as the verdict reads it: only false is "suggested"; null / 0 / "" / missing
+    // read as required, never as a bare "-" (the required applied row says the same, from the server)
+    function shown(key, v, present) {
+      if (key !== 'required') return val(v);
+      if (v === false) return 'false (suggested)';
+      if (v === true) return 'true';
+      if (!present) return '-';
+      return v === undefined || v === null ? 'required (default)' : 'required (' + val(v) + ' reads as required)';
+    }
     d.items.forEach(function (it) {
       var rows = (it.rows || []).map(function (r) {
-        return el('tr', {}, [el('td', {text: r.key.replace(/_/g, ' ')}), el('td', {text: val(r.was)}), el('td', {text: val(r.now)}),
+        return el('tr', {}, [el('td', {text: r.key.replace(/_/g, ' ')}), el('td', {text: shown(r.key, r.was, !!it.was)}), el('td', {text: shown(r.key, r.now, !!it.now)}),
           el('td', {}, r.changed ? U.chip('bad', it.change === 'changed' ? 'changed' : it.change) : U.chip('NA', 'same'))]);
       });
       box.appendChild(el('div', {'class': 'card'}, [el('h3', {}, [it.id + ' ', it.change === 'same' ? U.chip('NA', 'same') : U.chip('bad', it.change)]),

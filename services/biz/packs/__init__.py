@@ -27,7 +27,9 @@ may define:
       via_pack is True only when the pack's own route made the call. Raise SchemaError to
       refuse. It must not write. On 'create' only, it may set server-derived fields of the new
       record in data (a field the schema declares; whatever a caller sent there is overwritten):
-      pack:risk-transfer stamps a waiver's bound_evidence this way (rules 1.6.0, ruling W).
+      pack:risk-transfer stamps a waiver's bound_evidence this way (rules 1.6.0, ruling W). It may also
+      restate a caller's value as what it reads as, never looser: pack:risk-transfer stores a
+      requirement item's non-boolean `required` as true (rules 1.7.0, A).
   register_routes(bp, api, ctx)
       Add routes under <api>/<prefix>/... to the biz blueprint at import time. Every route must
       call ctx.require_pack(name) first (404 when the business has not turned the pack on), and

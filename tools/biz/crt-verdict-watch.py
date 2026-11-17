@@ -67,6 +67,14 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
   RW a waiver counts only for the paper it was bound to: its recorded (function, document id, file hash) must be
      the function and document raising the code now, and that file must still hash to the recorded value
   RK blanket counts only when the endorsement's schedule is empty; a schedule that names anyone is checked
+  (rules 1.7.0, gate-4 re-check #7, checked here with this file's own code)
+  RA an item's `required` is true or false; anything else stored (null, 0, "") is below the floor; only false skips
+  RB a COMPLETED_OPS_LAPSED waiver counts only on the term's paper it was bound to (the in-force policy's certificate,
+     hash-verified) and only while that policy carries no completed-ops endorsement at all; a waiver bound to no
+     paper never counts (RW)
+  RC7 a form number is read however it is written ('CG 20 10 04 13', 'ISO CG 20 10', CG 20 xx inside other text):
+     CG 20 10 / 20 26 / 20 11 anywhere in it is never completed operations and never a manuscript; the set's table and
+     form lists are read the same way; a number printed with another edition than the edition field is not backed
   R6 each assignment field the verdict reads (project, sub, set, set version, trade, scope change) was
      last written by a person or person-confirmed (per field, read from the activity log: a staff
      hold or note never vouches for a field the agent wrote), names the set the verdict used, and
@@ -173,8 +181,56 @@ def _excl(values):
     return cls, bad
 
 
-def _form(s):
+def _squash(s):
     return ''.join(ch for ch in unicodedata.normalize('NFKC', str(s or '')).upper() if ch.isalnum())
+
+
+def _form_parts(s):
+    """RC7 (rules 1.7.0, own code): (form key, (month, year) of an edition printed after the number or None). Two
+    letters + four digits, optionally after 'ISO' and before an edition ('CG 20 10 04 13', 'ISO CG 20 10'), is that
+    number; anything else is its letters and digits."""
+    k = _squash(s)
+    body = k[3:] if k.startswith('ISO') and len(k) > 3 else k
+    if len(body) >= 6 and body[:2].isalpha() and body[2:6].isdigit():
+        rest = body[6:]
+        rest = rest[7:] if rest.startswith('EDITION') else rest[2:] if rest.startswith('ED') else rest
+        if not rest:
+            return body[:6], None
+        if rest.isdigit() and len(rest) in (4, 6):
+            my = _edition_my(rest)
+            if my:
+                return body[:6], my
+    return k, None
+
+
+def _form(s):
+    return _form_parts(s)[0]
+
+
+def _iso_in(s):
+    """RC7: every ISO additional-insured number (CG 20 xx or a built-in ISO number) written anywhere in a form field."""
+    k, out = _squash(s), set()
+    for i in range(len(k) - 5):
+        n = k[i:i + 6]
+        if n.startswith('CG') and n[2:].isdigit() and (n in _ISO_FLOOR or n in _NOT_COMPLETED or _ISO_AI.match(n)):
+            out.add(n)
+    return out
+
+
+def _never_completed(s):
+    """RG/RC7: CG 20 10 / 20 26 / 20 11 named anywhere in the form field: never completed operations."""
+    bad = {_NEVER_COMPLETED} | _NOT_COMPLETED
+    return _form(s) in bad or bool(_iso_in(s) & bad)
+
+
+def _clash(s, fn):
+    """RF read per RC7: why mapping form field s to fn loosens the ISO floor, or None."""
+    for n in {_form(s)} | _iso_in(s):
+        if n in _ISO_FLOOR and _ISO_FLOOR[n] != fn:
+            return f'ISO {_ISO_FLOOR[n]}'
+    if fn == 'ai_completed' and _never_completed(s):
+        return 'never completed operations'
+    return None
 
 
 def _edition(s):
@@ -410,8 +466,7 @@ def _floor(sd):
     table = {}
     if isinstance(ff, dict):
         for k, v in ff.items():
-            if (_form(k) in _ISO_FLOOR and v != _ISO_FLOOR[_form(k)]) or \
-                    (_form(k) in _NOT_COMPLETED and v == 'ai_completed'):
+            if _clash(k, v):                                       # RC7: however the number is written
                 out.append(f'table maps {k} to {v}')
             table[_form(k)] = v
     for it in sd.get('items') or []:
@@ -419,6 +474,8 @@ def _floor(sd):
             extra = sorted(str(k) for k in it if k not in _ITEM_KEYS)
             if extra:
                 out.append(f"item {it.get('id')} carries keys the approval page does not name: {', '.join(extra[:5])}")
+            if 'required' in it and not isinstance(it['required'], bool):      # RA (rules 1.7.0)
+                out.append(f"item {it.get('id')} required is neither true nor false")
         if isinstance(it, dict) and it.get('kind') == 'limit':
             need, fl = _need(it), it.get('floor')
             if need is None:
@@ -429,12 +486,13 @@ def _floor(sd):
         if not isinstance(it, dict) or it.get('kind') != 'endorsement':
             continue
         fn = it.get('function')
-        forms = [_form(f) for f in (it.get('forms') or []) if isinstance(f, str) and _form(f)]
-        if not forms:
+        raw = [f for f in (it.get('forms') or []) if isinstance(f, str) and _form(f)]
+        if not raw:
             out.append(f"item {it.get('id')} lists no forms")
-        for f in forms:
-            if f in _ISO_FLOOR and _ISO_FLOOR[f] != fn:
-                out.append(f"item {it.get('id')} ({fn}) lists ISO {_ISO_FLOOR[f]} form {f}")
+        for r in raw:
+            f = _form(r)
+            if _clash(r, fn):                                      # RC7: however the number is written
+                out.append(f"item {it.get('id')} ({fn}) lists {r}: {_clash(r, fn)}")
             elif fn == 'ai_completed' and f not in _ISO_FLOOR and table.get(f) != 'ai_completed':
                 out.append(f"item {it.get('id')} (completed ops) lists {f}, not a completed-ops form in the table")
     return out
@@ -512,7 +570,7 @@ def _waived(st, asg, code, on, acct, fn=None, did=None):
             continue
         if fn is not None:
             sha = st.doc_sha(did) if did else None
-            if did and not st.file_ok(sha):
+            if not did or not sha or not st.file_ok(sha):      # RW/RB (rules 1.7.0): no paper, no waiver
                 continue
             if not any(isinstance(b, dict) and b.get('function') == fn and b.get('document_id') == did and
                        b.get('sha256') == sha for b in (wd.get('bound_evidence') or [])):
@@ -795,12 +853,13 @@ def _judge(st, claim):
                 # the form number: one the item lists, a manuscript excepted. R3 (rules 1.4.0): CG 20 10 is never
                 # completed operations by any route; a listed ISO number is never read as manuscript; a manuscript
                 # counts for completed ops only with its completed-operations wording person-confirmed.
-                fkey = _form(ed.get('form'))
-                if fn == 'ai_completed' and (fkey == _NEVER_COMPLETED or fkey in _NOT_COMPLETED):     # RG
+                fkey, form_my = _form_parts(ed.get('form'))      # RC7: however the number is written
+                if fn == 'ai_completed' and _never_completed(ed.get('form')):     # RG
                     continue
                 table = {_form(k): v for k, v in set_ff.items()} if set_ff else {}
                 table.update(_ISO_FLOOR)                       # ruling F: an ISO number keeps its ISO category
-                iso = fkey in _ISO_FLOOR or fkey in _NOT_COMPLETED or bool(_ISO_AI.match(fkey or ''))
+                iso = fkey in _ISO_FLOOR or fkey in _NOT_COMPLETED or bool(_ISO_AI.match(fkey or '')) or \
+                    bool(_iso_in(ed.get('form')))
                 if ed.get('manuscript') is not True or fkey in table or iso:        # RG: an ISO number is no manuscript
                     listed = {_form(f) for f in it.get('forms') or []}        # ruling F: the item's own list only
                     if fkey not in listed:
@@ -813,6 +872,8 @@ def _judge(st, claim):
                 edoc = ed.get('document_id')
                 if year is None or (year < 2004 and not _waived(st, asg, f'WRONG_FORM:{fn}', on, acct, fn, edoc)):
                     continue
+                if form_my is not None and form_my != _edition_my(ed.get('edition')):
+                    continue                                   # RC7: the number's own edition disagrees with the field
                 # the set's edition for the item is a requirement (rules 1.4.0 LOW): same month and year
                 if it.get('edition') and _edition_my(it.get('edition')) != _edition_my(ed.get('edition')) and \
                         not _waived(st, asg, f'WRONG_EDITION:{fn}', on, acct, fn, edoc):
@@ -836,6 +897,17 @@ def _judge(st, claim):
                         name_codes.append('WRONG_PROJECT')
                 if all(_waived(st, asg, c, on, acct, fn, edoc) for c in name_codes):
                     good = True
+            if not good and fn == 'ai_completed' and sc and on and on > sc and isinstance(repose, int) and \
+                    not isinstance(repose, bool):
+                # RB (rules 1.7.0): after substantial completion, a lapsed completed-ops endorsement the contractor
+                # accepted in writing counts only for the term (certificate) it was accepted on, and only while that
+                # policy carries no completed-ops endorsement at all (otherwise its own checks decide)
+                for p in in_force(line or 'gl')[0]:
+                    if not any(e['data'].get('function') == fn and e['data'].get('crt_policy_id') == p['id']
+                               for e in st.all('crt_endorsement')) and \
+                            _waived(st, asg, 'COMPLETED_OPS_LAPSED', on, acct, fn, p['data'].get('source_document_id')):
+                        good = True
+                        break
             if not good:
                 (cannot if changed else why).append(
                     f'R4 no person-confirmed {fn} endorsement document naming this account and project '
