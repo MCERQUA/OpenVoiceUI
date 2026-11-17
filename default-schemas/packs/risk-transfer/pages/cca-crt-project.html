@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project Matrix</title>
+<style>
+:root{--brand:#3b82f6;--brand-ink:#fff;--bg:#f6f8fb;--surface:#fff;--border:#dde3ea;--text:#16202c;--muted:#5b6876;
+--ok:#15803d;--ok-bg:#dcfce7;--warn:#a16207;--warn-bg:#fef9c3;--bad:#b91c1c;--bad-bg:#fee2e2;--info:#1d4ed8;--info-bg:#dbeafe;--grey-bg:#eef1f4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:1.35rem;margin:4px 0 2px} h2{font-size:1.05rem;margin:22px 0 8px}
+.sub{color:var(--muted);margin:0 0 14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin:0 0 12px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{display:inline-block;border-radius:999px;padding:3px 10px;font-size:.8rem;font-weight:600;white-space:nowrap}
+.s-meets,.s-OK{background:var(--ok-bg);color:var(--ok)} .s-expiring_30,.s-expiring_15,.s-SUGGESTED{background:var(--warn-bg);color:var(--warn)}
+.s-variance,.s-missing,.s-expired,.s-bad{background:var(--bad-bg);color:var(--bad)} .s-cant_tell,.s-UNCONFIRMED{background:var(--info-bg);color:var(--info)}
+.s-NA,.s-muted{background:var(--grey-bg);color:var(--muted)}
+button,.btn{min-height:44px;border-radius:8px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);
+padding:0 14px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+button.ghost,.btn.ghost{background:transparent;color:var(--brand)} button:disabled{opacity:.5;cursor:default}
+input,select,textarea{min-height:44px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;width:100%;background:#fff;color:var(--text)}
+label{display:block;font-size:.85rem;color:var(--muted);margin:8px 0 4px}
+table{width:100%;border-collapse:collapse;background:var(--surface)} th,td{text-align:left;padding:8px;border-bottom:1px solid var(--border);vertical-align:top;font-size:.9rem}
+th{color:var(--muted);font-weight:600} .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+.banner{border-radius:8px;padding:10px 12px;margin:0 0 12px;display:none} .banner.err{display:block;background:var(--bad-bg);color:var(--bad)}
+.banner.ok{display:block;background:var(--ok-bg);color:var(--ok)}
+.disclaimer{color:var(--muted);font-size:.82rem;margin-top:24px;border-top:1px solid var(--border);padding-top:10px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:.9rem} .kv dt{color:var(--muted)} .kv dd{margin:0}
+.muted{color:var(--muted)} .big{font-size:1.6rem;font-weight:700} a{color:var(--brand)}
+@media (max-width:600px){.hide-sm{display:none} main{padding:12px}}
+</style>
+</head>
+<body>
+<main>
+<div id="banner" class="banner" role="status"></div>
+
+<p id="back"></p>
+<h1 id="title">Project</h1>
+<p class="sub" id="summary"></p>
+<div class="scroll"><table><thead id="mh"></thead><tbody id="mb"><tr><td class="muted">Loading...</td></tr></tbody></table></div>
+<p class="muted">Hold suggested is advice only. Only staff set or clear a hold; nothing is held, sent or paid automatically.</p>
+<h2>Put a sub on this project</h2>
+<form id="adda" class="card"><div class="grid">
+<div><label for="as">Sub (linked to this account)</label><select id="as" required></select></div>
+<div><label for="ar">Approved requirement set</label><select id="ar" required></select></div>
+<div><label for="at">Trade</label><input id="at" placeholder="e.g. electrical, roofing, excavation"></div>
+<div><label for="ac">Subcontract signed</label><input id="ac" type="date"></div>
+</div><p><button type="submit">Add to project</button></p></form>
+<p class="disclaimer">Evidence check against the requirement set you approved. Not a coverage opinion or legal advice.
+Readings count only after staff confirm them against the stored document. Nothing on this page sends, holds or pays anything by itself.</p>
+</main>
+<script src="/jb/v1/jb.js"></script>
+<script>
+(function () {
+  'use strict';
+  var Q = new URLSearchParams(location.search);
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'text') n.textContent = attrs[k];
+      else if (k === 'on') Object.keys(attrs.on).forEach(function (e) { n.addEventListener(e, attrs.on[e]); });
+      else if (attrs[k] !== null && attrs[k] !== undefined && attrs[k] !== false) n.setAttribute(k, attrs[k]);
+    });
+    [].concat(kids || []).forEach(function (c) { if (c !== null && c !== undefined) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return n;
+  }
+  var LABEL = {meets: 'Meets requirements (documents reviewed)', expiring_30: 'Meets, expiring within 30 days',
+    expiring_15: 'Meets, expiring within 15 days', cant_tell: "Can't tell (needs staff check)", missing: 'Missing documents',
+    variance: 'Variance', expired: 'Expired'};
+  function chip(state, text) {
+    var cls = state === 'N/A' ? 'NA' : String(state || 'muted').split(':')[0];
+    if (/^(NOT_AI|LIMIT_LOW|WRONG|EXCLUSION|PRODUCER|PL_NO|COMPLETED|SCOPE|BLANKET|MISSING|EXPIRED)/.test(cls)) cls = 'bad';
+    return el('span', {'class': 'chip s-' + cls, text: text || LABEL[state] || state});
+  }
+  function money(n) { return typeof n === 'number' ? '$' + n.toLocaleString('en-US') : '-'; }
+  function say(msg, ok) { var b = document.getElementById('banner'); b.textContent = msg; b.className = 'banner ' + (ok ? 'ok' : 'err'); }
+  function fail(e) { say((e && (e.message || e.code)) || 'Something went wrong'); if (window.console) console.error(e); }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
+  function name(c) { var d = (c && c.data) || {}; return d.company_name || d.name || '(no name)'; }
+  function link(file, params, text) {
+    var base = jb.sandbox ? '/pages/sandbox/' + jb.sandbox + '/' : '/pages/';
+    return el('a', {href: base + file + '?' + new URLSearchParams(params).toString(), text: text});
+  }
+  function field(lbl, input) { return el('div', {}, [el('label', {text: lbl}), input]); }
+  var api = jb.pack('crt');
+  var U = {el: el, chip: chip, money: money, say: say, fail: fail, clear: clear, name: name, link: link, field: field, Q: Q, api: api, LABEL: LABEL};
+  try { if (jb.brand) jb.brand().then(function (b) { if (b && b.colors && b.colors.primary) document.documentElement.style.setProperty('--brand', b.colors.primary); }).catch(function () {}); } catch (e) {}
+  (function (U) {
+  var el = U.el, pid = U.Q.get('project'), project = null;
+  if (!pid) { U.say('Open this page from a contractor account (no project chosen).'); return; }
+  function act(label, fn, ghost) { return el('button', {'class': ghost ? 'ghost' : null, type: 'button', text: label, on: {click: fn}}); }
+  function load() {
+    return U.api.get('project/' + pid + '/matrix').then(function (m) {
+      project = m.project;
+      document.getElementById('title').textContent = project.data.name;
+      U.clear(document.getElementById('back')).appendChild(U.link('cca-crt-account.html', {account: project.data.crt_account_id}, 'Back to the account'));
+      document.getElementById('summary').textContent = [project.data.gc_name ? 'GC: ' + project.data.gc_name : null,
+        project.data.owner_name ? 'Owner: ' + project.data.owner_name : null, 'As of ' + m.as_of].filter(Boolean).join('. ');
+      var items = [];
+      m.rows.forEach(function (r) { Object.keys(r.items).forEach(function (k) { if (items.indexOf(k) < 0) items.push(k); }); });
+      U.clear(document.getElementById('mh')).appendChild(el('tr', {}, [el('th', {text: 'Sub'}), el('th', {text: 'State'})]
+        .concat(items.map(function (k) { return el('th', {'class': 'hide-sm', text: k.replace(/_/g, ' ')}); }))
+        .concat([el('th', {text: 'Hold'}), el('th', {text: ''})])));
+      var mb = U.clear(document.getElementById('mb'));
+      if (!m.rows.length) mb.appendChild(el('tr', {}, [el('td', {'class': 'muted', text: 'No subs on this project yet.'})]));
+      m.rows.forEach(function (r) {
+        var holdCell = el('td', {}, [r.hold ? U.chip('bad', 'Hold set') : r.hold_suggested ? U.chip('expiring_30', 'Hold suggested') : U.chip('meets', 'No hold')]);
+        var codes = el('div', {'class': 'muted', text: r.codes.join(', ')});
+        mb.appendChild(el('tr', {}, [
+          el('td', {}, [U.link('cca-crt-party.html', {party: r.party_contact_id, account: project.data.crt_account_id}, r.party_name || 'Sub'),
+            el('div', {'class': 'muted', text: r.trade_category || ''})]),
+          el('td', {}, [U.chip(r.state, r.label), codes].concat(r.accepted.map(function (a) { return el('div', {}, [U.chip('expiring_30', 'Accepted by contractor: ' + a.code)]); })))]
+          .concat(items.map(function (k) { return el('td', {'class': 'hide-sm'}, [U.chip(r.items[k] || 'N/A', r.items[k] || '-')]); }))
+          .concat([holdCell, el('td', {}, [
+            act('Record review', function () { U.api.post('assignment/' + r.assignment_id + '/review').then(function () { U.say('Review recorded', true); load(); }).catch(U.fail); }),
+            act(r.hold ? 'Clear hold' : 'Set hold', function () {
+              jb.get('crt_assignment', r.assignment_id).then(function (a) {
+                var patch = r.hold ? {hold: false} : {hold: true, hold_reason: window.prompt('Reason for the hold?') || r.codes.join(', ')};
+                return jb.update('crt_assignment', a.id, patch, a.version);
+              }).then(load).catch(U.fail);
+            }, true)])])));
+      });
+      return Promise.all([jb.list('crt_account_party', {where: {crt_account_id: project.data.crt_account_id}, limit: 500}),
+        jb.list('crt_requirement_set', {limit: 500})]);
+    }).then(function (res) {
+      var ss = U.clear(document.getElementById('as')), rs = U.clear(document.getElementById('ar'));
+      return Promise.all(res[0].records.map(function (ln) { return jb.get('contact', ln.data.party_contact_id); })).then(function (cs) {
+        cs.forEach(function (c) { ss.appendChild(el('option', {value: c.id, text: U.name(c)})); });
+        res[1].records.filter(function (s) { return s.data.status === 'APPROVED'; }).forEach(function (s) {
+          rs.appendChild(el('option', {value: s.id, text: s.data.name + ' (v' + (s.data.set_version || 1) + ')'}));
+        });
+        if (!rs.options.length) rs.appendChild(el('option', {value: '', text: 'No approved sets yet: approve one on the requirements page'}));
+      });
+    }).catch(U.fail);
+  }
+  document.getElementById('adda').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var v = function (id) { return document.getElementById(id).value; };
+    jb.create('crt_assignment', {crt_project_id: pid, party_contact_id: v('as'), requirement_set_id: v('ar'),
+      trade_category: v('at') || undefined, contract_signed_at: v('ac') || undefined})
+      .then(function () { U.say('Sub added to the project', true); return load(); }).catch(U.fail);
+  });
+  load();
+})(U);
+})();
+</script>
+</body>
+</html>

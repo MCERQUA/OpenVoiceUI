@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sub Detail</title>
+<style>
+:root{--brand:#3b82f6;--brand-ink:#fff;--bg:#f6f8fb;--surface:#fff;--border:#dde3ea;--text:#16202c;--muted:#5b6876;
+--ok:#15803d;--ok-bg:#dcfce7;--warn:#a16207;--warn-bg:#fef9c3;--bad:#b91c1c;--bad-bg:#fee2e2;--info:#1d4ed8;--info-bg:#dbeafe;--grey-bg:#eef1f4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:1.35rem;margin:4px 0 2px} h2{font-size:1.05rem;margin:22px 0 8px}
+.sub{color:var(--muted);margin:0 0 14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin:0 0 12px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{display:inline-block;border-radius:999px;padding:3px 10px;font-size:.8rem;font-weight:600;white-space:nowrap}
+.s-meets,.s-OK{background:var(--ok-bg);color:var(--ok)} .s-expiring_30,.s-expiring_15,.s-SUGGESTED{background:var(--warn-bg);color:var(--warn)}
+.s-variance,.s-missing,.s-expired,.s-bad{background:var(--bad-bg);color:var(--bad)} .s-cant_tell,.s-UNCONFIRMED{background:var(--info-bg);color:var(--info)}
+.s-NA,.s-muted{background:var(--grey-bg);color:var(--muted)}
+button,.btn{min-height:44px;border-radius:8px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);
+padding:0 14px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+button.ghost,.btn.ghost{background:transparent;color:var(--brand)} button:disabled{opacity:.5;cursor:default}
+input,select,textarea{min-height:44px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;width:100%;background:#fff;color:var(--text)}
+label{display:block;font-size:.85rem;color:var(--muted);margin:8px 0 4px}
+table{width:100%;border-collapse:collapse;background:var(--surface)} th,td{text-align:left;padding:8px;border-bottom:1px solid var(--border);vertical-align:top;font-size:.9rem}
+th{color:var(--muted);font-weight:600} .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+.banner{border-radius:8px;padding:10px 12px;margin:0 0 12px;display:none} .banner.err{display:block;background:var(--bad-bg);color:var(--bad)}
+.banner.ok{display:block;background:var(--ok-bg);color:var(--ok)}
+.disclaimer{color:var(--muted);font-size:.82rem;margin-top:24px;border-top:1px solid var(--border);padding-top:10px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:.9rem} .kv dt{color:var(--muted)} .kv dd{margin:0}
+.muted{color:var(--muted)} .big{font-size:1.6rem;font-weight:700} a{color:var(--brand)}
+@media (max-width:600px){.hide-sm{display:none} main{padding:12px}}
+</style>
+</head>
+<body>
+<main>
+<div id="banner" class="banner" role="status"></div>
+
+<p id="back"></p>
+<h1 id="title">Sub</h1>
+<p class="sub">Only the certificates and endorsements received for this account are shown.</p>
+<h2>Policies</h2><div class="scroll"><table><thead><tr><th>Line</th><th>Policy</th><th>Dates</th><th class="hide-sm">Limits</th><th class="hide-sm">Named insured</th><th>AI box</th><th>Document</th></tr></thead><tbody id="pols"></tbody></table></div>
+<h2>Endorsements</h2><div class="scroll"><table><thead><tr><th>Function</th><th>Form</th><th class="hide-sm">Scheduled</th><th>Document</th></tr></thead><tbody id="ends"></tbody></table></div>
+<h2>Reviews</h2><div id="reviews"></div>
+<h2>Variances the contractor accepted</h2><div id="waivers"></div>
+<h2>Record a variance the contractor accepted</h2>
+<form id="addw" class="card"><p class="muted">The contractor accepts a variance, in writing; you record it. Attach their written OK.</p><div class="grid">
+<div><label for="wa">On project</label><select id="wa" required></select></div>
+<div><label for="wc">Variance code</label><input id="wc" required placeholder="e.g. WRONG_PARTY"></div>
+<div><label for="wb">Accepted by (contractor person)</label><input id="wb" required></div>
+<div><label for="we">Expires</label><input id="we" type="date" required></div>
+<div><label for="wf">Their written OK (PDF or image)</label><input id="wf" type="file" accept="application/pdf,image/png,image/jpeg" required></div>
+<div><label for="wr">Reason / compensating control</label><input id="wr"></div>
+</div><p><button type="submit">Record</button></p></form>
+<p class="disclaimer">Evidence check against the requirement set you approved. Not a coverage opinion or legal advice.
+Readings count only after staff confirm them against the stored document. Nothing on this page sends, holds or pays anything by itself.</p>
+</main>
+<script src="/jb/v1/jb.js"></script>
+<script>
+(function () {
+  'use strict';
+  var Q = new URLSearchParams(location.search);
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'text') n.textContent = attrs[k];
+      else if (k === 'on') Object.keys(attrs.on).forEach(function (e) { n.addEventListener(e, attrs.on[e]); });
+      else if (attrs[k] !== null && attrs[k] !== undefined && attrs[k] !== false) n.setAttribute(k, attrs[k]);
+    });
+    [].concat(kids || []).forEach(function (c) { if (c !== null && c !== undefined) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return n;
+  }
+  var LABEL = {meets: 'Meets requirements (documents reviewed)', expiring_30: 'Meets, expiring within 30 days',
+    expiring_15: 'Meets, expiring within 15 days', cant_tell: "Can't tell (needs staff check)", missing: 'Missing documents',
+    variance: 'Variance', expired: 'Expired'};
+  function chip(state, text) {
+    var cls = state === 'N/A' ? 'NA' : String(state || 'muted').split(':')[0];
+    if (/^(NOT_AI|LIMIT_LOW|WRONG|EXCLUSION|PRODUCER|PL_NO|COMPLETED|SCOPE|BLANKET|MISSING|EXPIRED)/.test(cls)) cls = 'bad';
+    return el('span', {'class': 'chip s-' + cls, text: text || LABEL[state] || state});
+  }
+  function money(n) { return typeof n === 'number' ? '$' + n.toLocaleString('en-US') : '-'; }
+  function say(msg, ok) { var b = document.getElementById('banner'); b.textContent = msg; b.className = 'banner ' + (ok ? 'ok' : 'err'); }
+  function fail(e) { say((e && (e.message || e.code)) || 'Something went wrong'); if (window.console) console.error(e); }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
+  function name(c) { var d = (c && c.data) || {}; return d.company_name || d.name || '(no name)'; }
+  function link(file, params, text) {
+    var base = jb.sandbox ? '/pages/sandbox/' + jb.sandbox + '/' : '/pages/';
+    return el('a', {href: base + file + '?' + new URLSearchParams(params).toString(), text: text});
+  }
+  function field(lbl, input) { return el('div', {}, [el('label', {text: lbl}), input]); }
+  var api = jb.pack('crt');
+  var U = {el: el, chip: chip, money: money, say: say, fail: fail, clear: clear, name: name, link: link, field: field, Q: Q, api: api, LABEL: LABEL};
+  try { if (jb.brand) jb.brand().then(function (b) { if (b && b.colors && b.colors.primary) document.documentElement.style.setProperty('--brand', b.colors.primary); }).catch(function () {}); } catch (e) {}
+  (function (U) {
+  var el = U.el, pid = U.Q.get('party'), acct = U.Q.get('account');
+  if (!pid || !acct) { U.say('Open this page from an account or project (a sub is always seen through one account).'); return; }
+  U.clear(document.getElementById('back')).appendChild(U.link('cca-crt-account.html', {account: acct}, 'Back to the account'));
+  function docBtn(id, docs) {
+    var d = docs[id]; var fid = d && jb.files.idOf(d.data.file_url);
+    if (!fid) return el('span', {'class': 'muted', text: id ? 'not in the private store' : 'none'});
+    return el('button', {'class': 'ghost', type: 'button', text: 'Open', on: {click: function () {
+      jb.files.open(fid).then(function (u) { window.open(u, '_blank', 'noopener'); }).catch(U.fail); }}});
+  }
+  function load() {
+    return U.api.get('party/' + pid, {account: acct}).then(function (r) {
+      document.getElementById('title').textContent = U.name(r.party);
+      var docs = {}; r.documents.forEach(function (d) { docs[d.id] = d; });
+      var pb = U.clear(document.getElementById('pols'));
+      r.policies.forEach(function (p) {
+        var d = p.data, lim = Object.keys(d.limits || {}).map(function (k) { return k.replace(/_/g, ' ') + ' ' + U.money(d.limits[k]); }).join('; ');
+        pb.appendChild(el('tr', {}, [el('td', {text: (d.line || '').toUpperCase()}), el('td', {text: (d.carrier || '') + ' ' + (d.policy_number || '')}),
+          el('td', {text: (d.effective || '?') + ' to ' + (d.expiration || '?')}), el('td', {'class': 'hide-sm', text: lim}),
+          el('td', {'class': 'hide-sm', text: d.named_insured || ''}), el('td', {text: d.addl_insd === true ? 'Yes' : d.addl_insd === false ? 'No' : '?'}),
+          el('td', {}, [docBtn(d.source_document_id, docs)])]));
+      });
+      if (!r.policies.length) pb.appendChild(el('tr', {}, [el('td', {'class': 'muted', text: 'No certificates received for this account yet.'})]));
+      var eb = U.clear(document.getElementById('ends'));
+      r.endorsements.forEach(function (e) {
+        var d = e.data;
+        eb.appendChild(el('tr', {}, [el('td', {text: (d.function || '').replace(/_/g, ' ')}), el('td', {text: (d.form || '') + ' ' + (d.edition || '')}),
+          el('td', {'class': 'hide-sm', text: d.blanket ? 'Blanket (by written contract)' : (d.scheduled_names || []).join(', ') + ' / ' + (d.scheduled_projects || []).join(', ')}),
+          el('td', {}, [docBtn(d.document_id, docs)])]));
+      });
+      var rb = U.clear(document.getElementById('reviews'));
+      r.reviews.slice().reverse().forEach(function (v) {
+        rb.appendChild(el('div', {'class': 'card'}, [U.chip(v.data.state, v.data.label), ' ',
+          el('span', {'class': 'muted', text: (v.data.reviewed_at || '').slice(0, 10) + ' by ' + (v.data.reviewed_by || '') + '. ' + (v.data.variance_codes || []).join(', ')})]));
+      });
+      if (!r.reviews.length) rb.appendChild(el('p', {'class': 'muted', text: 'Never reviewed.'}));
+      var wb = U.clear(document.getElementById('waivers'));
+      r.waivers.forEach(function (w) {
+        wb.appendChild(el('div', {'class': 'card'}, [el('strong', {text: w.data.variance_code}), ' accepted by ' + w.data.accepted_by_contractor + ', expires ' + w.data.expires]));
+      });
+      if (!r.waivers.length) wb.appendChild(el('p', {'class': 'muted', text: 'None.'}));
+      var sel = U.clear(document.getElementById('wa'));
+      return Promise.all(r.assignments.map(function (a) { return jb.get('crt_project', a.data.crt_project_id).then(function (p) {
+        sel.appendChild(el('option', {value: a.id, text: p.data.name})); }); }));
+    }).catch(U.fail);
+  }
+  document.getElementById('addw').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var v = function (id) { return document.getElementById(id).value.trim(); };
+    var f = document.getElementById('wf').files[0];
+    jb.files.upload(f).then(function (meta) {
+      return jb.create('document', {title: 'Contractor accepted variance ' + v('wc'), file_url: meta.url, kind: 'contractor_waiver_ok',
+        crt_account_id: acct, contact_id: pid});
+    }).then(function (doc) {
+      return jb.create('crt_waiver', {crt_assignment_id: v('wa'), variance_code: v('wc'), accepted_by_contractor: v('wb'),
+        acceptance_document_id: doc.id, expires: v('we'), reason: v('wr') || undefined});
+    }).then(function () { ev.target.reset(); U.say('Recorded', true); return load(); }).catch(U.fail);
+  });
+  load();
+})(U);
+})();
+</script>
+</body>
+</html>

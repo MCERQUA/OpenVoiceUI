@@ -1,0 +1,76 @@
+{
+  "collection": "crt_review",
+  "label": "Review",
+  "label_plural": "Reviews",
+  "title_field": "state",
+  "staff_only": true,
+  "append_only": true,
+  "description": "A frozen verdict: the state, codes, inputs and disclaimer at the moment staff reviewed. Created only by the review route.",
+  "required": [
+    "crt_assignment_id",
+    "state"
+  ],
+  "fields": {
+    "crt_assignment_id": {
+      "type": "ref",
+      "label": "Sub on project",
+      "ref": "crt_assignment"
+    },
+    "state": {
+      "type": "string",
+      "label": "State"
+    },
+    "label": {
+      "type": "string",
+      "label": "Label"
+    },
+    "variance_codes": {
+      "type": "list",
+      "label": "Codes",
+      "items": "string"
+    },
+    "accepted_codes": {
+      "type": "list",
+      "label": "Accepted by contractor",
+      "items": "string"
+    },
+    "rule_version": {
+      "type": "string",
+      "label": "Rule version"
+    },
+    "requirement_set_id": {
+      "type": "ref",
+      "label": "Requirement set",
+      "ref": "crt_requirement_set"
+    },
+    "requirement_set_version": {
+      "type": "integer",
+      "label": "Set version"
+    },
+    "confirmation_ids": {
+      "type": "list",
+      "label": "Confirmations read",
+      "items": "string"
+    },
+    "disclaimer_text": {
+      "type": "text",
+      "label": "Disclaimer"
+    },
+    "hold_suggested": {
+      "type": "boolean",
+      "label": "Hold suggested"
+    },
+    "reviewed_by": {
+      "type": "string",
+      "label": "Reviewed by"
+    },
+    "reviewed_at": {
+      "type": "datetime",
+      "label": "Reviewed at"
+    },
+    "evaluation": {
+      "type": "object",
+      "label": "Full evaluation"
+    }
+  }
+}

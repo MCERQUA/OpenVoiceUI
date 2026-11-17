@@ -1,0 +1,87 @@
+{
+  "pages": [
+    {
+      "file": "cca-crt-book.html",
+      "label": "Risk transfer book",
+      "section": "home",
+      "kind": "dashboard",
+      "icon": "home",
+      "order": 10,
+      "tab": true,
+      "collections": [
+        "crt_project",
+        "crt_assignment"
+      ]
+    },
+    {
+      "file": "cca-crt-account.html",
+      "label": "Contractor account",
+      "section": "customers",
+      "kind": "tool",
+      "icon": "users",
+      "order": 20,
+      "collections": [
+        "crt_account_party"
+      ]
+    },
+    {
+      "file": "cca-crt-party.html",
+      "label": "Sub detail",
+      "section": "customers",
+      "kind": "tool",
+      "icon": "user",
+      "order": 30,
+      "collections": [
+        "crt_policy",
+        "crt_endorsement",
+        "crt_waiver"
+      ]
+    },
+    {
+      "file": "cca-crt-project.html",
+      "label": "Project matrix",
+      "section": "jobs",
+      "kind": "list",
+      "icon": "clipboard",
+      "order": 10,
+      "collections": [
+        "crt_assignment",
+        "crt_review"
+      ]
+    },
+    {
+      "file": "cca-crt-requirements.html",
+      "label": "Requirement sets",
+      "section": "jobs",
+      "kind": "list",
+      "icon": "list",
+      "order": 20,
+      "collections": [
+        "crt_requirement_set"
+      ]
+    },
+    {
+      "file": "cca-crt-renewals.html",
+      "label": "Renewals",
+      "section": "jobs",
+      "kind": "list",
+      "icon": "receipt",
+      "order": 30,
+      "tab": true
+    },
+    {
+      "file": "cca-crt-intake.html",
+      "label": "Certificate intake",
+      "section": "files",
+      "kind": "form",
+      "icon": "folder",
+      "order": 10,
+      "tab": true,
+      "collections": [
+        "document",
+        "crt_confirmation"
+      ]
+    }
+  ],
+  "note": "Register after the pack is on: POST /api/biz/v1/registry/pages with each row."
+}

@@ -1,0 +1,64 @@
+{
+  "name": "risk-transfer",
+  "prefix": "crt",
+  "version": "1.0.0",
+  "label": "Risk transfer tracker",
+  "description": "Certificate and endorsement tracking for a contractor's subs: checks staff-confirmed readings against an approved by-trade requirement set. Evidence check only; not a coverage opinion or legal advice.",
+  "hooks": "risk_transfer",
+  "collections": [
+    "crt_account_party",
+    "crt_requirement_set",
+    "crt_project",
+    "crt_assignment",
+    "crt_policy",
+    "crt_endorsement",
+    "crt_confirmation",
+    "crt_review",
+    "crt_waiver"
+  ],
+  "extends": {
+    "contact": {
+      "enum_add": {
+        "type": [
+          "subcontractor",
+          "producer"
+        ]
+      }
+    },
+    "document": {
+      "fields": {
+        "crt_account_id": {
+          "type": "ref",
+          "label": "Received for account",
+          "ref": "contact"
+        },
+        "crt_sha256": {
+          "type": "string",
+          "label": "File hash"
+        }
+      },
+      "enum_add": {
+        "kind": [
+          "coi_acord25",
+          "endorsement",
+          "contract_excerpt",
+          "contractor_waiver_ok"
+        ]
+      }
+    },
+    "task": {
+      "fields": {
+        "crt_account_id": {
+          "type": "ref",
+          "label": "Account",
+          "ref": "contact"
+        },
+        "crt_assignment_id": {
+          "type": "ref",
+          "label": "Sub on project",
+          "ref": "crt_assignment"
+        }
+      }
+    }
+  }
+}
