@@ -225,6 +225,9 @@ def test_R12_D11_WATCH_a_digit_glyph_spelling_of_a_non_cg20_floor_number_maps_to
     w = world(h, endorsements=_completed(form=form), party_name='D Eleven Inc')
     _x, r = _revise(h, w, 'ai_completed', forms=['CG 20 37', form], form_functions={form: 'ai_completed'})
     print('D11 revise', r.status_code, _code(r))
+    # WATCH flipped by the host ruling (rules 1.10.2, D11): a floor-table look-alike is refused when mapped, like D
+    assert r.status_code == 422, r.get_json()
+    return
     assert r.status_code == 201, r.get_json()
     _d, rec = _approve_as_page(h, r.get_json()['record']['id'])
     assert _repin_if_prompted(h, w, rec)
@@ -376,7 +379,8 @@ def test_R12_M2f_WATCH_a_digit_for_letter_month_or_bare_year_reads_any_edition(h
         d = h.ok(h.get(f'/crt/requirement-sets/{r.get_json()["record"]["id"]}/diff'))
         applied = _item_view(d, 'ai_ongoing').get('edition_applied')
     print('M2f', repr(form), r.status_code, _code(r), applied)
-    assert r.status_code == 201 and applied == 'any edition', (r.status_code, applied)
+    # WATCH flipped by the host ruling (rules 1.10.2, M2f): an unreadable edition never widens to "any edition"
+    assert r.status_code == 422 and _code(r) == 'edition_unreadable', (r.status_code, applied)
 
 
 # ───────────── M5: the Ed. prefix ─────────────
