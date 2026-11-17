@@ -186,14 +186,40 @@ def read_fd(fd: int, max_bytes=None) -> bytes:
     return b''.join(chunks)
 
 
-def write_beneath(root, rel, data: bytes, mode=0o644, create_dirs=False, dir_mode=0o755) -> None:
-    fd = open_beneath(root, rel, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode,
-                      create_dirs=create_dirs, dir_mode=dir_mode)
-    try:
+def _open_for_overwrite(dir_fd: int, name: str, mode: int):
+    """(fd, created) for writing `name` in dir_fd from offset 0, no-follow.
+
+    A file this call CREATES gets exactly `mode` (fchmod, not mode & ~umask). An EXISTING
+    file is truncated and KEEPS its mode, as Path.write_bytes() does: re-moding it would
+    re-lock a 0666 page or JSON the tenant agent edits in place (review 4 of PR #597,
+    R4-B1: a version restore re-moded pages to 0644). A symlink at the name is refused
+    either way (O_EXCL never follows one; the reopen is O_NOFOLLOW)."""
+    for _ in range(8):
         try:
-            os.fchmod(fd, mode)  # exact mode on a file we own; EPERM on another user's file
+            fd = open_in_dir(dir_fd, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+        except FileExistsError:
+            try:
+                return open_in_dir(dir_fd, name, os.O_WRONLY | os.O_TRUNC, mode), False
+            except FileNotFoundError:
+                continue   # removed between the two opens: try to create it again
+        try:
+            os.fchmod(fd, mode)
         except OSError:
             pass
+        return fd, True
+    raise UnsafePath(errno.EAGAIN, f'file keeps appearing and disappearing: {name}')
+
+
+def write_beneath(root, rel, data: bytes, mode=0o644, create_dirs=False, dir_mode=0o755) -> None:
+    """Write root/rel no-follow. `mode` applies to a file this call creates; an existing
+    file keeps its mode (Path.write_bytes semantics)."""
+    parent, name = _parent_and_name(rel)
+    dfd = open_dir_beneath(root, parent, create=create_dirs, dir_mode=dir_mode)
+    try:
+        fd, _ = _open_for_overwrite(dfd, name, mode)
+    finally:
+        os.close(dfd)
+    try:
         view = memoryview(data)
         while view:
             n = os.write(fd, view)
@@ -234,12 +260,8 @@ class BeneathFile:
         self.dir_fd, self.name, self.mode = dir_fd, name, mode
 
     def write_bytes(self, data: bytes) -> int:
-        fd = open_in_dir(self.dir_fd, self.name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, self.mode)
+        fd, _ = _open_for_overwrite(self.dir_fd, self.name, self.mode)   # existing: mode kept
         try:
-            try:
-                os.fchmod(fd, self.mode)
-            except OSError:
-                pass
             view = memoryview(data)
             while view:
                 view = view[os.write(fd, view):]
@@ -267,10 +289,21 @@ def atomic_write_beneath(root, rel, data: bytes, mode=0o644, create_dirs=False, 
 
     The temp name is unpredictable and created O_CREAT|O_EXCL|O_NOFOLLOW, so a
     name the other party pre-planted (as a symlink) can never be written through;
-    the rename replaces whatever sits at the final name without following it."""
+    the rename replaces whatever sits at the final name without following it.
+
+    The new file gets exactly `mode`. mode=None keeps the permission bits (& 0o777) of
+    the regular file it replaces (0o644 if there is none): use it where the code it
+    replaced wrote IN PLACE (Path.write_text keeps the mode), so the swap to an atomic
+    write does not re-lock a file the agent edits (review 4 of PR #597, R4-B1 class)."""
     parent, name = _parent_and_name(rel)
     dfd = open_dir_beneath(root, parent, create=create_dirs, dir_mode=dir_mode)
     try:
+        if mode is None:
+            try:
+                st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+                mode = stat.S_IMODE(st.st_mode) & 0o777 if stat.S_ISREG(st.st_mode) else 0o644
+            except FileNotFoundError:
+                mode = 0o644
         for _ in range(16):
             tmp = f'.{name[:40]}.{os.urandom(8).hex()}.tmp'
             try:

@@ -1866,7 +1866,8 @@ def _conversation_inner():
                                         'analyzed_at': datetime.utcnow().isoformat() + 'Z',
                                         'analysis': {'description': _gtxt, 'keywords': [],
                                                      'text_in_image': ''},
-                                    }, indent=1), create_dirs=True)
+                                    }, indent=1), create_dirs=True,
+                                        mode=None)   # keep an existing sidecar's mode (main wrote in place)
                                 except Exception as _we:
                                     logger.debug('Could not write gemini-sync sidecar: %s', _we)
                         except Exception as _ge:

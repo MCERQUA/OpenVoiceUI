@@ -26,6 +26,8 @@ all no-follow and beneath a root anchored at the mount point) or is justified he
 
 import ast
 import sys
+
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -62,6 +64,11 @@ ALLOWLIST = {
         'opens the uploads MOUNT POINT itself as a directory fd (only on an image without '
         'services/safe_open); every file below it is then opened no-follow relative to that fd. '
         'The mount point\'s own path is not agent-replaceable (same as safe_open.open_root)',
+    # ── review 4 of PR #597: the tenant-mounted wan-video-studio plugin, now in the repo ──
+    'plugins/wan-video-studio/routes/wan_video.py::_uploads_fd::os.open':
+        'opens the uploads MOUNT POINT itself as a directory fd (O_DIRECTORY|O_NOFOLLOW); '
+        '.wan-requests and every file in it are then opened no-follow relative to that fd, '
+        'modes set by fchmod on the fds. Same as booking::_root_fd / safe_open.open_root',
     'routes/canvas.py::openclaw_ui_proxy::<dynamic-call>':
         'getattr(requests, request.method.lower())(url, params=request.args, ...): an HTTP verb '
         'on the requests module (GET/POST/... to the internal openclaw UI), no file I/O; the '
@@ -181,6 +188,98 @@ def test_scanner_flags_the_review3_b3_pattern_in_plugins(tmp_path):
         '    tmp.write_text(data)\n'
         '    tmp.replace(CONFIG_PATH)\n')})
     assert ('plugins/booking/routes/booking.py', '_save_config', '.write_text') in found
+
+
+def test_scanner_flags_the_review4_wan_video_plugin(tmp_path):
+    """Negative control (review 4, R4-B2): the tenant-mounted wan-video-studio module as
+    live tenants run it today (byte copy, sha256 6f65d714...) is flagged in plugins/."""
+    orig = (Path(__file__).resolve().parent / 'review4_fixtures'
+            / 'tenant_wan_video_6f65d714.tenant-copy.txt').read_text()
+    found = _scan_tree(tmp_path, {'plugins/wan-video-studio/routes/wan_video.py': orig})
+    rel = 'plugins/wan-video-studio/routes/wan_video.py'
+    assert (rel, '_ensure_requests_dir', 'os.chmod') in found
+    assert (rel, 'queue_generation', '.write_text') in found
+    assert (rel, 'get_result', '.read_text') in found
+
+
+# ── tenant-loadable plugin code (review 4 of PR #597, R4-B2) ─────────────────────────
+# OVU imports /app/plugins/<id>/<routes[].module> in-process; /app/plugins is a PER-TENANT
+# mount (/mnt/clients/<t>/openvoiceui/plugins), not the image. The guard only sees what is
+# in this repo, so every plugin route module a tenant can load must be HERE (and is then
+# scanned via SCAN's plugins/), or be named below as a known, not-yet-scanned module.
+# Sources: the route modules declared by this repo's plugins/*/plugin.json, plus the
+# modules review 4 measured on live tenants that no repo manifest declares.
+KNOWN_TENANT_PLUGIN_MODULES_WITHOUT_REPO_MANIFEST = {
+    'desktop-native/routes.py', 'ovui-core/routes.py', 'housecall-pro/routes/housecall_pro.py',
+    'client-history-admin/routes/client_history_admin.py',
+}
+# Known tenant-loaded modules whose code is NOT in this repo yet, so the guard has never
+# scanned them. Follow-up (review 4, R4-B2 part 3): bring each into plugins/ (then remove
+# it here; test_unscanned_plugin_list_is_not_stale enforces that) or gate rollouts on a
+# host-side scan of /mnt/clients/*/openvoiceui/plugins.
+UNSCANNED_TENANT_PLUGIN_MODULES = {
+    'bhb-animated-characters/routes/bighead.py':
+        'catalog stub only (plugin.json + README); review 4: .write_text x3 in create_agent, '
+        'request id unvalidated, reaches only within the cell (LOW)',
+    'hermes-agent/routes/hermes.py': 'catalog stub only; review 4 scan: no finding',
+    'seo-platform/routes/seo.py': 'catalog stub only; review 4 scan: no finding',
+    'twenty-crm/routes/crm.py': 'catalog stub only; review 4 scan: no finding',
+    'desktop-native/routes.py': 'not in the repo; review 4 scan: no finding',
+    'ovui-core/routes.py': 'not in the repo (3 tenant variants); review 4 scan: no finding',
+    'housecall-pro/routes/housecall_pro.py': 'not in the repo; review 4 scan: no finding',
+    'client-history-admin/routes/client_history_admin.py': 'not in the repo; review 4 scan: no finding',
+}
+
+
+def _repo_manifest_route_modules(root):
+    import json
+    out = set()
+    for pj in sorted((root / 'plugins').glob('*/plugin.json')):
+        for r in json.loads(pj.read_text()).get('routes', []):
+            if r.get('module'):
+                out.add(f'{pj.parent.name}/{r["module"]}')
+    return out
+
+
+def _scanned_plugin_modules(root):
+    return {rel[len('plugins/'):] for rel in Scanner(root).modules if rel.startswith('plugins/')}
+
+
+def _unscanned_plugin_modules(root):
+    known = _repo_manifest_route_modules(root) | KNOWN_TENANT_PLUGIN_MODULES_WITHOUT_REPO_MANIFEST
+    return sorted(known - _scanned_plugin_modules(root) - set(UNSCANNED_TENANT_PLUGIN_MODULES))
+
+
+def test_every_known_tenant_plugin_module_is_scanned():
+    scanned = _scanned_plugin_modules(ROOT)
+    # the two plugins rolled to tenants by sha-gated scripts (booking, wan-video-studio)
+    assert {'booking/routes/booking.py', 'wan-video-studio/routes/wan_video.py'} <= scanned
+    unscanned = _unscanned_plugin_modules(ROOT)
+    assert not unscanned, (
+        'tenant-loadable plugin route module(s) the I/O guard never scans (their code is not '
+        'in this repo). Bring the module into plugins/<id>/ or list it in '
+        f'UNSCANNED_TENANT_PLUGIN_MODULES with a reason: {unscanned}')
+
+
+def test_unscanned_plugin_list_is_not_stale():
+    stale = sorted(set(UNSCANNED_TENANT_PLUGIN_MODULES) & _scanned_plugin_modules(ROOT))
+    assert not stale, f'now in the repo and scanned (remove from UNSCANNED_TENANT_PLUGIN_MODULES): {stale}'
+
+
+def test_plugin_scope_check_fires_on_an_unscanned_module(tmp_path):
+    """Negative control: a manifest whose route module is not in the tree (what a catalog
+    stub for a tenant plugin looks like) is reported; once the code is in, it is not."""
+    import json
+    (tmp_path / 'plugins' / 'newplug').mkdir(parents=True)
+    (tmp_path / 'plugins' / 'newplug' / 'plugin.json').write_text(
+        json.dumps({'routes': [{'module': 'routes/new.py', 'blueprint': 'bp'}]}))
+    assert 'newplug/routes/new.py' in _unscanned_plugin_modules(tmp_path)
+    (tmp_path / 'plugins' / 'newplug' / 'routes').mkdir()
+    (tmp_path / 'plugins' / 'newplug' / 'routes' / 'new.py').write_text('x = 1\n')
+    assert 'newplug/routes/new.py' not in _unscanned_plugin_modules(tmp_path)
+    # the out-of-repo tenant modules are reported unless listed as known-unscanned
+    assert set(_unscanned_plugin_modules(tmp_path)) == (
+        KNOWN_TENANT_PLUGIN_MODULES_WITHOUT_REPO_MANIFEST - set(UNSCANNED_TENANT_PLUGIN_MODULES))
 
 
 def test_request_value_joined_under_a_private_root_is_not_flagged(tmp_path):

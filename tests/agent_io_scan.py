@@ -31,6 +31,17 @@ tainted argument passed to a dynamic callee (`table[k](p)`, `getattr(o, name)(p)
 `f()(p)`) or alongside a sink passed as a value (`map(open, paths)`) is a
 finding that needs an allowlist reason.
 
+Review 4 of PR #597 closed these forms: a sink bound to a local name (`o = open`,
+`sp = subprocess.Popen`, `w = partial(open, mode='w')`); `importlib.import_module('os')`
+and `__import__('os')` (a non-constant module name fails closed); unbound `Path.<sink>(p)`
+and `map(Path.unlink, ps)`; `io.FileIO`; `getattr(<path>, 'write_text')(x)`; `a.root` /
+`a.rel` of an Anchored; a `dir_fd=` call is exempt only when dir_fd is not None and the
+path is a bare name, `<x>.name` or a '/'-free constant; only a MODULE-level def/assignment
+named `open` shadows the builtin. Still open (follow-ups, probes in
+tests/test_zz_review4_guard_blindspots.py fail on them): taint through class/instance
+attributes and function-level `global` assignments, `%`/`.format` path strings,
+`tempfile.*(dir=...)`, and `exec`/`eval` as spawns.
+
 The analysis over-approximates on purpose: a false positive costs one
 allowlist line with a reason; a false negative is a hole.
 """
@@ -68,6 +79,7 @@ FUNC_SINKS = {
                               'chflags', 'lchflags', 'setxattr', 'removexattr')},
     **{f'os.{x}': 2 for x in ('replace', 'rename', 'renames', 'link', 'symlink')},
     'io.open': 1, 'builtins.open': 1, 'codecs.open': 1, '_io.open': 1,
+    'io.FileIO': 1, '_io.FileIO': 1,
     'gzip.open': 1, 'gzip.GzipFile': 1, 'bz2.open': 1, 'bz2.BZ2File': 1,
     'lzma.open': 1, 'lzma.LZMAFile': 1, 'wave.open': 1, 'aifc.open': 1, 'sunau.open': 1,
     'zipfile.ZipFile': 1, 'zipfile.Path': 1, 'tarfile.open': 1, 'tarfile.TarFile': 1,
@@ -97,8 +109,17 @@ ARG_METHOD_SINKS = {'save': (0,), 'extractall': (0,), 'extract': (1,)}
 # Methods on an Anchored handle that hand out another Anchored handle.
 ANCHORED_METHODS = {'child', 'sibling', 'rename', 'replace', 'iterdir'}
 # Attributes of an Anchored handle that are plain path STRINGS (laundering).
-ANCHORED_ESCAPE_ATTRS = {'path', '__fspath__', '__str__'}
+ANCHORED_ESCAPE_ATTRS = {'path', '__fspath__', '__str__', 'root', 'rel'}
 _SPAWN_MODULES = {'subprocess', 'os', 'pty', 'asyncio'}
+# Review 4 of PR #597 (guard blind spots):
+# a bare-name sink bound to another name (`o = open`) resolves to these dotted sinks.
+_NAME_SINK_DOTTED = {'open': 'builtins.open', 'send_file': 'flask.send_file',
+                     'send_from_directory': 'flask.send_from_directory'}
+# `Path.write_text(p, ...)` / `map(Path.unlink, ps)`: the path is the first ARGUMENT.
+_PATH_CLASSES = {'pathlib.Path', 'pathlib.PurePath', 'pathlib.PosixPath', 'pathlib.PurePosixPath'}
+# `importlib.import_module('os')` / `__import__('os')` evaluate to that module.
+_IMPORT_FUNCS = {'importlib.import_module', '__import__', 'builtins.__import__'}
+_PARTIAL_FUNCS = {'functools.partial', 'partial'}
 _ROUTE_DECORATORS = {'route', 'get', 'post', 'put', 'delete', 'patch'}
 
 
@@ -129,6 +150,17 @@ def _mentions_root_after_value(parts):
         else:
             seen_value = True
     return False
+
+
+def _single_component(node):
+    """A path expression that cannot be absolute or climb: a bare name, `<x>.name`, or a
+    str constant with no '/'. (A bare NAME is trusted as a component name by convention:
+    the fd-relative helpers in this tree pass basenames.)"""
+    if isinstance(node, ast.Name):
+        return True
+    if isinstance(node, ast.Attribute) and node.attr == 'name':
+        return True
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and '/' not in node.value
 
 
 def _add_chain(node):
@@ -182,6 +214,50 @@ class _Module:
                         self.mods[top] = top
                         self.imports[top] = (a.name.replace('.', '/') + '.py', None)
         self._collect(tree, '', in_class=False)
+        # Names bound at MODULE level (defs, classes, assignments): only these shadow a
+        # builtin sink for the whole module. A method named `open` in some class does not
+        # (review 4: it used to disable the bare open() sink module-wide).
+        self.module_names = set()
+        for ch in tree.body:
+            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                self.module_names.add(ch.name)
+            elif isinstance(ch, (ast.Assign, ast.AnnAssign)):
+                for t in (ch.targets if isinstance(ch, ast.Assign) else [ch.target]):
+                    if isinstance(t, ast.Name):
+                        self.module_names.add(t.id)
+        # Local names bound to a sink or spawn function (`o = open`, `sp = subprocess.Popen`,
+        # `w = functools.partial(open, mode='w')`), anywhere in the module: a call through
+        # the alias is that sink (over-approximate: one binding anywhere counts).
+        self.sink_aliases = {}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                t = self._sink_value(node.value)
+                if t:
+                    self.sink_aliases[node.targets[0].id] = t
+
+    def shadows(self, name):
+        """A builtin sink name rebound by a MODULE-LEVEL def/class/assignment in this module
+        (an import of the same name is resolved through the import table instead)."""
+        return name in self.module_names
+
+    def _sink_value(self, v):
+        """Dotted sink/spawn a value expression evaluates to (`open`, `os.remove`,
+        `partial(open, ...)`), else None."""
+        if isinstance(v, ast.Name) and v.id in _NAME_SINK_DOTTED and not self.shadows(v.id):
+            return _NAME_SINK_DOTTED[v.id]
+        if isinstance(v, (ast.Name, ast.Attribute)):
+            d = self.dotted(v)
+            if d and (d in FUNC_SINKS or d in _SPAWN_DOTTED):
+                return d
+            return None
+        if isinstance(v, ast.Call) and v.args:
+            f = v.func
+            fd = self.dotted(f) if isinstance(f, ast.Attribute) else (
+                self.real(f.id) or f.id if isinstance(f, ast.Name) else None)
+            if fd in _PARTIAL_FUNCS:
+                return self._sink_value(v.args[0])
+        return None
 
     def _collect(self, node, prefix, in_class):
         for ch in ast.iter_child_nodes(node):
@@ -238,7 +314,27 @@ class _Module:
                 and isinstance(expr.args[1].value, str)):
             base = self.dotted(expr.args[0])
             return f'{base}.{expr.args[1].value}' if base else None
+        if (isinstance(expr, ast.Call) and self._import_call(expr) and expr.args
+                and isinstance(expr.args[0], ast.Constant) and isinstance(expr.args[0].value, str)):
+            return expr.args[0].value     # importlib.import_module('os') / __import__('os') -> 'os'
         return None
+
+    def _import_call(self, call):
+        f = call.func
+        if isinstance(f, ast.Name):
+            name = self.real(f.id) or f.id
+        elif isinstance(f, ast.Attribute):
+            name = self.dotted(f)
+        else:
+            return False
+        return name in _IMPORT_FUNCS
+
+    def _dynamic_import_rooted(self, expr):
+        """x.y.z whose root is an import_module/__import__ call with a NON-constant name."""
+        while isinstance(expr, ast.Attribute):
+            expr = expr.value
+        return (isinstance(expr, ast.Call) and self._import_call(expr)
+                and not (expr.args and isinstance(expr.args[0], ast.Constant)))
 
     def is_module_expr(self, expr):
         """`os`, `_os`, `os.path`: an imported MODULE (its attributes are functions)."""
@@ -253,9 +349,13 @@ class _Module:
         builtin name, '<dynamic>' for a callee the AST cannot name, or None."""
         f = call.func
         if isinstance(f, ast.Name):
-            return self.froms.get(f.id) or self.mods.get(f.id) or f.id
+            return (self.froms.get(f.id) or self.mods.get(f.id) or self.sink_aliases.get(f.id)
+                    or f.id)
         if isinstance(f, ast.Attribute):
-            return self.dotted(f)
+            d = self.dotted(f)
+            if d is None and self._dynamic_import_rooted(f):
+                return '<dynamic>'    # importlib.import_module(name).remove(p): fail closed
+            return d
         if isinstance(f, ast.Call):
             d = self.dotted(f)
             if d:
@@ -666,15 +766,31 @@ class _Engine:
     def _sink(self, m, call):
         """(sink-name, [path exprs]) or None."""
         f = call.func
-        if any(kw.arg in ('dir_fd', 'src_dir_fd', 'dst_dir_fd') for kw in call.keywords):
-            return None  # relative to a pinned directory fd
+        s = self._sink_unpinned(m, call)
+        if s is None:
+            return None
+        dir_fds = [kw.value for kw in call.keywords if kw.arg in ('dir_fd', 'src_dir_fd', 'dst_dir_fd')]
+        if dir_fds and not any(isinstance(v, ast.Constant) and v.value is None for v in dir_fds):
+            # relative to a pinned directory fd. Review 4 of PR #597: that holds only for a
+            # path that cannot be absolute (an absolute path ignores dir_fd, and dir_fd=None
+            # is no fd at all): a bare name, a '/'-free constant, or `<x>.name`. Any other
+            # path expression stays in and is judged by its taint.
+            kept = [p for p in s[1] if not _single_component(p)]
+            return (s[0], kept) if kept else None
+        return s
+
+    def _sink_unpinned(self, m, call):
+        f = call.func
         kw_paths = [kw.value for kw in call.keywords if kw.arg in PATH_KWS]
         target = m.call_target(call)
-        if isinstance(f, ast.Name) and f.id in NAME_SINKS and f.id not in m.by_name:
+        if isinstance(f, ast.Name) and f.id in NAME_SINKS and not m.shadows(f.id):
             return f.id, call.args[:1] + kw_paths
         if target in FUNC_SINKS:
             short = target if not target.startswith('builtins.') else target.split('.', 1)[1]
             return short, call.args[:FUNC_SINKS[target]] + kw_paths
+        if (isinstance(f, ast.Attribute) and f.attr in METHOD_SINKS
+                and m.dotted(f.value) in _PATH_CLASSES):
+            return f'.{f.attr}', call.args[:1] + kw_paths   # unbound: Path.write_text(p, ...)
         if target and target != '<dynamic>' and isinstance(f, (ast.Attribute, ast.Call)) \
                 and target.rsplit('.', 1)[-1] == 'open':
             # <any imported module>.open(path); for an imported VALUE (`UPLOADS_DIR.open()`)
@@ -706,16 +822,22 @@ class _Engine:
         """Fail closed: a tainted argument reaching a callee the AST cannot name, or handed
         over together with a sink function as a value (map(open, paths), partial(open, p))."""
         args = list(call.args) + [kw.value for kw in call.keywords]
+        f = call.func
+        if (isinstance(f, ast.Call) and isinstance(f.func, ast.Name) and f.func.id == 'getattr'
+                and f.args and m.call_target(call) == '<dynamic>'):
+            args.append(f.args[0])   # getattr(<tainted path>, 'write_text')(x): the receiver
         if not any(self._expr_tainted(m, a, local) for a in args):
             return None
         if m.call_target(call) == '<dynamic>':
             return '<dynamic-call>'
         for a in args:
-            if isinstance(a, ast.Name) and a.id in NAME_SINKS and a.id not in m.by_name:
+            if isinstance(a, ast.Name) and a.id in NAME_SINKS and not m.shadows(a.id):
                 return f'<sink-as-value:{a.id}>'
             d = m.dotted(a) if isinstance(a, ast.Attribute) else None
             if d in FUNC_SINKS:
                 return f'<sink-as-value:{d}>'
+            if d and '.' in d and d.rsplit('.', 1)[0] in _PATH_CLASSES and d.rsplit('.', 1)[1] in METHOD_SINKS:
+                return f'<sink-as-value:{d}>'   # map(Path.unlink, paths)
         return None
 
     def findings(self):
@@ -830,6 +952,11 @@ def spawn_sites(repo_root):
             key = None
             if t in _SPAWN_DOTTED:
                 key = t
+            elif (t == '<dynamic>' and isinstance(node.func, ast.Attribute)
+                  and m._dynamic_import_rooted(node.func)):
+                key = f'<dynamic-import>.{node.func.attr}'      # import_module(name).run(c)
+            elif (isinstance(node.func, ast.Call) and m._sink_value(node.func) in _SPAWN_DOTTED):
+                key = m._sink_value(node.func)                  # functools.partial(run, c)()
             elif (isinstance(node.func, ast.Call) and isinstance(node.func.func, ast.Name)
                   and node.func.func.id == 'getattr' and node.func.args
                   and (m.dotted(node.func.args[0]) or '') in _SPAWN_MODULES):

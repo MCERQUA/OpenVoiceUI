@@ -1,0 +1,1 @@
+../../plugins/wan-video-studio/routes/wan_video.py
