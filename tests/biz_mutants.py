@@ -1199,6 +1199,70 @@ _REBASE_1_10_0 = {
 }
 MUTANTS = [(n, _REBASE_1_10_0.get(n, e), t) for n, e, t in MUTANTS]
 
+# ── rules 1.10.1 (gate-4 re-check #11, host rulings D / M1 / M2 / M5 / N3) ──
+T_C11 = 'tests/test_biz_crt_claimcheck11.py::'
+T_P11 = 'tests/test_claimcheck11_probes.py::'
+MUTANTS += [
+    # D: the floor and R3 read every exact reading (engine, watcher RD11)
+    ('d11-floor-written-only', [(RT, "    for n in sorted({form_key(s)} | iso_numbers_in(s) | exact_numbers(s)):   # 1.10.1 (D): every exact reading",
+                                 "    for n in sorted({form_key(s)} | iso_numbers_in(s)):   # 1.10.1 (D): every exact reading")],
+     [T_P11 + 'test_R11_D2_HOLE_a_digit_glyph_spelling_of_cg2001_never_counts_as_additional_insured',
+      T_C11 + 'test_d_a_digit_glyph_cg2001_is_never_additional_insured']),
+    ('d11-never-completed-written-only', [(RT, "    return names_never_completed(s) or bool(exact_numbers(s) & NEVER_COMPLETED_ANY)",
+                                           "    return names_never_completed(s)")],
+     [T_P11 + 'test_R11_D1_HOLE_a_digit_glyph_spelling_of_cg2010_never_counts_for_completed_ops',
+      T_C11 + 'test_d_a_stored_digit_glyph_mapping_breaks_the_floor_and_the_paper_reads_missing']),
+    ('d11-paper-r3-exact-off', [(RT, "                elif fn == 'ai_completed' and never_completed_ops(e_form):\n                    # 1.10.1 (D)",
+                                 "                elif False:\n                    # 1.10.1 (D)")],
+     [T_C11 + 'test_d_a_stored_digit_glyph_mapping_breaks_the_floor_and_the_paper_reads_missing']),
+    ('d11-note-not-named', [(RT, "                                             (f'it reads as {iso_exact_reading(e_form)} through characters that '",
+                             "                                             (f'it is near {iso_exact_reading(e_form)[:0]} through characters that '")],
+     [T_C11 + 'test_d_the_near_note_names_the_exact_reading']),
+    ('watch-d11-never-completed-written-only', [(WA, "    return _form(s) in bad or bool((_iso_in(s) | exact) & bad)", "    return _form(s) in bad or bool(_iso_in(s) & bad)")],
+     [T_C11 + 'test_d_watch_a_meets_on_a_stored_digit_glyph_mapping_is_not_backed', T_C11 + 'test_engine_and_watcher_agree_on_the_1_10_1_readings']),
+    ('watch-d11-clash-written-only', [(WA, "    for n in {_form(s)} | _iso_in(s) | {r for r, _ in _exact_all(s)}:      # RD11",
+                                       "    for n in {_form(s)} | _iso_in(s):      # RD11")],
+     [T_C11 + 'test_engine_and_watcher_agree_on_the_1_10_1_readings']),
+    # M1: the apostrophe year; another mark beside a month word (engine, watcher RM11)
+    ('m11-apostrophe-is-a-mark', [(RT, "    folded = re.sub(r\"'(?=[0-9]{2}(?![0-9]))\", ' ', _fold_chars(s))   # 1.10.1 (M1): 'YY reads as YY",
+                                   "    folded = _fold_chars(s)   # 1.10.1 (M1): 'YY reads as YY")],
+     [T_C11 + 'test_m1_an_apostrophe_year_reads_as_its_year_and_pre_2004_is_refused']),
+    ('m11-mark-beside-month-is-any', [(RT, "        return (words[0] + digits, None, True) if month else None   # never \"any edition\"",
+                                       "        return None   # never \"any edition\"")],
+     [T_C11 + 'test_m1_another_mark_beside_a_month_word_is_no_date_never_any_edition']),
+    ('watch-m11-apostrophe-is-a-mark', [(WA, "        if ch == \"'\" and ''.join(f[i + 1:i + 3]).isdigit()", "        if False and ''.join(f[i + 1:i + 3]).isdigit()")],
+     [T_C11 + 'test_m1_a_stored_one_breaks_the_floor_in_both_copies', T_C11 + 'test_engine_and_watcher_agree_on_the_1_10_1_readings']),
+    ('watch-m11-mark-beside-month-is-any', [(WA, "        return (words[0] + num, None, True) if month else None", "        return None")],
+     [T_C11 + 'test_m1_a_stored_one_breaks_the_floor_in_both_copies', T_C11 + 'test_engine_and_watcher_agree_on_the_1_10_1_readings']),
+    # M2: month words before the O fold (engine, watcher RM11)
+    ('m11-month-folds', [(RT, "    k = _month_words_kept(re.sub(r'[^A-Z0-9]', '', _fold_chars(raw)))", "    k = re.sub(r'[^A-Z0-9]', '', _fold_chars(raw))")],
+     [T_P11 + 'test_R11_M2_HOLE_an_october_edition_in_the_form_list_binds', T_C11 + 'test_m2_october_in_the_form_list_binds']),
+    ('m11-form-list-month-zeroed', [(RT, "    kept = _month_words_kept(spaced)                  # 1.10.1 (M2)", "    kept = spaced                  # 1.10.1 (M2)")],
+     [T_C11 + 'test_m2_october_in_the_form_list_binds']),
+    ('watch-m11-month-folds', [(WA, "    k = _months_as_words(''.join(ch for ch in _fold(s) if ch in _LATIN))", "    k = ''.join(ch for ch in _fold(s) if ch in _LATIN)")],
+     [T_C11 + 'test_m2_october_on_the_paper_reads_as_its_edition_and_look_alikes_still_fold']),
+    ('watch-m11-form-list-month-zeroed', [(WA, "    masked = _months_as_words(plain)                      # RM11", "    masked = plain                      # RM11")],
+     [T_C11 + 'test_engine_and_watcher_agree_on_the_1_10_1_readings']),
+    # M5: the Ed. prefix (engine, watcher RM11)
+    ('m11-ed-prefix-unread', [(RT, "    if rest[:1] in (['ED'], ['EDITION']) and len(rest) > 1:", "    if False:")],
+     [T_C11 + 'test_m5_an_ed_prefixed_month_word_edition_binds']),
+    ('watch-m11-ed-prefix-unread', [(WA, "    if rest[0] in ('ED', 'EDITION') and len(rest) > 1:    # RM11", "    if False:    # RM11")],
+     [T_C11 + 'test_engine_and_watcher_agree_on_the_1_10_1_readings']),
+    # N3: the watcher's floor reads every form
+    ('watch-n3-keyed-forms-only', [(WA, "[it.get('edition')] + (it['forms'] if isinstance(it.get('forms'), list) else [])):   # RN8 / N3",
+                                    "[it.get('edition')] + raw):   # RN8 / N3")],
+     [T_C11 + 'test_n3_a_keyless_non_ascii_form_breaks_both_floors', T_C11 + 'test_n3_watch_a_meets_with_a_stored_keyless_non_ascii_form_is_not_backed']),
+]
+
+# rules 1.10.1: anchors the 1.10.1 change moved (same intent)
+_REBASE_1_10_1 = {
+    'watch-h8-floor-fold-off': [(WA, "        if any(_refold(v) for v in [it.get('edition')] + (it['forms'] if isinstance(it.get('forms'), list) else [])):   # RN8 / N3",
+                                 "        if False:   # RN8 / N3")],
+    'g-cg2026-completed-ops': [(RT, "NEVER_COMPLETED_ANY = frozenset(NEVER_COMPLETED_OPS) | frozenset(ISO_NOT_COMPLETED)",
+                                "NEVER_COMPLETED_ANY = frozenset(NEVER_COMPLETED_OPS)")],
+}
+MUTANTS = [(n, _REBASE_1_10_1.get(n, e), t) for n, e, t in MUTANTS]
+
 
 def _copy(name):
     dest = os.path.join(SCRATCH, name)

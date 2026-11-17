@@ -593,4 +593,4 @@ def test_l1_every_staff_page_carries_a_sign_out_control(h):
 
 def test_rules_version_is_1_5_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.10.0'         # rules 1.6.0-1.10.0 (re-checks #6-#10) keep every 1.5.0 rule
+    assert rt.RULE_VERSION == 'crt-rules-1.10.1'         # rules 1.6.0-1.10.1 (re-checks #6-#11) keep every 1.5.0 rule
