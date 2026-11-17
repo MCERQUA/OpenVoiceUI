@@ -273,7 +273,7 @@ MUTANTS = [
      [T_C + 'test_w4_watch_on_a_legit_accepted_wrong_party']),
     ('watch-certificate-as-endorsement', [(WA, "                if not doc or doc['data'].get('kind') != 'endorsement' or \\\n",
                                            "                if not doc or \\\n")],
-     [T_C + 'test_w1_engine_refuses_and_watcher_fails_a_forged_meets_on_certificate_backed_endorsements']),
+     [T_C + 'test_w1b_watcher_fails_a_forged_meets_on_a_second_certificate_posing_as_endorsements']),
     ('watch-ignores-effective', [(WA, "                if eff and exp and on and eff <= on < exp and \\\n", "                if exp and on and on < exp and \\\n")],
      [T_C + 'test_w2_engine_refuses_and_watcher_fails_a_forged_meets_on_a_policy_not_in_force']),
     ('watch-ignores-assignment', [(WA, "        if str(asg['updated_by']).startswith('agent:'):", "        if False:"),

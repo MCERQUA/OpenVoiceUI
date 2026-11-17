@@ -192,6 +192,11 @@ def test_h1_agent_cannot_create_or_repoint_an_assignment(h):
                                             'requirement_set_id': w['set']['id'],
                                             'requirement_set_version': w['set']['version']}})
     assert r.status_code == 403 and r.get_json()['code'] == 'staff_only_field'
+    assert 'requirement_set_id' in r.get_json()['fields']
+    # a repoint alone (no version field in the body) is refused on the set id itself
+    a = h.ok(h.get(f'/crt_assignment/{w["asg"]["id"]}'))
+    r = h.patch(f'/crt_assignment/{a["id"]}', {'data': {'requirement_set_id': w['set']['id']}}, a['version'])
+    assert r.status_code == 403 and r.get_json()['fields'] == ['requirement_set_id']
 
 
 def test_h1_agent_edit_of_trade_makes_the_assignment_unconfirmed(h):
@@ -335,3 +340,12 @@ def test_m2_live_meets_claims_are_judged_too(h, dirs):
     forged_live = dict(h.state(bad['asg']['id']), state='meets')
     v, rows, _ = mod.watch(_db(dirs), [live_good, forged_live])
     assert v == 'FAIL' and [r['watch'] for r in rows] == ['PASS', 'FAIL']
+
+
+def test_w1b_watcher_fails_a_forged_meets_on_a_second_certificate_posing_as_endorsements(h, dirs):
+    # not the policy's own certificate, but still a certificate (kind coi_acord25), never an endorsement
+    w = world(h, endorsements=_ends_doc('cert2'))
+    assert h.state(w['asg']['id'])['state'] == 'missing'
+    _forge(h, w)
+    v, rows, _ = _watch(dirs)
+    assert v == 'FAIL' and any(r.startswith('R4') for r in rows[0]['reasons']), rows

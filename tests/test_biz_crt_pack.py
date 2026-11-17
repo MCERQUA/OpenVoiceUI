@@ -154,12 +154,13 @@ def world(h, template='mep', trade='electrical', today=TODAY, policies=None, end
     # documents forwarded by staff and filed by the agent, into the private store
     h.agent()
     files = {k: h.upload(pdf(f'{k}-{party_name}-{template}'), f'{k}.pdf') for k in
-             ('contract', 'cert', 'e_ongoing', 'e_completed', 'e_pnc', 'e_other', 'waiver_ok')}
+             ('contract', 'cert', 'cert2', 'e_ongoing', 'e_completed', 'e_pnc', 'e_other', 'waiver_ok')}
 
     def doc(k, kind):
         return h.mk('document', {'title': k, 'file_url': files[k]['url'], 'kind': kind,
                                  'crt_account_id': w['account']['id'], 'contact_id': w['party']['id']})
     w['docs'] = {'contract': doc('contract', 'contract_excerpt'), 'cert': doc('cert', 'coi_acord25'),
+                 'cert2': doc('cert2', 'coi_acord25'),
                  'e_ongoing': doc('e_ongoing', 'endorsement'), 'e_completed': doc('e_completed', 'endorsement'),
                  'e_pnc': doc('e_pnc', 'endorsement'), 'e_other': doc('e_other', 'endorsement'),
                  'waiver_ok': doc('waiver_ok', 'contractor_waiver_ok')}
@@ -265,7 +266,7 @@ def test_tb1_files_are_private(h):
     h.staff()
     assert h.get(f'/files/{fid}').status_code == 200
     docs = h.ok(h.get('/document?limit=500'))['records']
-    assert len(docs) == 7 and sum(1 for d in docs if d['data']['file_url'].startswith('/uploads/')) == 0
+    assert len(docs) == 8 and sum(1 for d in docs if d['data']['file_url'].startswith('/uploads/')) == 0
 
 
 def test_tb1_pack_documents_cannot_point_at_uploads(h):
