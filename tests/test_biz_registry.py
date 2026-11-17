@@ -480,3 +480,81 @@ def test_phase1_database_migrates_to_the_registry_with_a_verified_backup(tmp_pat
         assert new.health()['registered_pages'] == 0
     finally:
         new.close()
+
+
+# ── NEEDS-BACKEND items from the dashboard template review: aggregate, confirm, deep links ──
+def _mk(client, coll, data, headers=None, source=None):
+    r = client.post(f'{B}/{coll}', json={'data': data, 'source': source}, headers=headers or {})
+    assert r.status_code == 201, r.get_json()
+    return r.get_json()
+
+
+def test_aggregate_counts_every_record_not_one_page(client, owner):
+    for i in range(60):
+        _mk(client, 'cost_entry', {'kind': 'material' if i % 3 else 'fuel', 'amount': 10.5})
+    page = client.get(f'{B}/cost_entry?limit=50').get_json()
+    assert len(page['records']) == 50 and page['next_cursor']
+    agg = client.get(f'{B}/cost_entry/aggregate?sum=amount&group_by=kind').get_json()
+    assert agg['count'] == 60 and agg['sum'] == {'amount': 630.0}
+    assert {g['key']: g['count'] for g in agg['groups']} == {'material': 40, 'fuel': 20}
+    fuel = client.get(f'{B}/cost_entry/aggregate?where=' + '{"kind":"fuel"}').get_json()
+    assert fuel['count'] == 20
+
+
+@pytest.mark.parametrize('q', ['sum=description', 'sum=nope', 'group_by=nope', 'where=[1]', 'where={"x;drop":1}'])
+def test_aggregate_refuses_bad_queries(client, owner, q):
+    _mk(client, 'cost_entry', {'kind': 'fuel', 'amount': 1})
+    assert client.get(f'{B}/cost_entry/aggregate?{q}').status_code == 400
+
+
+def test_aggregate_is_auth_gated(client, anon):
+    assert client.get(f'{B}/job/aggregate').status_code == 401
+
+
+def test_needs_check_queue_and_owner_confirm(client, owner):
+    flagged = _mk(client, 'cost_entry', {'kind': 'fuel', 'amount': 85.4}, headers=AG,
+                  source={'channel': 'photo', 'ref': 'receipt-1', 'confidence': 0.6, 'flags': ['amount']})
+    _mk(client, 'cost_entry', {'kind': 'fuel', 'amount': 20}, headers=AG, source={'channel': 'sms', 'ref': 'm2'})
+    assert client.get(f'{B}/cost_entry/aggregate?flagged=1').get_json()['count'] == 1
+    assert [r['id'] for r in client.get(f'{B}/cost_entry?flagged=1').get_json()['records']] == [flagged['id']]
+    # an agent cannot confirm its own reading
+    r = client.post(f'{B}/cost_entry/{flagged["id"]}/confirm', json={'fields': ['amount']}, headers=AG)
+    assert r.status_code == 403
+    r = client.post(f'{B}/cost_entry/{flagged["id"]}/confirm', json={'fields': ['vendor']})
+    assert r.status_code == 409 and r.get_json()['code'] == 'not_flagged'
+    r = client.post(f'{B}/cost_entry/{flagged["id"]}/confirm', json={'fields': ['amount'], 'note': 'matches receipt'})
+    assert r.status_code == 200 and r.get_json()['source']['flags'] == []
+    assert r.get_json()['version'] == flagged['version'] + 1
+    assert client.get(f'{B}/cost_entry/aggregate?flagged=1').get_json()['count'] == 0
+    tl = client.get(f'{B}/cost_entry/{flagged["id"]}/timeline').get_json()['events']
+    assert any(e['type'] == 'flags_confirmed' and e['by'] == f'clerk:{OWNER}' for e in tl)
+
+
+def test_record_deep_link_resolves_to_the_page_that_opens_it(client, owner):
+    job = _mk(client, 'job', {'title': 'Attic', 'job_number': '26107'})
+    r = client.get(f'{B}/registry/resolve?collection=job&id={job["id"]}')
+    assert r.status_code == 404 and r.get_json()['code'] == 'no_page_for_collection'
+    _reg(client, file='home-dash.html', label='Overview', section='home', kind='dashboard', collections=['job'])
+    _reg(client, file='job-board.html', label='Jobs', section='jobs', kind='list', collections=['job'])
+    r = client.get(f'{B}/registry/resolve?collection=job&id={job["id"]}').get_json()
+    assert r['url'] == f'/pages/job-board.html?record=job:{job["id"]}' and r['page_id'] == 'job-board'
+    r = client.get(f'{B}/registry/resolve?collection=job&job_number=26107').get_json()
+    assert r['record_id'] == job['id']
+    assert client.get(f'{B}/registry/resolve?collection=job&job_number=99999').status_code == 404
+    assert client.get(f'{B}/registry/resolve?collection=job&id=00000000-0000-0000-0000-000000000000').status_code == 404
+    assert client.get(f'{B}/registry/resolve?collection=spaceship&id=x').status_code == 404
+
+
+def test_deep_link_cannot_reach_another_tenants_record(dirs, monkeypatch):
+    _as(monkeypatch, OWNER)
+    _env(monkeypatch, dirs)
+    app_a, ca = _make_client()
+    job = _mk(ca, 'job', {'title': 'A job'})
+    app_a.extensions['biz']['store'].close()
+    _env(monkeypatch, dirs, tenant='tenant-b', db='b', pages='pages_b')
+    app_b, cb = _make_client()
+    try:
+        assert cb.get(f'{B}/registry/resolve?collection=job&id={job["id"]}').status_code == 404
+        assert cb.post(f'{B}/job/{job["id"]}/confirm', json={'fields': ['title']}).status_code == 404
+    finally:
+        app_b.extensions['biz']['store'].close()

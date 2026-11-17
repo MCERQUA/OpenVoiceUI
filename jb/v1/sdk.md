@@ -56,6 +56,20 @@ await jb.update('job', job.id, { status: 'scheduled' }, job.version);   // the v
 await jb.archive('job', job.id);                       // nothing is ever hard-deleted
 const n     = await jb.nextNumber('job_number', { prefix: '26', pad: 3 });   // one counter per business
 
+// numbers on tiles: counted by the SERVER over every matching record (a page of jb.list undercounts)
+const open  = await jb.count('job', { where: { status: { $in: ['scheduled', 'in_progress'] } } });
+const money = await jb.aggregate('cost_entry', { where: { job_id: j.id }, sum: ['amount'], group_by: 'kind' });
+//            -> { count, sum: { amount: 1234.5 }, groups: [{ key: 'material', count: 4, sum: { amount: 900 } }] }
+
+// "needs check": values an agent wrote with source.flags, until a person confirms them
+const queue = await jb.list('cost_entry', { flagged: true });            // or jb.count(..., { flagged: true })
+await jb.confirm('cost_entry', rec.id, ['amount'], 'matches the receipt'); // owner sessions only (agents get 403)
+
+// deep links: a text or a tile opens the record, not the home page
+const url   = await jb.recordUrl('job', j.id);       // '/pages/<page that lists jobs>?record=job:<id>'
+const url2  = await jb.recordUrl('job', null, { job_number: '26107' });
+const rec   = jb.currentRecord();                     // on the opened page: { collection: 'job', id } or null
+
 // live pages
 const stop  = jb.on('job', ev => reload());           // change feed (polling, pauses when hidden)
 
@@ -76,6 +90,13 @@ Errors are `jb.JbError` with `status`, `code`, `message`:
 | `source_required`, `bad_source` | 422 | agent writes need `source` |
 | `auth_required` | 401 | the page is not signed in |
 | `biz_read_only` | 503 | the backend is migrating or protecting data; show a notice, retry later |
+
+**Deep-link convention.** A record's link is `/pages/<file>?record=<collection>:<id>`, where `<file>` is the
+registered page whose `collections` include that collection (kind list, then tool, form, dashboard, report).
+For a text to the owner, put the business's domain in front: `https://<business domain>/pages/...`.
+A page that can show one record reads `jb.currentRecord()` on load and opens it.
+
+**Counts and money are never `0` on failure.** A failed call is "could not load", never an empty list.
 
 Core collections: `company` (one record), `contact`, `lead` (read-through, a later phase), `job`,
 `estimate`, `line_item`, `invoice`, `payment`, `cost_entry`, `time_entry`, `product`, `stock_move`
@@ -137,7 +158,9 @@ Base: `https://<business domain>/api/biz/v1` (inside the platform network the Op
 |---|---|
 | `GET /health` | engine, api, schema, mode, counts, `registered_pages` |
 | `GET /schema`, `GET /schema/<collection>` | |
-| `GET /<collection>` | `where=<json>&sort=-field&limit=&cursor=&include=a,b&archived=1` |
+| `GET /<collection>` | `where=<json>&sort=-field&limit=&cursor=&include=a,b&archived=1&flagged=1` |
+| `GET /<collection>/aggregate` | `where=<json>&sum=a,b&group_by=field&flagged=1&archived=1` -> `{count, sum, groups}` |
+| `POST /<collection>/<id>/confirm` | `{fields: [flagged names], note}` (owner only) |
 | `POST /<collection>` | `{data, source}` |
 | `GET /<collection>/<id>`, `GET /<collection>/<id>/timeline` | |
 | `PATCH /<collection>/<id>` | header `If-Match: <version>`; `{data, clear:[field], source}` |
@@ -150,6 +173,7 @@ Base: `https://<business domain>/api/biz/v1` (inside the platform network the Op
 | `PATCH /registry/pages/<id>` | header `If-Match: <version>` |
 | `POST /registry/pages/<id>/archive` / `unarchive` | |
 | `GET /registry/shell?page=<id>` | the menu model |
+| `GET /registry/resolve?collection=&id=` (or `&job_number=`) | `{url}`: the deep link that opens the record |
 
 ```bash
 curl -s -H "X-Agent-Key: $KEY" https://<business>/api/biz/v1/health

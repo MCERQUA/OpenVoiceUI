@@ -36,6 +36,9 @@ GET    /api/biz/v1/registry/pages/<id>
 PATCH  /api/biz/v1/registry/pages/<id>     If-Match: <version>
 POST   /api/biz/v1/registry/pages/<id>/archive | /unarchive
 GET    /api/biz/v1/registry/shell          ?page=<id>   what the menu shell draws (sections, tabs, theme)
+GET    /api/biz/v1/registry/resolve        ?collection=&id= | &job_number=   the deep link that opens a record
+GET    /api/biz/v1/<collection>/aggregate  ?where=&sum=a,b&group_by=f&flagged=1   server-side count / sums
+POST   /api/biz/v1/<collection>/<id>/confirm {fields:[..], note}   a person clears "needs check" flags (owner only)
 
 Dev sandboxes (only where BIZ_SANDBOXES is set; see services/biz/sandbox.py):
 GET    /api/biz/v1/dev/pages               the sandbox's page files
@@ -61,7 +64,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, g, jsonify, redirect, request, send_file
 
 from services.biz import sandbox as _sandbox
-from services.biz.pages import FILE_RE, build_theme, check_file, shell_model
+from services.biz.pages import FILE_RE, RECORD_PARAM, build_theme, check_file, page_for_record, shell_model
 from services.biz.schema import SchemaError
 from services.biz.store import BizStore, resolve_location
 from services.paths import JB_SDK_DIR
@@ -381,6 +384,29 @@ def registry_shell():
     return jsonify(model)
 
 
+@biz_bp.get(f'{API}/registry/resolve')
+def registry_resolve():
+    """Deep link for a record: /pages/<file>?record=<collection>:<id> on the page that opens it."""
+    store = g.biz_store
+    collection = request.args.get('collection') or ''
+    store.registry.require(collection)
+    rid = request.args.get('id')
+    if not rid and request.args.get('job_number') and collection == 'job':
+        hits = store.list('job', where={'job_number': request.args['job_number']}, limit=2)['records']
+        if not hits:
+            raise SchemaError(404, 'not_found', 'No job with that number')
+        rid = hits[0]['id']
+    if not rid:
+        raise SchemaError(400, 'bad_query', 'Send id=<record id> (or job_number= for a job)')
+    rec = store.get(collection, rid)
+    page = page_for_record(store.pages_list(), collection)
+    if page is None:
+        raise SchemaError(404, 'no_page_for_collection',
+                          f'No registered page lists "{collection}" in its collections yet', record_id=rec['id'])
+    return jsonify({'url': f"{_page_url(page['file'])}?{RECORD_PARAM}={collection}:{rec['id']}",
+                    'page_id': page['id'], 'collection': collection, 'record_id': rec['id']})
+
+
 def _page_url(file_name: str) -> str:
     return '/pages/' + (f'sandbox/{g.biz_sandbox}/' if g.biz_sandbox else '') + file_name
 
@@ -448,6 +474,36 @@ def dev_page_get(file_name):
 
 
 # ── records ────────────────────────────────────────────────────────────────
+def _where_arg():
+    where = request.args.get('where')
+    if not where:
+        return None
+    try:
+        where = json.loads(where)
+    except ValueError:
+        raise SchemaError(400, 'bad_query', 'where must be JSON, e.g. {"status":"open"}')
+    if not isinstance(where, dict):
+        raise SchemaError(400, 'bad_query', 'where must be a JSON object')
+    return where or None
+
+
+@biz_bp.get(f'{API}/<collection>/aggregate')
+def aggregate_records(collection):
+    sums = [f.strip() for f in request.args.get('sum', '').split(',') if f.strip()]
+    return jsonify(g.biz_store.aggregate(collection, where=_where_arg(), sum_fields=sums,
+                                         group_by=request.args.get('group_by') or None,
+                                         archived=request.args.get('archived') == '1',
+                                         flagged=request.args.get('flagged') == '1'))
+
+
+@biz_bp.post(f'{API}/<collection>/<rid>/confirm')
+def confirm_record_flags(collection, rid):
+    if _agent():
+        return _fail(403, 'owner_only', 'A person confirms a flagged value; an agent cannot confirm its own reading')
+    body = _body()
+    return jsonify(g.biz_store.confirm_flags(collection, rid, body.get('fields'), by=g.biz_by, note=body.get('note')))
+
+
 @biz_bp.get(f'{API}/<collection>')
 def list_records(collection):
     where = request.args.get('where')
@@ -461,7 +517,8 @@ def list_records(collection):
     include = [c.strip() for c in request.args.get('include', '').split(',') if c.strip()]
     return jsonify(g.biz_store.list(collection, where=where or None, sort=request.args.get('sort'),
                                     limit=request.args.get('limit', 50), cursor=request.args.get('cursor'),
-                                    include=include, archived=request.args.get('archived') == '1'))
+                                    include=include, archived=request.args.get('archived') == '1',
+                                    flagged=request.args.get('flagged') == '1'))
 
 
 @biz_bp.post(f'{API}/<collection>')

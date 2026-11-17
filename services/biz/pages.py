@@ -371,6 +371,19 @@ class PageRegistryMixin:
                 'fonts': brand.get('fonts') if isinstance(brand.get('fonts'), dict) else {}}
 
 
+# ── record deep links: /pages/<file>?record=<collection>:<id> ─────────────────
+RECORD_PARAM = 'record'
+_KIND_PREFERENCE = {'list': 0, 'tool': 1, 'form': 2, 'dashboard': 3, 'report': 4}
+
+
+def page_for_record(pages: list, collection: str):
+    """The registered page that opens a record of this collection (list > tool > form > dashboard > report)."""
+    order = {s: i for i, s in enumerate(SECTION_IDS)}
+    hits = [p for p in pages if not p['archived_at'] and collection in (p['collections'] or [])]
+    hits.sort(key=lambda p: (_KIND_PREFERENCE.get(p['kind'], 9), order.get(p['section'], 99), p['order']))
+    return hits[0] if hits else None
+
+
 # ── the shell model ─────────────────────────────────────────────────────────
 THEME_TOKENS = ('bg', 'surface', 'surface-2', 'border', 'text', 'text-secondary', 'text-muted', 'heading',
                 'brand', 'brand-contrast', 'accent', 'radius', 'font-body', 'font-display')
@@ -424,7 +437,7 @@ def shell_model(pages: list, *, company: dict, theme: dict, page_exists=None) ->
         sections.append({'id': sid, 'label': label, 'icon': icon, 'pages': [
             {'id': p['id'], 'file': p['file'], 'label': p['label'], 'kind': p['kind'],
              'icon': p['icon'] or icon, 'verb': p['verb'], 'verb_href': p['verb_href'],
-             'shell': p['shell'], 'tab': p['tab']} for p in items]})
+             'shell': p['shell'], 'tab': p['tab'], 'collections': p['collections']} for p in items]})
     flat = [pg for s in sections for pg in s['pages']]
     tabs = []
     if sections and sections[0]['id'] == 'home':

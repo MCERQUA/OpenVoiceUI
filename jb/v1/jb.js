@@ -105,8 +105,47 @@
         where: opts.where ? JSON.stringify(opts.where) : undefined,
         sort: opts.sort, limit: opts.limit, cursor: opts.cursor,
         include: opts.include ? [].concat(opts.include).join(',') : undefined,
-        archived: opts.archived ? '1' : undefined
+        archived: opts.archived ? '1' : undefined,
+        flagged: opts.flagged ? '1' : undefined
       }));
+    },
+    /**
+     * Counted by the server over EVERY matching record (a page of jb.list undercounts).
+     * opts: where, sum (['amount']), group_by ('status'), flagged (only "needs check"), archived
+     *   -> { count, sum: {amount: 1234.5}, groups: [{key, count, sum}] }
+     */
+    aggregate: function (collection, opts) {
+      opts = opts || {};
+      return call('GET', '/' + enc(collection) + '/aggregate' + qs({
+        where: opts.where ? JSON.stringify(opts.where) : undefined,
+        sum: opts.sum ? [].concat(opts.sum).join(',') : undefined,
+        group_by: opts.group_by, flagged: opts.flagged ? '1' : undefined, archived: opts.archived ? '1' : undefined
+      }));
+    },
+    /** The number of matching records, counted by the server. */
+    count: function (collection, opts) {
+      return jb.aggregate(collection, { where: (opts || {}).where, flagged: (opts || {}).flagged })
+        .then(function (r) { return r.count; });
+    },
+    /** A person confirms values an agent flagged "needs check" (record.source.flags). Owner sessions only. */
+    confirm: function (collection, id, fields, note) {
+      return call('POST', '/' + enc(collection) + '/' + enc(id) + '/confirm', { fields: [].concat(fields), note: note });
+    },
+    /**
+     * Deep link to a record: '/pages/<file>?record=<collection>:<id>' on the registered page that opens it.
+     * opts: { job_number: '26107' } instead of an id for jobs.
+     */
+    recordUrl: function (collection, id, opts) {
+      return call('GET', '/registry/resolve' + qs({ collection: collection, id: id, job_number: (opts || {}).job_number }))
+        .then(function (r) { return r.url; });
+    },
+    /** On a page opened from a deep link: { collection, id } from ?record=<collection>:<id>, else null. */
+    currentRecord: function () {
+      try {
+        var v = new URLSearchParams(global.location.search).get('record') || '';
+        var m = /^([a-z][a-z0-9_]{0,40}):([A-Za-z0-9-]{1,64})$/.exec(v);
+        return m ? { collection: m[1], id: m[2] } : null;
+      } catch (e) { return null; }
     },
     /** Every page of a list, concatenated (stops at opts.max records, default 2000). */
     listAll: function (collection, opts) {

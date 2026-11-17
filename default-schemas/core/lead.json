@@ -9,7 +9,7 @@
       "type": "datetime",
       "label": "Received"
     },
-    "source": {
+    "lead_source": {
       "type": "string",
       "label": "Source / site"
     },

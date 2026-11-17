@@ -96,6 +96,19 @@ test('jb.js sends X-Biz-Sandbox only on /pages/sandbox/<name>/ pages', async () 
     assert.strictEqual(odd.sandbox, null);
 });
 
+test('jb.currentRecord reads ?record=<collection>:<id> and ignores junk', () => {
+    const mk = (search) => {
+        const ctx = { location: { pathname: '/pages/jobs.html', search }, URLSearchParams, console };
+        ctx.window = ctx; ctx.fetch = () => Promise.reject(new Error('no'));
+        vm.createContext(ctx); vm.runInContext(SDK, ctx); return ctx.jb;
+    };
+    const r = mk('?record=job:0b6f1c2e-1111-4222-8333-944445555666').currentRecord();
+    assert.strictEqual(r.collection, 'job');
+    assert.strictEqual(r.id, '0b6f1c2e-1111-4222-8333-944445555666');
+    assert.strictEqual(mk('?record=job:<script>').currentRecord(), null);
+    assert.strictEqual(mk('').currentRecord(), null);
+});
+
 test('jb.pages.update refuses without a version', async () => {
     const jb = loadSdk('/pages/x.html', []);
     await assert.rejects(jb.pages.update('x', { label: 'y' }), e => e.code === 'if_match_required');
