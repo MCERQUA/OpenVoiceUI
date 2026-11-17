@@ -528,8 +528,11 @@ class BizStore(PageRegistryMixin):
             now = utcnow()
             conn.execute('UPDATE records SET archived_at = ?, version = version + 1, updated_at = ?, '
                          'updated_by = ? WHERE id = ?', (now if archived else None, now, by, rid))
+            # host ruling P (rules 1.5.0): archiving and unarchiving are provenance events -- who did it (by) and
+            # where: stamped here, server-side only, when a person did it on the platform staff surface
             self._activity(conn, collection=collection, record_id=rid,
-                           type_='archived' if archived else 'unarchived', by=by, source=source)
+                           type_='archived' if archived else 'unarchived', by=by, source=source,
+                           diff={SURFACE_KEY: ['archived_at']} if surface and not agent else {'off_surface': True})
             row = conn.execute('SELECT * FROM records WHERE id = ?', (rid,)).fetchone()
         return self._row_to_record(row)
 

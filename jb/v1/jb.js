@@ -338,5 +338,33 @@
     }
   };
 
+  // Gate-3b/5 (L1, rules 1.5.0): every platform staff page carries a visible "Sign out" control. It ends the
+  // httpOnly staff cookie on the staff origin (POST <staff base>signout, same-origin) and returns to sign-in.
+  jb.staffSignOut = function () {
+    if (!SURFACE || !SURFACE.base) return Promise.resolve(false);
+    return fetch(SURFACE.base + 'signout', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Accept': 'application/json' } }).then(function () {
+      global.location.replace(SURFACE.base + 'signin');
+      return true;
+    });
+  };
+  if (SURFACE && SURFACE.base && global.document) {
+    var addSignOut = function () {
+      try {
+        if (global.document.getElementById('jb-staff-signout')) return;
+        var b = global.document.createElement('button');
+        b.id = 'jb-staff-signout';
+        b.type = 'button';
+        b.textContent = 'Sign out';
+        b.setAttribute('style', 'position:fixed;top:8px;right:8px;z-index:50;min-height:44px;padding:0 14px;' +
+          'border-radius:8px;border:1px solid #94a3b8;background:#fff;color:#0f172a;font:inherit;cursor:pointer');
+        b.addEventListener('click', function () { jb.staffSignOut(); });
+        global.document.body.appendChild(b);
+      } catch (e) { /* no DOM */ }
+    };
+    if (global.document.readyState === 'loading') global.document.addEventListener('DOMContentLoaded', addSignOut);
+    else addSignOut();
+  }
+
   global.jb = jb;
 })(typeof window !== 'undefined' ? window : this);

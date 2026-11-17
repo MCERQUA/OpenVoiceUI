@@ -63,6 +63,7 @@ th{color:var(--muted);font-weight:600} .scroll{overflow-x:auto;border:1px solid 
 <div><label for="pai">Additional insured box</label><select id="pai"><option value="">Not shown</option><option value="1">Checked</option><option value="0">Not checked</option></select></div>
 <div><label for="ppn">Producer</label><input id="ppn"></div><div><label for="ppp">Producer phone</label><input id="ppp"></div><div><label for="ppe">Producer email</label><input id="ppe" type="email"></div>
 <div><label for="pd">Certificate document</label><select id="pd"></select></div>
+<div><label for="pcca">Are we (the agency) this policy's producer?</label><select id="pcca" required><option value="">Choose</option><option value="0">No, another agency</option><option value="1">Yes, we are the producer</option></select></div>
 </div><p><button type="submit">Add reading</button></p></form>
 <p class="disclaimer">Evidence check against the requirement set you approved. Not a coverage opinion or legal advice.
 Readings count only after staff confirm them against the stored document. Nothing on this page sends, holds or pays anything by itself.</p>
@@ -171,6 +172,14 @@ Readings count only after staff confirm them against the stored document. Nothin
         box.appendChild(el('h2', {}, [(p.data.line || '').toUpperCase() + ' ' + (p.data.policy_number || ''), ' ',
           cur.length ? U.chip('meets', 'confirmed at this version by ' + cur.length) : U.chip('cant_tell', 'not confirmed'),
           p.source && p.source.channel !== 'manual' && p.updated_by.indexOf('agent:') === 0 ? el('span', {'class': 'muted', text: ' proposed by the agent'}) : null]));
+        // host ruling C: whether we are the producer is said by staff, here, never by the agent's proposal
+        var cca = p.data.producer_is_cca;
+        box.appendChild(el('p', {'class': 'row'}, [
+          cca === true ? U.chip('expiring_30', 'We are the producer: two different staff must confirm') : cca === false ? U.chip('NA', 'Another agency is the producer') : U.chip('cant_tell', 'Producer not stated by staff'),
+          el('button', {type: 'button', 'class': 'ghost', text: 'We are the producer', on: {click: function () {
+            jb.update('crt_policy', p.id, {producer_is_cca: true}, p.version).then(load).catch(U.fail); }}}),
+          el('button', {type: 'button', 'class': 'ghost', text: 'Another agency is the producer', on: {click: function () {
+            jb.update('crt_policy', p.id, {producer_is_cca: false}, p.version).then(load).catch(U.fail); }}})]));
         box.appendChild(confirmBox('crt_policy', p, POLICY_FIELDS, p.data.source_document_id));
       });
       r[2].records.filter(function (e) { return pids.indexOf(e.data.crt_policy_id) >= 0; }).forEach(function (e) {
@@ -223,6 +232,7 @@ Readings count only after staff confirm them against the stored document. Nothin
       limits: limits, named_insured: v('pni') || undefined, certificate_holder: v('pch') || undefined,
       addl_insd: v('pai') === '' ? undefined : v('pai') === '1', producer_name: v('ppn') || undefined,
       producer_phone: v('ppp') || undefined, producer_email: v('ppe') || undefined, source_document_id: v('pd') || undefined,
+      producer_is_cca: v('pcca') === '' ? undefined : v('pcca') === '1',
       exclusions: Array.prototype.map.call(document.getElementById('pex').selectedOptions, function (o) { return o.value; })})
       .then(function () { ev.target.reset(); U.say('Reading added: confirm it above', true); return load(); }).catch(U.fail);
   });

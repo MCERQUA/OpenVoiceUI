@@ -24,6 +24,7 @@ Nothing here sends, holds or pays anything. hold_suggested is advice; the stored
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unicodedata
@@ -34,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.4.0'
+RULE_VERSION = 'crt-rules-1.5.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -61,7 +62,7 @@ PAGES_DIR = TEMPLATES_PATH.parent / 'pages'
 EVIDENCE = {'crt_policy', 'crt_endorsement'}
 PROJECT_CONTRACT_FIELDS = ('contract_requires_ai', 'contract_ai_parties')
 CONFIRMABLE = {'crt_policy', 'crt_endorsement', 'crt_project', 'contact', 'crt_account_party', 'crt_assignment',
-               'document'}
+               'document', 'company'}      # company (rules 1.5.0, ruling P/C): staff re-vouch the agency record
 # what makes a document "this sub's paper": a person wrote or confirmed each of these (rulings N2, L3)
 DOC_IDENTITY_FIELDS = ('kind', 'crt_account_id', 'contact_id', 'file_url')
 POLICY_BASE_FIELDS = ('line', 'policy_number', 'effective', 'expiration', 'limits', 'named_insured', 'addl_insd',
@@ -123,6 +124,14 @@ ISO_FORM_FUNCTION = {'CG2010': 'ai_ongoing', 'CG2033': 'ai_ongoing', 'CG2038': '
                      'CG2545': 'completed_ops_aggregate', 'CG2404': 'waiver_of_subrogation'}
 # Host ruling R3: CG 20 10 never satisfies completed operations, by any route (set, manuscript flag, waiver).
 NEVER_COMPLETED_OPS = ('CG2010',)
+# Host ruling F (rules 1.5.0): a built-in safety floor no requirement set can loosen. A built-in ISO number keeps its
+# own ISO category (CG 20 10 / 20 33 / 20 38 are ongoing operations only; completed operations needs CG 20 37 or a
+# form the set's table lists as completed operations), and an endorsement item's form list is never empty. Checked
+# at every set write, at approval, and again at every verdict (a stored set that breaks it reads Can't tell).
+ISO_FLOOR = dict(ISO_FORM_FUNCTION)
+# Other ISO additional-insured numbers a set might list, that are never completed operations (re-check #5 F2):
+# CG 20 26 (designated person or organization) and CG 20 11 (managers or lessors of premises).
+ISO_NOT_COMPLETED = ('CG2026', 'CG2011')
 FORM_FUNCTIONS = ('ai_ongoing', 'ai_completed', 'pnc', 'project_aggregate', 'completed_ops_aggregate',
                   'waiver_of_subrogation')
 _MONTHS = {m: i for i, m in enumerate(('JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT',
@@ -314,14 +323,64 @@ def validate_form_functions(ff):
         if form_key(k) in NEVER_COMPLETED_OPS and v == 'ai_completed':
             raise _err(422, 'cg2010_never_completed_ops', 'CG 20 10 covers ongoing operations only; it never '
                                                           'satisfies completed operations (host ruling R3)')
+        if form_key(k) in ISO_NOT_COMPLETED and v == 'ai_completed':
+            raise _err(422, 'iso_form_floor', f'{k} is an ISO form that never covers completed operations (host '
+                                              'ruling F safety floor)', form=str(k)[:30])
+        if form_key(k) in ISO_FLOOR and v != ISO_FLOOR[form_key(k)]:
+            raise _err(422, 'iso_form_floor', f'{k} is an ISO {ISO_FLOOR[form_key(k)]} form; no requirement set can '
+                                              'map it to another kind of coverage (host ruling F safety floor)',
+                       form=str(k)[:30], iso_function=ISO_FLOOR[form_key(k)])
 
 
 def set_form_functions(set_data) -> dict:
-    """{form key: function} the set uses: its own approved table, else the built-in default."""
+    """{form key: function} the set uses: its own approved table, else the built-in default. A built-in ISO number
+    always keeps its ISO category (host ruling F floor), whatever a stored table says."""
     ff = (set_data or {}).get('form_functions')
-    if isinstance(ff, dict) and ff:
-        return {form_key(k): v for k, v in ff.items() if isinstance(k, str)}
-    return dict(ISO_FORM_FUNCTION)
+    out = {form_key(k): v for k, v in ff.items() if isinstance(k, str)} if isinstance(ff, dict) and ff else {}
+    out.update(ISO_FLOOR)
+    return out
+
+
+def floor_violations(set_data) -> list:
+    """Why a set breaks the built-in safety floor (host ruling F), [] when it does not. Pure; also used at verdict
+    time, so a set stored before rules 1.5.0 (or written around the API) reads Can't tell, never loosens the floor."""
+    d = set_data or {}
+    out = []
+    ff = d.get('form_functions')
+    table = {}
+    if isinstance(ff, dict):
+        for k, v in ff.items():
+            fk = form_key(k)
+            if fk in ISO_FLOOR and v != ISO_FLOOR[fk]:
+                out.append(f'form_functions maps {k} to {v}; it is ISO {ISO_FLOOR[fk]}')
+            if fk in ISO_NOT_COMPLETED and v == 'ai_completed':
+                out.append(f'form_functions maps {k} to completed operations; it never is')
+            table[fk] = v
+    elif ff is not None:
+        out.append('form_functions is not a table')
+    for it in d.get('items') or []:
+        if not isinstance(it, dict) or it.get('kind') != 'endorsement':
+            continue
+        fn, forms = it.get('function'), it.get('forms')
+        if not isinstance(forms, list) or not [f for f in forms if isinstance(f, str) and form_key(f)]:
+            out.append(f"item {it.get('id')}: its form list is empty")
+            continue
+        for f in forms:
+            fk = form_key(f)
+            if fk in ISO_FLOOR and ISO_FLOOR[fk] != fn:
+                out.append(f"item {it.get('id')} ({fn}) lists {f}, an ISO {ISO_FLOOR[fk]} form")
+            elif fn == 'ai_completed' and fk not in ISO_FLOOR and table.get(fk) != 'ai_completed':
+                out.append(f"item {it.get('id')} (completed operations) lists {f}, which the set's table does not "
+                           'list as a completed-operations form')
+    return out
+
+
+def validate_floor(items, form_functions):
+    """422 when a set's items + table would loosen the built-in safety floor (host ruling F)."""
+    bad = floor_violations({'items': items, 'form_functions': form_functions})
+    if bad:
+        raise _err(422, 'safety_floor', 'This requirement set would loosen the built-in safety floor: '
+                   + '; '.join(bad[:5]) + ' (host ruling F)', reasons=bad[:20])
 
 
 def load_templates() -> dict:
@@ -364,6 +423,10 @@ def validate_items(items, trade_category=None) -> list:
             if forms is not None and (not isinstance(forms, list) or not all(isinstance(f, str) and form_key(f)
                                                                              for f in forms)):
                 raise _err(422, 'bad_requirement_items', 'forms lists the accepted form numbers, e.g. ["CG 20 37"]',
+                           item=iid)
+            if not forms:                       # host ruling F floor: never an empty form list
+                raise _err(422, 'forms_required', 'An endorsement item lists the form numbers it accepts, e.g. '
+                                                  '["CG 20 37"]; an empty list is never allowed (host ruling F)',
                            item=iid)
             if it.get('function') == 'ai_completed' and any(form_key(f) in NEVER_COMPLETED_OPS for f in forms or []):
                 raise _err(422, 'cg2010_never_completed_ops', 'CG 20 10 covers ongoing operations only; it never '
@@ -460,18 +523,36 @@ def gather(store, assignment_id) -> dict:
                     break
                 seen.add(cur)
                 cur = parent.get(cur)
+    # every record of the verdict's scope, archived ones too: an archive or unarchive is a provenance event
+    # (host ruling P, rules 1.5.0): one not made by a person on the staff surface reads Can't tell until staff
+    # vouch for the record again on the staff surface
+    scope = {}                                   # id -> (collection, record)
     if account_id and party_id:
-        inputs['policies'] = _all(store, 'crt_policy', {'party_contact_id': party_id, 'crt_account_id': account_id})
+        all_pols = _all(store, 'crt_policy', {'party_contact_id': party_id, 'crt_account_id': account_id},
+                        archived=True)
+        inputs['policies'] = [p for p in all_pols if not p['archived_at']]
+        all_pids = [p['id'] for p in all_pols]
         pids = [p['id'] for p in inputs['policies']]
-        if pids:
-            inputs['endorsements'] = [e for e in _all(store, 'crt_endorsement', {'crt_account_id': account_id})
-                                      if e['data'].get('crt_policy_id') in pids]
+        all_ends = [e for e in _all(store, 'crt_endorsement', {'crt_account_id': account_id}, archived=True)
+                    if e['data'].get('crt_policy_id') in all_pids] if all_pids else []
+        inputs['endorsements'] = [e for e in all_ends if not e['archived_at'] and e['data'].get('crt_policy_id') in pids]
+        for coll, recs in (('crt_policy', all_pols), ('crt_endorsement', all_ends),
+                           ('crt_account_party', [r for r in _all(store, 'crt_account_party',
+                                                                   {'party_contact_id': party_id}, archived=True)
+                                                  if r['data'].get('crt_account_id') == account_id])):
+            for r in recs:
+                scope[r['id']] = (coll, r)
+    for coll, r in (('crt_assignment', asg), ('crt_project', project), ('contact', inputs['account']),
+                    ('contact', inputs['party']), ('crt_requirement_set', inputs['set']), ('company', inputs['company'])):
+        if r:
+            scope[r['id']] = (coll, r)
     record_ids = [r['id'] for r in inputs['policies'] + inputs['endorsements']]
     for k in ('project', 'account', 'party', 'set', 'assignment'):
         if inputs[k]:
             record_ids.append(inputs[k]['id'])
     record_ids += [r['id'] for r in inputs['links']]
     record_ids += [r['id'] for r in inputs['newer_sets']]
+    record_ids += [rid for rid in scope if rid not in record_ids]
     for i in range(0, len(record_ids), 200):
         inputs['confirmations'] += _all(store, 'crt_confirmation', {'record_id': {'$in': record_ids[i:i + 200]}})
     doc_ids = set()
@@ -487,13 +568,16 @@ def gather(store, assignment_id) -> dict:
         doc_ids.add(project['data'].get('contract_document_id'))
     for did in filter(None, doc_ids):
         doc = _get(store, 'document', did)
+        if doc:
+            scope[doc['id']] = ('document', doc)
         if doc and not doc['archived_at']:
             inputs['documents'][did] = doc
             fid = _file_id(doc)
             if fid and fid not in inputs['files_ok']:
                 inputs['files_ok'][fid] = store.file_verified(fid)
-    # a person's confirmation of a document's kind / account / sub / file (rulings N2, L3)
-    dids = sorted(inputs['documents'])
+    # a person's confirmation of a document's kind / account / sub / file (rulings N2, L3), and of any document
+    # in scope (an archived one staff vouch for again, ruling P)
+    dids = sorted(set(inputs['documents']) | {rid for rid, (c, _r) in scope.items() if c == 'document'})
     for i in range(0, len(dids), 200):
         inputs['confirmations'] += _all(store, 'crt_confirmation', {'record_id': {'$in': dids[i:i + 200]}})
     # every certificate file on this sub-for-this-account: an endorsement document is never one of them (N2)
@@ -508,10 +592,20 @@ def gather(store, assignment_id) -> dict:
     # per-field provenance of every set-up record and document the verdict reads (ruling N1)
     for coll, recs in (('crt_assignment', [asg]), ('crt_project', [project]), ('company', [inputs['company']]),
                        ('contact', [inputs['account'], inputs['party']]),
-                       ('crt_account_party', inputs['links']), ('document', list(inputs['documents'].values()))):
+                       ('crt_account_party', inputs['links']), ('document', list(inputs['documents'].values())),
+                       ('crt_policy', inputs['policies'])):
         for r in recs:
             if r:
                 inputs['writers'][r['id']] = _writers(store, coll, r)
+    # ruling P: the last archive / unarchive of each record in scope, with who made it and where
+    inputs['toggles'] = {}
+    for rid, (coll, r) in scope.items():
+        try:
+            evs = [ev for ev in store.timeline(coll, rid) if ev.get('type') in ('archived', 'unarchived')]
+        except SchemaError:
+            continue
+        if evs:
+            inputs['toggles'][rid] = {'collection': coll, 'record': r, 'event': evs[-1]}
     return inputs
 
 
@@ -567,6 +661,9 @@ class _Confirmed:
         d = c['data']
         if d.get('record_collection') != collection or d.get('record_version') != rec['version']:
             return False
+        # host ruling C (rules 1.5.0): a confirmation counts only when a person made it on the staff surface
+        if d.get('on_staff_surface') is not True or not is_person(d.get('confirmed_by')):
+            return False
         if field not in (d.get('fields') or []):
             return False
         if need_source:
@@ -584,11 +681,16 @@ class _Confirmed:
         if person_ok and self.person_wrote(rec, field):
             return True
         hits = [c for c in self.by_record.get(rec['id'], []) if self._valid(c, rec, collection, field, need_source)]
-        people = {c['data'].get('confirmed_by') or c['created_by'] for c in hits}
+        people = {c['data'].get('confirmed_by') for c in hits}
         if not hits or (two and len(people) < 2):
             return False
         self.used.update(c['id'] for c in hits)
         return True
+
+    def revouched(self, rec) -> bool:
+        """Staff vouched for this record on the staff surface at its CURRENT version (any confirmation)."""
+        return any(c['data'].get('record_version') == rec['version'] and c['data'].get('on_staff_surface') is True
+                   and is_person(c['data'].get('confirmed_by')) for c in self.by_record.get(rec['id'], []))
 
 
 def evaluate_inputs(inputs: dict, today: date) -> dict:
@@ -626,6 +728,11 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             unc('crt_requirement_set', 'status')
         items = s_rec['data'].get('items') or []
     form_fn = set_form_functions((s_rec or {}).get('data'))
+    # host ruling F: a stored set that breaks the safety floor (written before rules 1.5.0, or around the API) is
+    # never read as loosening it
+    for why in (floor_violations(s_rec['data']) if s_rec else []):
+        unc('crt_requirement_set', 'items')
+        notes.append(f'requirement set below the safety floor: {why}')
     if not project:
         unc('crt_assignment', 'crt_project_id')
     account, party = inputs['account'], inputs['party']
@@ -634,10 +741,23 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         unc('crt_account_party', 'status')
     else:
         # the link itself: each field a person wrote or confirmed (ruling N1); report the closest link's gaps
-        gaps = min(([f for f in LINK_FIELDS if not conf.ok(ln, 'crt_account_party', f, need_source=False, person_ok=True)]
-                    for ln in active), key=len)
-        for f in gaps:
-            unc('crt_account_party', f)
+        # rules 1.5.0: EVERY active link for this pair is read, so an extra link nobody vouched for reads Can't tell
+        for ln in active:
+            for f in LINK_FIELDS:
+                if not conf.ok(ln, 'crt_account_party', f, need_source=False, person_ok=True):
+                    unc('crt_account_party', f)
+    # host ruling P (rules 1.5.0): archiving or unarchiving a record the verdict reads is a provenance event. One not
+    # made by a person on the staff surface (the agent key, a canvas page) reads Can't tell -- never a skipped
+    # check, never the record silently counting again -- until staff vouch for the record again on the staff
+    # surface (a staff-surface archive / unarchive, or a staff confirmation at its current version).
+    for rid, t in sorted((inputs.get('toggles') or {}).items()):
+        ev = t['event']
+        if is_person(ev.get('by')) and SURFACE_KEY in (ev.get('diff') or {}):
+            continue
+        if conf.revouched(t['record']):
+            continue
+        unc(t['collection'], 'archived_at')
+        notes.append(f"{t['collection']} {rid} was {ev.get('type')} off the staff surface; staff check it again")
 
     pd = (project or {}).get('data', {})
     # set-up fields a person types: each one person-written, or confirmed (ruling N1)
@@ -676,18 +796,22 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
 
     company_name = inputs.get('company_name')
     company_rec = inputs.get('company')
-    # R1 guard redesign: the agency's own name counts only when a person wrote it on the staff surface. Unvouched
-    # (an agent or canvas-page write), a policy naming a producer cannot be told apart from the agency's own,
-    # so it is Can't tell rather than silently dropping the two-person rule for the agency's own policies.
-    company_vouched = company_rec is None or conf.person_wrote(company_rec, 'name')
+    # Host ruling C (rules 1.5.0): the two-person rule fails CLOSED. The agency's own record must exist, be live and
+    # carry a name a person wrote (or confirmed) on the staff surface; the policy's producer_is_cca must be present
+    # and written by a person on the staff surface (it is a staff-only field). Anything else is Can't tell, and the
+    # policy is read as the agency's own (two confirmers), never silently as someone else's.
+    company_vouched = bool(company_rec and not company_rec['archived_at'] and company_name and
+                           conf.ok(company_rec, 'company', 'name', need_source=False, person_ok=True))
 
     def is_cca(pol):
-        if pol['data'].get('producer_is_cca'):
-            return True
-        if not company_name:
-            return False
-        if not company_vouched and pol['data'].get('producer_name'):
+        if not company_vouched:
             unc('company', 'name')
+            return True
+        flag = pol['data'].get('producer_is_cca')
+        if not isinstance(flag, bool) or not conf.person_wrote(pol, 'producer_is_cca'):
+            unc('crt_policy', 'producer_is_cca')
+            return True
+        if flag:
             return True
         return names_match(company_name, [pol['data'].get('producer_name')])
 
@@ -889,110 +1013,108 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 cells[iid] = code
                 continue
             two = is_cca(pol)
-            good, item_codes = False, []
+            # Host ruling E (rules 1.5.0): EVERY check runs on EVERY endorsement and each one's codes are kept in
+            # full. No finding (an edition, a pre-2004 form, a naming miss, anything) stops the later checks, so a
+            # waiver of one code can never stand in for another check that was never computed.
+            per_end = []
             for e in ends:
-                bad = [f for f in ENDORSEMENT_FIELDS if not conf.ok(e, 'crt_endorsement', f, two=two)]
-                if bad:
-                    for f in bad:
-                        unc('crt_endorsement', f)
-                    item_codes.append('UNCONFIRMED')
-                    continue
+                ecodes = []
+
+                def ec(code, _ecodes=ecodes):
+                    if code not in _ecodes:
+                        _ecodes.append(code)
+                for f in ENDORSEMENT_FIELDS:
+                    if not conf.ok(e, 'crt_endorsement', f, two=two):
+                        ec(f'UNCONFIRMED:crt_endorsement.{f}')
                 e_doc = e['data'].get('document_id')
                 e_state = conf.doc_check(e_doc, kind='endorsement')
                 if e_state == 'unconfirmed':                # an agent's "endorsement" label alone never counts (N2)
                     for c in conf.doc_codes.get(e_doc, []):
-                        _add(unconfirmed, c)
-                    item_codes.append('UNCONFIRMED')
-                    continue
-                if e_state or e_doc == pol['data'].get('source_document_id') or \
+                        ec(c)
+                elif e_state or e_doc == pol['data'].get('source_document_id') or \
                         _file_id(inputs['documents'].get(e_doc)) in inputs.get('cert_files', ()):
-                    item_codes.append(f'MISSING:{fn}')      # the certificate is a summary; the endorsement is the proof
-                    continue
+                    ec(f'MISSING:{fn}')                     # the certificate is a summary; the endorsement is the proof
                 # host ruling H3: the form number staff confirmed must be one the item accepts; a known ISO form
                 # for another purpose is not this endorsement at all.
                 # R3 (rules 1.4.0): CG 20 10 never satisfies completed operations, by any route; a LISTED ISO form
                 # number (the set's table or the built-in one) is never read as manuscript, whatever the flag says;
                 # a manuscript form satisfies completed ops only when staff confirmed its explicit completed-
                 # operations wording (a person's confirmation, made only on the staff surface).
+                # F (rules 1.5.0): the item's own form list is the only list (never empty); a built-in ISO number
+                # always keeps its ISO category.
                 fk = form_key(e['data'].get('form'))
                 if fn == 'ai_completed' and fk in NEVER_COMPLETED_OPS:
-                    item_codes.append(f'MISSING:{fn}')
-                    continue
-                listed_iso = fk in form_fn or fk in ISO_FORM_FUNCTION
-                if e['data'].get('manuscript') is not True or listed_iso:
+                    ec(f'MISSING:{fn}')
+                elif e['data'].get('manuscript') is not True or fk in form_fn:
                     accepted = {form_key(f) for f in it.get('forms') or []}
-                    if not accepted and form_fn.get(fk) == fn:
-                        accepted = {fk}
                     if fk not in accepted:
-                        if form_fn.get(fk, ISO_FORM_FUNCTION.get(fk)) not in (None, fn):
-                            item_codes.append(f'MISSING:{fn}')
+                        if form_fn.get(fk) not in (None, fn):
+                            ec(f'MISSING:{fn}')
                         else:
-                            unc('crt_endorsement', 'form')
+                            ec('UNCONFIRMED:crt_endorsement.form')
                             notes.append(f"{iid}: form {e['data'].get('form') or '(blank)'} is not a listed form "
                                          'for this item; list the equivalent in the requirement set or confirm '
                                          'it as a manuscript form')
-                            item_codes.append('UNCONFIRMED')
-                        continue
                 elif fn == 'ai_completed' and not (e['data'].get('completed_ops_wording') is True and
                                                    conf.ok(e, 'crt_endorsement', 'completed_ops_wording', two=two)):
-                    unc('crt_endorsement', 'completed_ops_wording')
+                    ec('UNCONFIRMED:crt_endorsement.completed_ops_wording')
                     notes.append(f'{iid}: a manuscript endorsement counts for completed operations only when staff '
                                  'confirm its explicit completed-operations wording')
-                    item_codes.append('UNCONFIRMED')
-                    continue
                 ed_year = _edition_year(e['data'].get('edition'))
-                if ed_year is None:                     # MED ruling: an empty or unreadable edition is no pass
-                    unc('crt_endorsement', 'edition')
-                    item_codes.append('UNCONFIRMED')
-                    continue
-                if ed_year < 2004:
-                    item_codes.append(f'WRONG_FORM:{fn}')
-                    continue
-                # LOW ruling (rules 1.4.0): the set's edition for this item is a requirement, not a note
                 want_ed = _edition_key(it.get('edition')) if it.get('edition') else None
-                if want_ed and _edition_key(e['data'].get('edition')) != want_ed:
-                    item_codes.append(f'WRONG_EDITION:{fn}')
-                    continue
+                if ed_year is None:                     # MED ruling: an empty or unreadable edition is no pass
+                    ec('UNCONFIRMED:crt_endorsement.edition')
+                else:
+                    if ed_year < 2004:
+                        ec(f'WRONG_FORM:{fn}')
+                    # LOW ruling (rules 1.4.0): the set's edition for this item is a requirement, not a note
+                    if want_ed and _edition_key(e['data'].get('edition')) != want_ed:
+                        ec(f'WRONG_EDITION:{fn}')
                 if fn in AI_FUNCTIONS or it.get('names_parties'):
                     if e['data'].get('blanket'):
                         cr, cr_ok = (pd.get('contract_requires_ai'),
                                      project and conf.ok(project, 'crt_project', 'contract_requires_ai'))
                         if not cr_ok:
-                            unc('crt_project', 'contract_requires_ai')
-                            item_codes.append('UNCONFIRMED')
-                            continue
-                        if cr is not True:
-                            item_codes.append('BLANKET_UNBACKED')
-                            continue
+                            ec('UNCONFIRMED:crt_project.contract_requires_ai')
+                        elif cr is not True:
+                            ec('BLANKET_UNBACKED')
                     else:
-                        parties_ok = project and conf.ok(project, 'crt_project', 'contract_ai_parties')
-                        if not parties_ok:
-                            unc('crt_project', 'contract_ai_parties')
-                            item_codes.append('UNCONFIRMED')
-                            continue
-                        pname, pn_ok = proj('name')
-                        if not acct_name or not pn_ok:
-                            item_codes.append('UNCONFIRMED')
-                            continue
+                        if not (project and conf.ok(project, 'crt_project', 'contract_ai_parties')):
+                            ec('UNCONFIRMED:crt_project.contract_ai_parties')
+                        pname = pd.get('name')
+                        if not (project and conf.ok(project, 'crt_project', 'name', need_source=False,
+                                                    person_ok=True)):
+                            ec('UNCONFIRMED:crt_project.name')
+                        if not acct_name:
+                            ec('UNCONFIRMED:contact.name')
                         sched = e['data'].get('scheduled_names') or []
                         wanted = [acct_name] + list(pd.get('contract_ai_parties') or [])
-                        if not all(names_equal(w, sched) for w in wanted):     # N8: exact, like M3
-                            item_codes.append('WRONG_PARTY')
-                            continue
-                        if not names_equal(pname, e['data'].get('scheduled_projects') or []):   # host ruling (a): exact
-                            item_codes.append('WRONG_PROJECT')
-                            continue
-                good = True
-                break
-            if good:
-                cells[iid] = 'OK'
+                        if not all(names_equal(w, sched) for w in wanted if w):     # N8: exact, like M3
+                            ec('WRONG_PARTY')
+                        if not names_equal(pname, e['data'].get('scheduled_projects') or []):   # ruling (a): exact
+                            ec('WRONG_PROJECT')
+                per_end.append(ecodes)
+            if any(not c for c in per_end):
+                # one endorsement carries no code at all; an endorsement on the same item that nobody has checked
+                # still reads Can't tell (rules 1.5.0: every check runs, Can't tell is never hidden). Variances on
+                # another paper (another project's endorsement for this sub) do not count against this one.
+                pending = [c for cs in per_end for c in cs if c.startswith('UNCONFIRMED')]
+                if pending:
+                    for c in pending:
+                        _add(unconfirmed, c)
+                    cells[iid] = 'UNCONFIRMED'
+                else:
+                    cells[iid] = 'OK'
                 continue
-            if 'UNCONFIRMED' in item_codes:
-                cells[iid] = 'UNCONFIRMED'
-                continue
-            code = item_codes[0]
-            _add(missing if code == f'MISSING:{fn}' else variances, code)
-            cells[iid] = code
+            first = None
+            for cs in per_end:
+                for c in cs:
+                    if c.startswith('UNCONFIRMED'):
+                        _add(unconfirmed, c)
+                    else:
+                        _add(missing if c == f'MISSING:{fn}' else variances, c)
+                        first = first or c
+            cells[iid] = 'UNCONFIRMED' if any(c.startswith('UNCONFIRMED') for cs in per_end for c in cs) else first
         else:
             cells[iid] = 'N/A'
 
@@ -1149,9 +1271,15 @@ def check_write(store, op, collection, data, current, *, by, agent, via_pack):
                                               '(POST /api/biz/v1/crt/confirm or /crt/assignment/<id>/review)')
         return
     if collection == 'crt_requirement_set':
+        if agent and op in ('edit', 'archive', 'unarchive'):
+            raise _err(403, 'set_change_staff_only', 'The agent only drafts requirement sets (from a template or as '
+                                                     'a revision, POST /api/biz/v1/crt/requirement-sets/<id>/revise); '
+                                                     'editing, archiving and unarchiving a set happen on the staff '
+                                                     'pages (host ruling F)')
         if op in ('create', 'edit'):
             validate_items(data.get('items'), data.get('trade_category'))
             validate_form_functions(data.get('form_functions'))
+            validate_floor(data.get('items'), data.get('form_functions'))
             was = (current or {}).get('data', {}).get('status')
             if data.get('status') == 'APPROVED' and was != 'APPROVED' and not via_pack:
                 raise _err(409, 'use_approve_route', 'A requirement set is approved only through '
@@ -1212,6 +1340,61 @@ def check_write(store, op, collection, data, current, *, by, agent, via_pack):
         return
 
 
+# ── requirement-set diff (host ruling F: the approval page shows all of it) ─
+DIFF_ITEM_FIELDS = ('kind', 'line', 'function', 'required', 'forms', 'edition', 'limit', 'min', 'floor', 'ceiling',
+                    'combined', 'trade_categories', 'classes', 'code', 'names_parties', 'suggested_when',
+                    'tail_required', 'when_trade')
+
+
+def set_diff(store, rec) -> dict:
+    """The full difference between a requirement set and the version it would replace: the set it revises
+    (`supersedes`, the version assignments pin today), else the template it was drafted from. Every item is listed
+    with its form list, edition, trades and exclusion classes, then and now; the form-equivalence table is listed
+    whole, then and now. Pure read; `sha256` binds an approval to exactly what the page showed."""
+    d = rec['data']
+    base, against = None, None
+    if d.get('supersedes'):
+        prev = _get(store, 'crt_requirement_set', d['supersedes'])
+        if prev:
+            base = prev['data']
+            against = {'kind': 'set', 'id': prev['id'], 'set_version': prev['data'].get('set_version'),
+                       'record_version': prev['version'], 'status': prev['data'].get('status')}
+    if base is None and d.get('template_key'):
+        tpls = load_templates()
+        tpl = next((t for t in tpls['templates'] if t['key'] == d['template_key']), None)
+        if tpl:
+            base = {'items': tpl['items'], 'trade_category': tpl['trade_category'],
+                    'form_functions': tpls.get('form_functions')}
+            against = {'kind': 'template', 'template_key': d['template_key']}
+    base = base or {}
+
+    def view(it):
+        return {k: it.get(k) for k in DIFF_ITEM_FIELDS if it.get(k) is not None}
+    was = {it.get('id'): it for it in base.get('items') or [] if isinstance(it, dict)}
+    now = {it.get('id'): it for it in d.get('items') or [] if isinstance(it, dict)}
+    items = []
+    for iid in list(now) + [i for i in was if i not in now]:
+        a, b = was.get(iid), now.get(iid)
+        va, vb = (view(a) if a else None), (view(b) if b else None)
+        change = 'added' if a is None else 'removed' if b is None else ('same' if va == vb else 'changed')
+        items.append({'id': iid, 'change': change, 'was': va, 'now': vb,
+                      'changed_fields': sorted(k for k in set(va or {}) | set(vb or {})
+                                               if (va or {}).get(k) != (vb or {}).get(k)) if change == 'changed' else []})
+    ffa = base.get('form_functions') if isinstance(base.get('form_functions'), dict) else {}
+    ffb = d.get('form_functions') if isinstance(d.get('form_functions'), dict) else {}
+    table = {'was': ffa, 'now': ffb,
+             'added': {k: ffb[k] for k in ffb if k not in ffa},
+             'removed': {k: ffa[k] for k in ffa if k not in ffb},
+             'changed': {k: [ffa[k], ffb[k]] for k in ffb if k in ffa and ffa[k] != ffb[k]}}
+    out = {'set_id': rec['id'], 'record_version': rec['version'], 'set_version': d.get('set_version'),
+           'against': against, 'items': items, 'form_functions': table,
+           'trade_category': {'was': base.get('trade_category'), 'now': d.get('trade_category')},
+           'name': {'was': base.get('name'), 'now': d.get('name')}, 'notes': d.get('notes'),
+           'floor_violations': floor_violations(d)}
+    out['sha256'] = hashlib.sha256(json.dumps(out, sort_keys=True, default=str).encode()).hexdigest()
+    return out
+
+
 # ── routes (contract: services/biz/packs/__init__.py) ──────────────────────
 def register_routes(bp, api, ctx):
     from flask import jsonify, request
@@ -1261,6 +1444,7 @@ def register_routes(bp, api, ctx):
         if tpl is None:
             raise _err(404, 'unknown_template', 'No such template', template_key=str(key)[:40])
         warnings = validate_items(tpl['items'], tpl['trade_category'])
+        validate_floor(tpl['items'], load_templates().get('form_functions'))
         rec = ctx.store().create('crt_requirement_set', {
             'name': str(body.get('name') or tpl['name'])[:200], 'trade_category': tpl['trade_category'],
             'template_key': key, 'items': tpl['items'], 'guide_cites': tpl.get('guide_cites') or [],
@@ -1279,16 +1463,28 @@ def register_routes(bp, api, ctx):
         rec = store.get('crt_requirement_set', sid)
         warnings = validate_items(rec['data'].get('items'), rec['data'].get('trade_category'))
         validate_form_functions(rec['data'].get('form_functions'))
+        validate_floor(rec['data'].get('items'), rec['data'].get('form_functions'))
+        # host ruling F: staff approve what the page showed them -- the full diff against the version it replaces.
+        # The page sends the diff's sha256; a set that changed since (or a diff never fetched) is refused.
+        diff = set_diff(store, rec)
+        shown = ctx.body().get('diff_sha256')
+        if shown is not None and shown != diff['sha256']:
+            raise _err(409, 'diff_changed', 'The requirement set changed since the page showed its changes; reload '
+                                            'and review the changes again', diff=diff)
         if rec['data'].get('status') != 'APPROVED':
             rec = store.update('crt_requirement_set', sid, {'status': 'APPROVED'}, expected_version=rec['version'],
                                by=ctx.by(), agent=False, via_pack=True, surface=ctx.surface())
         conf = store.create('crt_confirmation', {
             'record_collection': 'crt_requirement_set', 'record_id': sid, 'record_version': rec['version'],
             'fields': ['items', 'status'] + (['form_functions'] if rec['data'].get('form_functions') else []),
-            'confirmed_by': ctx.by(),
+            'confirmed_by': ctx.by(), 'on_staff_surface': ctx.surface(), 'approved_diff_sha256': diff['sha256'],
             'note': str(ctx.body().get('note') or 'approved for use')[:500]},
             by=ctx.by(), agent=False, via_pack=True, surface=ctx.surface())
-        return jsonify({'record': rec, 'confirmation': conf, 'warnings': warnings})
+        return jsonify({'record': rec, 'confirmation': conf, 'warnings': warnings, 'diff': diff})
+
+    @route('/requirement-sets/<sid>/diff', ['GET'], 'set_diff')
+    def set_diff_route(sid):
+        return jsonify(set_diff(ctx.store(), ctx.store().get('crt_requirement_set', sid)))
 
     @route('/requirement-sets/<sid>/revise', ['POST'], 'set_revise')
     def set_revise(sid):
@@ -1304,6 +1500,7 @@ def register_routes(bp, api, ctx):
         if body.get('name'):
             d['name'] = str(body['name'])[:200]
         warnings = validate_items(d.get('items'), d.get('trade_category'))
+        validate_floor(d.get('items'), d.get('form_functions'))
         d.pop('status', None)                   # a new version is a DRAFT until staff approve it
         d.update({'set_version': int(old['data'].get('set_version') or 1) + 1, 'supersedes': sid})
         rec = store.create('crt_requirement_set', d, by=ctx.by(), agent=ctx.is_agent(),
@@ -1348,6 +1545,7 @@ def register_routes(bp, api, ctx):
         rec2 = store.create('crt_confirmation', {
             'record_collection': coll, 'record_id': rid, 'record_version': rec['version'], 'fields': fields,
             'source_document_id': did, 'source_sha256': sha, 'confirmed_by': ctx.by(),
+            'on_staff_surface': ctx.surface(),
             'note': str(body.get('note'))[:500] if body.get('note') else None},
             by=ctx.by(), agent=False, via_pack=True, surface=ctx.surface())
         return jsonify(rec2), 201

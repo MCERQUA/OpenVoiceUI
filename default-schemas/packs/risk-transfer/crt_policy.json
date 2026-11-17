@@ -109,7 +109,8 @@
     },
     "producer_is_cca": {
       "type": "boolean",
-      "label": "We are the producer"
+      "label": "We are the producer (staff set this on the staff pages)",
+      "staff_only": true
     },
     "renewal_of": {
       "type": "ref",

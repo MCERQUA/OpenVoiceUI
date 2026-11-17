@@ -48,6 +48,15 @@
     "note": {
       "type": "text",
       "label": "Note"
+    },
+    "on_staff_surface": {
+      "type": "boolean",
+      "label": "Made on the staff surface (set by the server)"
+    },
+    "approved_diff_sha256": {
+      "type": "string",
+      "label": "Approved diff (sha256)",
+      "format": "sha256"
     }
   }
 }

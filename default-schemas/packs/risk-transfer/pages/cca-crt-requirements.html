@@ -103,6 +103,43 @@ Readings count only after staff confirm them against the stored document. Nothin
     if (it.kind === 'producer') return 'Producer contact complete';
     return it.kind;
   }
+  function val(v) {
+    if (v === undefined || v === null) return '-';
+    if (Array.isArray(v)) return v.length ? v.join(', ') : '(empty)';
+    if (typeof v === 'object') return Object.keys(v).map(function (k) { return k + ': ' + val(v[k]); }).join('; ');
+    return String(v);
+  }
+  function renderDiff(box, d) {
+    U.clear(box);
+    var a = d.against || {};
+    box.appendChild(el('h2', {text: 'Changes to review against ' + (a.kind === 'set' ? 'the version in use (v' + (a.set_version || '?') + ')' :
+      a.kind === 'template' ? 'the ' + a.template_key + ' template' : 'nothing (new set)')}));
+    if (d.floor_violations && d.floor_violations.length) {
+      box.appendChild(el('p', {}, [U.chip('bad', 'Below the safety floor'), ' ' + d.floor_violations.join('; ') + '. This set cannot be approved.']));
+    }
+    if (d.trade_category && d.trade_category.was !== d.trade_category.now) box.appendChild(el('p', {}, [U.chip('bad', 'Changed'), ' trade category: ' + val(d.trade_category.was) + ' -> ' + val(d.trade_category.now)]));
+    var rows = d.items.map(function (it) {
+      var w = it.was || {}, n = it.now || {};
+      function cell(k) {
+        var changed = it.changed_fields.indexOf(k) >= 0 || it.change === 'added' || it.change === 'removed';
+        return el('td', {}, [changed && it.change === 'changed' ? el('div', {'class': 'muted', text: 'was: ' + val(w[k])}) : null,
+          el('div', {}, [changed ? U.chip('bad', 'now') : null, ' ' + val(it.change === 'removed' ? w[k] : n[k])])]);
+      }
+      return el('tr', {}, [el('td', {}, [it.id + ' ', it.change === 'same' ? U.chip('NA', 'same') : U.chip('bad', it.change)]),
+        cell('function'), cell('required'), cell('forms'), cell('edition'), cell('trade_categories'), cell('classes'), cell('min')]);
+    });
+    box.appendChild(el('div', {'class': 'scroll'}, el('table', {}, [el('thead', {}, el('tr', {}, ['Item', 'Function', 'Required', 'Accepted forms', 'Edition', 'Trades', 'Exclusion classes', 'Minimum'].map(function (h) { return el('th', {text: h}); }))),
+      el('tbody', {}, rows)])));
+    var t = d.form_functions || {};
+    var keys = Object.keys(Object.assign({}, t.was || {}, t.now || {})).sort();
+    box.appendChild(el('h2', {text: 'Form equivalences (which form counts as which coverage)'}));
+    box.appendChild(el('div', {'class': 'scroll'}, el('table', {}, [el('thead', {}, el('tr', {}, ['Form', 'Was', 'Now', ''].map(function (h) { return el('th', {text: h}); }))),
+      el('tbody', {}, keys.map(function (k) {
+        var was = (t.was || {})[k], now = (t.now || {})[k];
+        return el('tr', {}, [el('td', {text: k}), el('td', {text: val(was)}), el('td', {text: val(now)}),
+          el('td', {}, was === now ? U.chip('NA', 'same') : U.chip('bad', was === undefined ? 'added' : now === undefined ? 'removed' : 'changed'))]);
+      }))])));
+  }
   function itemsList(items) {
     return el('ul', {}, items.map(function (it) { return el('li', {}, [itemText(it), it.cite ? el('span', {'class': 'muted', text: ' - ' + it.cite}) : null]); }));
   }
@@ -123,13 +160,26 @@ Readings count only after staff confirm them against the stored document. Nothin
       if (!r[1].records.length) sb.appendChild(el('p', {'class': 'muted', text: 'No sets yet.'}));
       r[1].records.forEach(function (s) {
         var approved = s.data.status === 'APPROVED';
+        var diffBox = el('div', {'class': 'diff'});
+        var approveBtn = approved ? null : el('button', {type: 'button', text: 'Approve these changes (staff)', disabled: 'disabled'});
         sb.appendChild(el('div', {'class': 'card'}, [el('h2', {}, [s.data.name + ' (v' + (s.data.set_version || 1) + ') ', approved ? U.chip('meets', 'APPROVED') : U.chip('cant_tell', 'DRAFT')]),
-          s.data.notes ? el('p', {'class': 'muted', text: s.data.notes}) : null, itemsList(s.data.items || []),
-          el('p', {'class': 'row'}, [
-            approved ? null : el('button', {type: 'button', text: 'Approve (staff)', on: {click: function () {
-              U.api.post('requirement-sets/' + s.id + '/approve').then(function () { U.say('Approved', true); load(); }).catch(U.fail); }}}),
+          s.data.notes ? el('p', {'class': 'muted', text: 'Notes (written by whoever drafted this set): ' + s.data.notes}) : null, itemsList(s.data.items || []),
+          diffBox,
+          el('p', {'class': 'row'}, [approveBtn,
             el('button', {type: 'button', 'class': 'ghost', text: 'Make a new version', on: {click: function () {
               U.api.post('requirement-sets/' + s.id + '/revise', {}).then(function () { U.say('New DRAFT version made', true); load(); }).catch(U.fail); }}})])]));
+        // host ruling F: the approval shows the FULL change against the version it replaces (every item's form
+        // list, edition, trades and exclusion classes, and the whole form-equivalence table) before the button works
+        U.api.get('requirement-sets/' + s.id + '/diff').then(function (d) {
+          renderDiff(diffBox, d);
+          if (approveBtn) {
+            if (d.floor_violations && d.floor_violations.length) return;
+            approveBtn.removeAttribute('disabled');
+            approveBtn.addEventListener('click', function () {
+              U.api.post('requirement-sets/' + s.id + '/approve', {diff_sha256: d.sha256}).then(function () { U.say('Approved', true); load(); }).catch(U.fail);
+            });
+          }
+        }).catch(U.fail);
       });
     }).catch(U.fail);
   }

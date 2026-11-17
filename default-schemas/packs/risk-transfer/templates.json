@@ -1,7 +1,7 @@
 {
   "source": "Effective Contractual Risk Transfer in Construction 2026 (TrustLayer), md5 3bd05e161941017b5d8ef9888a3e9ed0. Values are the guide's; the wording here is ours.",
   "status_on_create": "DRAFT",
-  "form_functions_note": "Form equivalences copied into every new requirement set (form_functions), approved and versioned with it, so CCA licensed staff change them per set version (host ruling R4). CG 20 38 is read as ongoing operations (the conservative reading: a wrong call reads MISSING, never a false Meets); the guide's p.32 and App. B call it completed operations. Confirm with CCA licensed staff at the gate-5 pilot. CG 20 10 can never be mapped to completed operations (host ruling R3).",
+  "form_functions_note": "Form equivalences copied into every new requirement set (form_functions), approved and versioned with it, so CCA licensed staff add equivalences per set version (host ruling R4), shown in full on the approval page. A built-in safety floor no set can loosen (host ruling F, rules 1.5.0): a built-in ISO number keeps its ISO category (CG 20 10 / 20 33 / 20 38 ongoing operations only), CG 20 26 and CG 20 11 never count as completed operations, completed operations needs CG 20 37 or a form the set's table lists as completed operations, and no endorsement item has an empty form list. CG 20 38 is read as ongoing operations (the conservative reading: a wrong call reads MISSING, never a false Meets); the guide's p.32 and App. B call it completed operations. Confirm with CCA licensed staff at the gate-5 pilot; a different ruling changes the floor in code, never a set. CG 20 10 can never be mapped to completed operations (host ruling R3).",
   "form_functions": {
     "CG 20 10": "ai_ongoing",
     "CG 20 33": "ai_ongoing",

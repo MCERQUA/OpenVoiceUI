@@ -43,6 +43,18 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
      edition must match the endorsement's (month and year), or a waiver of WRONG_EDITION.
      R5/R6 also: a person's write vouches for a field only when the store stamped it as made on the
      platform staff surface (activity diff 'staff_surface'); any other person-write is nobody's word.
+  (rules 1.5.0, host rulings E/F/P/C, checked here with this file's own code)
+  RE every check runs on every endorsement: an edition or pre-2004 finding never stops the naming checks; each
+     naming miss (WRONG_PARTY and WRONG_PROJECT separately) needs its own waiver; the contract's AI party list must
+     be person-confirmed against this account's paper; an endorsement on the item nobody confirmed is not backed
+  RF the set meets the built-in safety floor: every endorsement item lists forms; a built-in ISO number keeps its
+     ISO category (CG 20 10 / 20 33 / 20 38 ongoing only); completed operations lists only CG 20 37 or a form the
+     set's own table lists as completed operations
+  RP the last archive / unarchive of every record the claim relies on was made by a person on the staff surface
+     (activity stamp), or staff confirmed the record again at its current version since
+  RC the agency record is live with a person-written name; every policy relied on has producer_is_cca written by
+     a person on the staff surface; an agency-produced policy has two different people's confirmations; every
+     confirmation counted was made on the staff surface (its activity stamp)
   R6 each assignment field the verdict reads (project, sub, set, set version, trade, scope change) was
      last written by a person or person-confirmed (per field, read from the activity log: a staff
      hold or note never vouches for a field the agent wrote), names the set the verdict used, and
@@ -102,6 +114,8 @@ _ISO = {'CG2010': 'ai_ongoing', 'CG2033': 'ai_ongoing', 'CG2038': 'ai_ongoing', 
         'CG2001': 'pnc', 'CG2503': 'project_aggregate', 'CG2545': 'completed_ops_aggregate',
         'CG2404': 'waiver_of_subrogation'}
 _NEVER_COMPLETED = 'CG2010'        # host ruling R3: never completed operations, by any route
+_ISO_FLOOR = dict(_ISO)            # host ruling F (rules 1.5.0): a built-in ISO number keeps its category in any set
+_NOT_COMPLETED = {'CG2026', 'CG2011'}   # other ISO AI numbers that never cover completed operations
 SURFACE = 'staff_surface'          # activity diff: the fields a person wrote on the platform staff surface (R1)
 _MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
@@ -222,8 +236,12 @@ class Store:
             self.events.setdefault(a['record_id'], []).append(
                 (a['type'], a['by'], json.loads(a['diff']) if a['diff'] else {}))
         self.toggles = {}         # archive / unarchive times per record: each bumped the version, not the data
-        for a in self.conn.execute("SELECT record_id, at FROM activity WHERE type IN ('archived', 'unarchived')"):
+        self.toggle_ev = {}       # (at, type, by, diff) per record: who archived / unarchived it, and where (ruling P)
+        for a in self.conn.execute("SELECT record_id, at, type, by, diff FROM activity "
+                                   "WHERE type IN ('archived', 'unarchived') ORDER BY id"):
             self.toggles.setdefault(a['record_id'], []).append(a['at'])
+            self.toggle_ev.setdefault(a['record_id'], []).append(
+                (a['at'], a['type'], a['by'], json.loads(a['diff']) if a['diff'] else {}))
         self._hash = {}
         self.at = None            # None: as things are now; an ISO time: as they were at that claim
 
@@ -251,6 +269,31 @@ class Store:
     def get(self, coll, rid):
         r = self.rows.get(rid)
         return r if r and r['collection'] == coll and self._visible(r) else None
+
+    def get_any(self, coll, rid):
+        """The record whether archived or not (ruling P reads who archived it)."""
+        r = self.rows.get(rid)
+        return r if r and r['collection'] == coll else None
+
+    def surface_made(self, rec):
+        """The record was CREATED by a person on the staff surface (its 'created' activity carries the stamp)."""
+        for typ, by, diff in self.events.get(rec['id'], []):
+            if typ == 'created':
+                return str(by or '').startswith(PERSON) and SURFACE in (diff or {})
+        return False
+
+    def toggle_unvouched(self, rec):
+        """Ruling P: the last archive / unarchive (as of this view) was not a person on the staff surface, and no
+        person confirmed the record on the staff surface at its current version since."""
+        evs = [e for e in self.toggle_ev.get(rec['id'], []) if self.at is None or e[0] <= self.at]
+        if not evs:
+            return False
+        _at, _typ, by, diff = evs[-1]
+        if str(by or '').startswith(PERSON) and SURFACE in (diff or {}):
+            return False
+        return not any(c['data'].get('record_id') == rec['id'] and c['data'].get('record_version') == self.version(rec)
+                       and str(c['data'].get('confirmed_by') or '').startswith(PERSON) and self.surface_made(c)
+                       for c in self.all('crt_confirmation'))
 
     def wrote(self, rec, field):
         """Who last set or changed this ONE field, read from the activity log; None when the log does
@@ -327,6 +370,8 @@ def _person_confs(st, rec, fields, need_file=True, acct=None, party=None):
             continue
         if not str(d.get('confirmed_by') or '').startswith(PERSON) or not str(c['created_by']).startswith(PERSON):
             continue
+        if not st.surface_made(c):                 # ruling C (rules 1.5.0): made on the staff surface, by its stamp
+            continue
         if not set(fields) <= set(d.get('fields') or []):
             continue
         if need_file:
@@ -340,6 +385,32 @@ def _person_confs(st, rec, fields, need_file=True, acct=None, party=None):
 
 
 WAIVABLE_NAME_CODES = ('WRONG_PARTY', 'WRONG_PROJECT', 'BLANKET_UNBACKED')
+
+
+def _floor(sd):
+    """Ruling F (own code): why a set breaks the built-in safety floor; [] when it does not."""
+    out = []
+    ff = sd.get('form_functions')
+    table = {}
+    if isinstance(ff, dict):
+        for k, v in ff.items():
+            if (_form(k) in _ISO_FLOOR and v != _ISO_FLOOR[_form(k)]) or \
+                    (_form(k) in _NOT_COMPLETED and v == 'ai_completed'):
+                out.append(f'table maps {k} to {v}')
+            table[_form(k)] = v
+    for it in sd.get('items') or []:
+        if not isinstance(it, dict) or it.get('kind') != 'endorsement':
+            continue
+        fn = it.get('function')
+        forms = [_form(f) for f in (it.get('forms') or []) if isinstance(f, str) and _form(f)]
+        if not forms:
+            out.append(f"item {it.get('id')} lists no forms")
+        for f in forms:
+            if f in _ISO_FLOOR and _ISO_FLOOR[f] != fn:
+                out.append(f"item {it.get('id')} ({fn}) lists ISO {_ISO_FLOOR[f]} form {f}")
+            elif fn == 'ai_completed' and f not in _ISO_FLOOR and table.get(f) != 'ai_completed':
+                out.append(f"item {it.get('id')} (completed ops) lists {f}, not a completed-ops form in the table")
+    return out
 
 
 def _waived(st, asg, code, on, acct):
@@ -421,6 +492,16 @@ def _judge(st, claim):
         (cannot if changed_since(s) else why).append('R1 set not approved by a person')
     if not changed_since(s) and not changed_since(asg) and asg['data'].get('requirement_set_version') != s['version']:
         why.append('R6 the assignment did not pin this version of the set')
+    floor = _floor(s['data'])
+    if floor:
+        why.append('RF the set is below the built-in safety floor: ' + '; '.join(floor[:3]))
+    # RC the agency's own record: live, with a name a person wrote on the staff surface (or confirmed there)
+    comps = st.all('company')
+    company = comps[0] if comps else None
+    cname = (company or {}).get('data', {}).get('name')
+    company_ok = bool(company and cname and _person_field(st, company, 'name'))
+    if not company_ok:
+        why.append('RC the agency record is missing, archived, or its name is not a person\'s staff-surface word')
     for cid in claim.get('confirmation_ids') or []:
         c = st.get('crt_confirmation', cid)
         if not c or not str(c['data'].get('confirmed_by') or '').startswith(PERSON) \
@@ -435,6 +516,48 @@ def _judge(st, claim):
                 and p['data'].get('crt_account_id') == acct['id']]
     party_name = party['data'].get('company_name') or party['data'].get('name')
 
+    # RP every record the claim relies on: its last archive / unarchive was a person's, on the staff surface
+    relied = [('crt_assignment', asg), ('crt_project', proj), ('contact', acct), ('contact', party),
+              ('crt_requirement_set', s)] + ([('company', company)] if company else [])
+    every_pol = [p for p in st.all_ever('crt_policy') if p['data'].get('party_contact_id') == party['id']
+                 and p['data'].get('crt_account_id') == acct['id']]
+    relied += [('crt_policy', p) for p in every_pol]
+    relied += [('crt_endorsement', e) for e in st.all_ever('crt_endorsement')
+               if e['data'].get('crt_policy_id') in {p['id'] for p in every_pol}]
+    relied += [('crt_account_party', ln) for ln in st.all_ever('crt_account_party')
+               if ln['data'].get('crt_account_id') == acct['id'] and ln['data'].get('party_contact_id') == party['id']]
+    dids = {proj['data'].get('contract_document_id')}
+    for coll, r in list(relied):
+        if coll == 'crt_policy':
+            dids.add(r['data'].get('source_document_id'))
+        if coll == 'crt_endorsement':
+            dids.add(r['data'].get('document_id'))
+    relied += [('document', d) for d in (st.get_any('document', x) for x in dids if x) if d]
+    for coll, r in relied:
+        if st.toggle_unvouched(r):
+            why.append(f'RP a {coll} the claim relies on was archived or unarchived off the staff surface, and no '
+                       'person vouched for it again')
+    # RE every active link for this pair was written or confirmed by a person (an extra unvouched link is not backed)
+    for ln in st.all('crt_account_party'):
+        if ln['data'].get('crt_account_id') == acct['id'] and ln['data'].get('party_contact_id') == party['id'] \
+                and ln['data'].get('status', 'active') == 'active' and \
+                not all(_person_field(st, ln, f) for f in ('crt_account_id', 'party_contact_id', 'status')):
+            why.append('RE an active link of this sub to the account was not written or confirmed by a person')
+    rc_why = {}
+
+    def agency_people(p):
+        """How many different people must have confirmed this policy (ruling C), or None when nobody on staff
+        said whether we are its producer."""
+        flag = p['data'].get('producer_is_cca')
+        if not isinstance(flag, bool) or not str(st.wrote(p, 'producer_is_cca') or '').startswith(PERSON):
+            return None
+        if not company_ok:
+            return 2
+        return 2 if (flag or _named(cname, [p['data'].get('producer_name')])) else 1
+
+    def people(p, fields):
+        return {c['data'].get('confirmed_by') for c in _person_confs(st, p, fields, acct=acct, party=party)}
+
     def in_force(line):
         """(person-confirmed, file-backed policies on this line in force on the claim date, any changed since)"""
         out, changed = [], False
@@ -445,14 +568,21 @@ def _judge(st, claim):
                 changed = True
                 continue
             eff, exp = _day(p['data'].get('effective')), _day(p['data'].get('expiration'))
-            if eff and exp and on and eff <= on < exp and \
-                    _person_confs(st, p, ['line', 'effective', 'expiration', 'source_document_id'], acct=acct,
-                                  party=party):
+            if not (eff and exp and on and eff <= on < exp):
+                continue
+            need = agency_people(p)
+            if need is None:
+                rc_why[line] = f'RC nobody on staff said (on the staff surface) whether we produce the {line} policy'
+                continue
+            if len(people(p, ['line', 'effective', 'expiration', 'source_document_id'])) >= need:
                 out.append(p)
+            elif need == 2:
+                rc_why[line] = f'RC the {line} policy is the agency\'s own: two different people must confirm it'
         return out, changed
 
     def confirmed(p, field):
-        return bool(_person_confs(st, p, [field], acct=acct, party=party))
+        need = agency_people(p) or 2
+        return len(people(p, [field])) >= need
 
     def num(v):
         return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
@@ -467,6 +597,8 @@ def _judge(st, claim):
             pols, changed = in_force(line)
             if not pols:
                 (cannot if changed else why).append(f'R3 no person-confirmed, file-backed {line} policy in force')
+                if line in rc_why:
+                    why.append(rc_why[line])
                 continue
             misses = []
             for p in pols:
@@ -552,9 +684,10 @@ def _judge(st, claim):
                 if not doc or not _doc_backs(st, doc['id'], acct, party, kind='endorsement') or \
                         doc['id'] == pol['data'].get('source_document_id') or st.doc_sha(doc['id']) in cert_shas:
                     continue
-                if not _person_confs(st, e, ['function', 'document_id', 'scheduled_names', 'scheduled_projects',
-                                             'blanket', 'crt_policy_id', 'form', 'edition', 'manuscript'],
-                                     acct=acct, party=party):
+                e_people = {c['data'].get('confirmed_by') for c in _person_confs(
+                    st, e, ['function', 'document_id', 'scheduled_names', 'scheduled_projects', 'blanket',
+                            'crt_policy_id', 'form', 'edition', 'manuscript'], acct=acct, party=party)}
+                if len(e_people) < (agency_people(pol) or 2):        # RC: the agency's own paper needs two people
                     continue
                 # the form number: one the item lists, a manuscript excepted. R3 (rules 1.4.0): CG 20 10 is never
                 # completed operations by any route; a listed ISO number is never read as manuscript; a manuscript
@@ -562,10 +695,10 @@ def _judge(st, claim):
                 fkey = _form(ed.get('form'))
                 if fn == 'ai_completed' and fkey == _NEVER_COMPLETED:
                     continue
-                table = {_form(k): v for k, v in set_ff.items()} if set_ff else dict(_ISO)
-                if ed.get('manuscript') is not True or fkey in table or fkey in _ISO:
-                    listed = {_form(f) for f in it.get('forms') or []} or \
-                        {k for k, v in table.items() if v == fn}
+                table = {_form(k): v for k, v in set_ff.items()} if set_ff else {}
+                table.update(_ISO_FLOOR)                       # ruling F: an ISO number keeps its ISO category
+                if ed.get('manuscript') is not True or fkey in table:
+                    listed = {_form(f) for f in it.get('forms') or []}        # ruling F: the item's own list only
                     if fkey not in listed:
                         continue
                 elif fn == 'ai_completed' and not (ed.get('completed_ops_wording') is True and
@@ -579,23 +712,39 @@ def _judge(st, claim):
                 if it.get('edition') and _edition_my(it.get('edition')) != _edition_my(ed.get('edition')) and \
                         not _waived(st, asg, f'WRONG_EDITION:{fn}', on, acct):
                     continue
+                # RE (rules 1.5.0): every naming check runs; each miss needs its OWN waiver
+                name_codes = []
                 if ed.get('blanket'):
                     backed = proj['data'].get('contract_requires_ai') is True and \
                         bool(_person_confs(st, proj, ['contract_requires_ai']))
-                    name_code = None if backed else 'BLANKET_UNBACKED'
-                elif not _named_exact(acct_name, ed.get('scheduled_names')) or \
-                        not all(_named_exact(n, ed.get('scheduled_names')) for n in proj['data'].get('contract_ai_parties') or []):
-                    name_code = 'WRONG_PARTY'
-                elif not _named_exact(pname, ed.get('scheduled_projects')):
-                    name_code = 'WRONG_PROJECT'
+                    if not backed:
+                        name_codes.append('BLANKET_UNBACKED')
                 else:
-                    name_code = None
-                if name_code is None or _waived(st, asg, name_code, on, acct):
+                    if not _person_confs(st, proj, ['contract_ai_parties'], acct=acct):
+                        continue                               # the contract's AI list nobody confirmed: not backed
+                    if not _named_exact(acct_name, ed.get('scheduled_names')) or \
+                            not all(_named_exact(n, ed.get('scheduled_names'))
+                                    for n in proj['data'].get('contract_ai_parties') or []):
+                        name_codes.append('WRONG_PARTY')
+                    if not _named_exact(pname, ed.get('scheduled_projects')):
+                        name_codes.append('WRONG_PROJECT')
+                if all(_waived(st, asg, c, on, acct) for c in name_codes):
                     good = True
             if not good:
                 (cannot if changed else why).append(
                     f'R4 no person-confirmed {fn} endorsement document naming this account and project '
                     '(or a contractor-accepted waiver of the naming)')
+            else:
+                # RE: an endorsement for this coverage on this sub's in-force policy that nobody confirmed means the
+                # evidence is not fully checked (rules 1.5.0: Can't tell is never hidden behind another paper)
+                live_pols = {p['id'] for p in in_force(line or 'gl')[0]}
+                for e in st.all('crt_endorsement'):
+                    if e['data'].get('function') == fn and e['data'].get('crt_account_id') == acct['id'] and \
+                            e['data'].get('crt_policy_id') in live_pols and not changed_since(e) and \
+                            not _person_confs(st, e, ['function', 'document_id', 'crt_policy_id', 'form', 'edition'],
+                                              acct=acct, party=party):
+                        why.append(f'RE a {fn} endorsement on this sub\'s policy was never confirmed by a person')
+                        break
     if why:
         return FAIL, sorted(set(why))
     if cannot:
