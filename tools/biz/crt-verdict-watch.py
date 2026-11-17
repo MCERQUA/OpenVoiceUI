@@ -15,13 +15,22 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
   R3 every required line (limit / ai items) has a policy for this sub, received for THIS account,
      person-confirmed (line, effective, expiration, source document) against a stored file whose bytes
      still hash to the confirmed sha256, that file's document received for THIS account and THIS sub,
-     and IN FORCE on the claim date (effective <= date < expiration)
+     and IN FORCE on the claim date (effective <= date < expiration); read here, independently (rules
+     1.3.0, MED ruling): its person-confirmed LIMIT meets the item's minimum (or the combined GL +
+     umbrella test, or a waiver of LIMIT_LOW), its person-confirmed NAMED INSURED is this sub (the same
+     legal name, entity suffix included: never waivable), and an AI item's AI box is ticked (or waived)
+  R3x every required disallowed-exclusion item that applies to the sub's trade CATEGORY (a listed
+     category; free text never matches by substring) has a policy whose person-confirmed exclusions are
+     classes (not wording), none of them a class the item disallows (or a waiver of EXCLUSION:<code>);
+     a blank list counts only when a person confirmed "none"
   R4 every required additional-insured endorsement (ai_ongoing / ai_completed, or names_parties) has an
      endorsement on that line, for this account, whose OWN document is of kind 'endorsement' with that
      kind written or confirmed by a PERSON, for this account and sub, hash-verified, whose file is NOT
      any certificate file of this sub, person-confirmed (including which policy it attaches to), that
      names this account and this project EXACTLY (normalised equality, never containment) (or is
-     blanket with the project's contract tick person-confirmed true). A naming miss (WRONG_PARTY,
+     blanket with the project's contract tick person-confirmed true), whose person-confirmed FORM NUMBER is
+     one the item lists (a manuscript form excepted) and whose EDITION reads as a date from 2004 on (a
+     pre-2004 one needs a waiver of WRONG_FORM; an empty or unreadable one is never backed). A naming miss (WRONG_PARTY,
      WRONG_PROJECT, BLANKET_UNBACKED) counts only when a person recorded an unexpired waiver backed by
      THIS account's written OK (kind contractor_waiver_ok). A missing document is never waivable.
      Ongoing ops are not required after substantial completion; completed ops not after the statute
@@ -55,6 +64,7 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 from datetime import date, datetime
 
 PASS, FAIL, CANNOT, STALE = 'PASS', 'FAIL', 'CANNOT-TELL', 'STALE'
@@ -65,13 +75,88 @@ ASG_FIELDS = ('crt_project_id', 'party_contact_id', 'requirement_set_id', 'requi
               'trade_category', 'scope_changed_at')
 PROJECT_FIELDS = ('crt_account_id', 'name', 'substantial_completion', 'repose_years')
 _ABSENT = object()
-_SUFFIX = {'llc', 'inc', 'co', 'corp', 'corporation', 'company', 'ltd', 'the', 'lp', 'llp', 'pllc', 'pc'}
+# Own copies (never imported from the engine): rules 1.3.0, host rulings H1/H2/H3.
+_ENTITY = {'incorporated': 'inc', 'inc': 'inc', 'l l c': 'llc', 'llc': 'llc', 'corporation': 'corp', 'corp': 'corp',
+           'company': 'co', 'co': 'co', 'limited': 'ltd', 'ltd': 'ltd', 'l p': 'lp', 'lp': 'lp', 'l l p': 'llp',
+           'llp': 'llp', 'lllp': 'lllp', 'p l l c': 'pllc', 'pllc': 'pllc', 'p c': 'pc', 'pc': 'pc', 'p a': 'pa',
+           'pa': 'pa', 'plc': 'plc', 'limited liability company': 'llc', 'limited liability partnership': 'llp',
+           'limited partnership': 'lp', 'professional corporation': 'pc',
+           'professional limited liability company': 'pllc'}
+_TRADES = {'excavation', 'trenching', 'earthwork', 'grading', 'demolition', 'blasting', 'shoring',
+           'underground_utilities', 'pile_driving', 'tunneling', 'structural_steel', 'steel_erection', 'crane_rigging',
+           'heavy_civil', 'roofing', 'waterproofing', 'windows_glazing', 'curtain_wall', 'siding_cladding', 'hvac',
+           'electrical', 'plumbing', 'fire_protection', 'concrete', 'framing', 'masonry', 'painting', 'drywall',
+           'flooring', 'tile', 'landscaping', 'signage', 'architect', 'engineer', 'other'}
+_EXCL = {'none', 'xcu', 'explosion', 'collapse', 'underground', 'water_intrusion', 'moisture', 'water_damage_sublimit',
+         'insured_vs_insured', 'residential', 'eifs', 'subsidence', 'mold', 'silica', 'pollution', 'action_over',
+         'designated_ongoing_operations', 'classification_limitation', 'height_limitation', 'other_reviewed'}
+_EXCL_FAMILY = {'xcu': {'xcu', 'explosion', 'collapse', 'underground'},
+                'water': {'water_intrusion', 'moisture', 'water_damage_sublimit'}}
+_ISO = {'CG2010': 'ai_ongoing', 'CG2033': 'ai_ongoing', 'CG2038': 'ai_ongoing', 'CG2037': 'ai_completed',
+        'CG2001': 'pnc'}
+_MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
 
 def _norm(s):
+    """Legal-name key: NFKC, casefold, punctuation gone, letters kept (any script), the entity suffix KEPT in one
+    spelling per kind (Inc / Inc. / Incorporated -> inc; LLC / L.L.C. -> llc). LLC != Inc != Corp."""
     if not isinstance(s, str):
         return ''
-    return ' '.join(w for w in re.split(r'[^a-z0-9]+', s.lower().replace('&', ' and ')) if w and w not in _SUFFIX)
+    text = unicodedata.normalize('NFKC', s).casefold().replace('&', ' and ')
+    words = ''.join(ch if ch.isalnum() else ' ' for ch in text).split()
+    merged = []
+    for w in words:                        # initials written with dots or spaces: 'l l c' -> one word
+        if len(w) == 1 and w.isalpha() and merged and merged[-1][1]:
+            merged[-1] = (merged[-1][0] + ' ' + w, True)
+        else:
+            merged.append((w, len(w) == 1 and w.isalpha()))
+    joined = ' '.join(w.replace(' ', '') for w, _ in merged)
+    for phrase in sorted((k for k in _ENTITY if ' ' in k and len(k) > 5), key=len, reverse=True):
+        joined = re.sub(r'(?<!\S)' + re.escape(phrase) + r'(?!\S)', _ENTITY[phrase], joined)
+    return ' '.join(_ENTITY.get(w, w) for w in joined.split())
+
+
+def _trade(s):
+    k = '_'.join(''.join(ch if ch.isalnum() else ' ' for ch in unicodedata.normalize('NFKC', str(s or '')).casefold()).split())
+    return k if k in _TRADES else None
+
+
+def _excl(values):
+    """(classes, unmapped) of a policy's exclusions; blank -> ([], [])."""
+    if values in (None, ''):
+        values = []
+    if not isinstance(values, list):
+        values = [values]
+    cls, bad = set(), []
+    for v in values:
+        k = '_'.join(''.join(ch if ch.isalnum() else ' ' for ch in unicodedata.normalize('NFKC', str(v)).casefold()).split())
+        (cls.add(k) if k in _EXCL else bad.append(v))
+    return cls, bad
+
+
+def _form(s):
+    return ''.join(ch for ch in unicodedata.normalize('NFKC', str(s or '')).upper() if ch.isalnum())
+
+
+def _edition(s):
+    """Year of an ISO edition date as printed ('04 13', '11-85', '(11/85)', '1185', 'Nov 1985', 'CG 20 10 11 85')."""
+    t = unicodedata.normalize('NFKC', str(s or '')).upper()
+    t = ' '.join(''.join(ch if ch.isalnum() else ' ' for ch in t).split())
+    parts = t.split()
+    if len(parts) >= 3 and parts[0].isalpha() and len(parts[0]) == 2 and parts[1].isdigit() and parts[2].isdigit():
+        parts = parts[3:]                  # 'CG 20 10' printed before the date
+    t = ''.join(parts) if all(x.isdigit() for x in parts) else ' '.join(parts)
+    mon = yr = None
+    if parts and parts[0][:3] in _MON and len(parts) == 2 and parts[1].isdigit():
+        mon, yr = _MON.index(parts[0][:3]) + 1, parts[1]
+    elif t.isdigit() and len(t) in (3, 4, 5, 6):
+        mon, yr = (t[:-4], t[-4:]) if len(t) in (5, 6) and t[-4:-2] in ('19', '20') else (t[:-2], t[-2:])
+        mon = int(mon) if mon else None
+    if not mon or not yr or not 1 <= mon <= 12 or len(yr) not in (2, 4):
+        return None
+    y = int(yr)
+    y = (1900 + y if y >= 50 else 2000 + y) if len(yr) == 2 else y
+    return y if 1950 <= y <= 2100 else None
 
 
 def _named(wanted, texts):
@@ -324,6 +409,30 @@ def _judge(st, claim):
     repose = proj['data'].get('repose_years')
     policies = [p for p in st.all('crt_policy') if p['data'].get('party_contact_id') == party['id']
                 and p['data'].get('crt_account_id') == acct['id']]
+    party_name = party['data'].get('company_name') or party['data'].get('name')
+
+    def in_force(line):
+        """(person-confirmed, file-backed policies on this line in force on the claim date, any changed since)"""
+        out, changed = [], False
+        for p in policies:
+            if p['data'].get('line') != line:
+                continue
+            if changed_since(p):
+                changed = True
+                continue
+            eff, exp = _day(p['data'].get('effective')), _day(p['data'].get('expiration'))
+            if eff and exp and on and eff <= on < exp and \
+                    _person_confs(st, p, ['line', 'effective', 'expiration', 'source_document_id'], acct=acct,
+                                  party=party):
+                out.append(p)
+        return out, changed
+
+    def confirmed(p, field):
+        return bool(_person_confs(st, p, [field], acct=acct, party=party))
+
+    def num(v):
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
     for it in s['data'].get('items') or []:
         kind, line, fn = it.get('kind'), it.get('line'), it.get('function')
         if it.get('required') is False:
@@ -331,20 +440,69 @@ def _judge(st, claim):
         if kind in ('limit', 'ai'):
             if kind == 'ai' and line == 'pl':
                 continue
-            good = changed = False
-            for p in policies:
-                if p['data'].get('line') != line:
-                    continue
-                if changed_since(p):
-                    changed = True
-                    continue
-                eff, exp = _day(p['data'].get('effective')), _day(p['data'].get('expiration'))
-                if eff and exp and on and eff <= on < exp and \
-                        _person_confs(st, p, ['line', 'effective', 'expiration', 'source_document_id'], acct=acct,
-                                      party=party):
-                    good = True
-            if not good:
+            pols, changed = in_force(line)
+            if not pols:
                 (cannot if changed else why).append(f'R3 no person-confirmed, file-backed {line} policy in force')
+                continue
+            misses = []
+            for p in pols:
+                pd = p['data']
+                miss = None
+                # never waivable: the certificate is another company's (host ruling N10, H2 suffix kept)
+                if not confirmed(p, 'named_insured') or _norm(party_name) == '' or \
+                        _norm(pd.get('named_insured')) != _norm(party_name):
+                    miss = f'R3 the named insured on the {line} policy is not this sub (same legal name, entity suffix ' \
+                           'included) or not person-confirmed'
+                elif kind == 'limit':
+                    val, need = num((pd.get('limits') or {}).get(it.get('limit'))), it.get('min', it.get('floor')) or 0
+                    ok = confirmed(p, 'limits') and val is not None and val >= need
+                    comb = it.get('combined') or {}
+                    if not ok and comb and line == 'gl' and confirmed(p, 'limits') and val is not None and \
+                            val >= (comb.get('gl_occ_floor') or 0):
+                        for u in in_force('umbrella')[0]:
+                            uv = num((u['data'].get('limits') or {}).get('each_occurrence'))
+                            if confirmed(u, 'limits') and uv is not None and \
+                                    val + uv >= (comb.get('gl_occ_plus_umbrella_min') or 0):
+                                ok = True
+                    if not ok and not _waived(st, asg, f'LIMIT_LOW:{line}', on, acct):
+                        miss = f'R3 the person-confirmed {line} {it.get("limit")} limit is below {need}'
+                elif not (confirmed(p, 'addl_insd') and pd.get('addl_insd') is True) and \
+                        not _waived(st, asg, f'NOT_AI:{line}', on, acct):
+                    miss = f'R3 the {line} policy does not show additional insured (person-confirmed)'
+                if miss is None:
+                    break
+                misses.append(miss)
+            else:
+                why.extend(misses[:1])
+        elif kind == 'disallowed_exclusion':
+            code = it.get('code')
+            if it.get('when_trade') is not None:
+                why.append('R3x the set still carries the retired word rule for trades (when_trade)')
+                continue
+            cats = it.get('trade_categories')
+            if cats:
+                trade = _trade(asg['data'].get('trade_category'))
+                if trade is None:
+                    why.append('R3x the trade is not one of the listed trade categories, so nobody can say '
+                               f'whether the {code} item applies')
+                    continue
+                if trade not in cats:
+                    continue
+            banned = set(it.get('classes') or _EXCL_FAMILY.get(code) or ())
+            pols, changed = in_force(line)
+            good = False
+            for p in pols:
+                cls, unmapped = _excl(p['data'].get('exclusions'))
+                if not confirmed(p, 'exclusions') or unmapped or not cls or ('none' in cls and len(cls) > 1):
+                    continue
+                if cls & banned and not _waived(st, asg, f'EXCLUSION:{code}', on, acct):
+                    continue
+                good = True
+                break
+            if not good:
+                (cannot if changed and not pols else why).append(
+                    f'R3x no {line} policy whose person-confirmed exclusions are classes free of {code} '
+                    '("none" confirmed by a person, never a blank list or unmapped wording)')
         elif kind == 'endorsement' and (fn in ('ai_ongoing', 'ai_completed') or it.get('names_parties')):
             if fn == 'ai_ongoing' and sc and on and on > sc:
                 continue
@@ -371,7 +529,17 @@ def _judge(st, claim):
                         doc['id'] == pol['data'].get('source_document_id') or st.doc_sha(doc['id']) in cert_shas:
                     continue
                 if not _person_confs(st, e, ['function', 'document_id', 'scheduled_names', 'scheduled_projects',
-                                             'blanket', 'crt_policy_id'], acct=acct, party=party):
+                                             'blanket', 'crt_policy_id', 'form', 'edition', 'manuscript'],
+                                     acct=acct, party=party):
+                    continue
+                # the form number: one the item lists (CG 20 10 is never completed operations), a manuscript excepted
+                if ed.get('manuscript') is not True:
+                    listed = {_form(f) for f in it.get('forms') or []} or \
+                        {k for k, v in _ISO.items() if v == fn}
+                    if _form(ed.get('form')) not in listed:
+                        continue
+                year = _edition(ed.get('edition'))
+                if year is None or (year < 2004 and not _waived(st, asg, f'WRONG_FORM:{fn}', on, acct)):
                     continue
                 if ed.get('blanket'):
                     backed = proj['data'].get('contract_requires_ai') is True and \
