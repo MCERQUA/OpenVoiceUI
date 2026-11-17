@@ -44,6 +44,7 @@ from services.canvas_versioning import (
 # ---------------------------------------------------------------------------
 
 from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR, CODE_WORKSPACE_DIR
+from services.terminal_sandbox import share_with_sandbox
 CANVAS_SSE_PORT = int(os.getenv('CANVAS_SSE_PORT', '3030'))
 CANVAS_SESSION_PORT = int(os.getenv('CANVAS_SESSION_PORT', '3002'))
 BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
@@ -2109,6 +2110,7 @@ def workspace_file_write():
     try:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content, encoding='utf-8')
+        share_with_sandbox(resolved, _workspace_root())  # editable from the terminal's sandbox user
         return jsonify({'ok': True, 'path': rel, 'bytes': len(content.encode('utf-8'))})
     except Exception as exc:
         logger.error(f'workspace_file_write error: {exc}')
@@ -2127,6 +2129,7 @@ def workspace_mkdir():
         return jsonify({'error': 'invalid path'}), 400
     try:
         resolved.mkdir(parents=True, exist_ok=True)
+        share_with_sandbox(resolved, _workspace_root())
         return jsonify({'ok': True, 'path': rel})
     except Exception as exc:
         logger.error(f'workspace_mkdir error: {exc}')

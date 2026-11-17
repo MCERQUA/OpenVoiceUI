@@ -2570,12 +2570,20 @@ def browse_stream_websocket(ws):
 # Spawns a login shell inside THIS container, cwd'd to the dedicated code
 # sandbox (CODE_WORKSPACE_DIR). Gated by the Clerk __session cookie (same as
 # /ws/clawdbot) OR the internal X-Agent-Key. Pure-Python pty — no node-pty.
+#
+# The shell is a SANDBOX, not the server's identity: in the image it runs as
+# the unprivileged `sandbox` user via deploy/terminal-sandbox/ovu-sandbox-shell
+# with no inherited environment, so it cannot read the server's secrets,
+# /proc/1/environ, /app (db, vault, code) or the /mnt key mounts. On a hosted
+# tenant a missing helper refuses the terminal (services/terminal_sandbox.py).
 
 @sock.route("/ws/terminal")
 def terminal_websocket(ws):
     import pty, select, struct, fcntl, termios, signal, threading
     from services.auth import verify_clerk_token, get_token_from_request
     from services.paths import CODE_WORKSPACE_DIR
+    from services.terminal_sandbox import (
+        TerminalSandboxUnavailable, exec_terminal_child, plan_terminal_child)
 
     # --- auth: valid Clerk session OR internal agent key ---
     token = get_token_from_request()
@@ -2597,22 +2605,22 @@ def terminal_websocket(ws):
     except Exception:
         pass
 
-    pid, master_fd = pty.fork()
-    if pid == 0:
-        # --- child: become the login shell ---
-        os.environ["TERM"] = "xterm-256color"
+    # Everything the child execs is decided BEFORE fork (no work in the child).
+    try:
+        child_plan = plan_terminal_child(CODE_WORKSPACE_DIR)
+    except TerminalSandboxUnavailable as e:
+        logger.error(f"Terminal WS refused: {e}")
         try:
-            os.chdir(str(CODE_WORKSPACE_DIR))
+            ws.send(json.dumps({"type": "error", "message": "Terminal sandbox unavailable on this server"}))
+            ws.close()
         except Exception:
             pass
-        shell = os.environ.get("SHELL") or "/bin/bash"
-        try:
-            os.execvp(shell, [shell, "-l"])
-        except Exception:
-            try:
-                os.execvp("/bin/sh", ["/bin/sh"])
-            except Exception:
-                os._exit(1)
+        return
+
+    pid, master_fd = pty.fork()
+    if pid == 0:
+        # --- child: become the sandboxed login shell (never returns) ---
+        exec_terminal_child(child_plan)
 
     # --- parent: bridge pty <-> websocket ---
     stop = threading.Event()
@@ -2666,6 +2674,9 @@ def terminal_websocket(ws):
         logger.error(f"Terminal WS error: {e}")
     finally:
         stop.set()
+        # A sandboxed shell runs as another uid, so this kill is refused
+        # (EPERM) there; closing the pty master hangs up the session instead
+        # (the kernel sends SIGHUP, the shell reads EIO and exits).
         try:
             os.kill(pid, signal.SIGKILL)
         except Exception:
@@ -2674,10 +2685,15 @@ def terminal_websocket(ws):
             os.close(master_fd)
         except Exception:
             pass
-        try:
-            os.waitpid(pid, 0)
-        except Exception:
-            pass
+
+        # Reap off the handler thread: never block it on a child that is slow
+        # to die (a sandboxed one cannot be SIGKILLed from here).
+        def _reap(child=pid):
+            try:
+                os.waitpid(child, 0)
+            except Exception:
+                pass
+        threading.Thread(target=_reap, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
