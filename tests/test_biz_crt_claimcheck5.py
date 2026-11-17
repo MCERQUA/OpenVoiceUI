@@ -305,7 +305,8 @@ def test_f_the_diff_shows_every_item_and_the_whole_table_and_binds_the_approval(
     d = h.ok(h.get(f'/crt/requirement-sets/{new["id"]}/diff'))
     assert d['against']['kind'] == 'set' and d['against']['id'] == s['id']
     by = {it['id']: it for it in d['items']}
-    assert by['ai_ongoing']['change'] == 'changed' and by['ai_ongoing']['changed_fields'] == ['edition']
+    # rules 1.8.0 (H5): the diff also says the edition the verdict applies, so a changed edition changes both rows
+    assert by['ai_ongoing']['change'] == 'changed' and by['ai_ongoing']['changed_fields'] == ['edition', 'edition_applied']
     assert by['ai_completed']['now']['forms'] == ['CG 20 37'] and by['ai_completed']['change'] == 'same'
     assert set(by) == {it['id'] for it in s['data']['items']}                       # EVERY item, same or not
     assert d['form_functions']['added'] == {'ACME 9': 'pnc'} and 'CG 20 37' in d['form_functions']['now']
@@ -592,4 +593,4 @@ def test_l1_every_staff_page_carries_a_sign_out_control(h):
 
 def test_rules_version_is_1_5_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.7.0'          # rules 1.6.0 / 1.7.0 (re-checks #6, #7) keep every 1.5.0 rule
+    assert rt.RULE_VERSION == 'crt-rules-1.8.0'          # rules 1.6.0-1.8.0 (re-checks #6-#8) keep every 1.5.0 rule

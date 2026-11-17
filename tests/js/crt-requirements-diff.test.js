@@ -116,5 +116,24 @@ test('required is shown as the verdict reads it: only false is suggested, null i
     assert.ok(![null, 0, ''].some((v) => cell(v)[2] === '-'));
 });
 
+test('the item list says the edition the verdict applies, not the stored edition key (rules 1.8.0 H5)', () => {
+    const c = { };
+    vm.createContext(c);
+    vm.runInContext(`var U = {money: function (n) { return '$' + n; }};
+      ${lift('itemText')}
+      this.itemText = itemText;`, c);
+    const before = { kind: 'endorsement', function: 'ai_completed', forms: ['CG 20 37'], edition: '04 13', names_parties: true,
+        edition_applied: '04/2013' };
+    const moved = { kind: 'endorsement', function: 'ai_completed', forms: ['CG 20 37 04 13'], names_parties: true,
+        edition_applied: '04/2013' };
+    const dropped = { kind: 'endorsement', function: 'ai_completed', forms: ['CG 20 37'], names_parties: true,
+        edition_applied: 'any edition' };
+    assert.ok(c.itemText(before).includes('edition: 04/2013'), c.itemText(before));
+    assert.ok(c.itemText(moved).includes('edition: 04/2013'), c.itemText(moved));
+    assert.ok(c.itemText(dropped).includes('edition: any edition'), c.itemText(dropped));
+    assert.notStrictEqual(c.itemText(before).replace(/\s+/g, ' '), c.itemText(dropped).replace(/\s+/g, ' '));
+    assert.ok(c.itemText({ kind: 'endorsement', function: 'ai_ongoing', forms: ['CG 20 10'], edition: '04 13' }).includes('04 13 (as written)'));
+});
+
 if (failed) { console.log(failed + ' failed'); process.exit(1); }
 console.log('all passed');

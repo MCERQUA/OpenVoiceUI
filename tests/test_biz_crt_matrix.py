@@ -908,6 +908,10 @@ def _seq_world(h, kind, n):
         e = _ends()
         e.pop('ai_completed')
         return world(h, endorsements=e, party_name=f'Seq {n} Inc')
+    if kind == 'old_edition_completed':        # rules 1.8.0 (E): the sub's CG 20 37 is the 07 04 edition
+        e = _ends()
+        e['ai_completed'] = dict(e['ai_completed'], edition='07 04')
+        return world(h, endorsements=e, party_name=f'Seq {n} Inc')
     gl = {'low_gl': 250_000, 'raised_min': 1_500_000}[kind]
     w = world(h, party_name=f'Seq {n} Inc', policies={
         'gl': {'line': 'gl', 'policy_number': 'GL-S', 'limits': {'each_occurrence': gl, 'general_aggregate': 2 * M_}},
@@ -959,6 +963,9 @@ def _visible(d, pinned, now_set):
         r = rows.get(iid, {}).get('required_applied')
         want = b.get('required') is not False if b.get('kind') == 'endorsement' else True
         if not r or r.get('now') is not want:
+            return False
+        # rules 1.8.0 (E): every endorsement item's row says the edition the verdict applies (the page lists it)
+        if b.get('kind') == 'endorsement' and not rows.get(iid, {}).get('edition_applied'):
             return False
     ff = d.get('form_functions') or {}
     return ff.get('was') == (pinned['data'].get('form_functions') or {}) and \
@@ -1056,6 +1063,19 @@ SEQS = {
                               'not_meets'),
     'revise-required-false': ('missing_completed', _seq_revise(lambda s: _items(s, 'ai_completed', {'required': False})),
                               'visible'),
+    # rules 1.8.0 (E, H): the edition moved into the form list still binds; two editions or a look-alike are refused
+    'revise-edition-into-form-list': ('old_edition_completed', _seq_revise(lambda s: _items(
+        s, 'ai_completed', {'forms': ['CG 20 37 04 13']}, drop=('edition',))), 'not_meets'),
+    'revise-edition-null-form-list': ('old_edition_completed', _seq_revise(lambda s: _items(
+        s, 'ai_completed', {'forms': ['CG 20 37 04 13'], 'edition': None})), 'not_meets'),
+    'revise-edition-empty-form-list': ('old_edition_completed', _seq_revise(lambda s: _items(
+        s, 'ai_completed', {'forms': ['CG 20 37 04 13'], 'edition': ''})), 'not_meets'),
+    'revise-edition-conflict': ('old_edition_completed', _seq_revise(lambda s: _items(
+        s, 'ai_completed', {'forms': ['CG 20 37 07 04'], 'edition': '04 13'})), 'not_meets'),
+    'revise-edition-dropped': ('old_edition_completed', _seq_revise(lambda s: _items(
+        s, 'ai_completed', {}, drop=('edition',))), 'visible'),
+    'revise-form-lookalike': ('missing_completed', _seq_revise(lambda s: _items(
+        s, 'ai_completed', {'forms': ['\u0421G 20 37']})), 'not_meets'),
     'decoy-create-then-revise': ('missing_completed', _seq_decoy, 'visible'),
     'agent-revise-then-staff-revise': ('missing_completed', _seq_then_staff, 'visible'),
 }

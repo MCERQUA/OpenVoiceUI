@@ -917,6 +917,104 @@ _REBASE_1_7_0 = {
 }
 MUTANTS = [(n, _REBASE_1_7_0.get(n, e), t) for n, e, t in MUTANTS]
 
+# ── rules 1.8.0 (gate-4 re-check #8, host rulings H5-H8): E edition in the form list, H ASCII + folding, F one contract,
+# G the edition field holds an edition only. Each names the regression test (or verbatim probe) that must catch it.
+T_C8 = 'tests/test_biz_crt_claimcheck8.py::'
+T_P8 = 'tests/test_claimcheck8_probes.py::'
+MUTANTS += [
+    # E (H5)
+    ('e8-item-edition-field-only', [(RT, "    listed = {form_parts(f)[1] for f in forms if isinstance(f, str)} - {None}\n",
+                                     "    listed = set()\n")],
+     [T_C8 + 'test_e_an_edition_in_the_form_list_is_the_items_edition', T_P8 + 'test_R8_E1_HOLE_an_edition_moved_into_the_form_list_still_binds']),
+    ('e8-verdict-reads-the-field', [(RT, "                want_ed = item_edition(it)[0]           # 1.8.0 (H5): an edition in the item's form list binds",
+                                     "                want_ed = _edition_key(it.get('edition')) if it.get('edition') else None")],
+     [T_C8 + 'test_e_an_edition_in_the_form_list_is_the_items_edition']),
+    ('e8-conflict-accepted', [(RT, "            if item_edition(it)[1]:\n                # rules 1.8.0 (H5): an edition written in the form list binds",
+                               "            if False:\n                # rules 1.8.0 (H5): an edition written in the form list binds")],
+     [T_C8 + 'test_e_two_editions_for_one_item_are_refused_on_revise', T_C8 + 'test_e_a_staff_edit_with_two_editions_is_refused']),
+    ('e8-stored-conflict-not-floor', [(RT, "        if item_edition(it)[1]:\n            out.append(f\"item {it.get('id')}: {item_edition(it)[1]}\")",
+                                       "        if False:\n            out.append(f\"item {it.get('id')}: {item_edition(it)[1]}\")")],
+     [T_C8 + 'test_e_a_stored_edition_conflict_reads_cant_tell']),
+    ('e8-diff-no-edition-applied', [(RT, "        v['edition_applied'] = f\"can't tell: {why}\" if why else edition_text(ed)", "        pass")],
+     [T_C8 + 'test_e_the_diff_shows_the_edition_the_verdict_applies',
+      T_MX + 'test_sequence_and_loosening_matrix[revise-edition-dropped-agent_key]']),
+    ('e8-page-lists-stored-keys', [(RQ, "          U.clear(listBox).appendChild(itemsList(d.items.filter(function (x) { return x.now; }).map(function (x) { return x.now; })));",
+                                    "          U.clear(listBox).appendChild(itemsList(s.data.items || []));")],
+     [T_C8 + 'test_e_the_page_lists_the_items_as_the_verdict_reads_them']),
+    ('watch-e8-item-field-only', [(WA, "        if isinstance(f, str) and _form_parts(f)[1] is not None:\n            listed.add(_form_parts(f)[1])",
+                                   "        if False:\n            listed.add(_form_parts(f)[1])")],
+     [T_C8 + 'test_e_watch_a_meets_against_the_form_list_edition_is_not_backed', T_C8 + 'test_f_engine_and_watcher_read_every_items_edition_alike']),
+    ('watch-e8-floor-off', [(WA, "        if _item_ed(it)[1]:                                                         # RE8 (H5)",
+                             "        if False:                                                         # RE8 (H5)")],
+     [T_C8 + 'test_e_watch_a_stored_edition_conflict_is_below_the_floor']),
+    # H (H6)
+    ('h8-set-ascii-off', [(RT, "    if not isinstance(v, str) or not needs_fold(v):\n        return\n", "    return\n")],
+     [T_C8 + 'test_h_a_set_refuses_non_ascii_form_numbers_and_editions', T_C8 + 'test_h_a_set_refuses_a_letter_o_inside_a_number',
+      T_C8 + 'test_h_a_sets_table_refuses_a_non_ascii_key']),
+    ('h8-no-confusables', [(RT, "        out.append(CONFUSABLES.get(ch, str(d) if d is not None else ch))",
+                            "        out.append(str(d) if d is not None else ch)")],
+     [T_P8 + 'test_R8_H1_HOLE_a_look_alike_iso_number_never_counts_for_completed_ops', T_C8 + 'test_f_the_contract_folds_what_the_ruling_names']),
+    ('h8-no-unicode-digits', [(RT, "        d = None if ch.isascii() else unicodedata.decimal(ch, None)", "        d = None")],
+     [T_C8 + 'test_h_a_look_alike_cg2037_filed_as_manuscript_never_meets', T_C8 + 'test_f_the_contract_folds_what_the_ruling_names']),
+    ('h8-letter-o-not-zero', [(RT, "    out = list(t)\n    for i, ch in enumerate(t):\n        if ch != 'O':", "    out = list(t)\n    for i, ch in enumerate([]):\n        if ch != 'O':")],
+     [T_P8 + 'test_R8_H1_HOLE_a_look_alike_iso_number_never_counts_for_completed_ops']),
+    ('h8-stored-fold-reads-as-written', [(RT, "                elif needs_fold(e_form):\n                    ec('UNCONFIRMED:crt_endorsement.form')",
+                                          "                elif False:\n                    ec('UNCONFIRMED:crt_endorsement.form')")],
+     [T_C8 + 'test_h_a_look_alike_listed_number_reads_cant_tell', T_C8 + 'test_h_a_look_alike_cg2037_filed_as_manuscript_never_meets']),
+    ('h8-near-iso-is-manuscript', [(RT, "                near = near_iso_number(e_form) and not iso\n", "                near = False\n")],
+     [T_C8 + 'test_h_a_number_one_character_from_an_iso_number_is_never_a_manuscript', T_C8 + 'test_h_near_iso_number_is_never_invited_as_a_manuscript']),
+    ('h8-edition-fold-reads-as-written', [(RT, "                elif needs_fold(e['data'].get('edition')):  # 1.8.0 (H6)", "                elif False:  # 1.8.0 (H6)")],
+     [T_C8 + 'test_h_a_look_alike_edition_on_the_paper_reads_cant_tell']),
+    ('h8-stored-set-fold-not-floor', [(RT, "        for v in [it.get('edition')] + forms:\n            if needs_fold(v):",
+                                       "        for v in []:\n            if needs_fold(v):")],
+     [T_C8 + 'test_h_a_stored_look_alike_in_a_sets_form_list_reads_cant_tell']),
+    ('watch-h8-refold-off', [(WA, "                if _refold(ed.get('form')) or _refold(ed.get('edition')):         # RN8: look-alikes are not backed",
+                              "                if False:         # RN8: look-alikes are not backed")],
+     [T_C8 + 'test_h_watch_a_look_alike_manuscript_meets_is_not_backed']),
+    ('watch-h8-near-off', [(WA, "                    bool(_iso_in(ed.get('form'))) or _near_iso(ed.get('form'))    # RN8: near an ISO number too",
+                            "                    bool(_iso_in(ed.get('form')))    # RN8: near an ISO number too")],
+     [T_C8 + 'test_h_watch_a_near_iso_manuscript_meets_is_not_backed']),
+    ('watch-h8-floor-fold-off', [(WA, "        if any(_refold(v) for v in [it.get('edition')] + raw):                     # RN8",
+                                  "        if False:                     # RN8")],
+     [T_C8 + 'test_h_watch_a_stored_look_alike_in_a_sets_form_list_is_below_the_floor']),
+    # F (H7): a watcher-only change to its copy of the contract is caught by the cross-check
+    ('watch-f8-no-lookalike-map', [(WA, "        if ch in _LOOKALIKE:\n            out += _LOOKALIKE[ch]", "        if False:\n            out += _LOOKALIKE[ch]")],
+     [T_C8 + 'test_f_engine_and_watcher_read_every_string_alike', T_P8 + 'test_R8_F1_HOLE_engine_and_watcher_read_every_form_field_alike']),
+    ('watch-f8-keeps-any-letter', [(WA, "    return _zero(''.join(ch for ch in _fold(s) if ch in _LATIN))",
+                                    "    return _zero(''.join(ch for ch in _fold(s) if ch.isalnum()))")],
+     [T_C8 + 'test_f_engine_and_watcher_read_every_string_alike']),
+    ('watch-f8-edition-own-gaps', [(WA, "        mon, yr = (int(words[0]) if len(words[0]) < 3 else 0), words[1]",
+                                    "        mon, yr = int(words[0]), words[1]")],
+     [T_C8 + 'test_f_engine_and_watcher_read_every_string_alike']),
+    # G (H8)
+    ('g8-item-edition-form-allowed', [(RT, "            if it.get('edition') and edition_parts(it.get('edition'))[0]:\n                # rules 1.8.0 (H8)",
+                                       "            if False:\n                # rules 1.8.0 (H8)")],
+     [T_C8 + 'test_g_an_items_edition_field_holding_a_form_number_is_refused']),
+    ('g8-stored-item-edition-form-not-floor', [(RT, "        if it.get('edition') and edition_parts(it.get('edition'))[0]:\n            out.append(",
+                                                "        if False:\n            out.append(")],
+     [T_C8 + 'test_g_a_stored_items_edition_holding_a_form_number_reads_cant_tell']),
+    ('g8-endorsement-edition-form-unchecked', [(RT, "                elif ed_form is not None and ed_form != fk:", "                elif False:")],
+     [T_C8 + 'test_g_an_endorsement_edition_naming_another_form_reads_cant_tell', T_P8 + 'test_R8_G1_HOLE_an_edition_field_naming_another_form_is_never_a_pass']),
+    ('watch-g8-off', [(WA, "                if _edition_read(ed.get('edition'))[0] not in (None, fkey):", "                if False:")],
+     [T_C8 + 'test_g_watch_an_endorsement_edition_naming_another_form_is_not_backed']),
+    ('watch-g8-floor-off', [(WA, "        if it.get('edition') and _edition_read(it.get('edition'))[0]:                # RE8 (H8)",
+                             "        if False:                # RE8 (H8)")],
+     [T_C8 + 'test_g_watch_a_stored_items_edition_holding_a_form_number_is_below_the_floor']),
+]
+
+# rules 1.8.0 (re-check #8): anchors the 1.8.0 engine / watcher rewrote, rebased onto the new lines (same intent)
+_REBASE_1_8_0 = {
+    'h3-form-not-compared': [(RT, "                elif e['data'].get('manuscript') is not True or fk in form_fn or iso or near:\n"
+                                  "                    accepted = ", '                elif False:\n                    accepted = ')],
+    'r3-manuscript-overrides-iso': [(RT, "                elif e['data'].get('manuscript') is not True or fk in form_fn or iso or near:",
+                                     "                elif e['data'].get('manuscript') is not True:")],
+    'med-edition-footer-unparsed': [(RT, "    words = re.findall(r'[A-Z]+|[0-9]+', _o_is_zero(re.sub(r'[^A-Z0-9]', ' ', _fold_chars(edition))))",
+                                     "    words = _fold_chars(edition).split()")],
+    'watch-low-edition-off': [(WA, "                if want_my and want_my != _edition_my(ed.get('edition')) and \\",
+                               "                if False and \\")],
+}
+MUTANTS = [(n, _REBASE_1_8_0.get(n, e), t) for n, e, t in MUTANTS]
+
 
 def _copy(name):
     dest = os.path.join(SCRATCH, name)
