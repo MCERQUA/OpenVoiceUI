@@ -71,7 +71,7 @@ import logging
 import os
 import re
 import secrets
-import shutil
+import stat as _stat
 import threading
 import time
 from urllib.parse import urlparse
@@ -85,6 +85,7 @@ from services.biz.pages import FILE_RE, RECORD_PARAM, build_theme, check_file, p
 from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_MAX_BYTES, BizStore, resolve_location
 from services.paths import JB_SDK_DIR
+from services.safe_open import Anchored, UnsafePath, lstat_beneath, scandir_beneath
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,17 @@ def _canvas_dir() -> Path:
 def _pages_dir(sandbox: str | None) -> Path:
     base = _canvas_dir()
     return base if sandbox is None else base / 'sandbox' / sandbox
+
+
+def _page_rel(sandbox: str | None, name: str = '') -> str:
+    """A page path RELATIVE to the canvas-pages mount (the anchor for every no-follow open below)."""
+    parts = ([] if sandbox is None else ['sandbox', sandbox]) + ([name] if name else [])
+    return '/'.join(parts)
+
+
+def _page_is_file(sandbox: str | None, name: str) -> bool:
+    """A regular file, never a symlink followed (the agent writes this tree: PR #597 safe_open)."""
+    return Anchored(_canvas_dir(), _page_rel(sandbox, name)).is_file()
 
 
 def _fail(status, code, message, **extra):
@@ -858,9 +870,8 @@ class PackContext:
 @biz_bp.get(f'{API}/registry/pages')
 def registry_list():
     pages = g.biz_store.pages_list(archived=request.args.get('archived') == '1')
-    pdir = _pages_dir(g.biz_sandbox)
     for p in pages:
-        p['exists'] = (pdir / p['file']).is_file()
+        p['exists'] = _page_is_file(g.biz_sandbox, p['file'])
     return jsonify({'pages': pages, 'count': len(pages)})
 
 
@@ -876,7 +887,7 @@ def registry_register():
 @biz_bp.get(f'{API}/registry/pages/<pid>')
 def registry_get(pid):
     page = g.biz_store.page_get(pid)
-    page['exists'] = (_pages_dir(g.biz_sandbox) / page['file']).is_file()
+    page['exists'] = _page_is_file(g.biz_sandbox, page['file'])
     return jsonify(page)
 
 
@@ -919,10 +930,10 @@ def registry_shell():
     page_id = request.args.get('page')
     if page_id is not None and not FILE_RE.match(page_id + '.html'):
         page_id = None
-    pdir = _pages_dir(g.biz_sandbox)
+    sandbox = g.biz_sandbox
     brand = store.company_brand()
     model = shell_model(store.pages_list(), company=brand, theme=build_theme(_style_tokens(page_id), brand),
-                        page_exists=lambda f: (pdir / f).is_file())
+                        page_exists=lambda f: _page_is_file(sandbox, f))
     model['base'] = _page_url('')
     model['page'] = page_id
     if g.biz_sandbox:
@@ -971,9 +982,12 @@ def _sandbox_only():
 def dev_pages_list():
     if not g.biz_sandbox:
         raise SchemaError(404, 'not_a_sandbox', 'This is not a dev sandbox')
-    pdir = _pages_dir(g.biz_sandbox)
     registered = {p['file'] for p in g.biz_store.pages_list()}
-    files = sorted(f.name for f in pdir.glob('*.html')) if pdir.is_dir() else []
+    try:                                    # no-follow listing (the agent writes this tree): regular files only
+        entries = scandir_beneath(_canvas_dir(), _page_rel(g.biz_sandbox))
+    except (OSError, UnsafePath):
+        entries = []
+    files = sorted(n for n, st in entries if n.endswith('.html') and _stat.S_ISREG(st.st_mode))
     return jsonify({'sandbox': g.biz_sandbox, 'pages': [
         {'file': f, 'url': _page_url(f), 'registered': f in registered} for f in files]})
 
@@ -992,21 +1006,31 @@ def dev_page_put(file_name):
     if not isinstance(page_html, str) or '<' not in page_html:
         raise SchemaError(422, 'validation_failed', 'html must be the page\'s full HTML text', field='html')
     g.biz_store.check_source(body.get('source'), agent=True)
-    pdir = _pages_dir(g.biz_sandbox)
-    pdir.mkdir(parents=True, exist_ok=True)
-    dest = pdir / file_name
-    kept = None
-    if dest.is_file():
-        hist = pdir / '.history'
-        hist.mkdir(exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-        kept = hist / f'{file_name}.{stamp}'
-        shutil.copy2(dest, kept)          # the previous version is kept, never removed
-    tmp = dest.with_name('.' + file_name + '.partial')
-    tmp.write_text(page_html, encoding='utf-8')
-    os.replace(tmp, dest)
+    # PR #597 class (gate-4 re-check #7, D1): the sandbox's canvas folder is agent-writable, so every open here is
+    # no-follow and beneath the canvas-pages mount (services/safe_open.py). A symlink (or anything not a regular file)
+    # at the page's name is refused, never followed: the history copy can never carry another file's bytes
+    # (staff-surface.key included) into the agent's folder, and the write never lands outside it.
+    root = _canvas_dir()
+    rel = _page_rel(g.biz_sandbox, file_name)
+    try:
+        st = lstat_beneath(root, rel)
+        if st is not None and not _stat.S_ISREG(st.st_mode):
+            raise SchemaError(409, 'page_not_a_regular_file', 'Something other than a plain page file sits at this '
+                                                              'name (a link or a folder); remove it and publish again',
+                              file=file_name)
+        kept = None
+        if st is not None:
+            old = Anchored(root, rel).read_bytes()
+            stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+            kept = f'{file_name}.{stamp}'
+            Anchored(root, _page_rel(g.biz_sandbox, f'.history/{kept}')).atomic_write_bytes(
+                old, create_dirs=True)          # the previous version is kept, never removed
+        Anchored(root, rel).atomic_write_text(page_html, create_dirs=True)
+    except UnsafePath:
+        raise SchemaError(409, 'page_not_a_regular_file', 'This page path crosses a link or a non-plain folder; '
+                                                          'publishing refuses to follow it', file=file_name)
     return jsonify({'file': file_name, 'url': _page_url(file_name), 'bytes': len(page_html.encode('utf-8')),
-                    'previous_kept_as': kept.name if kept else None,
+                    'previous_kept_as': kept,
                     'next': 'Register it: POST /api/biz/v1/registry/pages {file, label, section, ...}'}), 200
 
 
@@ -1015,11 +1039,15 @@ def dev_page_get(file_name):
     if not g.biz_sandbox:
         raise SchemaError(404, 'not_a_sandbox', 'This is not a dev sandbox')
     check_file(file_name)
-    path = _pages_dir(g.biz_sandbox) / file_name
-    if not path.is_file():
+    path = Anchored(_canvas_dir(), _page_rel(g.biz_sandbox, file_name))     # no-follow (PR #597 class, D1)
+    try:
+        page_html = path.read_text(encoding='utf-8') if path.is_file() else None
+    except (OSError, UnsafePath, UnicodeDecodeError):
+        page_html = None
+    if page_html is None:
         raise SchemaError(404, 'not_found', 'No such page in this sandbox')
     page = g.biz_store.page_for_serve(file_name)
-    return jsonify({'file': file_name, 'url': _page_url(file_name), 'html': path.read_text(encoding='utf-8'),
+    return jsonify({'file': file_name, 'url': _page_url(file_name), 'html': page_html,
                     'registered': page is not None,
                     'shell_injection': _shell_tags(page, g.biz_sandbox).decode('utf-8') if page else None})
 
