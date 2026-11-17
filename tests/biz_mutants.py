@@ -1142,7 +1142,7 @@ MUTANTS += [
     ('watch-m10-unreadable-is-any', [(WA, "        if isinstance(f, str) and (_num_ed(f) or (0, 0, False))[2]:", "        if False:")],
      [T_C10 + 'test_m_watch_a_stored_month_word_edition_is_below_the_floor', T_C10 + 'test_engine_and_watcher_agree_on_the_1_10_0_readings']),
     # FP1: the narrowed near test and edition gain (engine, watcher RF10)
-    ('f10-near-reads-the-full-map-with-an-edit', [(RT, "    return _indel_distance(s, _MAP_1_9_0)\n", "    return _indel_distance(s, LOOKALIKE_DIGITS)\n")],
+    ('f10-near-reads-d-with-an-edit', [(RT, "if k in 'IL|!O'}      # the 1.9.0 letters", "if k in 'IL|!OD'}      # the 1.9.0 letters")],
      [T_C10 + 'test_fp1_a_carrier_cg_letter_number_is_a_manuscript_again_and_a_set_may_list_it',
       T_P10 + 'test_R10_FP1_WATCH_a_carrier_cg_letter_series_number_is_a_dead_end']),
     ('f10-edition-gain-any-form', [(RT, "        if got is not None and got != read(raw)[1] and form and is_iso_number(form):",

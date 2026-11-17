@@ -267,7 +267,7 @@ _EXACT_DIGIT_GLYPHS = (frozenset(), frozenset('9'), frozenset('7'), frozenset('6
 _EXACT_DIGIT = dict(LOOKALIKE_DIGITS, **{']': '1', '[': '1', 'J': '1', 'T': '1', '/': '1', "'": '1',
                                           'U': '0', 'C': '0', '?': '2'})
 _EXACT_PAIRS = ('()', '[]')                           # two marks read as one 0
-_MAP_1_9_0 = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}
+_MAP_1_9_0 = {k: v for k, v in LOOKALIKE_DIGITS.items() if k in 'IL|!O'}      # the 1.9.0 letters, from the one map
 
 
 def _exact_readings(s) -> set:
