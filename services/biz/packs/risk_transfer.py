@@ -35,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.9.0'
+RULE_VERSION = 'crt-rules-1.9.1'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -233,26 +233,44 @@ def _squash(s) -> str:
 # no cost; dropping a character that can never match CG 20 xx can only bring a stretch closer, never further, so the
 # test stays fail-closed. The same map decides the set-side 422 form_lookalike (needs_fold below). The watcher keeps
 # its own copy (RL9 in tools/biz/crt-verdict-watch.py); a test runs both over a look-alike generator.
-LOOKALIKE_DIGITS = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}
+# Rules 1.9.1 (host ruling, widened): S reads as 5, Z as 2, B as 8, G as 6, and Q and D as 0, too. The G of a CG prefix
+# (a G whose last letter, digit, | or ! before it is a C) is the letter the number starts with and stays a G.
+LOOKALIKE_DIGITS = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0', 'Q': '0', 'D': '0',
+                    'S': '5', 'Z': '2', 'B': '8', 'G': '6'}
 
 
 def lookalike_reading(s) -> str:
-    """The field as written (folded, nothing dropped), each look-alike read as its digit: 'CG 20 |O' -> 'CG 20 10'."""
-    return ''.join(LOOKALIKE_DIGITS.get(c, c) for c in _fold_chars(s))
+    """The field as written (folded, nothing dropped), each look-alike read as its digit: 'CG 2D |O' -> 'CG 20 10'.
+    A G right after a C (gaps aside) is the CG prefix and stays a letter."""
+    out, last = [], ''
+    for c in _fold_chars(s):
+        out.append(c if c == 'G' and last == 'C' else LOOKALIKE_DIGITS.get(c, c))
+        if 'A' <= c <= 'Z' or c in _DIGITS or c in '|!':
+            last = c
+    return ''.join(out)
 
 
-def iso_distance(t) -> int:
-    """Fewest single-character edits (substitute, insert, delete) that make some stretch of t read CG 20 xx (xx: any
-    two digits). t is read character by character as written; a gap (not A-Z, not 0-9) costs nothing to pass."""
+def _iso_hit(c, w, lookalikes) -> bool:
+    """Does character c fill position w of CG 20 xx (None: any digit)? With lookalikes, by class: a digit position takes
+    a digit or any look-alike, '2' takes Z, '0' takes O / Q / D, and the G takes 6 (G and 6 are one class)."""
+    if w is None:
+        return c in _DIGITS or (lookalikes and c in LOOKALIKE_DIGITS)
+    return c == w or (lookalikes and (LOOKALIKE_DIGITS.get(c) == w or (w == 'G' and c == '6')))
+
+
+def iso_distance(s, lookalikes=True) -> int:
+    """Fewest single-character edits (substitute, insert, delete) that make some stretch of the field read CG 20 xx
+    (xx: any two digits), on the field as written (folded) and, with lookalikes, by the look-alike classes. A gap (not
+    A-Z, not 0-9, and not a look-alike mark) costs nothing to pass."""
     want = ('C', 'G', '2', '0', None, None)           # None: any digit
     col = list(range(len(want) + 1))                  # col[i]: cheapest way to have read want[:i], ending here
     best = col[-1]
-    for c in t:
-        if not ('A' <= c <= 'Z' or c in _DIGITS):
+    for c in _fold_chars(s):
+        if not ('A' <= c <= 'Z' or c in _DIGITS or (lookalikes and c in LOOKALIKE_DIGITS)):
             continue
         nxt = [0]                                     # the number may start anywhere in the field
         for i, w in enumerate(want, start=1):
-            hit = (c in _DIGITS) if w is None else (c == w)
+            hit = _iso_hit(c, w, lookalikes)
             nxt.append(min(col[i - 1] + (0 if hit else 1), col[i] + 1, nxt[i - 1] + 1))
         col = nxt
         best = min(best, col[-1])
@@ -262,12 +280,9 @@ def iso_distance(t) -> int:
 def _lookalike_changes_reading(raw) -> bool:
     """Rules 1.9.0 (L): reading the look-alikes as digits gives the field an ISO number, an edition, or a closeness to
     CG 20 xx (within one character) that it does not have as written."""
-    plain = _fold_chars(raw)
-    if not any(c in LOOKALIKE_DIGITS for c in plain):
-        return False
     mapped = lookalike_reading(raw)
-    d = iso_distance(mapped)
-    if d <= 1 and d < iso_distance(plain):
+    d = iso_distance(raw)
+    if d <= 1 and d < iso_distance(raw, lookalikes=False):
         return True
     if iso_numbers_in(mapped) - iso_numbers_in(raw) or (is_iso_form(mapped) and not is_iso_form(raw)):
         return True
@@ -295,7 +310,7 @@ def near_iso_number(s) -> bool:
     """Rules 1.8.0 (H6), read per 1.9.0 (L): the field, as written and read through the look-alike map, is within one
     edit (substitution, insertion or deletion) of a CG 20 xx number anywhere in it. Such a number is never invited, or
     read, as a manuscript."""
-    return iso_distance(lookalike_reading(s)) <= 1
+    return iso_distance(s) <= 1
 
 
 def form_parts(s):

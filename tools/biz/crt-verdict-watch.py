@@ -84,7 +84,8 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
      empty; two different editions for one item, or an edition field holding a form number, is below the floor
   RG8 an endorsement whose edition field names another form number than its form field is not backed
   (rules 1.9.0, gate-4 re-check #9, checked here with this file's own code)
-  RL9 the ASCII look-alike map: I, L, |, ! read as 1 and O as 0 on the field as written (nothing squashed first). A
+  RL9 the ASCII look-alike map: I, L, |, ! read as 1, O / Q / D as 0, S as 5, Z as 2, B as 8 and G as 6 (not the G of
+     a CG prefix; rules 1.9.1) on the field as written (nothing squashed first). A
      number within one edit (substitution, insertion, deletion) of CG 20 xx read that way is never a manuscript; a
      form or edition whose look-alikes give it an ISO number, an edition or that closeness is not backed (and is below
      the floor in a set)
@@ -249,23 +250,38 @@ def _squash(s):
 # RL9 (rules 1.9.0, own code): the ASCII look-alike map. I, L (l), | and ! read as the digit 1 and O as 0, on the field
 # AS WRITTEN (folded, nothing squashed first): a look-alike is a position, never dropped. A character that is neither
 # a letter A-Z nor a digit once the map has read it is a gap and is skipped (it can never match CG 20 xx).
-_DIGIT_LIKE = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}
+# RL9 (rules 1.9.1, widened): S -> 5, Z -> 2, B -> 8, G -> 6, Q and D -> 0 as well; the G of a CG prefix stays a letter.
+_DIGIT_LIKE = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0', 'Q': '0', 'D': '0',
+               'S': '5', 'Z': '2', 'B': '8', 'G': '6'}
 
 
 def _as_digits(s):
-    """RL9: the folded field with each look-alike read as its digit."""
-    return ''.join(_DIGIT_LIKE[ch] if ch in _DIGIT_LIKE else ch for ch in _fold(s))
+    """RL9: the folded field with each look-alike read as its digit; a G whose previous letter / digit / | / ! is a C
+    (the CG prefix) is kept."""
+    f = _fold(s)
+    res = ''
+    for i, ch in enumerate(f):
+        before = [x for x in f[:i] if x in _LATIN or x in '|!']
+        keep = ch == 'G' and before[-1:] == ['C']
+        res += ch if keep or ch not in _DIGIT_LIKE else _DIGIT_LIKE[ch]
+    return res
 
 
-def _gap_to_iso(t):
-    """RL9 (own code): the edit distance (substitute / insert / delete) from CG 20 xx to the closest stretch of t."""
-    seq = [ch for ch in t if ch in _LATIN]
-    pat = ['C', 'G', '2', '0', '#', '#']                  # '#': any digit
+def _gap_to_iso(s, look=True):
+    """RL9 (own code): the edit distance (substitute / insert / delete) from CG 20 xx to the closest stretch of the
+    folded field; with look, each position takes its look-alike class (G or 6; 2 or Z; 0, O, Q or D; a digit or any
+    look-alike)."""
+    digitish = set('0123456789') | (set(_DIGIT_LIKE) if look else set())
+    seq = [ch for ch in _fold(s) if ch in _LATIN or ch in digitish]
+    if look:
+        pat = [{'C'}, {'G', '6'}, {'2', 'Z'}, {'0', 'O', 'Q', 'D'}, digitish, digitish]
+    else:
+        pat = [{'C'}, {'G'}, {'2'}, {'0'}, digitish, digitish]
     row = [0] * (len(seq) + 1)                            # pattern row 0: the stretch may start anywhere
     for p in pat:
         new = [row[0] + 1]
         for j, ch in enumerate(seq, start=1):
-            same = ch.isdigit() if p == '#' else ch == p
+            same = ch in p
             new.append(min(row[j - 1] + (not same), row[j] + 1, new[j - 1] + 1))
         row = new
     return min(row)
@@ -287,11 +303,8 @@ def _refold(s):
     k = ''.join(ch for ch in _fold(s) if ch in _LATIN)
     if _zero(k) != k:
         return True
-    f = _fold(s)
-    if not set(f) & set(_DIGIT_LIKE):
-        return False
     m = _as_digits(s)
-    if _gap_to_iso(m) <= 1 and _gap_to_iso(m) < _gap_to_iso(f):
+    if _gap_to_iso(s) <= 1 and _gap_to_iso(s) < _gap_to_iso(s, look=False):
         return True
     if not _iso_in(m) <= _iso_in(s) or (_is_iso(m) and not _is_iso(s)):
         return True
@@ -303,7 +316,7 @@ def _refold(s):
 def _near_iso(s):
     """RN8 / RL9: within one edit of a CG 20 xx number anywhere in the field, read through the look-alike map: never a
     manuscript."""
-    return _gap_to_iso(_as_digits(s)) <= 1
+    return _gap_to_iso(s) <= 1
 
 
 def _form_parts(s):
