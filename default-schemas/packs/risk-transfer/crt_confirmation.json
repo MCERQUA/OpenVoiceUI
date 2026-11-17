@@ -57,6 +57,10 @@
       "type": "string",
       "label": "Approved diff (sha256)",
       "format": "sha256"
+    },
+    "approved_against": {
+      "type": "object",
+      "label": "Approved against (the version in use it was compared with; set by the server)"
     }
   }
 }

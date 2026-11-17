@@ -35,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.5.0'
+RULE_VERSION = 'crt-rules-1.6.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -132,6 +132,26 @@ ISO_FLOOR = dict(ISO_FORM_FUNCTION)
 # Other ISO additional-insured numbers a set might list, that are never completed operations (re-check #5 F2):
 # CG 20 26 (designated person or organization) and CG 20 11 (managers or lessors of premises).
 ISO_NOT_COMPLETED = ('CG2026', 'CG2011')
+# Host ruling G (rules 1.6.0): a floored or otherwise ISO additional-insured number (the CG 20 xx series, every number
+# above) is evaluated as that ISO form whatever its manuscript flag says. A manuscript is a non-ISO form only.
+_ISO_AI_RE = re.compile(r'^CG20\d\d$')
+
+
+def is_iso_number(fk) -> bool:
+    """An ISO number (built-in floor, ISO_NOT_COMPLETED, or any CG 20 xx): never read as a manuscript (ruling G)."""
+    return bool(fk) and (fk in ISO_FLOOR or fk in ISO_NOT_COMPLETED or bool(_ISO_AI_RE.match(fk)))
+
+
+# Host ruling M (rules 1.6.0): the keys an item may carry. Anything else (a typo, a renamed key) is refused on write,
+# so every key that can change a verdict is one the approval page names. An item's identity keys never change under
+# the same id: a revision that wants another limit / line / coverage removes the item and adds a new one.
+ITEM_KEYS = ('id', 'kind', 'line', 'required', 'cite', 'limit', 'floor', 'ceiling', 'min', 'function', 'forms',
+             'edition', 'names_parties', 'suggested_when', 'code', 'classes', 'combined', 'trade_categories',
+             'tail_required', 'when_trade')
+ITEM_IDENTITY_KEYS = ('kind', 'line', 'limit', 'function', 'code')
+COMBINED_KEYS = ('gl_occ_floor', 'gl_occ_plus_umbrella_min', 'note')
+# Host ruling D (rules 1.6.0): fields of a requirement set only the pack's own routes set (never a generic write)
+SET_SERVER_FIELDS = ('supersedes', 'template_key', 'set_version')
 FORM_FUNCTIONS = ('ai_ongoing', 'ai_completed', 'pnc', 'project_aggregate', 'completed_ops_aggregate',
                   'waiver_of_subrogation')
 _MONTHS = {m: i for i, m in enumerate(('JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT',
@@ -359,6 +379,15 @@ def floor_violations(set_data) -> list:
     elif ff is not None:
         out.append('form_functions is not a table')
     for it in d.get('items') or []:
+        if isinstance(it, dict) and it.get('kind') == 'limit':
+            # plan S2 / ruling M (rules 1.6.0): min_* is the floor unless staff RAISE it; never below it, never absent
+            mn, fl = it.get('min'), it.get('floor')
+            if limit_need(it) is None:
+                out.append(f"item {it.get('id')}: a limit item with no minimum and no floor")
+            elif isinstance(mn, (int, float)) and isinstance(fl, (int, float)) and not isinstance(mn, bool) and \
+                    not isinstance(fl, bool) and mn < fl:
+                out.append(f"item {it.get('id')}: minimum {mn} is below its floor {fl}")
+            continue
         if not isinstance(it, dict) or it.get('kind') != 'endorsement':
             continue
         fn, forms = it.get('function'), it.get('forms')
@@ -408,6 +437,10 @@ def validate_items(items, trade_category=None) -> list:
         if not isinstance(iid, str) or not iid or iid in ids:
             raise _err(422, 'bad_requirement_items', 'each item needs a unique id')
         ids.add(iid)
+        unknown = sorted(str(k)[:40] for k in it if k not in ITEM_KEYS)
+        if unknown:                     # host ruling M: a key the approval page cannot name never reaches a verdict
+            raise _err(422, 'unknown_item_key', 'Requirement items carry only these keys: ' + ', '.join(ITEM_KEYS)
+                       + ' (host ruling M)', item=iid, keys=unknown[:10])
         is_ai = kind == 'ai' or (kind == 'endorsement' and it.get('function') in AI_FUNCTIONS)
         if is_ai and line == 'wc':
             raise _err(422, 'ai_on_wc_refused', 'Workers compensation never carries additional insured '
@@ -458,10 +491,49 @@ def validate_items(items, trade_category=None) -> list:
                 v = it.get(k)
                 if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0):
                     raise _err(422, 'bad_requirement_items', f'{k} must be a dollar amount', item=iid)
+            if not isinstance(it.get('limit'), str) or not it.get('limit'):
+                raise _err(422, 'bad_requirement_items', 'a limit item names the policy limit it reads, e.g. '
+                                                         '"each_occurrence"', item=iid)
+            if limit_need(it) is None:      # host ruling M: no minimum and no floor is never $0
+                raise _err(422, 'limit_floor_required', 'A limit item carries its floor (and a minimum at or above '
+                                                        'it); a missing minimum means the floor, never $0 '
+                                                        '(host ruling M)', item=iid)
+            comb = it.get('combined')
+            if comb is not None:
+                if line != 'gl' or not isinstance(comb, dict) or any(k not in COMBINED_KEYS for k in comb) or \
+                        any(isinstance(comb.get(k), bool) or not isinstance(comb.get(k), (int, float)) or comb[k] < 0
+                            for k in ('gl_occ_floor', 'gl_occ_plus_umbrella_min')):
+                    raise _err(422, 'bad_requirement_items', 'combined is {"gl_occ_floor": <$>, '
+                                                             '"gl_occ_plus_umbrella_min": <$>} on a GL limit item',
+                               item=iid)
             if trade_category == 'finish' and line == 'umbrella' and (it.get('min') or 0) > 2_000_000:
                 warnings.append({'item': iid, 'warning': 'Umbrella above $2M on a finish trade over-demands '
                                                          '(guide p.18, p.25).'})
     return warnings
+
+
+def limit_need(it):
+    """The minimum a limit item asks for: its `min`, or its `floor` when `min` is missing or null (host ruling M:
+    never $0 by omission). None when the item carries neither (refused on write; reads Can't tell)."""
+    for k in ('min', 'floor'):
+        v = (it or {}).get(k)
+        if v is not None and not isinstance(v, bool) and isinstance(v, (int, float)):
+            return v
+    return None
+
+
+def check_item_identity(old_items, new_items):
+    """422 when a revision keeps an item's id but changes what the item IS (its kind, line, limit, function or
+    exclusion code): host ruling M. Remove the item and add a new one instead, so the page shows both whole."""
+    was = {it.get('id'): it for it in old_items or [] if isinstance(it, dict)}
+    for it in new_items or []:
+        if not isinstance(it, dict) or it.get('id') not in was:
+            continue
+        moved = [k for k in ITEM_IDENTITY_KEYS if was[it['id']].get(k) != it.get(k)]
+        if moved:
+            raise _err(422, 'item_identity_changed', f"Item {it['id']} would change its {', '.join(moved)}. An "
+                       'item keeps what it measures; remove it and add a new item with its own id (host ruling M)',
+                       item=it['id'], keys=moved)
 
 
 # ── evidence gathering (account-scoped) ─────────────────────────────────────
@@ -701,6 +773,16 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
     unconfirmed = []
     cells = {}
     expiring = None
+    # host ruling W (rules 1.6.0): every waivable code is raised by one piece of paper for one function; a waiver
+    # binds to exactly those (function, document id, file hash) triples, so other or changed paper re-raises it
+    raised = {}
+
+    def occur(code, function, doc_id):
+        b = {'function': function, 'document_id': doc_id,
+             'sha256': _file_id(inputs['documents'].get(doc_id)) if doc_id else None}
+        lst = raised.setdefault(code, [])
+        if b not in lst:
+            lst.append(b)
 
     def unc(coll, field):
         code = f'UNCONFIRMED:{coll}.{field}'
@@ -859,6 +941,16 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         checked_policies[pol['id']] = pol
         return pol
 
+    def umbrella_for_combined():
+        """The umbrella the combined GL + umbrella test may lean on: the current one, passing the same checks
+        policy_for runs (every base field confirmed, this sub's paper, dates, in force today), or None."""
+        umb = current('umbrella')
+        if umb is None or not all(pol_ok(umb, f) for f in POLICY_BASE_FIELDS) or \
+                conf.doc_check(umb['data'].get('source_document_id')) != '':
+            return None
+        u_eff, u_exp = _d(umb['data'].get('effective')), _d(umb['data'].get('expiration'))
+        return umb if u_eff and u_exp and u_eff <= today < u_exp else None
+
     def endorsements_for(pol, function):
         return [e for e in inputs['endorsements'] if e['data'].get('crt_policy_id') == pol['id']
                 and e['data'].get('function') == function]
@@ -875,26 +967,35 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         iid, kind, line = it.get('id'), it.get('kind'), it.get('line')
         required = it.get('required', True)
         if kind == 'limit':
+            need = limit_need(it)                # ruling M: a missing / null min is the floor, never $0
+            if need is None:
+                unc('crt_requirement_set', 'items')
+                cells[iid] = 'UNCONFIRMED'
+                continue
             pol = policy_for(line, iid)
             if pol is None:
                 continue
             val = (pol['data'].get('limits') or {}).get(it.get('limit'))
-            need = it.get('min', it.get('floor')) or 0
             ok = isinstance(val, (int, float)) and not isinstance(val, bool) and val >= need
             comb = it.get('combined')
-            if not ok and comb and line == 'gl' and isinstance(val, (int, float)) and val >= comb.get('gl_occ_floor', 0):
-                umb = current('umbrella')
-                if umb is not None and all(pol_ok(umb, f) for f in POLICY_BASE_FIELDS) and \
-                        conf.doc_check(umb['data'].get('source_document_id')) == '':
-                    uv = (umb['data'].get('limits') or {}).get('each_occurrence') or 0
-                    u_exp, u_eff = _d(umb['data'].get('expiration')), _d(umb['data'].get('effective'))
-                    if u_exp and u_exp > today and u_eff and u_eff <= today and val + uv >= comb.get('gl_occ_plus_umbrella_min', 0):
+            if not ok and isinstance(comb, dict) and line == 'gl' and isinstance(val, (int, float)) and \
+                    not isinstance(val, bool) and isinstance(comb.get('gl_occ_floor'), (int, float)) and \
+                    isinstance(comb.get('gl_occ_plus_umbrella_min'), (int, float)) and val >= comb['gl_occ_floor']:
+                umb = umbrella_for_combined()
+                if umb is not None:
+                    uv = (umb['data'].get('limits') or {}).get('each_occurrence')
+                    if isinstance(uv, (int, float)) and not isinstance(uv, bool) and \
+                            val + uv >= comb['gl_occ_plus_umbrella_min']:
                         ok = True
+                        # host ruling U (rules 1.6.0): the umbrella this test leans on gets every check a policy
+                        # gets (named insured, producer, expiry window), whether or not the set has an umbrella item
+                        checked_policies[umb['id']] = umb
                         notes.append(f'{iid}: met by the combined GL + umbrella test')
             if not ok:
                 code = f'LIMIT_LOW:{line}'
                 if code not in variances:
                     variances.append(code)
+                occur(code, iid, pol['data'].get('source_document_id'))
                 cells[iid] = code
             else:
                 cells[iid] = 'OK'
@@ -909,6 +1010,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 cells[iid] = 'OK'
             else:
                 _add(variances, f'NOT_AI:{line}')
+                occur(f'NOT_AI:{line}', iid, pol['data'].get('source_document_id'))
                 cells[iid] = f'NOT_AI:{line}'
         elif kind == 'cert_holder':
             pol = policy_for(line, iid)
@@ -920,7 +1022,8 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             elif acct_name and names_equal(acct_name, [pol['data'].get('certificate_holder')]):
                 cells[iid] = 'OK'
             else:
-                variances.append('WRONG_HOLDER')
+                _add(variances, 'WRONG_HOLDER')
+                occur('WRONG_HOLDER', iid, pol['data'].get('source_document_id'))
                 cells[iid] = 'WRONG_HOLDER'
         elif kind == 'tail':
             pol = policy_for(line, iid)
@@ -930,7 +1033,8 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 unc('crt_policy', 'tail')
                 cells[iid] = 'UNCONFIRMED'
             elif pol['data'].get('occurrence_or_claims_made') == 'claims_made' and not pol['data'].get('tail'):
-                variances.append('PL_NO_TAIL')
+                _add(variances, 'PL_NO_TAIL')
+                occur('PL_NO_TAIL', iid, pol['data'].get('source_document_id'))
                 cells[iid] = 'PL_NO_TAIL'
             else:
                 cells[iid] = 'OK'
@@ -974,6 +1078,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             code = f"EXCLUSION:{it.get('code')}"
             if any(c in banned for c in have):
                 _add(variances, code)
+                occur(code, iid, pol['data'].get('source_document_id'))
                 cells[iid] = code
             else:
                 cells[iid] = 'OK'
@@ -1009,7 +1114,9 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             ends = endorsements_for(pol, fn)
             if not ends:
                 code = 'COMPLETED_OPS_LAPSED' if lapsed_rule else f'MISSING:{fn}'
-                (variances if lapsed_rule else missing).append(code)
+                _add(variances if lapsed_rule else missing, code)
+                if lapsed_rule:
+                    occur(code, fn, None)
                 cells[iid] = code
                 continue
             two = is_cca(pol)
@@ -1042,10 +1149,13 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 # operations wording (a person's confirmation, made only on the staff surface).
                 # F (rules 1.5.0): the item's own form list is the only list (never empty); a built-in ISO number
                 # always keeps its ISO category.
+                # G (rules 1.6.0): an ISO number (the floor, CG 20 26 / 20 11, any CG 20 xx) is that ISO form whatever
+                # its manuscript flag says; CG 20 26 / 20 11 are never completed operations, like CG 20 10.
                 fk = form_key(e['data'].get('form'))
-                if fn == 'ai_completed' and fk in NEVER_COMPLETED_OPS:
+                iso = is_iso_number(fk)
+                if fn == 'ai_completed' and (fk in NEVER_COMPLETED_OPS or fk in ISO_NOT_COMPLETED):
                     ec(f'MISSING:{fn}')
-                elif e['data'].get('manuscript') is not True or fk in form_fn:
+                elif e['data'].get('manuscript') is not True or fk in form_fn or iso:
                     accepted = {form_key(f) for f in it.get('forms') or []}
                     if fk not in accepted:
                         if form_fn.get(fk) not in (None, fn):
@@ -1053,8 +1163,12 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                         else:
                             ec('UNCONFIRMED:crt_endorsement.form')
                             notes.append(f"{iid}: form {e['data'].get('form') or '(blank)'} is not a listed form "
-                                         'for this item; list the equivalent in the requirement set or confirm '
-                                         'it as a manuscript form')
+                                         'for this item; ' + (
+                                             'it is an ISO form, read as that form (never as a manuscript); list '
+                                             'it in the requirement set only if your licensed staff accept it for '
+                                             'this coverage' if iso else
+                                             'list the equivalent in the requirement set or confirm it as a '
+                                             'manuscript form'))
                 elif fn == 'ai_completed' and not (e['data'].get('completed_ops_wording') is True and
                                                    conf.ok(e, 'crt_endorsement', 'completed_ops_wording', two=two)):
                     ec('UNCONFIRMED:crt_endorsement.completed_ops_wording')
@@ -1071,7 +1185,10 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                     if want_ed and _edition_key(e['data'].get('edition')) != want_ed:
                         ec(f'WRONG_EDITION:{fn}')
                 if fn in AI_FUNCTIONS or it.get('names_parties'):
-                    if e['data'].get('blanket'):
+                    # K (rules 1.6.0): blanket applies only when there is no schedule; a schedule that names anyone
+                    # (a party or a project) is checked like any other, whatever the blanket flag says
+                    if e['data'].get('blanket') and not (e['data'].get('scheduled_names') or
+                                                         e['data'].get('scheduled_projects')):
                         cr, cr_ok = (pd.get('contract_requires_ai'),
                                      project and conf.ok(project, 'crt_project', 'contract_requires_ai'))
                         if not cr_ok:
@@ -1093,12 +1210,12 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                             ec('WRONG_PARTY')
                         if not names_equal(pname, e['data'].get('scheduled_projects') or []):   # ruling (a): exact
                             ec('WRONG_PROJECT')
-                per_end.append(ecodes)
-            if any(not c for c in per_end):
+                per_end.append((e, ecodes))
+            if any(not c for _e, c in per_end):
                 # one endorsement carries no code at all; an endorsement on the same item that nobody has checked
                 # still reads Can't tell (rules 1.5.0: every check runs, Can't tell is never hidden). Variances on
                 # another paper (another project's endorsement for this sub) do not count against this one.
-                pending = [c for cs in per_end for c in cs if c.startswith('UNCONFIRMED')]
+                pending = [c for _e, cs in per_end for c in cs if c.startswith('UNCONFIRMED')]
                 if pending:
                     for c in pending:
                         _add(unconfirmed, c)
@@ -1107,14 +1224,15 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                     cells[iid] = 'OK'
                 continue
             first = None
-            for cs in per_end:
+            for e, cs in per_end:
                 for c in cs:
                     if c.startswith('UNCONFIRMED'):
                         _add(unconfirmed, c)
                     else:
                         _add(missing if c == f'MISSING:{fn}' else variances, c)
+                        occur(c, fn, e['data'].get('document_id'))
                         first = first or c
-            cells[iid] = 'UNCONFIRMED' if any(c.startswith('UNCONFIRMED') for cs in per_end for c in cs) else first
+            cells[iid] = 'UNCONFIRMED' if any(c.startswith('UNCONFIRMED') for _e, cs in per_end for c in cs) else first
         else:
             cells[iid] = 'N/A'
 
@@ -1132,6 +1250,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             if not pdd.get('producer_name') or not (pdd.get('producer_phone') or pdd.get('producer_email')):
                 if 'PRODUCER_INCOMPLETE' not in variances:
                     variances.append('PRODUCER_INCOMPLETE')
+                occur('PRODUCER_INCOMPLETE', 'producer:' + str(pdd.get('line')), pdd.get('source_document_id'))
         exp = _d(pol['data'].get('expiration'))
         if exp is not None:
             days = (exp - today).days
@@ -1150,6 +1269,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         lr = _dt(last_review['data'].get('reviewed_at') or last_review['created_at'])
         if lr and sca > lr:
             variances.append('SCOPE_CHANGED')
+            occur('SCOPE_CHANGED', 'scope@' + str(asg['data'].get('scope_changed_at')), None)
 
     # contractor-accepted variances (written OK on file, unexpired)
     accepted = []
@@ -1160,14 +1280,28 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         if w['archived_at'] or not exp_w or exp_w <= today or \
                 conf.doc_check(wd.get('acceptance_document_id'), kind='contractor_waiver_ok', party=False) != '':
             continue                      # N3: the written OK of THIS assignment's contractor account only
-        live_waivers[wd.get('variance_code')] = w
+        live_waivers.setdefault(wd.get('variance_code'), []).append(w)
     for lst in (missing, variances):
         for code in list(lst):
-            if code in live_waivers and code.startswith(WAIVABLE_PREFIXES) and code not in NEVER_WAIVABLE:
-                lst.remove(code)
-                accepted.append({'code': code, 'waiver_id': live_waivers[code]['id'],
-                                 'accepted_by_contractor': live_waivers[code]['data'].get('accepted_by_contractor'),
-                                 'expires': live_waivers[code]['data'].get('expires')})
+            if code not in live_waivers or not code.startswith(WAIVABLE_PREFIXES) or code in NEVER_WAIVABLE:
+                continue
+            # host ruling W (rules 1.6.0): the waiver covers the code only on the paper it was given for: every
+            # place the code is raised now (function + document id + file hash) is one a waiver was bound to
+            bound = {(b.get('function'), b.get('document_id'), b.get('sha256'))
+                     for w in live_waivers[code] for b in (w['data'].get('bound_evidence') or [])
+                     if isinstance(b, dict)}
+            need = [(o['function'], o['document_id'], o['sha256']) for o in raised.get(code) or []]
+            uncovered = [o for o in need if o not in bound]
+            if not need or uncovered:
+                notes.append(f'{code}: the contractor accepted this on other paper; it is raised again here '
+                             '(' + ', '.join(f'{fn_} on document {d_ or "-"}' for fn_, d_, _s in uncovered[:3])
+                             + ')')
+                continue
+            w0 = live_waivers[code][0]
+            lst.remove(code)
+            accepted.append({'code': code, 'waiver_id': w0['id'],
+                             'accepted_by_contractor': w0['data'].get('accepted_by_contractor'),
+                             'expires': w0['data'].get('expires')})
 
     if unconfirmed:
         state = 'cant_tell'
@@ -1221,6 +1355,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         'requirement_set_version': s_rec['data'].get('set_version') if s_rec else None,
         'newer_requirement_set': newer_set,
         'policies_read': sorted(checked_policies), 'confirmation_ids': sorted(conf.used),
+        'raised': raised,
         'rule_version': RULE_VERSION, 'disclaimer': DISCLAIMER, 'as_of': today.isoformat(),
         'advisory': '[probation] advisory only; never auto-holds, auto-sends or gates a pay application',
     }
@@ -1271,6 +1406,18 @@ def check_write(store, op, collection, data, current, *, by, agent, via_pack):
                                               '(POST /api/biz/v1/crt/confirm or /crt/assignment/<id>/review)')
         return
     if collection == 'crt_requirement_set':
+        if op in ('create', 'edit') and not via_pack:
+            # host ruling D (rules 1.6.0): which set a set replaces, the template it came from and its version number
+            # are the pack's own routes' to set (draft, revise): an agent or a generic write never names the base
+            # an approval is compared against
+            was_d = (current or {}).get('data', {})
+            moved = [k for k in SET_SERVER_FIELDS if data.get(k) != was_d.get(k)]
+            if moved:
+                raise _err(409, 'set_field_server_only', 'supersedes, template_key and set_version are set by the '
+                                                         'draft and revise routes only (host ruling D)',
+                           fields=moved)
+        if op == 'edit' and current:
+            check_item_identity(current['data'].get('items'), data.get('items'))
         if agent and op in ('edit', 'archive', 'unarchive'):
             raise _err(403, 'set_change_staff_only', 'The agent only drafts requirement sets (from a template or as '
                                                      'a revision, POST /api/biz/v1/crt/requirement-sets/<id>/revise); '
@@ -1337,49 +1484,96 @@ def check_write(store, op, collection, data, current, *, by, agent, via_pack):
             raise _err(422, 'not_a_waiver_document', "The acceptance must be the contractor's written OK "
                                                      "(a document of kind contractor_waiver_ok)",
                        field='acceptance_document_id')
+        # host ruling W (rules 1.6.0): a waiver binds to the code AND the paper it was given for. The server stamps,
+        # at the moment staff record it, every (function, document id, file hash) that raises the code today; later
+        # different or changed paper raises the code again. The binding is never the caller's to write or change.
+        if op == 'create':
+            ev = evaluate(store, data.get('crt_assignment_id'), datetime.now(timezone.utc).date())
+            data['bound_evidence'] = list((ev.get('raised') or {}).get(data.get('variance_code')) or [])
+        else:
+            was_d = current['data']
+            moved = [k for k in ('crt_assignment_id', 'variance_code', 'bound_evidence')
+                     if data.get(k) != was_d.get(k)]
+            if moved:
+                raise _err(409, 'waiver_binding_fixed', 'A waiver stays bound to the code and paper it was given '
+                                                        'for; record a new waiver instead (host ruling W)',
+                           fields=moved)
         return
 
 
 # ── requirement-set diff (host ruling F: the approval page shows all of it) ─
-DIFF_ITEM_FIELDS = ('kind', 'line', 'function', 'required', 'forms', 'edition', 'limit', 'min', 'floor', 'ceiling',
-                    'combined', 'trade_categories', 'classes', 'code', 'names_parties', 'suggested_when',
-                    'tail_required', 'when_trade')
+def set_approved(store, rec) -> bool:
+    """The set is APPROVED, live, and a person approved it on the staff surface at its CURRENT version (the same
+    test the verdict uses). A draft, an archived set, or one edited since its approval is not."""
+    if not rec or rec['archived_at'] or rec['data'].get('status') != 'APPROVED':
+        return False
+    need = {'status', 'items'} | ({'form_functions'} if rec['data'].get('form_functions') else set())
+    return any(c['data'].get('record_collection') == 'crt_requirement_set'
+               and c['data'].get('record_version') == rec['version'] and c['data'].get('on_staff_surface') is True
+               and is_person(c['data'].get('confirmed_by')) and need <= set(c['data'].get('fields') or [])
+               for c in _all(store, 'crt_confirmation', {'record_id': rec['id']}))
+
+
+def diff_base(store, rec):
+    """Host ruling D (rules 1.6.0): what a set is compared against at approval, fixed server-side: the nearest
+    APPROVED set up its `supersedes` chain (the version in use), never the immediate parent when that is a draft.
+    Returns (approved base record or None, [the unapproved drafts in between, nearest first])."""
+    hops, seen = [], {rec['id']}
+    cur = rec['data'].get('supersedes')
+    while cur and cur not in seen and len(seen) <= 100:
+        seen.add(cur)
+        prev = _get(store, 'crt_requirement_set', cur)
+        if prev is None:
+            break
+        if set_approved(store, prev):
+            return prev, hops
+        hops.append(prev)
+        cur = prev['data'].get('supersedes')
+    return None, hops
+
+
+def _item_view(it):
+    """Every key of an item (host ruling M: the page shows all of them), plus the minimum the verdict applies."""
+    v = {k: it.get(k) for k in sorted(it, key=str)}
+    if it.get('kind') == 'limit':
+        v['minimum_applied'] = limit_need(it)          # a missing / null min reads as the floor (ruling M)
+    return v
 
 
 def set_diff(store, rec) -> dict:
-    """The full difference between a requirement set and the version it would replace: the set it revises
-    (`supersedes`, the version assignments pin today), else the template it was drafted from. Every item is listed
-    with its form list, edition, trades and exclusion classes, then and now; the form-equivalence table is listed
-    whole, then and now. Pure read; `sha256` binds an approval to exactly what the page showed."""
+    """The full difference between a requirement set and the version in use: the nearest APPROVED set up its
+    `supersedes` chain (host ruling D; drafts in between are listed, never used as the base), else the template it
+    was drafted from (server data), else nothing. Every key of every item is listed then and now (ruling M); the
+    form-equivalence table is listed whole, then and now. Pure read; `sha256` binds an approval to exactly what the
+    page showed."""
     d = rec['data']
     base, against = None, None
-    if d.get('supersedes'):
-        prev = _get(store, 'crt_requirement_set', d['supersedes'])
-        if prev:
-            base = prev['data']
-            against = {'kind': 'set', 'id': prev['id'], 'set_version': prev['data'].get('set_version'),
-                       'record_version': prev['version'], 'status': prev['data'].get('status')}
-    if base is None and d.get('template_key'):
+    prev, hops = diff_base(store, rec)
+    if prev is not None:
+        base = prev['data']
+        against = {'kind': 'set', 'id': prev['id'], 'set_version': prev['data'].get('set_version'),
+                   'record_version': prev['version'], 'status': prev['data'].get('status'), 'approved': True,
+                   'name': prev['data'].get('name')}
+    elif d.get('template_key'):
         tpls = load_templates()
         tpl = next((t for t in tpls['templates'] if t['key'] == d['template_key']), None)
         if tpl:
-            base = {'items': tpl['items'], 'trade_category': tpl['trade_category'],
+            base = {'items': tpl['items'], 'trade_category': tpl['trade_category'], 'name': tpl.get('name'),
                     'form_functions': tpls.get('form_functions')}
-            against = {'kind': 'template', 'template_key': d['template_key']}
+            against = {'kind': 'template', 'template_key': d['template_key'], 'name': tpl.get('name')}
     base = base or {}
-
-    def view(it):
-        return {k: it.get(k) for k in DIFF_ITEM_FIELDS if it.get(k) is not None}
     was = {it.get('id'): it for it in base.get('items') or [] if isinstance(it, dict)}
     now = {it.get('id'): it for it in d.get('items') or [] if isinstance(it, dict)}
     items = []
     for iid in list(now) + [i for i in was if i not in now]:
         a, b = was.get(iid), now.get(iid)
-        va, vb = (view(a) if a else None), (view(b) if b else None)
+        va, vb = (_item_view(a) if a else None), (_item_view(b) if b else None)
         change = 'added' if a is None else 'removed' if b is None else ('same' if va == vb else 'changed')
-        items.append({'id': iid, 'change': change, 'was': va, 'now': vb,
-                      'changed_fields': sorted(k for k in set(va or {}) | set(vb or {})
-                                               if (va or {}).get(k) != (vb or {}).get(k)) if change == 'changed' else []})
+        keys = sorted(set(va or {}) | set(vb or {}), key=str)
+        rows = [{'key': k, 'was': (va or {}).get(k), 'now': (vb or {}).get(k),
+                 'changed': change != 'same' and (va or {}).get(k) != (vb or {}).get(k)} for k in keys]
+        items.append({'id': iid, 'change': change, 'was': va, 'now': vb, 'rows': rows,
+                      'changed_fields': [r['key'] for r in rows if r['changed']] if change == 'changed' else []})
     ffa = base.get('form_functions') if isinstance(base.get('form_functions'), dict) else {}
     ffb = d.get('form_functions') if isinstance(d.get('form_functions'), dict) else {}
     table = {'was': ffa, 'now': ffb,
@@ -1387,9 +1581,14 @@ def set_diff(store, rec) -> dict:
              'removed': {k: ffa[k] for k in ffa if k not in ffb},
              'changed': {k: [ffa[k], ffb[k]] for k in ffb if k in ffa and ffa[k] != ffb[k]}}
     out = {'set_id': rec['id'], 'record_version': rec['version'], 'set_version': d.get('set_version'),
-           'against': against, 'items': items, 'form_functions': table,
+           'against': against,
+           'unapproved_between': [{'id': r['id'], 'set_version': r['data'].get('set_version'),
+                                   'record_version': r['version'], 'status': r['data'].get('status') or 'DRAFT'}
+                                  for r in hops],
+           'items': items, 'form_functions': table,
            'trade_category': {'was': base.get('trade_category'), 'now': d.get('trade_category')},
-           'name': {'was': base.get('name'), 'now': d.get('name')}, 'notes': d.get('notes'),
+           'name': {'was': base.get('name'), 'now': d.get('name')},
+           'notes': {'was': base.get('notes'), 'now': d.get('notes')},
            'floor_violations': floor_violations(d)}
     out['sha256'] = hashlib.sha256(json.dumps(out, sort_keys=True, default=str).encode()).hexdigest()
     return out
@@ -1468,7 +1667,10 @@ def register_routes(bp, api, ctx):
         # The page sends the diff's sha256; a set that changed since (or a diff never fetched) is refused.
         diff = set_diff(store, rec)
         shown = ctx.body().get('diff_sha256')
-        if shown is not None and shown != diff['sha256']:
+        if not isinstance(shown, str) or not shown:      # X4 (rules 1.6.0): an approval names the diff it saw
+            raise _err(422, 'diff_sha256_required', 'Approve from the requirements page: it sends the sha256 of the '
+                                                    'changes it showed you (GET .../diff)', diff=diff)
+        if shown != diff['sha256']:
             raise _err(409, 'diff_changed', 'The requirement set changed since the page showed its changes; reload '
                                             'and review the changes again', diff=diff)
         if rec['data'].get('status') != 'APPROVED':
@@ -1478,6 +1680,9 @@ def register_routes(bp, api, ctx):
             'record_collection': 'crt_requirement_set', 'record_id': sid, 'record_version': rec['version'],
             'fields': ['items', 'status'] + (['form_functions'] if rec['data'].get('form_functions') else []),
             'confirmed_by': ctx.by(), 'on_staff_surface': ctx.surface(), 'approved_diff_sha256': diff['sha256'],
+            # ruling D: what the approval was compared against, so the watcher can check it was an approved version
+            'approved_against': {k: v for k, v in (diff['against'] or {'kind': 'none'}).items()
+                                 if k in ('kind', 'id', 'record_version', 'template_key')},
             'note': str(ctx.body().get('note') or 'approved for use')[:500]},
             by=ctx.by(), agent=False, via_pack=True, surface=ctx.surface())
         return jsonify({'record': rec, 'confirmation': conf, 'warnings': warnings, 'diff': diff})
@@ -1494,6 +1699,7 @@ def register_routes(bp, api, ctx):
         d = dict(old['data'])
         if body.get('items') is not None:
             d['items'] = body['items']
+            check_item_identity(old['data'].get('items'), d['items'])     # ruling M: no key swap under one id
         if body.get('form_functions') is not None:          # R4: equivalences change per set version
             validate_form_functions(body['form_functions'])
             d['form_functions'] = body['form_functions']

@@ -319,8 +319,10 @@ def test_f_the_diff_shows_every_item_and_the_whole_table_and_binds_the_approval(
 
 def test_f_the_approval_page_renders_the_diff_and_sends_its_hash():
     page = (ROOT / 'default-schemas/packs/risk-transfer/pages/cca-crt-requirements.html').read_text(encoding='utf-8')
-    for needle in ("'/diff'", 'diff_sha256', 'form_functions', "cell('forms')", "cell('edition')",
-                   "cell('trade_categories')", "cell('classes')", 'floor_violations',
+    # rules 1.6.0 (ruling M): the item table renders every key of every item (it.rows), not fixed columns; the
+    # behaviour is run in tests/js/crt-requirements-diff.test.js
+    for needle in ("'/diff'", 'diff_sha256', 'form_functions', '(it.rows || []).map(function (r) {', 'val(r.was)',
+                   'val(r.now)', 'r.changed ?', 'floor_violations',
                    "box.appendChild(el('h2', {text: 'Form equivalences (which form counts as which coverage)'}));",
                    "keys.map(function (k) {"):
         assert needle in page, needle
@@ -588,4 +590,4 @@ def test_l1_every_staff_page_carries_a_sign_out_control(h):
 
 def test_rules_version_is_1_5_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.5.0'
+    assert rt.RULE_VERSION == 'crt-rules-1.6.0'          # rules 1.6.0 (re-check #6) keeps every 1.5.0 rule

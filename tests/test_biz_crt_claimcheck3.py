@@ -215,7 +215,9 @@ def test_watch_h2_fails_a_meets_on_a_scheduled_name_with_another_suffix(h, dirs)
 # ── H3: the form number is compared; no bulk tick ───────────────────────────
 @pytest.mark.parametrize('end,state,code', [
     ({'form': 'CG 20 10'}, 'missing', 'MISSING:ai_completed'),                 # ongoing-ops form, never completed
-    ({'form': 'CG 20 26'}, 'cant_tell', 'UNCONFIRMED:crt_endorsement.form'),   # not a form the item lists
+    # rules 1.6.0 (ruling G): CG 20 26 is an ISO number that never covers completed operations -> MISSING, like 20 10
+    ({'form': 'CG 20 26'}, 'missing', 'MISSING:ai_completed'),
+    ({'form': 'ACME 12 34'}, 'cant_tell', 'UNCONFIRMED:crt_endorsement.form'),  # not a form the item lists
 ])
 def test_h3_the_confirmed_form_number_must_be_a_listed_form(h, end, state, code):
     ends = _ends()
@@ -355,7 +357,7 @@ def test_low_a_newer_approved_set_is_noted_on_the_label_and_never_applied(h):
     new = h.ok(h.post(f'/crt/requirement-sets/{s["id"]}/revise', {'items': items}), 201)['record']
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'meets' and ev['newer_requirement_set'] is None      # a DRAFT revision is not news yet
-    h.ok(h.post(f'/crt/requirement-sets/{new["id"]}/approve'))
+    h.ok(h.approve(new['id']))
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'meets' and codes(ev) == []                          # still pinned: verdict unchanged
     assert ev['label'] == 'Meets requirements (documents reviewed); newer requirement set available'

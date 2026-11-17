@@ -55,7 +55,7 @@ def test_p3_agent_repoints_the_assignment_to_a_weaker_approved_set(h):
     w = world(h, template='high_severity', trade='excavation', policies=pols)
     assert codes(h.state(w['asg']['id'])) == ['EXCLUSION:xcu']
     weak = h.ok(h.post('/crt/requirement-sets/from-template', {'template_key': 'finish'}), 201)['record']
-    weak = h.ok(h.post(f'/crt/requirement-sets/{weak["id"]}/approve'))['record']
+    weak = h.ok(h.approve(weak['id']))['record']
     a = h.ok(h.get(f'/crt_assignment/{w["asg"]["id"]}'))
     h.agent()
     r = h.patch(f'/crt_assignment/{a["id"]}', {'data': {'requirement_set_id': weak['id']}}, a['version'])
@@ -315,7 +315,7 @@ def test_w3_agent_cannot_repoint_and_watcher_fails_a_meets_on_an_agent_written_a
             'auto': {'line': 'auto', 'policy_number': 'AU-1', 'addl_insd': False, 'limits': {'combined_single_limit': M}}}
     w = world(h, template='high_severity', trade='excavation', policies=pols)
     weak = h.ok(h.post('/crt/requirement-sets/from-template', {'template_key': 'finish'}), 201)['record']
-    weak = h.ok(h.post(f'/crt/requirement-sets/{weak["id"]}/approve'))['record']
+    weak = h.ok(h.approve(weak['id']))['record']
     a = h.ok(h.get(f'/crt_assignment/{w["asg"]["id"]}'))
     h.agent()
     r = h.patch(f'/crt_assignment/{a["id"]}', {'data': {'requirement_set_id': weak['id']}}, a['version'])

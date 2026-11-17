@@ -55,6 +55,18 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
   RC the agency record is live with a person-written name; every policy relied on has producer_is_cca written by
      a person on the staff surface; an agency-produced policy has two different people's confirmations; every
      confirmation counted was made on the staff surface (its activity stamp)
+  (rules 1.6.0, host rulings D/M/U/G/W/K/X4, checked here with this file's own code)
+  RD the pinned set's approval names the diff it was shown (X4) and records what it was compared against, and that was an APPROVED version up the set's
+     own supersedes chain (approved by a person on the staff surface at the recorded version), or the template /
+     nothing only when no ancestor was ever approved: an approval compared against a draft is not backed
+  RM a limit item's minimum is its min, or its floor when min is missing or null (never $0); an item with neither,
+     a min below its floor, or an item key outside the known list is below the floor
+  RU the umbrella the combined GL + umbrella test leans on is person-confirmed, in force, and names this sub
+  RG an ISO number (CG 20 xx, the floor) is never read as a manuscript; CG 20 26 / CG 20 11 never count as completed
+     operations
+  RW a waiver counts only for the paper it was bound to: its recorded (function, document id, file hash) must be
+     the function and document raising the code now, and that file must still hash to the recorded value
+  RK blanket counts only when the endorsement's schedule is empty; a schedule that names anyone is checked
   R6 each assignment field the verdict reads (project, sub, set, set version, trade, scope change) was
      last written by a person or person-confirmed (per field, read from the activity log: a staff
      hold or note never vouches for a field the agent wrote), names the set the verdict used, and
@@ -116,6 +128,10 @@ _ISO = {'CG2010': 'ai_ongoing', 'CG2033': 'ai_ongoing', 'CG2038': 'ai_ongoing', 
 _NEVER_COMPLETED = 'CG2010'        # host ruling R3: never completed operations, by any route
 _ISO_FLOOR = dict(_ISO)            # host ruling F (rules 1.5.0): a built-in ISO number keeps its category in any set
 _NOT_COMPLETED = {'CG2026', 'CG2011'}   # other ISO AI numbers that never cover completed operations
+_ISO_AI = re.compile(r'^CG20\d\d$')   # rules 1.6.0 (G): the ISO additional-insured series, never a manuscript
+_ITEM_KEYS = {'id', 'kind', 'line', 'required', 'cite', 'limit', 'floor', 'ceiling', 'min', 'function', 'forms',
+              'edition', 'names_parties', 'suggested_when', 'code', 'classes', 'combined', 'trade_categories',
+              'tail_required', 'when_trade'}   # rules 1.6.0 (M): the keys the approval page names
 SURFACE = 'staff_surface'          # activity diff: the fields a person wrote on the platform staff surface (R1)
 _MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
@@ -399,6 +415,17 @@ def _floor(sd):
                 out.append(f'table maps {k} to {v}')
             table[_form(k)] = v
     for it in sd.get('items') or []:
+        if isinstance(it, dict):
+            extra = sorted(str(k) for k in it if k not in _ITEM_KEYS)
+            if extra:
+                out.append(f"item {it.get('id')} carries keys the approval page does not name: {', '.join(extra[:5])}")
+        if isinstance(it, dict) and it.get('kind') == 'limit':
+            need, fl = _need(it), it.get('floor')
+            if need is None:
+                out.append(f"item {it.get('id')} has no minimum and no floor")
+            elif _num(it.get('min')) is not None and _num(fl) is not None and it['min'] < fl:
+                out.append(f"item {it.get('id')} minimum is below its floor")
+            continue
         if not isinstance(it, dict) or it.get('kind') != 'endorsement':
             continue
         fn = it.get('function')
@@ -413,14 +440,83 @@ def _floor(sd):
     return out
 
 
-def _waived(st, asg, code, on, acct):
-    """A person-recorded, unexpired waiver of exactly this code, backed by THIS account's written OK."""
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _need(it):
+    """RM: the item's min, or its floor when min is missing or null; None when it has neither."""
+    return _num(it.get('min')) if _num(it.get('min')) is not None else _num(it.get('floor'))
+
+
+def _approval(st, s):
+    """The person's staff-surface approval confirmation of set s at its current version, or None."""
+    ff = isinstance(s['data'].get('form_functions'), dict) and bool(s['data'].get('form_functions'))
+    hits = _person_confs(st, s, ['status', 'items'] + (['form_functions'] if ff else []), need_file=False)
+    return hits[-1] if hits else None
+
+
+def _approved_at(st, sid, version):
+    """A person approved set sid on the staff surface at that record version (any time)."""
+    for c in st.all_ever('crt_confirmation'):
+        d = c['data']
+        if d.get('record_id') == sid and d.get('record_version') == version and \
+                {'status', 'items'} <= set(d.get('fields') or []) and \
+                str(d.get('confirmed_by') or '').startswith(PERSON) and str(c['created_by']).startswith(PERSON) and \
+                st.surface_made(c):
+            return True
+    return False
+
+
+def _base_ok(st, s):
+    """RD (own code): None when the set's approval was compared against an approved version up its own chain (or the
+    template / nothing when no ancestor was ever approved); else why not."""
+    c = _approval(st, s)
+    if c is None:
+        return None                                    # R1 already says the set is not approved
+    chain, seen, cur = [], {s['id']}, s['data'].get('supersedes')
+    while cur and cur not in seen and len(seen) <= 100:
+        seen.add(cur)
+        prev = st.get_any('crt_requirement_set', cur)
+        if prev is None:
+            break
+        chain.append(prev)
+        cur = prev['data'].get('supersedes')
+    if not re.match(r'^[0-9a-f]{64}$', str(c['data'].get('approved_diff_sha256') or '')):
+        return 'RD the approval names no diff it was shown (X4)'
+    ag = c['data'].get('approved_against')
+    if not isinstance(ag, dict):
+        return 'RD the approval does not record which version it was compared against'
+    ever = [p for p in chain if any(_approved_at(st, p['id'], v) for v in range(1, p['version'] + 1))]
+    if ag.get('kind') == 'set':
+        if ag.get('id') not in {p['id'] for p in chain}:
+            return 'RD the approval was compared against a set that is not an earlier version of this one'
+        if not _approved_at(st, ag.get('id'), ag.get('record_version')):
+            return 'RD the approval was compared against a version nobody approved (a draft)'
+        return None
+    if ever:
+        return 'RD the approval was compared against a template or nothing while an approved earlier version existed'
+    if ag.get('kind') == 'template' and ag.get('template_key') != s['data'].get('template_key'):
+        return 'RD the approval was compared against another template'
+    return None
+
+
+def _waived(st, asg, code, on, acct, fn=None, did=None):
+    """A person-recorded, unexpired waiver of exactly this code, backed by THIS account's written OK; RW (rules
+    1.6.0): when the raising paper is given, the waiver must be bound to that function, document and file hash."""
     for w in st.all('crt_waiver'):
         wd = w['data']
         if wd.get('crt_assignment_id') != asg['id'] or wd.get('variance_code') != code:
             continue
         if not str(w['created_by']).startswith(PERSON):
             continue
+        if fn is not None:
+            sha = st.doc_sha(did) if did else None
+            if did and not st.file_ok(sha):
+                continue
+            if not any(isinstance(b, dict) and b.get('function') == fn and b.get('document_id') == did and
+                       b.get('sha256') == sha for b in (wd.get('bound_evidence') or [])):
+                continue
         exp = _day(wd.get('expires'))
         doc = st.get('document', wd.get('acceptance_document_id'))
         if exp and on and exp > on and doc and _doc_backs(st, doc['id'], acct, kind='contractor_waiver_ok'):
@@ -495,6 +591,9 @@ def _judge(st, claim):
     floor = _floor(s['data'])
     if floor:
         why.append('RF the set is below the built-in safety floor: ' + '; '.join(floor[:3]))
+    rd = _base_ok(st, s)
+    if rd:
+        (cannot if changed_since(s) else why).append(rd)
     # RC the agency's own record: live, with a name a person wrote on the staff surface (or confirmed there)
     comps = st.all('company')
     company = comps[0] if comps else None
@@ -584,8 +683,7 @@ def _judge(st, claim):
         need = agency_people(p) or 2
         return len(people(p, [field])) >= need
 
-    def num(v):
-        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    num = _num
 
     for it in s['data'].get('items') or []:
         kind, line, fn = it.get('kind'), it.get('line'), it.get('function')
@@ -610,20 +708,24 @@ def _judge(st, claim):
                     miss = f'R3 the named insured on the {line} policy is not this sub (same legal name, entity suffix ' \
                            'included) or not person-confirmed'
                 elif kind == 'limit':
-                    val, need = num((pd.get('limits') or {}).get(it.get('limit'))), it.get('min', it.get('floor')) or 0
-                    ok = confirmed(p, 'limits') and val is not None and val >= need
-                    comb = it.get('combined') or {}
-                    if not ok and comb and line == 'gl' and confirmed(p, 'limits') and val is not None and \
-                            val >= (comb.get('gl_occ_floor') or 0):
+                    val, need = num((pd.get('limits') or {}).get(it.get('limit'))), _need(it)   # RM: never $0
+                    ok = need is not None and confirmed(p, 'limits') and val is not None and val >= need
+                    comb = it.get('combined') if isinstance(it.get('combined'), dict) else {}
+                    if not ok and need is not None and comb and line == 'gl' and confirmed(p, 'limits') and \
+                            val is not None and num(comb.get('gl_occ_floor')) is not None and \
+                            num(comb.get('gl_occ_plus_umbrella_min')) is not None and val >= comb['gl_occ_floor']:
                         for u in in_force('umbrella')[0]:
                             uv = num((u['data'].get('limits') or {}).get('each_occurrence'))
-                            if confirmed(u, 'limits') and uv is not None and \
-                                    val + uv >= (comb.get('gl_occ_plus_umbrella_min') or 0):
+                            # RU: the umbrella the combined test leans on names this sub, person-confirmed
+                            if confirmed(u, 'limits') and uv is not None and confirmed(u, 'named_insured') and \
+                                    _norm(party_name) != '' and _norm(u['data'].get('named_insured')) == _norm(party_name) \
+                                    and val + uv >= comb['gl_occ_plus_umbrella_min']:
                                 ok = True
-                    if not ok and not _waived(st, asg, f'LIMIT_LOW:{line}', on, acct):
+                    if not ok and not _waived(st, asg, f'LIMIT_LOW:{line}', on, acct, it.get('id'),
+                                              pd.get('source_document_id')):
                         miss = f'R3 the person-confirmed {line} {it.get("limit")} limit is below {need}'
                 elif not (confirmed(p, 'addl_insd') and pd.get('addl_insd') is True) and \
-                        not _waived(st, asg, f'NOT_AI:{line}', on, acct):
+                        not _waived(st, asg, f'NOT_AI:{line}', on, acct, it.get('id'), pd.get('source_document_id')):
                     miss = f'R3 the {line} policy does not show additional insured (person-confirmed)'
                 if miss is None:
                     break
@@ -651,7 +753,8 @@ def _judge(st, claim):
                 cls, unmapped = _excl(p['data'].get('exclusions'))
                 if not confirmed(p, 'exclusions') or unmapped or not cls or ('none' in cls and len(cls) > 1):
                     continue
-                if cls & banned and not _waived(st, asg, f'EXCLUSION:{code}', on, acct):
+                if cls & banned and not _waived(st, asg, f'EXCLUSION:{code}', on, acct, it.get('id'),
+                                                p['data'].get('source_document_id')):
                     continue
                 good = True
                 break
@@ -693,11 +796,12 @@ def _judge(st, claim):
                 # completed operations by any route; a listed ISO number is never read as manuscript; a manuscript
                 # counts for completed ops only with its completed-operations wording person-confirmed.
                 fkey = _form(ed.get('form'))
-                if fn == 'ai_completed' and fkey == _NEVER_COMPLETED:
+                if fn == 'ai_completed' and (fkey == _NEVER_COMPLETED or fkey in _NOT_COMPLETED):     # RG
                     continue
                 table = {_form(k): v for k, v in set_ff.items()} if set_ff else {}
                 table.update(_ISO_FLOOR)                       # ruling F: an ISO number keeps its ISO category
-                if ed.get('manuscript') is not True or fkey in table:
+                iso = fkey in _ISO_FLOOR or fkey in _NOT_COMPLETED or bool(_ISO_AI.match(fkey or ''))
+                if ed.get('manuscript') is not True or fkey in table or iso:        # RG: an ISO number is no manuscript
                     listed = {_form(f) for f in it.get('forms') or []}        # ruling F: the item's own list only
                     if fkey not in listed:
                         continue
@@ -706,15 +810,17 @@ def _judge(st, claim):
                                                                  party=party)):
                     continue
                 year = _edition(ed.get('edition'))
-                if year is None or (year < 2004 and not _waived(st, asg, f'WRONG_FORM:{fn}', on, acct)):
+                edoc = ed.get('document_id')
+                if year is None or (year < 2004 and not _waived(st, asg, f'WRONG_FORM:{fn}', on, acct, fn, edoc)):
                     continue
                 # the set's edition for the item is a requirement (rules 1.4.0 LOW): same month and year
                 if it.get('edition') and _edition_my(it.get('edition')) != _edition_my(ed.get('edition')) and \
-                        not _waived(st, asg, f'WRONG_EDITION:{fn}', on, acct):
+                        not _waived(st, asg, f'WRONG_EDITION:{fn}', on, acct, fn, edoc):
                     continue
                 # RE (rules 1.5.0): every naming check runs; each miss needs its OWN waiver
                 name_codes = []
-                if ed.get('blanket'):
+                # RK (rules 1.6.0): blanket only when the schedule is empty
+                if ed.get('blanket') and not (ed.get('scheduled_names') or ed.get('scheduled_projects')):
                     backed = proj['data'].get('contract_requires_ai') is True and \
                         bool(_person_confs(st, proj, ['contract_requires_ai']))
                     if not backed:
@@ -728,7 +834,7 @@ def _judge(st, claim):
                         name_codes.append('WRONG_PARTY')
                     if not _named_exact(pname, ed.get('scheduled_projects')):
                         name_codes.append('WRONG_PROJECT')
-                if all(_waived(st, asg, c, on, acct) for c in name_codes):
+                if all(_waived(st, asg, c, on, acct, fn, edoc) for c in name_codes):
                     good = True
             if not good:
                 (cannot if changed else why).append(

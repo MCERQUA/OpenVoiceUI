@@ -494,8 +494,9 @@ def test_watch_r3_fails_a_meets_on_cg2010_even_worded_as_manuscript(h, dirs):
 
 
 def test_watch_fails_a_meets_on_an_unlisted_form(h, dirs):
-    """The listed-form check alone (mutant watch-med-form-off): CG 20 26 is no form of the completed-ops item."""
-    w = world(h, endorsements=_completed(form='CG 20 26'), party_name='Unlisted Form Inc')
+    """The listed-form check alone (mutant watch-med-form-off): a carrier form is no form of the completed-ops item
+    (rules 1.6.0: CG 20 26 now reads MISSING by ruling G, so the unlisted non-ISO form carries this check)."""
+    w = world(h, endorsements=_completed(form='ACME 12 34'), party_name='Unlisted Form Inc')
     assert h.state(w['asg']['id'])['state'] == 'cant_tell'
     _forge_meets(h, w)
     v, rows, _ = _watch(dirs)
@@ -566,7 +567,7 @@ def test_r4_an_unapproved_change_to_the_equivalences_is_cant_tell(h):
     assert ex.value.status == 403
     store.update('crt_requirement_set', s['id'], {'form_functions': dict(s['data']['form_functions'], **{'ACME 99': 'pnc'})},
                  expected_version=s['version'], by='clerk:' + STAFF_1, agent=False, via_pack=True, surface=True)
-    assert rt.RULE_VERSION == 'crt-rules-1.5.0'
+    assert rt.RULE_VERSION == 'crt-rules-1.6.0'
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'cant_tell', ev
 

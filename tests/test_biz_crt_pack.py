@@ -130,6 +130,11 @@ class H:
         assert resp.status_code in ((code,) if isinstance(code, int) else code), resp.get_json()
         return resp.get_json()
 
+    def approve(self, sid, **extra):
+        """What the requirements page does: GET the diff, then POST approve with its sha256 (required, rules 1.6.0 X4)."""
+        d = self.ok(self.get(f'/crt/requirement-sets/{sid}/diff'))
+        return self.post(f'/crt/requirement-sets/{sid}/approve', {'diff_sha256': d['sha256'], **extra})
+
     def mk(self, coll, data):
         return self.ok(self.post(f'/{coll}', {'data': data}), 201)
 
@@ -237,7 +242,7 @@ def world(h, template='mep', trade='electrical', today=TODAY, policies=None, end
     w['set'] = h.ok(h.post('/crt/requirement-sets/from-template', {'template_key': template}), 201)['record']
     h.staff()
     if approve:
-        w['set'] = h.ok(h.post(f'/crt/requirement-sets/{w["set"]["id"]}/approve'))['record']
+        w['set'] = h.ok(h.approve(w['set']['id']))['record']
     pdata = {'crt_account_id': w['account']['id'], 'name': 'Mesa Clinic Expansion', 'gc_name': account_name,
              'owner_name': 'Mesa Health District', 'substantial_completion': iso(today + timedelta(days=200)),
              'repose_years': 8, 'repose_source': 'A.R.S. 12-552 (sandbox fixture)', 'size_flag': 'small',

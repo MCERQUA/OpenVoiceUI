@@ -112,24 +112,35 @@ Readings count only after staff confirm them against the stored document. Nothin
   function renderDiff(box, d) {
     U.clear(box);
     var a = d.against || {};
-    box.appendChild(el('h2', {text: 'Changes to review against ' + (a.kind === 'set' ? 'the version in use (v' + (a.set_version || '?') + ')' :
-      a.kind === 'template' ? 'the ' + a.template_key + ' template' : 'nothing (new set)')}));
+    // host ruling D (rules 1.6.0): the base is fixed by the server. "The version in use" only ever names an APPROVED set.
+    var head = a.kind === 'set' && a.approved === true ? 'the approved version in use: ' + (a.name || 'set') + ' v' + (a.set_version || '?') :
+      a.kind === 'template' ? 'the ' + (a.name || a.template_key) + ' template (no approved version of this set yet)' : 'nothing (a new set: every item is new)';
+    box.appendChild(el('h2', {text: 'Changes to review against ' + head}));
+    if (a.kind === 'set' && a.approved !== true) {
+      box.appendChild(el('p', {}, [U.chip('bad', 'Not approved'), ' The comparison base is not an approved set. Do not approve.']));
+    }
+    if (d.unapproved_between && d.unapproved_between.length) {
+      box.appendChild(el('p', {}, [U.chip('expiring_30', 'Built on drafts'), ' This draft builds on ' + d.unapproved_between.length +
+        ' unapproved draft(s) (' + d.unapproved_between.map(function (x) { return 'v' + (x.set_version || '?'); }).join(', ') +
+        '). Every change below is measured against the approved version, not those drafts.']));
+    }
     if (d.floor_violations && d.floor_violations.length) {
       box.appendChild(el('p', {}, [U.chip('bad', 'Below the safety floor'), ' ' + d.floor_violations.join('; ') + '. This set cannot be approved.']));
     }
-    if (d.trade_category && d.trade_category.was !== d.trade_category.now) box.appendChild(el('p', {}, [U.chip('bad', 'Changed'), ' trade category: ' + val(d.trade_category.was) + ' -> ' + val(d.trade_category.now)]));
-    var rows = d.items.map(function (it) {
-      var w = it.was || {}, n = it.now || {};
-      function cell(k) {
-        var changed = it.changed_fields.indexOf(k) >= 0 || it.change === 'added' || it.change === 'removed';
-        return el('td', {}, [changed && it.change === 'changed' ? el('div', {'class': 'muted', text: 'was: ' + val(w[k])}) : null,
-          el('div', {}, [changed ? U.chip('bad', 'now') : null, ' ' + val(it.change === 'removed' ? w[k] : n[k])])]);
-      }
-      return el('tr', {}, [el('td', {}, [it.id + ' ', it.change === 'same' ? U.chip('NA', 'same') : U.chip('bad', it.change)]),
-        cell('function'), cell('required'), cell('forms'), cell('edition'), cell('trade_categories'), cell('classes'), cell('min')]);
+    ['name', 'trade_category', 'notes'].forEach(function (k) {
+      var v = d[k] || {};
+      if (v.was !== v.now) box.appendChild(el('p', {}, [U.chip('bad', 'Changed'), ' set ' + k.replace(/_/g, ' ') + ': ' + val(v.was) + ' -> ' + val(v.now)]));
     });
-    box.appendChild(el('div', {'class': 'scroll'}, el('table', {}, [el('thead', {}, el('tr', {}, ['Item', 'Function', 'Required', 'Accepted forms', 'Edition', 'Trades', 'Exclusion classes', 'Minimum'].map(function (h) { return el('th', {text: h}); }))),
-      el('tbody', {}, rows)])));
+    // host ruling M (rules 1.6.0): every key of every item, then and now; a changed key is marked, never a bare chip
+    d.items.forEach(function (it) {
+      var rows = (it.rows || []).map(function (r) {
+        return el('tr', {}, [el('td', {text: r.key.replace(/_/g, ' ')}), el('td', {text: val(r.was)}), el('td', {text: val(r.now)}),
+          el('td', {}, r.changed ? U.chip('bad', it.change === 'changed' ? 'changed' : it.change) : U.chip('NA', 'same'))]);
+      });
+      box.appendChild(el('div', {'class': 'card'}, [el('h3', {}, [it.id + ' ', it.change === 'same' ? U.chip('NA', 'same') : U.chip('bad', it.change)]),
+        el('div', {'class': 'scroll'}, el('table', {}, [el('thead', {}, el('tr', {}, ['Key', 'Was', 'Now', ''].map(function (h) { return el('th', {text: h}); }))),
+          el('tbody', {}, rows)]))]));
+    });
     var t = d.form_functions || {};
     var keys = Object.keys(Object.assign({}, t.was || {}, t.now || {})).sort();
     box.appendChild(el('h2', {text: 'Form equivalences (which form counts as which coverage)'}));

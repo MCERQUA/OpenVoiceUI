@@ -46,6 +46,11 @@
     "expires": {
       "type": "date",
       "label": "Expires"
+    },
+    "bound_evidence": {
+      "type": "list",
+      "items": "object",
+      "label": "The paper the contractor accepted (function, document, file hash; set by the server)"
     }
   }
 }
