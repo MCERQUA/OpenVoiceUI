@@ -1,0 +1,110 @@
+/*
+ * shell.css — the shared company-system menu (contract v1). Loaded by /jb/v1/shell.js.
+ * Every colour is a variable: the server sends the business's canvas-style tokens and
+ * company colours (theme), the fallbacks are the platform's dark base. Page CSS is not
+ * touched except the padding that keeps page content clear of the menu.
+ * Touch targets are 44px or more. No browser storage, no external assets.
+ */
+:root {
+  --jb-rail-w: 248px;
+  --jb-top-h: 60px;
+  --jb-tab-h: 64px;
+  --jb-field-h: 56px;
+}
+.jb-shell, .jb-shell * { box-sizing: border-box; }
+.jb-shell {
+  --_bg: var(--jb-surface, var(--jb-bg, #111214));
+  --_bg2: var(--jb-surface-2, var(--jb-bg, #17181b));
+  --_line: var(--jb-border, rgba(148, 163, 184, 0.22));
+  --_text: var(--jb-text, #e2e8f0);
+  --_muted: var(--jb-muted, var(--jb-text-2, #94a3b8));
+  --_brand: var(--jb-brand, #3b82f6);
+  --_on-brand: var(--jb-on-brand, #ffffff);
+  --_radius: var(--jb-radius, 10px);
+  font-family: var(--jb-font, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif);
+  color: var(--_text);
+  font-size: 15px;
+  line-height: 1.35;
+}
+.jb-shell a { color: inherit; text-decoration: none; }
+.jb-shell button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.jb-shell :focus-visible { outline: 2px solid var(--_brand); outline-offset: 2px; }
+.jb-ico { display: inline-flex; width: 22px; height: 22px; flex: 0 0 22px; align-items: center; justify-content: center; }
+.jb-ico svg { width: 22px; height: 22px; }
+
+/* brand block */
+.jb-brand { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px; min-width: 0; }
+.jb-logo { width: 34px; height: 34px; object-fit: contain; border-radius: 8px; }
+.jb-mark { width: 34px; height: 34px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--_brand); color: var(--_on-brand); font-weight: 700; font-family: var(--jb-font-display, inherit); }
+.jb-company { font-weight: 650; font-family: var(--jb-font-display, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* grouped menu (rail + drawer) */
+.jb-menu { display: flex; flex-direction: column; gap: 14px; padding: 6px 0 24px; }
+.jb-group-label { display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 12px; font-weight: 650;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--_muted); }
+.jb-group-label .jb-ico, .jb-group-label .jb-ico svg { width: 16px; height: 16px; flex-basis: 16px; }
+.jb-item { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; margin: 2px 6px;
+  border-radius: var(--_radius); color: var(--_text); }
+.jb-item:hover { background: var(--_bg2); }
+.jb-item[aria-current="page"] { background: var(--_brand); color: var(--_on-brand); font-weight: 600; }
+.jb-item-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* buttons */
+.jb-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; min-width: 44px;
+  border-radius: var(--_radius); }
+.jb-icon-btn { width: 44px; height: 44px; }
+.jb-icon-btn:hover { background: var(--_bg2); }
+.jb-verb { padding: 0 16px; background: var(--_brand); color: var(--_on-brand) !important; font-weight: 600; white-space: nowrap; }
+.jb-verb:hover { filter: brightness(1.08); }
+
+/* OFFICE: phone first (top bar + bottom tab bar), rail from 900px */
+.jb-rail { display: none; }
+.jb-top { position: fixed; z-index: 2147483000; top: 0; left: 0; right: 0; height: var(--jb-top-h);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px;
+  background: var(--_bg); border-bottom: 1px solid var(--_line); }
+.jb-titles { min-width: 0; }
+.jb-eyebrow { font-size: 11px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--_muted); }
+.jb-title { font-size: 17px; font-weight: 650; font-family: var(--jb-font-display, inherit);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--jb-heading, var(--_text)); }
+.jb-tabbar { position: fixed; z-index: 2147483000; left: 0; right: 0; bottom: 0;
+  height: calc(var(--jb-tab-h) + env(safe-area-inset-bottom, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px);
+  display: flex; background: var(--_bg); border-top: 1px solid var(--_line); }
+.jb-tab { flex: 1 1 0; min-width: 0; min-height: 44px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 3px; color: var(--_muted); font-size: 11px; font-weight: 600; }
+.jb-tab[aria-current="page"] { color: var(--_brand); }
+.jb-tab-label { max-width: 100%; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+html.jb-shell-on.jb-shell-office body { padding-top: calc(var(--jb-top-h) + 20px) !important; }
+html.jb-shell-on.jb-shell-office.jb-has-tabbar body {
+  padding-bottom: calc(var(--jb-tab-h) + env(safe-area-inset-bottom, 0px) + 20px) !important; }
+
+@media (min-width: 900px) {
+  .jb-rail { display: flex; flex-direction: column; gap: 12px; position: fixed; z-index: 2147483000; top: 0; bottom: 0; left: 0;
+    width: var(--jb-rail-w); padding: 14px 4px 0; overflow-y: auto; background: var(--_bg); border-right: 1px solid var(--_line); }
+  .jb-top { left: var(--jb-rail-w); padding: 0 24px; }
+  .jb-tabbar { display: none; }
+  html.jb-shell-on.jb-shell-office body { padding-left: calc(var(--jb-rail-w) + 24px) !important; }
+  html.jb-shell-on.jb-shell-office.jb-has-tabbar body { padding-bottom: 25px !important; }
+}
+
+/* FIELD: slim top bar, the rest of the screen is the task */
+.jb-field-bar { position: fixed; z-index: 2147483000; top: 0; left: 0; right: 0; height: var(--jb-field-h);
+  display: flex; align-items: center; gap: 6px; padding: 0 6px; background: var(--_bg); border-bottom: 1px solid var(--_line); }
+.jb-field-bar .jb-title { flex: 1 1 auto; text-align: center; }
+html.jb-shell-on.jb-shell-field body { padding-top: calc(var(--jb-field-h) + 16px) !important; }
+
+/* drawer (phone "More", field menu) */
+.jb-drawer[hidden] { display: none; }
+.jb-drawer { position: fixed; inset: 0; z-index: 2147483100; }
+.jb-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .5); }
+.jb-drawer-panel { position: absolute; top: 0; bottom: 0; left: 0; width: min(86vw, 340px); overflow-y: auto;
+  background: var(--_bg); border-right: 1px solid var(--_line); padding: 10px 4px 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px); }
+.jb-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 10px; }
+html.jb-drawer-open, html.jb-drawer-open body { overflow: hidden; }
+
+/* a page's own old menu, hidden while the shell is on (registry legacy_nav) */
+html.jb-shell-on [data-jb-hidden-nav] { display: none !important; }
+
+@media print { .jb-shell { display: none !important; } html.jb-shell-on body { padding: 0 !important; } }

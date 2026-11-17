@@ -29,6 +29,7 @@ from pathlib import Path
 
 from services.biz import BIZ_API, BIZ_ENGINE_VERSION
 from services.biz import field_gate
+from services.biz.pages import PageRegistryMixin
 from services.biz.migrations import discover, script
 from services.biz.schema import (COLLECTION_RE, FIELD_RE, ID_RE, Registry, SchemaError,
                                  mask_secret)
@@ -42,7 +43,7 @@ PREFIX_RE = re.compile(r'^[A-Za-z0-9-]{0,12}$')
 SOURCE_CHANNELS = {'sms', 'voice', 'email', 'photo', 'web', 'manual', 'import'}
 AGENT_CHANNELS = {'sms', 'voice', 'email', 'photo', 'web'}
 MAX_RECORD_BYTES = 256 * 1024
-TABLES = ('records', 'activity', 'counters', 'field_proposals')
+TABLES = ('records', 'activity', 'counters', 'field_proposals', 'app_pages')
 META_FIELDS = {'id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'version'}
 _EMPTY = (None, '', [], {})
 
@@ -90,7 +91,7 @@ class _Pool(SQLitePool):
         return conn
 
 
-class BizStore:
+class BizStore(PageRegistryMixin):
     def __init__(self, db_dir: Path, tenant: str, *, core_dir=None, library_path=None):
         if not TENANT_RE.match(tenant or ''):
             raise _err(503, 'biz_tenant_invalid', 'invalid tenant id')
@@ -605,7 +606,15 @@ class BizStore:
             'engine_too_old': self.engine_too_old,
             'library_version': self.registry.library.get('library_version'),
             'collections': self.collection_counts(), 'last_backup': self.last_backup,
+            'shell': BIZ_API, 'registered_pages': self._registered_count(),
         }
+
+    def _registered_count(self):
+        try:
+            with self._read() as conn:
+                return conn.execute('SELECT COUNT(*) FROM app_pages WHERE archived_at IS NULL').fetchone()[0]
+        except sqlite3.OperationalError:      # an older schema (read-only mode): no registry yet
+            return None
 
     def export(self):
         with self._read() as conn:
@@ -615,6 +624,7 @@ class BizStore:
         return {'tenant': self.tenant, 'exported_at': utcnow(), 'engine': BIZ_ENGINE_VERSION,
                 'schema': self.schema_version, 'records': [self._row_to_record(r) for r in rows],
                 'counters': counters, 'activity_count': n_activity, 'proposals': self.proposals(),
+                'pages': self.pages_list(archived=True) if self._registered_count() is not None else [],
                 'schema_overlay': {n: s for n, s in self.registry.collections().items() if s.get('layer') == 'custom'}}
 
     def backup_to(self, dest: Path) -> dict:

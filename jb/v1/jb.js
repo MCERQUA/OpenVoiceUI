@@ -15,6 +15,12 @@
  *   jb.on('job', ev => render());                                  // change feed (polling)
  *   const n    = await jb.nextNumber('job_number', { prefix: '26', pad: 3 });
  *
+ * Company system (the shared menu): register a page once and it joins the menu on every page.
+ *   await jb.pages.register({ file: 'quote-tool.html', label: 'Quotes', section: 'sales', kind: 'tool',
+ *                             collections: ['estimate', 'contact'], verb: 'New quote' });
+ *   const menu = await jb.shell();      // what /jb/v1/shell.js draws
+ *
+ * Full reference: /jb/v1/sdk.md
  * Auth: the page's own signed-in session. Inside OpenVoiceUI canvas pages the
  * injected window.authFetch adds the Clerk token; otherwise the __session cookie
  * goes with the same-origin request.
@@ -24,6 +30,15 @@
   if (global.jb && global.jb.contract === 'v1') return;   // loaded twice: keep the first
 
   var BASE = '/api/biz/v1';
+  // A page published into a dev sandbox (/pages/sandbox/<name>/...) reads that sandbox's
+  // own database. The server accepts this only on the dev server; everywhere else the
+  // path does not exist, so production pages never send it.
+  var SANDBOX = (function () {
+    try {
+      var m = /^\/pages\/sandbox\/([a-z][a-z0-9-]{1,30})\//.exec(global.location.pathname);
+      return m ? m[1] : null;
+    } catch (e) { return null; }
+  })();
 
   function JbError(status, body) {
     body = body || {};
@@ -47,6 +62,7 @@
 
   function call(method, path, body, headers) {
     var opts = { method: method, headers: Object.assign({ 'Accept': 'application/json' }, headers || {}) };
+    if (SANDBOX) opts.headers['X-Biz-Sandbox'] = SANDBOX;
     if (body !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
@@ -76,6 +92,7 @@
   var jb = {
     contract: 'v1',
     JbError: JbError,
+    sandbox: SANDBOX,
 
     health: function () { return call('GET', '/health'); },
     schema: function (collection) { return call('GET', '/schema' + (collection ? '/' + enc(collection) : '')); },
@@ -141,6 +158,31 @@
     },
     /** Adopt a shared-library field: jb.adopt('job', 'sf_set_yield') */
     adopt: function (collection, key) { return call('POST', '/schema/adopt', { collection: collection, key: key }); },
+
+    /**
+     * The company system: the pages registered for this business, which the shared menu
+     * shell draws. Register a page once, after the file exists; it then shows in the menu
+     * of every registered page. Sections: home customers sales jobs money stock team files reports.
+     */
+    pages: {
+      list: function (opts) { return call('GET', '/registry/pages' + qs({ archived: (opts || {}).archived ? '1' : undefined })); },
+      get: function (id) { return call('GET', '/registry/pages/' + enc(id)); },
+      register: function (page, opts) {
+        return call('POST', '/registry/pages', Object.assign({}, page, { source: (opts || {}).source }));
+      },
+      update: function (id, patch, version, opts) {
+        if (version === undefined || version === null) {
+          return Promise.reject(new JbError(428, { code: 'if_match_required',
+            error: 'jb.pages.update needs the version you read (page.version)' }));
+        }
+        return call('PATCH', '/registry/pages/' + enc(id),
+          Object.assign({}, patch || {}, { source: (opts || {}).source }), { 'If-Match': String(version) });
+      },
+      archive: function (id, opts) { return call('POST', '/registry/pages/' + enc(id) + '/archive', { source: (opts || {}).source }); },
+      unarchive: function (id, opts) { return call('POST', '/registry/pages/' + enc(id) + '/unarchive', { source: (opts || {}).source }); }
+    },
+    /** The menu model the shell draws: {sections, tabs, more, company, theme, icons}. */
+    shell: function (pageId) { return call('GET', '/registry/shell' + qs({ page: pageId })); },
 
     /** Company styling from the company record: {name, logo, colors, fonts} (null fields when unset). */
     brand: function () {

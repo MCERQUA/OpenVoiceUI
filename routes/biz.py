@@ -28,19 +28,40 @@ POST   /api/biz/v1/<collection>/<id>/archive | /unarchive
 POST   /api/biz/v1/counters/<name>/next    {prefix, pad} (used on first call only)
 GET    /api/biz/v1/events?since=<id>       change feed (poll)
 GET    /api/biz/v1/export                  whole tenant as JSON (owner only)
-GET    /jb/v1/jb.js                        the SDK (public asset; the data behind it is gated)
+
+Company system (phase 2, design section 9):
+GET    /api/biz/v1/registry/pages          ?archived=1   the pages of this company system
+POST   /api/biz/v1/registry/pages          {file, label, section, ...} -> 201 (+ first_of_system)
+GET    /api/biz/v1/registry/pages/<id>
+PATCH  /api/biz/v1/registry/pages/<id>     If-Match: <version>
+POST   /api/biz/v1/registry/pages/<id>/archive | /unarchive
+GET    /api/biz/v1/registry/shell          ?page=<id>   what the menu shell draws (sections, tabs, theme)
+
+Dev sandboxes (only where BIZ_SANDBOXES is set; see services/biz/sandbox.py):
+GET    /api/biz/v1/dev/pages               the sandbox's page files
+PUT    /api/biz/v1/dev/pages/<file>        {html} publish a page into the sandbox (sandbox key only)
+GET    /api/biz/v1/dev/pages/<file>        the file + the shell tags the server would inject
+
+Static, served from the image (public assets; the data behind them is gated):
+GET    /jb/v1/jb.js  /jb/v1/shell.js  /jb/v1/shell.css  /jb/v1/sdk.md (also /jb/v1/)
 """
 from __future__ import annotations
 
 import hmac
+import html as _html
 import json
 import logging
 import os
+import shutil
 import threading
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
-from flask import Blueprint, current_app, g, jsonify, request, send_file
+from flask import Blueprint, current_app, g, jsonify, redirect, request, send_file
 
+from services.biz import sandbox as _sandbox
+from services.biz.pages import FILE_RE, build_theme, check_file, shell_model
 from services.biz.schema import SchemaError
 from services.biz.store import BizStore, resolve_location
 from services.paths import JB_SDK_DIR
@@ -61,29 +82,52 @@ def _hosted() -> bool:
         os.getenv('CANVAS_REQUIRE_AUTH', '').strip().lower() == 'true'
 
 
-def get_store() -> BizStore:
-    """The tenant's store, opened once per app. A refusal is cached for a minute, then retried."""
+def _open_main():
+    tenant, db_dir = resolve_location(hosted=_hosted())
+    return BizStore(db_dir, tenant)
+
+
+def _open_sandbox(name):
+    tenant, db_dir = resolve_location(hosted=_hosted())
+    return BizStore(Path(db_dir) / 'sandboxes' / name, _sandbox.tenant_id(tenant, name))
+
+
+def get_store(sandbox: str | None = None) -> BizStore:
+    """The tenant's store (or one dev sandbox's), opened once per app.
+
+    A refusal is cached for a minute, then retried.
+    """
     ext = current_app.extensions.setdefault('biz', {})
-    store = ext.get('store')
+    slot = 'store' if sandbox is None else 'sandbox:' + sandbox
+    store = ext.get(slot)
     if store is not None:
         return store
     with _open_lock:
-        store = ext.get('store')
+        store = ext.get(slot)
         if store is not None:
             return store
-        failed = ext.get('open_error')
+        failed = ext.get('open_error:' + slot)
         if failed and time.monotonic() - failed[0] < _RETRY_OPEN_AFTER_S:
             raise failed[1]
         try:
-            tenant, db_dir = resolve_location(hosted=_hosted())
-            store = BizStore(db_dir, tenant)
+            store = _open_main() if sandbox is None else _open_sandbox(sandbox)
         except SchemaError as exc:
-            ext['open_error'] = (time.monotonic(), exc)
-            logger.error('biz: store refused to open: %s (%s)', exc.code, exc.message)
+            ext['open_error:' + slot] = (time.monotonic(), exc)
+            logger.error('biz: store %s refused to open: %s (%s)', slot, exc.code, exc.message)
             raise
-        ext.pop('open_error', None)
-        ext['store'] = store
+        ext.pop('open_error:' + slot, None)
+        ext[slot] = store
         return store
+
+
+def _canvas_dir() -> Path:
+    import routes.canvas as canvas          # the same (patchable) dir the page server reads
+    return Path(canvas.CANVAS_PAGES_DIR)
+
+
+def _pages_dir(sandbox: str | None) -> Path:
+    base = _canvas_dir()
+    return base if sandbox is None else base / 'sandbox' / sandbox
 
 
 def _fail(status, code, message, **extra):
@@ -116,9 +160,22 @@ def _authenticate():
 
     presented = request.headers.get('X-Agent-Key')
     expected = os.getenv('AGENT_API_KEY', '').strip()
+    asked_sandbox = (request.headers.get('X-Biz-Sandbox') or '').strip() or None
+    sandboxes = _sandbox.configured()
+    g.biz_sandbox = None
     if presented is not None:
+        sbx = _sandbox.for_key(presented)
         if expected and hmac.compare_digest(presented.encode(), expected.encode()):
             g.biz_role = 'agent'
+            if asked_sandbox:
+                return _fail(400, 'tenant_param_refused',
+                             'This agent key serves its own business only; it never takes a sandbox')
+        elif sbx:
+            g.biz_role = 'agent'
+            g.biz_sandbox = sbx
+            if asked_sandbox and asked_sandbox != sbx:
+                logger.warning('biz: sandbox key for %s asked for sandbox %s (refused)', sbx, asked_sandbox[:40])
+                return _fail(403, 'sandbox_refused', 'This key belongs to one sandbox and cannot reach another')
         else:
             logger.warning('biz: wrong X-Agent-Key refused (path=%s)', request.path)
             return _fail(403, 'agent_key_invalid', 'This agent key is not valid for this business')
@@ -138,8 +195,17 @@ def _authenticate():
         g.biz_role = 'owner'          # single-user local install (no Clerk configured)
         g.biz_by = 'local:owner'
 
+    if g.biz_role == 'owner' and asked_sandbox:
+        # The dev server's own owner may open a sandbox to look at it (jb.js sends this header
+        # on /pages/sandbox/<name>/ pages). Anywhere sandboxes are off, naming one is refused
+        # exactly like naming a tenant.
+        if asked_sandbox not in sandboxes:
+            return _fail(400, 'tenant_param_refused',
+                         'The business backend serves only this container\'s business; it never takes a sandbox')
+        g.biz_sandbox = asked_sandbox
+
     try:
-        store = get_store()
+        store = get_store(g.biz_sandbox)
     except SchemaError as exc:
         return jsonify(exc.to_dict()), exc.status
     if g.biz_role == 'agent':
@@ -172,7 +238,10 @@ def _w() -> dict:
 # ── health + schema + library ───────────────────────────────────────────────
 @biz_bp.get(f'{API}/health')
 def health():
-    return jsonify(g.biz_store.health())
+    out = g.biz_store.health()
+    if g.biz_sandbox:
+        out['sandbox'] = g.biz_sandbox
+    return jsonify(out)
 
 
 @biz_bp.get(f'{API}/schema')
@@ -234,6 +303,148 @@ def export():
     if _agent():
         return _fail(403, 'owner_only', 'Export is for the business owner only')
     return jsonify(g.biz_store.export())
+
+
+# ── company system: page registry + shell model ───────────────────────────
+@biz_bp.get(f'{API}/registry/pages')
+def registry_list():
+    pages = g.biz_store.pages_list(archived=request.args.get('archived') == '1')
+    pdir = _pages_dir(g.biz_sandbox)
+    for p in pages:
+        p['exists'] = (pdir / p['file']).is_file()
+    return jsonify({'pages': pages, 'count': len(pages)})
+
+
+@biz_bp.post(f'{API}/registry/pages')
+def registry_register():
+    body = _body()
+    page = g.biz_store.page_register({k: v for k, v in body.items() if k != 'source'},
+                                     source=body.get('source'), pages_dir=_pages_dir(g.biz_sandbox), **_w())
+    page['url'] = _page_url(page['file'])
+    return jsonify(page), 201
+
+
+@biz_bp.get(f'{API}/registry/pages/<pid>')
+def registry_get(pid):
+    page = g.biz_store.page_get(pid)
+    page['exists'] = (_pages_dir(g.biz_sandbox) / page['file']).is_file()
+    return jsonify(page)
+
+
+@biz_bp.patch(f'{API}/registry/pages/<pid>')
+def registry_patch(pid):
+    body = _body()
+    return jsonify(g.biz_store.page_update(pid, {k: v for k, v in body.items() if k != 'source'},
+                                           expected_version=_if_match(), source=body.get('source'), **_w()))
+
+
+@biz_bp.post(f'{API}/registry/pages/<pid>/archive')
+def registry_archive(pid):
+    return jsonify(g.biz_store.page_set_archived(pid, True, source=_body().get('source'), **_w()))
+
+
+@biz_bp.post(f'{API}/registry/pages/<pid>/unarchive')
+def registry_unarchive(pid):
+    return jsonify(g.biz_store.page_set_archived(pid, False, source=_body().get('source'), **_w()))
+
+
+def _style_tokens(page_id=None) -> dict:
+    """The page's own canvas style, else the tenant's active style (tokens only)."""
+    try:
+        from services import canvas_styles
+        style_id = None
+        if page_id and not g.biz_sandbox:
+            from routes.canvas import load_canvas_manifest
+            style_id = (load_canvas_manifest().get('pages', {}).get(page_id) or {}).get('style')
+        style_id = style_id or canvas_styles.get_active_style_id()
+        style = canvas_styles.get_style(style_id) if style_id else None
+        return dict((style or {}).get('tokens') or {})
+    except Exception:
+        logger.debug('biz: no style tokens for the shell', exc_info=True)
+        return {}
+
+
+@biz_bp.get(f'{API}/registry/shell')
+def registry_shell():
+    store = g.biz_store
+    page_id = request.args.get('page')
+    if page_id is not None and not FILE_RE.match(page_id + '.html'):
+        page_id = None
+    pdir = _pages_dir(g.biz_sandbox)
+    brand = store.company_brand()
+    model = shell_model(store.pages_list(), company=brand, theme=build_theme(_style_tokens(page_id), brand),
+                        page_exists=lambda f: (pdir / f).is_file())
+    model['base'] = _page_url('')
+    model['page'] = page_id
+    if g.biz_sandbox:
+        model['sandbox'] = g.biz_sandbox
+    return jsonify(model)
+
+
+def _page_url(file_name: str) -> str:
+    return '/pages/' + (f'sandbox/{g.biz_sandbox}/' if g.biz_sandbox else '') + file_name
+
+
+# ── dev sandboxes: page publish (sandbox keys only) ──────────────────────────
+def _sandbox_only():
+    if not g.biz_sandbox:
+        raise SchemaError(404, 'not_a_sandbox',
+                          'Dev page publishing exists only for sandbox keys on the dev server. A business\'s own '
+                          'agent writes pages the normal way (canvas pages) and registers them here.')
+    if g.biz_role != 'agent':
+        raise SchemaError(403, 'sandbox_key_required', 'Only the sandbox\'s own key publishes its dev pages')
+
+
+@biz_bp.get(f'{API}/dev/pages')
+def dev_pages_list():
+    if not g.biz_sandbox:
+        raise SchemaError(404, 'not_a_sandbox', 'This is not a dev sandbox')
+    pdir = _pages_dir(g.biz_sandbox)
+    registered = {p['file'] for p in g.biz_store.pages_list()}
+    files = sorted(f.name for f in pdir.glob('*.html')) if pdir.is_dir() else []
+    return jsonify({'sandbox': g.biz_sandbox, 'pages': [
+        {'file': f, 'url': _page_url(f), 'registered': f in registered} for f in files]})
+
+
+@biz_bp.put(f'{API}/dev/pages/<file_name>')
+def dev_page_put(file_name):
+    _sandbox_only()
+    check_file(file_name)
+    body = _body()
+    page_html = body.get('html')
+    if not isinstance(page_html, str) or '<' not in page_html:
+        raise SchemaError(422, 'validation_failed', 'html must be the page\'s full HTML text', field='html')
+    g.biz_store.check_source(body.get('source'), agent=True)
+    pdir = _pages_dir(g.biz_sandbox)
+    pdir.mkdir(parents=True, exist_ok=True)
+    dest = pdir / file_name
+    kept = None
+    if dest.is_file():
+        hist = pdir / '.history'
+        hist.mkdir(exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        kept = hist / f'{file_name}.{stamp}'
+        shutil.copy2(dest, kept)          # the previous version is kept, never removed
+    tmp = dest.with_name('.' + file_name + '.partial')
+    tmp.write_text(page_html, encoding='utf-8')
+    os.replace(tmp, dest)
+    return jsonify({'file': file_name, 'url': _page_url(file_name), 'bytes': len(page_html.encode('utf-8')),
+                    'previous_kept_as': kept.name if kept else None,
+                    'next': 'Register it: POST /api/biz/v1/registry/pages {file, label, section, ...}'}), 200
+
+
+@biz_bp.get(f'{API}/dev/pages/<file_name>')
+def dev_page_get(file_name):
+    if not g.biz_sandbox:
+        raise SchemaError(404, 'not_a_sandbox', 'This is not a dev sandbox')
+    check_file(file_name)
+    path = _pages_dir(g.biz_sandbox) / file_name
+    if not path.is_file():
+        raise SchemaError(404, 'not_found', 'No such page in this sandbox')
+    page = g.biz_store.page_for_serve(file_name)
+    return jsonify({'file': file_name, 'url': _page_url(file_name), 'html': path.read_text(encoding='utf-8'),
+                    'registered': page is not None,
+                    'shell_injection': _shell_tags(page, g.biz_sandbox).decode('utf-8') if page else None})
 
 
 # ── records ────────────────────────────────────────────────────────────────
@@ -299,9 +510,74 @@ def unarchive_record(collection, rid):
     return jsonify(g.biz_store.set_archived(collection, rid, False, source=_body().get('source'), **_w()))
 
 
-# ── the SDK: one fixed file, served from the image, never copied into tenant folders ──
-@jb_sdk_bp.get('/jb/v1/jb.js')
-def jb_sdk():
-    resp = send_file(JB_SDK_DIR / 'v1' / 'jb.js', mimetype='application/javascript', max_age=0)
+# ── the SDK, the menu shell and the SDK doc: fixed files, served from the image ──
+_JB_ASSETS = {
+    'jb.js': 'application/javascript',
+    'shell.js': 'application/javascript',
+    'shell.css': 'text/css',
+    'sdk.md': 'text/markdown; charset=utf-8',
+}
+
+
+@jb_sdk_bp.get('/jb/v1/<name>')
+def jb_asset(name):
+    mimetype = _JB_ASSETS.get(name)
+    if mimetype is None:
+        return jsonify({'error': 'Not found', 'code': 'not_found'}), 404
+    resp = send_file(JB_SDK_DIR / 'v1' / name, mimetype=mimetype, max_age=0)
     resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
     return resp
+
+
+@jb_sdk_bp.get('/jb/v1/')
+def jb_index():
+    return redirect('/jb/v1/sdk.md', code=302)
+
+
+# ── serve-time shell injection (called by routes/canvas.py for every served page) ──
+def _shell_tags(page: dict, sandbox: str | None) -> bytes:
+    attrs = [('id', 'jb-shell-js'), ('src', '/jb/v1/shell.js'), ('data-page', page['id']),
+             ('data-variant', page['shell'])]
+    if page.get('legacy_nav'):
+        attrs.append(('data-legacy-nav', page['legacy_nav']))
+    if sandbox:
+        attrs.append(('data-sandbox', sandbox))
+    tag = '<script ' + ' '.join(f'{k}="{_html.escape(v, quote=True)}"' for k, v in attrs) + '></script>'
+    # No <link> for shell.css: the canvas CSP has no 'self' in style-src; shell.js adds it inline.
+    return ('<script id="jb-sdk-js" src="/jb/v1/jb.js"></script>' + tag).encode('utf-8')
+
+
+def shell_injection(rel_path: str, content: bytes) -> bytes:
+    """Tags that put the shared menu on a served canvas page, or b''.
+
+    Only for pages registered in this business's company system with shell != off.
+    Never creates a database (a business that has none has no registered pages), never
+    raises (a broken registry must not take the page down), and leaves the page file
+    on disk untouched: removing the registry row gives the page back exactly as it was.
+    """
+    try:
+        if b'/jb/v1/shell.js' in content:          # the page includes the shell itself
+            return b''
+        sandbox = None
+        file_name = rel_path
+        if '/' in rel_path:
+            hit = _sandbox.split_page_path(rel_path)
+            if not hit:
+                return b''
+            sandbox, file_name = hit
+        if not FILE_RE.match(file_name):
+            return b''
+        ext = current_app.extensions.setdefault('biz', {})
+        slot = 'store' if sandbox is None else 'sandbox:' + sandbox
+        if ext.get(slot) is None:
+            tenant, db_dir = resolve_location(hosted=_hosted())
+            db_path = (Path(db_dir) if sandbox is None else Path(db_dir) / 'sandboxes' / sandbox) / 'business.db'
+            if not db_path.is_file():
+                return b''
+        page = get_store(sandbox).page_for_serve(file_name)
+        if not page or page['shell'] == 'off':
+            return b''
+        return _shell_tags(page, sandbox)
+    except Exception:
+        logger.warning('biz: shell injection skipped for %s', rel_path, exc_info=True)
+        return b''
