@@ -16,10 +16,12 @@ field is an explicit `clear` list.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import threading
 import uuid
@@ -43,7 +45,15 @@ PREFIX_RE = re.compile(r'^[A-Za-z0-9-]{0,12}$')
 SOURCE_CHANNELS = {'sms', 'voice', 'email', 'photo', 'web', 'manual', 'import'}
 AGENT_CHANNELS = {'sms', 'voice', 'email', 'photo', 'web'}
 MAX_RECORD_BYTES = 256 * 1024
-TABLES = ('records', 'activity', 'counters', 'field_proposals', 'app_pages')
+TABLES = ('records', 'activity', 'counters', 'field_proposals', 'app_pages', 'files')
+# Backend-private file store (migration 0003): <db dir>/files/<sha256>, served only by
+# GET /api/biz/v1/files/<id>. Type is decided from the bytes, never from the client's claim.
+FILE_MAX_BYTES = 15 * 1024 * 1024
+FILE_ID_RE = re.compile(r'^[0-9a-f]{64}$')
+FILE_URL_PREFIX = 'biz-file:'
+FILE_TYPES = ((b'%PDF-', 'application/pdf', '.pdf'),
+              (b'\x89PNG\r\n\x1a\n', 'image/png', '.png'),
+              (b'\xff\xd8\xff', 'image/jpeg', '.jpg'))
 META_FIELDS = {'id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'version'}
 _EMPTY = (None, '', [], {})
 
@@ -100,6 +110,7 @@ class BizStore(PageRegistryMixin):
         self.db_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.db_dir / 'business.db'
         self.backup_dir = self.db_dir / 'backups'
+        self.files_dir = self.db_dir / 'files'
         kw = {}
         if core_dir is not None:
             kw['core_dir'] = core_dir
@@ -694,6 +705,132 @@ class BizStore(PageRegistryMixin):
                  'definition': json.loads(r['definition']), 'gate': json.loads(r['gate']) if r['gate'] else None,
                  'status': r['status']} for r in rows]
 
+    # ── backend-private file store ───────────────────────────────────────
+    @staticmethod
+    def sniff_type(blob: bytes):
+        for magic, ctype, ext in FILE_TYPES:
+            if blob.startswith(magic):
+                return ctype, ext
+        return None, None
+
+    def put_file(self, blob, *, name=None, by, source=None, agent=False):
+        """Store bytes by content hash. Returns the file's metadata (+ existed). Idempotent."""
+        self._writable()
+        source = self.check_source(source, agent=agent)
+        if not isinstance(blob, (bytes, bytearray)) or not blob:
+            raise _err(422, 'file_empty', 'Send the file as multipart form field "file"')
+        if len(blob) > FILE_MAX_BYTES:
+            raise _err(413, 'file_too_large', f'A stored file is at most {FILE_MAX_BYTES // (1024 * 1024)} MB')
+        ctype, _ = self.sniff_type(bytes(blob[:16]))
+        if ctype is None:
+            raise _err(415, 'file_type_refused', 'Only PDF, PNG and JPEG files are stored (checked from the bytes)')
+        if name is not None:
+            if not isinstance(name, str):
+                raise _err(422, 'bad_request', 'name must be text')
+            name = re.split(r'[\\/]', name)[-1].strip()[:200] or None
+        fid = hashlib.sha256(blob).hexdigest()
+        self.files_dir.mkdir(parents=True, exist_ok=True)
+        dest = self.files_dir / fid
+        if not dest.is_file() or self._sha_of(dest) != fid:
+            tmp = self.files_dir / f'.{fid}.partial'
+            with open(tmp, 'wb') as fh:
+                fh.write(blob)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.chmod(tmp, 0o640)
+            os.replace(tmp, dest)
+        with self._tx() as conn:
+            row = conn.execute('SELECT * FROM files WHERE id = ?', (fid,)).fetchone()
+            existed = row is not None
+            if not existed:
+                conn.execute('INSERT INTO files(id, tenant, content_type, size, name, created_at, created_by, source) '
+                             'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                             (fid, self.tenant, ctype, len(blob), name, utcnow(), by,
+                              json.dumps(source) if source else None))
+                self._activity(conn, collection=None, record_id=None, type_='file_stored', by=by, source=source,
+                               diff={'file': fid, 'size': len(blob), 'content_type': ctype})
+                row = conn.execute('SELECT * FROM files WHERE id = ?', (fid,)).fetchone()
+        out = self._file_row(row)
+        out['existed'] = existed
+        return out
+
+    @staticmethod
+    def _file_row(r):
+        return {'id': r['id'], 'sha256': r['id'], 'url': FILE_URL_PREFIX + r['id'],
+                'content_type': r['content_type'], 'size': r['size'], 'name': r['name'],
+                'created_at': r['created_at'], 'created_by': r['created_by']}
+
+    @staticmethod
+    def _sha_of(path: Path) -> str:
+        h = hashlib.sha256()
+        with open(path, 'rb') as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b''):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def file_meta(self, fid):
+        if not isinstance(fid, str) or not FILE_ID_RE.match(fid):
+            raise _err(404, 'not_found', 'No such file')
+        with self._read() as conn:
+            row = conn.execute('SELECT * FROM files WHERE id = ?', (fid,)).fetchone()
+        if row is None:
+            raise _err(404, 'not_found', 'No such file')
+        return self._file_row(row)
+
+    def file_verified(self, fid) -> bool:
+        """True when the file is indexed AND its bytes on disk still hash to its id."""
+        try:
+            self.file_meta(fid)
+        except SchemaError:
+            return False
+        path = self.files_dir / fid
+        return path.is_file() and self._sha_of(path) == fid
+
+    def file_open(self, fid):
+        """(metadata, path) for a stored file whose bytes still match its hash; else refused."""
+        meta = self.file_meta(fid)
+        path = self.files_dir / fid
+        if not path.is_file() or self._sha_of(path) != fid:
+            logger.error('biz: stored file %s is missing or does not match its hash', fid[:12])
+            raise _err(500, 'file_corrupt', 'The stored file is missing or does not match its hash')
+        return meta, path
+
+    def backup_files(self) -> dict:
+        """Mirror the file store into backups/files/ (copy what is missing, verify each copy's hash).
+
+        Never deletes. Same disk as the store: an off-box copy is a separate, platform job.
+        """
+        mirror = self.backup_dir / 'files'
+        with self._read() as conn:
+            ids = [r[0] for r in conn.execute('SELECT id FROM files').fetchall()]
+        copied, bad = 0, []
+        for fid in ids:
+            src, dst = self.files_dir / fid, mirror / fid
+            if dst.is_file() and dst.stat().st_size == (src.stat().st_size if src.is_file() else -1):
+                continue
+            if not src.is_file():
+                bad.append(fid[:12])
+                continue
+            mirror.mkdir(parents=True, exist_ok=True)
+            tmp = mirror / f'.{fid}.partial'
+            shutil.copy2(src, tmp)
+            if self._sha_of(tmp) != fid:
+                bad.append(fid[:12])
+                continue
+            os.replace(tmp, dst)
+            copied += 1
+        present = sum(1 for fid in ids if (mirror / fid).is_file())
+        return {'indexed': len(ids), 'mirrored': present, 'copied_now': copied, 'problems': bad,
+                'verified': not bad and present == len(ids)}
+
+    def files_list(self):
+        try:
+            with self._read() as conn:
+                rows = conn.execute('SELECT * FROM files ORDER BY created_at').fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [self._file_row(r) for r in rows]
+
     # ── health, export, backup ───────────────────────────────────────────
     def collection_counts(self):
         with self._read() as conn:
@@ -728,6 +865,7 @@ class BizStore(PageRegistryMixin):
                 'schema': self.schema_version, 'records': [self._row_to_record(r) for r in rows],
                 'counters': counters, 'activity_count': n_activity, 'proposals': self.proposals(),
                 'pages': self.pages_list(archived=True) if self._registered_count() is not None else [],
+                'files': self.files_list(),
                 'schema_overlay': {n: s for n, s in self.registry.collections().items() if s.get('layer') == 'custom'}}
 
     def backup_to(self, dest: Path) -> dict:
@@ -768,6 +906,11 @@ class BizStore(PageRegistryMixin):
             self.last_backup = {'day': day, 'verified': False, 'error': type(exc).__name__}
             return self.last_backup
         result['day'] = day
+        try:
+            result['files'] = self.backup_files()
+        except Exception as exc:
+            logger.exception('biz: file store backup failed')
+            result['files'] = {'verified': False, 'error': type(exc).__name__}
         self.last_backup = result
         if not result['verified']:
             logger.error('biz: daily backup did NOT verify: %s', result)

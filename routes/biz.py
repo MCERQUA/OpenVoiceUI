@@ -28,6 +28,9 @@ POST   /api/biz/v1/<collection>/<id>/archive | /unarchive
 POST   /api/biz/v1/counters/<name>/next    {prefix, pad} (used on first call only)
 GET    /api/biz/v1/events?since=<id>       change feed (poll)
 GET    /api/biz/v1/export                  whole tenant as JSON (owner only)
+POST   /api/biz/v1/files                   multipart "file" (+ "source" JSON, "name"): backend-private store
+GET    /api/biz/v1/files/<id>              the bytes, as an attachment (a person's session only)
+GET    /api/biz/v1/files/<id>/meta         {id, sha256, url: biz-file:<id>, content_type, size, name}
 
 Company system (phase 2, design section 9):
 GET    /api/biz/v1/registry/pages          ?archived=1   the pages of this company system
@@ -66,7 +69,7 @@ from flask import Blueprint, current_app, g, jsonify, redirect, request, send_fi
 from services.biz import sandbox as _sandbox
 from services.biz.pages import FILE_RE, RECORD_PARAM, build_theme, check_file, page_for_record, shell_model
 from services.biz.schema import SchemaError
-from services.biz.store import BizStore, resolve_location
+from services.biz.store import FILE_ID_RE, FILE_MAX_BYTES, BizStore, resolve_location
 from services.paths import JB_SDK_DIR
 
 logger = logging.getLogger(__name__)
@@ -158,8 +161,11 @@ def _authenticate():
     if 'tenant' in request.args or request.headers.get('X-Tenant') or request.headers.get('X-Jambot-Tenant'):
         return _fail(400, 'tenant_param_refused',
                      'The business backend serves only this container\'s tenant; it never takes a tenant parameter')
-    if request.content_length and request.content_length > MAX_BODY_BYTES:
-        return _fail(413, 'body_too_large', 'Request body is larger than 1 MB')
+    is_upload = request.method == 'POST' and request.path == API + '/files'
+    cap = FILE_MAX_BYTES + 64 * 1024 if is_upload else MAX_BODY_BYTES
+    if request.content_length and request.content_length > cap:
+        return _fail(413, 'body_too_large', 'Request body is larger than '
+                     + ('the file store limit' if is_upload else '1 MB'))
 
     presented = request.headers.get('X-Agent-Key')
     expected = os.getenv('AGENT_API_KEY', '').strip()
@@ -215,7 +221,11 @@ def _authenticate():
         g.biz_by = f'agent:{store.tenant}'
     g.biz_store = store
     store.maybe_daily_backup()
-    if request.method in ('POST', 'PATCH', 'PUT'):
+    if is_upload:
+        if 'tenant' in request.form:
+            return _fail(400, 'tenant_param_refused',
+                         'The business backend serves only this container\'s tenant; never send a tenant')
+    elif request.method in ('POST', 'PATCH', 'PUT'):
         body = request.get_json(silent=True)
         if request.content_length and body is None:
             return _fail(400, 'bad_json', 'Body must be JSON')
@@ -306,6 +316,50 @@ def export():
     if _agent():
         return _fail(403, 'owner_only', 'Export is for the business owner only')
     return jsonify(g.biz_store.export())
+
+
+# ── backend-private file store (design amendment 2026-11-17) ──────────────
+@biz_bp.post(f'{API}/files')
+def file_upload():
+    up = request.files.get('file')
+    if up is None:
+        raise SchemaError(422, 'file_empty', 'Send the file as multipart form field "file"')
+    raw_source = request.form.get('source')
+    source = None
+    if raw_source:
+        try:
+            source = json.loads(raw_source)
+        except ValueError:
+            raise SchemaError(422, 'bad_source', '"source" must be JSON text')
+    blob = up.read(FILE_MAX_BYTES + 1)
+    meta = g.biz_store.put_file(blob, name=request.form.get('name') or up.filename, source=source, **_w())
+    return jsonify(meta), 200 if meta['existed'] else 201
+
+
+def _owner_file(fid):
+    if _agent():
+        raise SchemaError(403, 'owner_only', 'Stored files are opened by a person\'s session only')
+    if not FILE_ID_RE.match(fid or ''):
+        raise SchemaError(404, 'not_found', 'No such file')
+
+
+@biz_bp.get(f'{API}/files/<fid>')
+def file_get(fid):
+    _owner_file(fid)
+    meta, path = g.biz_store.file_open(fid)
+    ext = {'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg'}.get(meta['content_type'], '')
+    resp = send_file(path, mimetype=meta['content_type'], as_attachment=True,
+                     download_name=fid[:16] + ext, max_age=0, conditional=False, etag=False)
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox"
+    return resp
+
+
+@biz_bp.get(f'{API}/files/<fid>/meta')
+def file_get_meta(fid):
+    if not FILE_ID_RE.match(fid or ''):
+        raise SchemaError(404, 'not_found', 'No such file')
+    return jsonify(g.biz_store.file_meta(fid))
 
 
 # ── company system: page registry + shell model ───────────────────────────
