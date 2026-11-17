@@ -1,0 +1,70 @@
+{
+  "collection": "document",
+  "label": "Document",
+  "label_plural": "Documents",
+  "title_field": "title",
+  "required": [
+    "file_url"
+  ],
+  "fields": {
+    "title": {
+      "type": "string",
+      "label": "Title"
+    },
+    "file_url": {
+      "type": "string",
+      "label": "File (/uploads/...)"
+    },
+    "kind": {
+      "type": "enum",
+      "label": "Kind",
+      "values": [
+        "photo",
+        "pdf",
+        "work_order",
+        "receipt",
+        "plan",
+        "contract",
+        "other"
+      ]
+    },
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "contact_id": {
+      "type": "ref",
+      "label": "Contact",
+      "ref": "contact"
+    },
+    "extracted": {
+      "type": "list",
+      "label": "Extracted fields",
+      "items": "object"
+    },
+    "line_items": {
+      "type": "list",
+      "label": "Line items",
+      "items": "object"
+    },
+    "transcription": {
+      "type": "text",
+      "label": "Transcription"
+    },
+    "readers": {
+      "type": "list",
+      "label": "Readers",
+      "items": "string"
+    },
+    "companycam_ref": {
+      "type": "string",
+      "label": "CompanyCam reference"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "A photo, PDF or work order, with what was read from it."
+}

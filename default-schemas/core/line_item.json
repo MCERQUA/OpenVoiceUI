@@ -1,0 +1,54 @@
+{
+  "collection": "line_item",
+  "label": "Line item",
+  "label_plural": "Line items",
+  "title_field": "description",
+  "required": [
+    "description"
+  ],
+  "fields": {
+    "parent_collection": {
+      "type": "enum",
+      "label": "Belongs to",
+      "values": [
+        "estimate",
+        "invoice",
+        "cost_entry"
+      ]
+    },
+    "parent_id": {
+      "type": "string",
+      "label": "Parent record id"
+    },
+    "description": {
+      "type": "string",
+      "label": "Description"
+    },
+    "qty": {
+      "type": "number",
+      "label": "Quantity"
+    },
+    "unit": {
+      "type": "string",
+      "label": "Unit"
+    },
+    "rate": {
+      "type": "money",
+      "label": "Rate"
+    },
+    "amount": {
+      "type": "money",
+      "label": "Amount"
+    },
+    "product_id": {
+      "type": "ref",
+      "label": "Product",
+      "ref": "product"
+    },
+    "order": {
+      "type": "integer",
+      "label": "Order"
+    }
+  },
+  "description": "One line of an estimate, invoice or cost."
+}

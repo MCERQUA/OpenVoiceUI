@@ -1,0 +1,60 @@
+{
+  "collection": "event",
+  "label": "Event",
+  "label_plural": "Calendar",
+  "title_field": "title",
+  "required": [
+    "title",
+    "date"
+  ],
+  "fields": {
+    "title": {
+      "type": "string",
+      "label": "Title"
+    },
+    "date": {
+      "type": "date",
+      "label": "Date"
+    },
+    "time": {
+      "type": "string",
+      "label": "Time"
+    },
+    "duration_min": {
+      "type": "integer",
+      "label": "Duration (minutes)"
+    },
+    "type": {
+      "type": "enum",
+      "label": "Type",
+      "values": [
+        "estimate",
+        "install",
+        "inspection",
+        "follow_up",
+        "meeting",
+        "other"
+      ]
+    },
+    "contact_id": {
+      "type": "ref",
+      "label": "Contact",
+      "ref": "contact"
+    },
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "estimate_id": {
+      "type": "ref",
+      "label": "Estimate",
+      "ref": "estimate"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "A calendar entry."
+}

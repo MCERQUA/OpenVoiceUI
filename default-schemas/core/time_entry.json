@@ -1,0 +1,46 @@
+{
+  "collection": "time_entry",
+  "label": "Time entry",
+  "label_plural": "Time entries",
+  "title_field": "date",
+  "required": [
+    "date"
+  ],
+  "fields": {
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "person_id": {
+      "type": "ref",
+      "label": "Person",
+      "ref": "person"
+    },
+    "date": {
+      "type": "date",
+      "label": "Date"
+    },
+    "start": {
+      "type": "datetime",
+      "label": "Start"
+    },
+    "end": {
+      "type": "datetime",
+      "label": "End"
+    },
+    "hours": {
+      "type": "number",
+      "label": "Hours"
+    },
+    "crew_count": {
+      "type": "integer",
+      "label": "Crew count"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "Labor and crew time."
+}

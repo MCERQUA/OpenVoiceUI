@@ -1,0 +1,60 @@
+{
+  "collection": "stock_move",
+  "label": "Stock move",
+  "label_plural": "Stock moves",
+  "title_field": "reason",
+  "required": [
+    "product_id",
+    "qty",
+    "type"
+  ],
+  "fields": {
+    "product_id": {
+      "type": "ref",
+      "label": "Product",
+      "ref": "product"
+    },
+    "qty": {
+      "type": "number",
+      "label": "Quantity (+ in / - out)"
+    },
+    "reason": {
+      "type": "string",
+      "label": "Reason"
+    },
+    "type": {
+      "type": "enum",
+      "label": "Type",
+      "values": [
+        "receive",
+        "use",
+        "correction",
+        "count"
+      ]
+    },
+    "counted": {
+      "type": "number",
+      "label": "Counted"
+    },
+    "expected_before": {
+      "type": "number",
+      "label": "Expected before"
+    },
+    "reverses_id": {
+      "type": "ref",
+      "label": "Reverses",
+      "ref": "stock_move"
+    },
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "date": {
+      "type": "date",
+      "label": "Date"
+    }
+  },
+  "append_only": true,
+  "description": "Append-only inventory ledger. Stock on hand is a sum, never stored. Corrections reverse, never edit."
+}

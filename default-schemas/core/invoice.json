@@ -1,0 +1,58 @@
+{
+  "collection": "invoice",
+  "label": "Invoice",
+  "label_plural": "Invoices",
+  "title_field": "number",
+  "required": [
+    "number"
+  ],
+  "fields": {
+    "number": {
+      "type": "string",
+      "label": "Invoice number"
+    },
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "contact_id": {
+      "type": "ref",
+      "label": "Bill to",
+      "ref": "contact"
+    },
+    "amount": {
+      "type": "money",
+      "label": "Amount"
+    },
+    "issued_on": {
+      "type": "date",
+      "label": "Issued"
+    },
+    "due_on": {
+      "type": "date",
+      "label": "Due"
+    },
+    "status": {
+      "type": "enum",
+      "label": "Status",
+      "values": [
+        "draft",
+        "sent",
+        "partial",
+        "paid",
+        "void",
+        "overdue"
+      ]
+    },
+    "payment_link": {
+      "type": "url",
+      "label": "Payment link"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "A bill sent to a customer."
+}

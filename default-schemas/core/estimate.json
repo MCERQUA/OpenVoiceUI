@@ -1,0 +1,92 @@
+{
+  "collection": "estimate",
+  "label": "Estimate",
+  "label_plural": "Estimates",
+  "title_field": "title",
+  "required": [
+    "title"
+  ],
+  "fields": {
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "contact_id": {
+      "type": "ref",
+      "label": "Customer",
+      "ref": "contact"
+    },
+    "title": {
+      "type": "string",
+      "label": "Title"
+    },
+    "version_label": {
+      "type": "string",
+      "label": "Quote version (Q1, Q2...)"
+    },
+    "status": {
+      "type": "enum",
+      "label": "Status",
+      "values": [
+        "draft",
+        "issued",
+        "sent",
+        "accepted",
+        "declined",
+        "superseded"
+      ]
+    },
+    "lines": {
+      "type": "list",
+      "label": "Lines",
+      "items": "object"
+    },
+    "areas": {
+      "type": "list",
+      "label": "Areas",
+      "items": "object"
+    },
+    "pricing_inputs": {
+      "type": "object",
+      "label": "Pricing inputs"
+    },
+    "subtotal": {
+      "type": "money",
+      "label": "Subtotal"
+    },
+    "tax": {
+      "type": "money",
+      "label": "Tax"
+    },
+    "total": {
+      "type": "money",
+      "label": "Total"
+    },
+    "rate_card_version": {
+      "type": "string",
+      "label": "Rate card version"
+    },
+    "content_hash": {
+      "type": "string",
+      "label": "Content hash"
+    },
+    "frozen": {
+      "type": "boolean",
+      "label": "Frozen (issued, never edited)"
+    },
+    "sent_at": {
+      "type": "datetime",
+      "label": "Sent"
+    },
+    "accepted_at": {
+      "type": "datetime",
+      "label": "Accepted"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "A versioned quote. Issued versions are frozen; a change is a new version."
+}

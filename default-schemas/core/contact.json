@@ -1,0 +1,76 @@
+{
+  "collection": "contact",
+  "label": "Contact",
+  "label_plural": "Contacts",
+  "title_field": "name",
+  "required": [
+    "name"
+  ],
+  "fields": {
+    "name": {
+      "type": "string",
+      "label": "Name"
+    },
+    "phone": {
+      "type": "phone",
+      "label": "Phone"
+    },
+    "email": {
+      "type": "email",
+      "label": "Email"
+    },
+    "address": {
+      "type": "string",
+      "label": "Address"
+    },
+    "city": {
+      "type": "string",
+      "label": "City"
+    },
+    "state": {
+      "type": "string",
+      "label": "State"
+    },
+    "zip": {
+      "type": "string",
+      "label": "ZIP"
+    },
+    "type": {
+      "type": "enum",
+      "label": "Type",
+      "values": [
+        "residential",
+        "commercial",
+        "gc",
+        "supplier",
+        "other"
+      ]
+    },
+    "company_name": {
+      "type": "string",
+      "label": "Company"
+    },
+    "source": {
+      "type": "string",
+      "label": "Source"
+    },
+    "lead_ref": {
+      "type": "string",
+      "label": "Lead reference"
+    },
+    "office_ref": {
+      "type": "string",
+      "label": "Office file reference"
+    },
+    "tags": {
+      "type": "list",
+      "label": "Tags",
+      "items": "string"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "A customer, company, general contractor or supplier."
+}

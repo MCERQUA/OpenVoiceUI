@@ -1,0 +1,84 @@
+{
+  "collection": "company",
+  "label": "Company",
+  "label_plural": "Company",
+  "title_field": "name",
+  "required": [
+    "name"
+  ],
+  "fields": {
+    "name": {
+      "type": "string",
+      "label": "Business name"
+    },
+    "phone": {
+      "type": "phone",
+      "label": "Phone"
+    },
+    "email": {
+      "type": "email",
+      "label": "Email"
+    },
+    "address": {
+      "type": "string",
+      "label": "Address"
+    },
+    "website": {
+      "type": "url",
+      "label": "Website"
+    },
+    "gbp_url": {
+      "type": "url",
+      "label": "Google Business Profile"
+    },
+    "review_link": {
+      "type": "url",
+      "label": "Review link"
+    },
+    "services": {
+      "type": "list",
+      "label": "Services",
+      "items": "string"
+    },
+    "service_area": {
+      "type": "list",
+      "label": "Service area",
+      "items": "string"
+    },
+    "zips": {
+      "type": "list",
+      "label": "ZIP codes",
+      "items": "string"
+    },
+    "hours": {
+      "type": "object",
+      "label": "Hours"
+    },
+    "timezone": {
+      "type": "string",
+      "label": "Time zone"
+    },
+    "brand": {
+      "type": "object",
+      "label": "Brand (logo, colors, fonts)"
+    },
+    "license_no": {
+      "type": "string",
+      "label": "License / ROC number"
+    },
+    "rate_card_ref": {
+      "type": "string",
+      "label": "Rate card reference"
+    },
+    "job_number_format": {
+      "type": "string",
+      "label": "Job number format"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "singleton": true,
+  "description": "The business itself: one record per tenant (profile and settings)."
+}
