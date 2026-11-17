@@ -188,6 +188,7 @@ CONFUSABLES = {
 
 
 _DIGITS = frozenset('0123456789')
+_EDITION_GAPS = frozenset(' \t\n\r\f\v()[]/-.,')
 
 
 def _fold_chars(s) -> str:
@@ -477,10 +478,13 @@ def _edition_year(edition):
 
 def edition_parts(edition):
     """Rules 1.8.0 (one reading, H5/H7/H8): (the form number printed before the edition or None, (month, year) or None).
-    The value is folded (H6), every mark other than a letter or digit is a gap, and letters and digits are separate
-    words: 'CG 20 10 11 85' -> ('CG2010', (11, 1985)); '04 13', '(04/13)', '0413', '04/2013', 'Nov 2013' -> (None,
+    The value is folded (H6); spaces and ( ) [ ] / - . , are gaps (any other mark: not a date); letters and digits are
+    separate words: 'CG 20 10 11 85' -> ('CG2010', (11, 1985)); '04 13', '(04/13)', '0413', '04/2013', 'Nov 2013' -> (None,
     (4 or 11, year))."""
-    words = re.findall(r'[A-Z]+|[0-9]+', _o_is_zero(re.sub(r'[^A-Z0-9]', ' ', _fold_chars(edition))))
+    t = _fold_chars(edition)
+    if any(not ('A' <= c <= 'Z' or c in _DIGITS or c in _EDITION_GAPS) for c in t):
+        return None, None                       # only the marks a footer prints between parts ("Nov '85" is no date)
+    words = re.findall(r'[A-Z]+|[0-9]+', _o_is_zero(re.sub(r'[^A-Z0-9]', ' ', t)))
     form = None
     if len(words) >= 2 and len(words[0]) == 2 and words[0].isalpha() and words[1].isdigit():
         digits, j = '', 1

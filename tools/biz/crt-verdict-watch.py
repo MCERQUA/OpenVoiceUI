@@ -314,9 +314,13 @@ def _edition(s):
 
 
 def _edition_read(s):
-    """RE8/RN8 (own code): (form number printed before the edition or None, (month, year) or None). Folded; any mark
-    other than a letter or digit is a gap; a run of letters and a run of digits are separate words."""
-    t = _zero(''.join(ch if ch in _LATIN else ' ' for ch in _fold(s)))
+    """RE8/RN8 (own code): (form number printed before the edition or None, (month, year) or None). Folded; spaces and
+    ( ) [ ] / - . , are gaps, any other mark is no date; a run of letters and a run of digits are separate words."""
+    f = _fold(s)
+    for ch in f:
+        if ch not in _LATIN and ch not in ' \t\n\r\f\v()[]/-.,':
+            return None, None              # a footer separates parts with these marks only
+    t = _zero(''.join(ch if ch in _LATIN else ' ' for ch in f))
     words, cur = [], ''
     for ch in t:
         if cur and (ch == ' ' or ch.isdigit() != cur[-1].isdigit()):

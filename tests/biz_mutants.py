@@ -986,6 +986,9 @@ MUTANTS += [
     ('watch-f8-edition-own-gaps', [(WA, "        mon, yr = (int(words[0]) if len(words[0]) < 3 else 0), words[1]",
                                     "        mon, yr = int(words[0]), words[1]")],
      [T_C8 + 'test_f_engine_and_watcher_read_every_string_alike']),
+    ('h8-edition-any-mark-is-a-gap', [(RT, "    if any(not ('A' <= c <= 'Z' or c in _DIGITS or c in _EDITION_GAPS) for c in t):",
+                                       "    if False:")],
+     ['tests/test_claimcheck4_probes.py::test_x6d_control_unreadable_editions_are_cant_tell', T_C8 + 'test_f_the_contract_folds_what_the_ruling_names']),
     # G (H8)
     ('g8-item-edition-form-allowed', [(RT, "            if it.get('edition') and edition_parts(it.get('edition'))[0]:\n                # rules 1.8.0 (H8)",
                                        "            if False:\n                # rules 1.8.0 (H8)")],
@@ -1008,8 +1011,8 @@ _REBASE_1_8_0 = {
                                   "                    accepted = ", '                elif False:\n                    accepted = ')],
     'r3-manuscript-overrides-iso': [(RT, "                elif e['data'].get('manuscript') is not True or fk in form_fn or iso or near:",
                                      "                elif e['data'].get('manuscript') is not True:")],
-    'med-edition-footer-unparsed': [(RT, "    words = re.findall(r'[A-Z]+|[0-9]+', _o_is_zero(re.sub(r'[^A-Z0-9]', ' ', _fold_chars(edition))))",
-                                     "    words = _fold_chars(edition).split()")],
+    'med-edition-footer-unparsed': [(RT, "    words = re.findall(r'[A-Z]+|[0-9]+', _o_is_zero(re.sub(r'[^A-Z0-9]', ' ', t)))",
+                                     "    words = t.split()")],
     'watch-low-edition-off': [(WA, "                if want_my and want_my != _edition_my(ed.get('edition')) and \\",
                                "                if False and \\")],
 }

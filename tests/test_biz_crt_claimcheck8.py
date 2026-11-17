@@ -337,7 +337,7 @@ _SEED_PARTS = (list('CGISOEDITION0123456789 ()/.-,') +
 FIXED = ['СG 20 10', 'cg20О37', 'CGО/С2026', 'CG 20 1٠', '13)3', '/213', '3,13', 'NOV85',
          'CG 2O 1O', 'CG 20 10 04 13', 'ISO CG 20 10', 'CG 20 37 (04/13)', 'CG 20 10 CG 20 37', 'CG 20 37 042013',
          'CG 20 10 11 85', 'Nov 1985', '11/1985', '(11/85)', 'ＣＧ２０１０', '', None,
-         'ACME COMP 7', 'ACME CO 77', 'CO77', 'OO1', 'CG 20 O4', 'ISOLATED 12', 'CG 72 15 04 13', 'CQ 20 37', 'CG 2I 37', 'NO 2013', 'OCT 2O13']
+         'ACME COMP 7', 'ACME CO 77', 'CO77', 'OO1', 'CG 20 O4', 'ISOLATED 12', 'CG 72 15 04 13', 'CQ 20 37', 'CG 2I 37', 'NO 2013', 'OCT 2O13', "Nov '85", 'Ed. 04 13', '2013-04', '04_13', '04 13!']
 
 
 def _random_strings(n, seed=8):
@@ -396,6 +396,7 @@ def test_f_the_contract_folds_what_the_ruling_names():
     assert rt.form_key('СG 20 10') == rt.form_key('CG 2O 1O') == rt.form_key('CG 20 1٠') == 'CG2010'
     assert rt.needs_fold('СG 20 10') and rt.needs_fold('CG 2O 1O') and not rt.needs_fold('CG 20 10 04 13')
     assert rt.edition_parts('CG 20 10 11 85') == ('CG2010', (11, 1985)) and rt.edition_parts('04 13') == (None, (4, 2013))
+    assert rt.edition_parts("Nov '85") == (None, None) and rt.edition_parts('(11/85)')[1] == (11, 1985)
     assert rt.near_iso_number('CQ 20 37') and not rt.near_iso_number('ACME COMP 7')
     assert not rt.needs_fold('ACME CO 77') and not rt.needs_fold('CO77') and rt.needs_fold('CG 20 O4')   # an O in a word stays
 
