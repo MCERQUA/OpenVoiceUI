@@ -174,6 +174,11 @@ from tests.test_biz_crt_pack import confirm  # noqa: E402
 
 def test_m1_one_field_confirmation_does_not_cover_the_rest(h):
     w = world(h, confirm_all=False)
+    # rules 1.2.0: the documents are checked, so field coverage is the ONLY reason left (else the
+    # document check would mask this guard)
+    from tests.test_biz_crt_pack import DOC_FIELDS
+    for d in w['docs'].values():
+        confirm(h, 'document', d, DOC_FIELDS)
     for p in w['pol'].values():
         confirm(h, 'crt_policy', p, ['line'], w['docs']['cert']['id'])
     for e in w['end'].values():

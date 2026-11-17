@@ -412,10 +412,22 @@ def test_tb2_confirmation_hash_must_match_the_stored_file(h):
     h.ok(h.patch(f'/document/{doc["id"]}', {'data': {'file_url': other['url']}}, doc['version']))
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'cant_tell' and 'UNCONFIRMED:crt_policy.limits' in codes(ev)
+    # rules 1.2.0: even when a person then checks the repointed document itself, the readings made
+    # against the OLD bytes still do not count (the hash, not the document check, decides this)
+    confirm(h, 'document', doc, DOC_FIELDS)
+    ev = h.state(w['asg']['id'])
+    assert ev['state'] == 'cant_tell' and 'UNCONFIRMED:crt_policy.limits' in codes(ev)
 
 
 def test_tb2_confirmation_written_with_a_wrong_hash_does_not_count(h):
     w = world(h, confirm_all=False)
+    # rules 1.2.0: everything else confirmed (documents, endorsements, contract), so the wrong hash on the
+    # policy confirmations is the ONLY reason left (else the document check would mask this guard)
+    for d in w['docs'].values():
+        confirm(h, 'document', d, DOC_FIELDS)
+    for e in w['end'].values():
+        confirm(h, 'crt_endorsement', e, END_FIELDS, e['data']['document_id'])
+    confirm(h, 'crt_project', w['project'], ['contract_requires_ai', 'contract_ai_parties'], w['docs']['contract']['id'])
     store = h.app.extensions['biz']['sandbox:josh']
     for p in w['pol'].values():
         store.create('crt_confirmation', {'record_collection': 'crt_policy', 'record_id': p['id'],
