@@ -58,6 +58,11 @@
       "type": "boolean",
       "label": "Manuscript form"
     },
+    "completed_ops_wording": {
+      "type": "boolean",
+      "label": "Manuscript: explicit completed-operations wording (staff confirm)",
+      "staff_only": true
+    },
     "document_id": {
       "type": "ref",
       "label": "Endorsement document",

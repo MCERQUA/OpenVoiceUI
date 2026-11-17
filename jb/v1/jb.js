@@ -39,13 +39,17 @@
       return m ? m[1] : null;
     } catch (e) { return null; }
   })();
-  // Host ruling H4: a PLATFORM staff page (served from the image at /api/biz/v1/crt/staff/<page>) is given
-  // a per-render token by the server. It goes with every call, so the server knows a staff change came
-  // from the platform's own page. A canvas page never has one, so where a pack needs it, its writes are
-  // refused even with a staff session.
+  // Host rulings H4 + R1: a PLATFORM staff page is served from the image on the business's separate STAFF
+  // ORIGIN (BIZ_STAFF_ORIGIN) and given a per-render token by the server. It goes with every call, so the
+  // server knows a staff change came from the platform's own page. A canvas page never has one (and the
+  // server honours it only on the staff origin), so where a pack needs it, its writes are refused.
   var SURFACE = (function () {
     var s = global.__JB_SURFACE__;
     try { delete global.__JB_SURFACE__; } catch (e) { global.__JB_SURFACE__ = undefined; }
+    try {                                    // the boot script's text held the token: take it out of the DOM
+      var boot = global.document && global.document.getElementById('jb-surface-boot');
+      if (boot && boot.parentNode) boot.parentNode.removeChild(boot);
+    } catch (e) { /* no DOM (tests) */ }
     return (s && typeof s.token === 'string') ? { token: s.token, sandbox: s.sandbox || null, base: s.base || null } : null;
   })();
   if (SURFACE && SURFACE.sandbox) SANDBOX = SURFACE.sandbox;

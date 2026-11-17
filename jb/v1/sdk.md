@@ -225,21 +225,31 @@ await jb.create('document', { title: 'COI', file_url: f.url });
 const blobUrl = await jb.files.open(jb.files.idOf(doc.data.file_url));  // a person's session only
 ```
 
-### Platform staff pages (engine 1.3, host ruling H4)
+### Platform staff pages (engine 1.4, host rulings H4 + R1)
 
-A pack whose verdict trusts what a *person* wrote (risk-transfer) ships its staff pages in the image. They are
-served at `GET /api/biz/v1/crt/staff/<page>` (sandbox: `?sandbox=<name>`), never from canvas-pages, which the
-agent can write. Opening one by a top-level navigation gives that render a token bound to the staff session;
-`jb.js` sends it on every call (`X-JB-Staff-Surface`) and drops it from `window` at load. Where that pack is on:
+A pack whose verdict trusts what a *person* wrote (risk-transfer) ships its staff pages in the image and serves
+them on the business's **own staff origin**, `BIZ_STAFF_ORIGIN` (e.g. `https://crt-staff-<tenant>.jam-bot.com`),
+at `GET /api/biz/v1/crt/staff/<page>` (sandbox: `?sandbox=<name>`). The tenant origin never serves them (a
+navigation there is redirected to the staff origin): it is where canvas pages, which the agent can write, run,
+and OVU hands those pages the staff member's Clerk JWT.
 
-* a staff-session write to `crt_*`, `contact`, `document`, `company` or `/crt/...` **without** the token is
-  `403 staff_surface_required` (reads are unaffected), so a canvas page, even one opened by staff, never
-  makes a person-write there;
-* a token from another user, another sandbox, another site (`Sec-Fetch-Site`, `Origin`) or a tampered one is
-  `403 staff_surface_invalid`;
-* the staff page is minted only for `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` (never fetched,
-  framed or embedded), carries `frame-ancestors 'none'`, `Cross-Origin-Opener-Policy: same-origin` and a
-  nonce-only `script-src`;
-* the agent's sandbox `PUT /dev/pages/<file>` refuses a platform page name (`409 platform_page_reserved`).
-  The agent may keep its own read view under another name. `jb.staffBase` is the staff pages' base URL on
-  a platform page and `null` elsewhere: link staff pages with it.
+* **Signing in** happens on the staff origin (`/api/biz/v1/crt/staff/signin`): Clerk mints a session token
+  there whose `azp` is the staff origin, and `POST .../crt/staff/session` exchanges it for an httpOnly,
+  Secure, `SameSite=Strict`, host-only `__Host-jb_staff` cookie (8 h). A JWT with any other `azp` (every
+  token a canvas page can get) is `403 staff_origin_token_refused`. The staff origin accepts no bearer token,
+  no `__session` cookie and no agent key, and serves nothing but the staff pages, their JSON API and
+  `/jb/v1/jb.js` (`404 not_on_staff_origin`). It grants no CORS. An expired session sends a page to sign-in.
+* **Every write** there also carries the page's per-render token: `jb.js` sends it (`X-JB-Staff-Surface`),
+  drops it from `window` and removes its boot script node at load. No token: `403 staff_surface_required`;
+  a token from another user, another sandbox, another site (`Sec-Fetch-Site`, `Origin`) or a tampered or
+  expired one: `403 staff_surface_invalid`.
+* Where the pack is on, `crt_*` records and `/crt/...` actions are written **only** from the staff origin
+  (`403 staff_surface_required` anywhere else). `contact`, `document` and `company` stay writable from any
+  page; the backend stamps each write with whether it came from the staff surface, and the pack's verdict
+  counts a person's write only when it did (otherwise the field reads "Can't tell", like an agent's).
+* The staff page is minted only for `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document`, carries
+  `frame-ancestors 'none'`, `Cross-Origin-Opener-Policy: same-origin` and a nonce-only `script-src`.
+* A platform page name is reserved: the sandbox `PUT /dev/pages/<file>` and `POST /api/canvas/pages` refuse
+  it (`409 platform_page_reserved`), and `/pages/<that name>` is never served. The agent may keep its own read
+  view under another name. `jb.staffBase` is the staff pages' base URL on a platform page and `null`
+  elsewhere: link staff pages with it.

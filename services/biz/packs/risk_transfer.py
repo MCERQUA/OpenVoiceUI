@@ -31,10 +31,10 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from services.biz.schema import SchemaError
-from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX
+from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.3.0'
+RULE_VERSION = 'crt-rules-1.4.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -114,9 +114,17 @@ EXCLUSION_CLASSES = (
 EXCLUSION_FAMILIES = {'xcu': ('xcu', 'explosion', 'collapse', 'underground'),
                       'water': ('water_intrusion', 'moisture', 'water_damage_sublimit')}
 # Host ruling H3: a non-manuscript form's number says what it is. CG 20 10 is never completed operations.
+# Host ruling R4 (rules 1.4.0): this is only the DEFAULT. A requirement set carries its own `form_functions`
+# (copied from templates.json at draft time, approved with the set, versioned with it), so CCA's licensed staff
+# change an equivalence per set version. CG 20 38 stays ongoing ops (safe direction: a wrong call reads
+# MISSING, never a false Meets) until they rule; see the plan's gate-5 spec note.
 ISO_FORM_FUNCTION = {'CG2010': 'ai_ongoing', 'CG2033': 'ai_ongoing', 'CG2038': 'ai_ongoing',
                      'CG2037': 'ai_completed', 'CG2001': 'pnc', 'CG2503': 'project_aggregate',
                      'CG2545': 'completed_ops_aggregate', 'CG2404': 'waiver_of_subrogation'}
+# Host ruling R3: CG 20 10 never satisfies completed operations, by any route (set, manuscript flag, waiver).
+NEVER_COMPLETED_OPS = ('CG2010',)
+FORM_FUNCTIONS = ('ai_ongoing', 'ai_completed', 'pnc', 'project_aggregate', 'completed_ops_aggregate',
+                  'waiver_of_subrogation')
 _MONTHS = {m: i for i, m in enumerate(('JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT',
                                        'NOV', 'DEC'), start=1)}
 
@@ -197,18 +205,27 @@ def field_writers(events, rec) -> dict:
 
     {field: by}, plus '' -> the record's creator. A field whose current value is not the value its
     last logged write left (a write the log does not explain) maps to None: nobody vouches for it.
+    A PERSON's write counts as the person only for the fields the store stamped as written on the platform
+    staff surface (R1 guard redesign); any other person-write (a canvas page, which may be the agent's) maps
+    to 'unvouched:<by>', which is not a person: the verdict reads it as Can't tell, the same as an agent write.
     """
     who, val, creator = {}, {}, None
+
+    def vouched(by, field, d):
+        if not is_person(by):
+            return by
+        return by if field in (d.get(SURFACE_KEY) or ()) else f'unvouched:{by}'
     for ev in events or []:
         d = ev.get('diff') or {}
         if ev.get('type') == 'created':
-            creator = ev.get('by')
+            by = ev.get('by')
+            creator = by if (not is_person(by) or SURFACE_KEY in d) else f'unvouched:{by}'
             for k, v in (d.get('set') or {}).items():
-                who[k], val[k] = ev.get('by'), v
+                who[k], val[k] = vouched(by, k, d), v
         elif ev.get('type') == 'updated':
             for k, ch in (d.get('changed') or {}).items():
                 if isinstance(ch, list) and len(ch) == 2:
-                    who[k], val[k] = ev.get('by'), ch[1]
+                    who[k], val[k] = vouched(ev.get('by'), k, d), ch[1]
     data = (rec or {}).get('data') or {}
     out = {k: (who[k] if val[k] == data.get(k) else None) for k in who}
     for k in data:
@@ -258,6 +275,12 @@ def _add_years(d: date, years: int) -> date:
 def _edition_year(edition):
     """The year of an ISO edition date written the ways a form footer prints it: '04 13', '11-85', '(11/85)',
     '1185', '11/1985', 'Nov 1985', 'CG 20 10 11 85'. None when it is empty or not a date (MED ruling)."""
+    k = _edition_key(edition)
+    return k[1] if k else None
+
+
+def _edition_key(edition):
+    """(month, year) of an ISO edition date as printed (see _edition_year), or None."""
     s = unicodedata.normalize('NFKC', str(edition or '')).upper().strip()
     s = re.sub(r'^[A-Z]{2}\s*\d{2}\s*\d{2}(?=\s|\(|$)', ' ', s)      # the form number printed before it
     s = re.sub(r'[()\[\]]', ' ', s).strip().rstrip('.').strip()
@@ -274,7 +297,31 @@ def _edition_year(edition):
     y = int(year)
     if len(year) == 2:
         y = 1900 + y if y >= 50 else 2000 + y
-    return y if 1950 <= y <= 2100 else None
+    return (month, y) if 1950 <= y <= 2100 else None
+
+
+def validate_form_functions(ff):
+    """A set's form equivalences: {form number: function}. CG 20 10 is never completed operations (R3)."""
+    if ff is None:
+        return
+    if not isinstance(ff, dict) or not ff:
+        raise _err(422, 'bad_form_functions', 'form_functions maps a form number to its function, '
+                                              'e.g. {"CG 20 37": "ai_completed"}')
+    for k, v in ff.items():
+        if not isinstance(k, str) or not form_key(k) or v not in FORM_FUNCTIONS:
+            raise _err(422, 'bad_form_functions', 'each form_functions entry is "<form number>": one of '
+                       + ', '.join(FORM_FUNCTIONS), form=str(k)[:30])
+        if form_key(k) in NEVER_COMPLETED_OPS and v == 'ai_completed':
+            raise _err(422, 'cg2010_never_completed_ops', 'CG 20 10 covers ongoing operations only; it never '
+                                                          'satisfies completed operations (host ruling R3)')
+
+
+def set_form_functions(set_data) -> dict:
+    """{form key: function} the set uses: its own approved table, else the built-in default."""
+    ff = (set_data or {}).get('form_functions')
+    if isinstance(ff, dict) and ff:
+        return {form_key(k): v for k, v in ff.items() if isinstance(k, str)}
+    return dict(ISO_FORM_FUNCTION)
 
 
 def load_templates() -> dict:
@@ -317,6 +364,10 @@ def validate_items(items, trade_category=None) -> list:
             if forms is not None and (not isinstance(forms, list) or not all(isinstance(f, str) and form_key(f)
                                                                              for f in forms)):
                 raise _err(422, 'bad_requirement_items', 'forms lists the accepted form numbers, e.g. ["CG 20 37"]',
+                           item=iid)
+            if it.get('function') == 'ai_completed' and any(form_key(f) in NEVER_COMPLETED_OPS for f in forms or []):
+                raise _err(422, 'cg2010_never_completed_ops', 'CG 20 10 covers ongoing operations only; it never '
+                                                              'satisfies completed operations (host ruling R3)',
                            item=iid)
         if kind == 'disallowed_exclusion':
             if it.get('when_trade') is not None:
@@ -388,6 +439,7 @@ def gather(store, assignment_id) -> dict:
         'party': _get(store, 'contact', party_id) if party_id else None,
         'set': _get(store, 'crt_requirement_set', asg['data'].get('requirement_set_id')),
         'company_name': (company[0]['data'].get('name') if company else None),
+        'company': company[0] if company else None,
         'links': [r for r in _all(store, 'crt_account_party', {'party_contact_id': party_id})
                   if r['data'].get('crt_account_id') == account_id] if account_id and party_id else [],
         'policies': [], 'endorsements': [], 'documents': {}, 'files_ok': {}, 'confirmations': [],
@@ -454,7 +506,8 @@ def gather(store, assignment_id) -> dict:
         if _file_id(src):
             inputs['cert_files'].add(_file_id(src))
     # per-field provenance of every set-up record and document the verdict reads (ruling N1)
-    for coll, recs in (('crt_assignment', [asg]), ('crt_project', [project]), ('contact', [inputs['account'], inputs['party']]),
+    for coll, recs in (('crt_assignment', [asg]), ('crt_project', [project]), ('company', [inputs['company']]),
+                       ('contact', [inputs['account'], inputs['party']]),
                        ('crt_account_party', inputs['links']), ('document', list(inputs['documents'].values()))):
         for r in recs:
             if r:
@@ -566,10 +619,13 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             unc('crt_assignment', 'requirement_set_version')
         approved = s_rec['data'].get('status') == 'APPROVED' and \
             conf.ok(s_rec, 'crt_requirement_set', 'status', need_source=False) and \
-            conf.ok(s_rec, 'crt_requirement_set', 'items', need_source=False)
+            conf.ok(s_rec, 'crt_requirement_set', 'items', need_source=False) and \
+            (not s_rec['data'].get('form_functions') or
+             conf.ok(s_rec, 'crt_requirement_set', 'form_functions', need_source=False))
         if not approved:
             unc('crt_requirement_set', 'status')
         items = s_rec['data'].get('items') or []
+    form_fn = set_form_functions((s_rec or {}).get('data'))
     if not project:
         unc('crt_assignment', 'crt_project_id')
     account, party = inputs['account'], inputs['party']
@@ -619,10 +675,21 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         return max(ps, key=key)
 
     company_name = inputs.get('company_name')
+    company_rec = inputs.get('company')
+    # R1 guard redesign: the agency's own name counts only when a person wrote it on the staff surface. Unvouched
+    # (an agent or canvas-page write), a policy naming a producer cannot be told apart from the agency's own,
+    # so it is Can't tell rather than silently dropping the two-person rule for the agency's own policies.
+    company_vouched = company_rec is None or conf.person_wrote(company_rec, 'name')
 
     def is_cca(pol):
-        return bool(pol['data'].get('producer_is_cca')) or \
-            (company_name and names_match(company_name, [pol['data'].get('producer_name')]))
+        if pol['data'].get('producer_is_cca'):
+            return True
+        if not company_name:
+            return False
+        if not company_vouched and pol['data'].get('producer_name'):
+            unc('company', 'name')
+            return True
+        return names_match(company_name, [pol['data'].get('producer_name')])
 
     checked_policies = {}
 
@@ -842,14 +909,22 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                     item_codes.append(f'MISSING:{fn}')      # the certificate is a summary; the endorsement is the proof
                     continue
                 # host ruling H3: the form number staff confirmed must be one the item accepts; a known ISO form
-                # for another purpose is not this endorsement at all (CG 20 10 is never completed operations)
-                if e['data'].get('manuscript') is not True:
-                    fk = form_key(e['data'].get('form'))
+                # for another purpose is not this endorsement at all.
+                # R3 (rules 1.4.0): CG 20 10 never satisfies completed operations, by any route; a LISTED ISO form
+                # number (the set's table or the built-in one) is never read as manuscript, whatever the flag says;
+                # a manuscript form satisfies completed ops only when staff confirmed its explicit completed-
+                # operations wording (a person's confirmation, made only on the staff surface).
+                fk = form_key(e['data'].get('form'))
+                if fn == 'ai_completed' and fk in NEVER_COMPLETED_OPS:
+                    item_codes.append(f'MISSING:{fn}')
+                    continue
+                listed_iso = fk in form_fn or fk in ISO_FORM_FUNCTION
+                if e['data'].get('manuscript') is not True or listed_iso:
                     accepted = {form_key(f) for f in it.get('forms') or []}
-                    if not accepted and ISO_FORM_FUNCTION.get(fk) == fn:
+                    if not accepted and form_fn.get(fk) == fn:
                         accepted = {fk}
                     if fk not in accepted:
-                        if ISO_FORM_FUNCTION.get(fk) not in (None, fn):
+                        if form_fn.get(fk, ISO_FORM_FUNCTION.get(fk)) not in (None, fn):
                             item_codes.append(f'MISSING:{fn}')
                         else:
                             unc('crt_endorsement', 'form')
@@ -858,6 +933,13 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                                          'it as a manuscript form')
                             item_codes.append('UNCONFIRMED')
                         continue
+                elif fn == 'ai_completed' and not (e['data'].get('completed_ops_wording') is True and
+                                                   conf.ok(e, 'crt_endorsement', 'completed_ops_wording', two=two)):
+                    unc('crt_endorsement', 'completed_ops_wording')
+                    notes.append(f'{iid}: a manuscript endorsement counts for completed operations only when staff '
+                                 'confirm its explicit completed-operations wording')
+                    item_codes.append('UNCONFIRMED')
+                    continue
                 ed_year = _edition_year(e['data'].get('edition'))
                 if ed_year is None:                     # MED ruling: an empty or unreadable edition is no pass
                     unc('crt_endorsement', 'edition')
@@ -865,6 +947,11 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                     continue
                 if ed_year < 2004:
                     item_codes.append(f'WRONG_FORM:{fn}')
+                    continue
+                # LOW ruling (rules 1.4.0): the set's edition for this item is a requirement, not a note
+                want_ed = _edition_key(it.get('edition')) if it.get('edition') else None
+                if want_ed and _edition_key(e['data'].get('edition')) != want_ed:
+                    item_codes.append(f'WRONG_EDITION:{fn}')
                     continue
                 if fn in AI_FUNCTIONS or it.get('names_parties'):
                     if e['data'].get('blanket'):
@@ -1064,6 +1151,7 @@ def check_write(store, op, collection, data, current, *, by, agent, via_pack):
     if collection == 'crt_requirement_set':
         if op in ('create', 'edit'):
             validate_items(data.get('items'), data.get('trade_category'))
+            validate_form_functions(data.get('form_functions'))
             was = (current or {}).get('data', {}).get('status')
             if data.get('status') == 'APPROVED' and was != 'APPROVED' and not via_pack:
                 raise _err(409, 'use_approve_route', 'A requirement set is approved only through '
@@ -1177,8 +1265,10 @@ def register_routes(bp, api, ctx):
             'name': str(body.get('name') or tpl['name'])[:200], 'trade_category': tpl['trade_category'],
             'template_key': key, 'items': tpl['items'], 'guide_cites': tpl.get('guide_cites') or [],
             'notes': ' '.join(filter(None, [tpl.get('conflict_note'), tpl.get('single_source')])) or None,
+            'form_functions': dict(load_templates().get('form_functions') or {}) or None,
             'set_version': 1},                      # no status = DRAFT; only staff approve
-            by=ctx.by(), agent=ctx.is_agent(), source=body.get('source'), via_pack=True)
+            by=ctx.by(), agent=ctx.is_agent(), source=body.get('source'), via_pack=True,
+            surface=ctx.surface())
         return jsonify({'record': rec, 'warnings': warnings}), 201
 
     @route('/requirement-sets/<sid>/approve', ['POST'], 'set_approve')
@@ -1188,14 +1278,16 @@ def register_routes(bp, api, ctx):
         store = ctx.store()
         rec = store.get('crt_requirement_set', sid)
         warnings = validate_items(rec['data'].get('items'), rec['data'].get('trade_category'))
+        validate_form_functions(rec['data'].get('form_functions'))
         if rec['data'].get('status') != 'APPROVED':
             rec = store.update('crt_requirement_set', sid, {'status': 'APPROVED'}, expected_version=rec['version'],
-                               by=ctx.by(), agent=False, via_pack=True)
+                               by=ctx.by(), agent=False, via_pack=True, surface=ctx.surface())
         conf = store.create('crt_confirmation', {
             'record_collection': 'crt_requirement_set', 'record_id': sid, 'record_version': rec['version'],
-            'fields': ['items', 'status'], 'confirmed_by': ctx.by(),
+            'fields': ['items', 'status'] + (['form_functions'] if rec['data'].get('form_functions') else []),
+            'confirmed_by': ctx.by(),
             'note': str(ctx.body().get('note') or 'approved for use')[:500]},
-            by=ctx.by(), agent=False, via_pack=True)
+            by=ctx.by(), agent=False, via_pack=True, surface=ctx.surface())
         return jsonify({'record': rec, 'confirmation': conf, 'warnings': warnings})
 
     @route('/requirement-sets/<sid>/revise', ['POST'], 'set_revise')
@@ -1206,13 +1298,16 @@ def register_routes(bp, api, ctx):
         d = dict(old['data'])
         if body.get('items') is not None:
             d['items'] = body['items']
+        if body.get('form_functions') is not None:          # R4: equivalences change per set version
+            validate_form_functions(body['form_functions'])
+            d['form_functions'] = body['form_functions']
         if body.get('name'):
             d['name'] = str(body['name'])[:200]
         warnings = validate_items(d.get('items'), d.get('trade_category'))
         d.pop('status', None)                   # a new version is a DRAFT until staff approve it
         d.update({'set_version': int(old['data'].get('set_version') or 1) + 1, 'supersedes': sid})
         rec = store.create('crt_requirement_set', d, by=ctx.by(), agent=ctx.is_agent(),
-                           source=body.get('source'), via_pack=True)
+                           source=body.get('source'), via_pack=True, surface=ctx.surface())
         return jsonify({'record': rec, 'warnings': warnings}), 201
 
     @route('/confirm', ['POST'], 'confirm')
@@ -1254,7 +1349,7 @@ def register_routes(bp, api, ctx):
             'record_collection': coll, 'record_id': rid, 'record_version': rec['version'], 'fields': fields,
             'source_document_id': did, 'source_sha256': sha, 'confirmed_by': ctx.by(),
             'note': str(body.get('note'))[:500] if body.get('note') else None},
-            by=ctx.by(), agent=False, via_pack=True)
+            by=ctx.by(), agent=False, via_pack=True, surface=ctx.surface())
         return jsonify(rec2), 201
 
     @route('/assignment/<aid>/state', ['GET'], 'state')
@@ -1274,7 +1369,7 @@ def register_routes(bp, api, ctx):
             'requirement_set_id': ev['requirement_set_id'], 'requirement_set_version': ev['requirement_set_version'],
             'confirmation_ids': ev['confirmation_ids'], 'disclaimer_text': DISCLAIMER,
             'hold_suggested': ev['hold_suggested'], 'reviewed_by': ctx.by(), 'reviewed_at': now,
-            'evaluation': ev}, by=ctx.by(), agent=False, via_pack=True)
+            'evaluation': ev}, by=ctx.by(), agent=False, via_pack=True, surface=ctx.surface())
         return jsonify({'review': rec, 'evaluation': ev}), 201
 
     @route('/assignment/<aid>/chase-sent', ['POST'], 'chase_sent')

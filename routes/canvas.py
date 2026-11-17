@@ -1009,6 +1009,16 @@ def _upload_grant_for_viewer(viewer_id):
         return None
 
 
+def _platform_page_reserved(name) -> bool:
+    """True for a page file name a business-backend pack ships (served only from the image, on the staff origin)."""
+    try:
+        from routes.biz import platform_page_names
+        return Path(str(name)).name.lower() in {n.lower() for n in platform_page_names()}
+    except Exception:
+        logger.warning('[canvas] platform page names unavailable', exc_info=True)
+        return False
+
+
 @canvas_bp.route('/pages/<path:path>')
 def canvas_pages_proxy(path):
     """Serve files from Canvas pages directory.
@@ -1027,6 +1037,10 @@ def canvas_pages_proxy(path):
     if _m:
         _qs = request.query_string.decode('utf-8', errors='replace')
         return redirect('/pages/' + _m.group(1) + ('?' + _qs if _qs else ''), code=301)
+    if _platform_page_reserved(path):
+        # A file the agent dropped under a platform staff page's name is never served as a canvas page
+        # (review M4): the real one lives on the staff origin only.
+        return jsonify({'error': 'Not found', 'code': 'platform_page_reserved'}), 404
     try:
         # Auth check — only when explicitly enabled (opt-in for self-hosted deployments)
         # Skip auth for non-HTML assets (images, icons, CSS) — they're embedded resources
@@ -1827,6 +1841,14 @@ def create_canvas_page():
         filename = Path(raw_filename).name
         if not filename.endswith('.html'):
             filename += '.html'
+
+        # Platform staff page names (business backend packs) are served only from the image on the staff
+        # origin; a canvas page under one of those names would be a look-alike staff page (review M4).
+        if _platform_page_reserved(filename):
+            return jsonify({
+                'error': f'{filename} is the name of a platform staff page; publish your view under another name',
+                'code': 'platform_page_reserved',
+            }), 409
 
         CANVAS_PAGES_DIR.mkdir(parents=True, exist_ok=True)
         filepath = CANVAS_PAGES_DIR / filename

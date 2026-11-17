@@ -1,6 +1,17 @@
 {
   "source": "Effective Contractual Risk Transfer in Construction 2026 (TrustLayer), md5 3bd05e161941017b5d8ef9888a3e9ed0. Values are the guide's; the wording here is ours.",
   "status_on_create": "DRAFT",
+  "form_functions_note": "Form equivalences copied into every new requirement set (form_functions), approved and versioned with it, so CCA licensed staff change them per set version (host ruling R4). CG 20 38 is read as ongoing operations (the conservative reading: a wrong call reads MISSING, never a false Meets); the guide's p.32 and App. B call it completed operations. Confirm with CCA licensed staff at the gate-5 pilot. CG 20 10 can never be mapped to completed operations (host ruling R3).",
+  "form_functions": {
+    "CG 20 10": "ai_ongoing",
+    "CG 20 33": "ai_ongoing",
+    "CG 20 38": "ai_ongoing",
+    "CG 20 37": "ai_completed",
+    "CG 20 01": "pnc",
+    "CG 25 03": "project_aggregate",
+    "CG 25 45": "completed_ops_aggregate",
+    "CG 24 04": "waiver_of_subrogation"
+  },
   "templates": [
     {
       "key": "high_severity",
@@ -130,7 +141,8 @@
             "shoring",
             "underground_utilities",
             "pile_driving",
-            "tunneling"
+            "tunneling",
+            "heavy_civil"
           ],
           "classes": [
             "xcu",

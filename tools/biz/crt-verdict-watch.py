@@ -37,6 +37,12 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
      of repose.
   R5 the account, sub, project and assignment rows exist, the sub is linked to the account, and the
      names, the project's account and its dates were each written or confirmed by a person
+  (rules 1.4.0) R4 also: CG 20 10 never counts for completed ops; a listed ISO form number is never read as
+     manuscript; a manuscript counts for completed ops only with its completed-operations wording
+     person-confirmed; the set's own approved form table (form_functions) classifies forms; the item's
+     edition must match the endorsement's (month and year), or a waiver of WRONG_EDITION.
+     R5/R6 also: a person's write vouches for a field only when the store stamped it as made on the
+     platform staff surface (activity diff 'staff_surface'); any other person-write is nobody's word.
   R6 each assignment field the verdict reads (project, sub, set, set version, trade, scope change) was
      last written by a person or person-confirmed (per field, read from the activity log: a staff
      hold or note never vouches for a field the agent wrote), names the set the verdict used, and
@@ -75,7 +81,7 @@ ASG_FIELDS = ('crt_project_id', 'party_contact_id', 'requirement_set_id', 'requi
               'trade_category', 'scope_changed_at')
 PROJECT_FIELDS = ('crt_account_id', 'name', 'substantial_completion', 'repose_years')
 _ABSENT = object()
-# Own copies (never imported from the engine): rules 1.3.0, host rulings H1/H2/H3.
+# Own copies (never imported from the engine): rules 1.4.0, host rulings H1/H2/H3/R3/R4.
 _ENTITY = {'incorporated': 'inc', 'inc': 'inc', 'l l c': 'llc', 'llc': 'llc', 'corporation': 'corp', 'corp': 'corp',
            'company': 'co', 'co': 'co', 'limited': 'ltd', 'ltd': 'ltd', 'l p': 'lp', 'lp': 'lp', 'l l p': 'llp',
            'llp': 'llp', 'lllp': 'lllp', 'p l l c': 'pllc', 'pllc': 'pllc', 'p c': 'pc', 'pc': 'pc', 'p a': 'pa',
@@ -93,7 +99,10 @@ _EXCL = {'none', 'xcu', 'explosion', 'collapse', 'underground', 'water_intrusion
 _EXCL_FAMILY = {'xcu': {'xcu', 'explosion', 'collapse', 'underground'},
                 'water': {'water_intrusion', 'moisture', 'water_damage_sublimit'}}
 _ISO = {'CG2010': 'ai_ongoing', 'CG2033': 'ai_ongoing', 'CG2038': 'ai_ongoing', 'CG2037': 'ai_completed',
-        'CG2001': 'pnc'}
+        'CG2001': 'pnc', 'CG2503': 'project_aggregate', 'CG2545': 'completed_ops_aggregate',
+        'CG2404': 'waiver_of_subrogation'}
+_NEVER_COMPLETED = 'CG2010'        # host ruling R3: never completed operations, by any route
+SURFACE = 'staff_surface'          # activity diff: the fields a person wrote on the platform staff surface (R1)
 _MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 
 
@@ -140,6 +149,12 @@ def _form(s):
 
 def _edition(s):
     """Year of an ISO edition date as printed ('04 13', '11-85', '(11/85)', '1185', 'Nov 1985', 'CG 20 10 11 85')."""
+    my = _edition_my(s)
+    return my[1] if my else None
+
+
+def _edition_my(s):
+    """(month, year) of an ISO edition date as printed, or None."""
     t = unicodedata.normalize('NFKC', str(s or '')).upper()
     t = ' '.join(''.join(ch if ch.isalnum() else ' ' for ch in t).split())
     parts = t.split()
@@ -156,7 +171,7 @@ def _edition(s):
         return None
     y = int(yr)
     y = (1900 + y if y >= 50 else 2000 + y) if len(yr) == 2 else y
-    return y if 1950 <= y <= 2100 else None
+    return (mon, y) if 1950 <= y <= 2100 else None
 
 
 def _named(wanted, texts):
@@ -241,13 +256,20 @@ class Store:
         """Who last set or changed this ONE field, read from the activity log; None when the log does
         not explain the field's current value (nobody vouches for it)."""
         last, creator = _ABSENT, None
+
+        def who(by, diff, f):
+            # rules 1.4.0 (R1): a person's write vouches for a field only when the store stamped it as made on
+            # the platform staff surface; any other (a canvas page, maybe the agent's) is nobody's word
+            if str(by or '').startswith(PERSON) and f not in (diff.get(SURFACE) or ()):
+                return 'unvouched:' + str(by)
+            return by
         for typ, by, diff in self.events.get(rec['id'], []):
             if typ == 'created':
-                creator = by
+                creator = by if (not str(by or '').startswith(PERSON) or SURFACE in diff) else 'unvouched:' + str(by)
                 if field in (diff.get('set') or {}):
-                    last = (by, diff['set'][field])
+                    last = (who(by, diff, field), diff['set'][field])
             elif field in (diff.get('changed') or {}):
-                last = (by, (diff['changed'][field] or [None, None])[-1])
+                last = (who(by, diff, field), (diff['changed'][field] or [None, None])[-1])
         if last is _ABSENT:
             return creator if field not in rec['data'] else None
         return last[0] if last[1] == rec['data'].get(field) else None
@@ -393,7 +415,9 @@ def _judge(st, claim):
     s = st.get('crt_requirement_set', claim.get('set_id') or asg['data'].get('requirement_set_id'))
     if not s:
         return FAIL, ['R1 requirement set missing']
-    if s['data'].get('status') != 'APPROVED' or not _person_confs(st, s, ['status'], need_file=False):
+    set_ff = s['data'].get('form_functions') if isinstance(s['data'].get('form_functions'), dict) else None
+    if s['data'].get('status') != 'APPROVED' or not _person_confs(st, s, ['status'] + (['form_functions'] if set_ff else []),
+                                                                  need_file=False):
         (cannot if changed_since(s) else why).append('R1 set not approved by a person')
     if not changed_since(s) and not changed_since(asg) and asg['data'].get('requirement_set_version') != s['version']:
         why.append('R6 the assignment did not pin this version of the set')
@@ -532,14 +556,28 @@ def _judge(st, claim):
                                              'blanket', 'crt_policy_id', 'form', 'edition', 'manuscript'],
                                      acct=acct, party=party):
                     continue
-                # the form number: one the item lists (CG 20 10 is never completed operations), a manuscript excepted
-                if ed.get('manuscript') is not True:
+                # the form number: one the item lists, a manuscript excepted. R3 (rules 1.4.0): CG 20 10 is never
+                # completed operations by any route; a listed ISO number is never read as manuscript; a manuscript
+                # counts for completed ops only with its completed-operations wording person-confirmed.
+                fkey = _form(ed.get('form'))
+                if fn == 'ai_completed' and fkey == _NEVER_COMPLETED:
+                    continue
+                table = {_form(k): v for k, v in set_ff.items()} if set_ff else dict(_ISO)
+                if ed.get('manuscript') is not True or fkey in table or fkey in _ISO:
                     listed = {_form(f) for f in it.get('forms') or []} or \
-                        {k for k, v in _ISO.items() if v == fn}
-                    if _form(ed.get('form')) not in listed:
+                        {k for k, v in table.items() if v == fn}
+                    if fkey not in listed:
                         continue
+                elif fn == 'ai_completed' and not (ed.get('completed_ops_wording') is True and
+                                                   _person_confs(st, e, ['completed_ops_wording'], acct=acct,
+                                                                 party=party)):
+                    continue
                 year = _edition(ed.get('edition'))
                 if year is None or (year < 2004 and not _waived(st, asg, f'WRONG_FORM:{fn}', on, acct)):
+                    continue
+                # the set's edition for the item is a requirement (rules 1.4.0 LOW): same month and year
+                if it.get('edition') and _edition_my(it.get('edition')) != _edition_my(ed.get('edition')) and \
+                        not _waived(st, asg, f'WRONG_EDITION:{fn}', on, acct):
                     continue
                 if ed.get('blanket'):
                     backed = proj['data'].get('contract_requires_ai') is True and \

@@ -36,6 +36,10 @@
       "label": "Requirement items",
       "items": "object"
     },
+    "form_functions": {
+      "type": "object",
+      "label": "Form equivalences (form number -> function; approved with the set)"
+    },
     "guide_cites": {
       "type": "list",
       "label": "Guide citations",

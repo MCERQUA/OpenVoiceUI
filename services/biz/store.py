@@ -58,6 +58,11 @@ META_FIELDS = {'id', 'created_at', 'updated_at', 'created_by', 'updated_by', 've
 _EMPTY = (None, '', [], {})
 
 
+# Activity diff key: the fields of this write that a person made on the platform staff surface (R1 guard
+# redesign). Absent = not the staff surface (an agent, a canvas page, an older write).
+SURFACE_KEY = 'staff_surface'
+
+
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
@@ -371,7 +376,7 @@ class BizStore(PageRegistryMixin):
              (source or {}).get('channel'), (source or {}).get('ref'),
              json.dumps(diff) if diff is not None else None))
 
-    def create(self, collection, data, *, by, source=None, agent=False, via_pack=False):
+    def create(self, collection, data, *, by, source=None, agent=False, via_pack=False, surface=False):
         self._writable()
         spec = self._spec_for_write(collection)
         self._staff_guard(spec, collection, agent=agent, op='create',
@@ -395,8 +400,13 @@ class BizStore(PageRegistryMixin):
                 'updated_at, updated_by, source) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)',
                 (rid, self.tenant, collection, blob, now, by, now, by,
                  json.dumps(source) if source else None))
+            diff = {'set': self._masked(collection, clean)}
+            if surface and not agent:
+                # per-field provenance, stamped here and nowhere else: these fields were written by a person
+                # on the platform staff surface (its own origin, R1). A client never sends this.
+                diff[SURFACE_KEY] = sorted(clean)
             self._activity(conn, collection=collection, record_id=rid, type_='created', by=by, source=source,
-                           diff={'set': self._masked(collection, clean)})
+                           diff=diff)
             row = conn.execute('SELECT * FROM records WHERE id = ?', (rid,)).fetchone()
         return self._row_to_record(row)
 
@@ -411,7 +421,7 @@ class BizStore(PageRegistryMixin):
         return self._row_to_record(row)
 
     def update(self, collection, rid, patch, *, expected_version, by, source=None, agent=False, clear=None,
-               via_pack=False):
+               via_pack=False, surface=False):
         self._writable()
         spec = self._spec_for_write(collection)
         self._staff_guard(spec, collection, agent=agent, op='edit',
@@ -491,15 +501,18 @@ class BizStore(PageRegistryMixin):
                 raise _err(409, 'version_conflict', 'Someone else saved this record first. Reload to see their changes.')
             secrets = self.registry.secret_fields(collection)
             diff = {k: ([mask_secret(a), mask_secret(b)] if k in secrets else [a, b]) for k, (a, b) in changes.items()}
+            diff = {'changed': diff, 'preserved': preserved} if preserved else {'changed': diff}
+            if surface and not agent:
+                diff[SURFACE_KEY] = sorted(changes)
             self._activity(conn, collection=collection, record_id=rid, type_='updated', by=by, source=source,
-                           diff={'changed': diff, 'preserved': preserved} if preserved else {'changed': diff})
+                           diff=diff)
             row = conn.execute('SELECT * FROM records WHERE id = ?', (rid,)).fetchone()
         rec = self._row_to_record(row)
         if preserved:
             rec['preserved'] = preserved
         return rec
 
-    def set_archived(self, collection, rid, archived: bool, *, by, source=None, agent=False):
+    def set_archived(self, collection, rid, archived: bool, *, by, source=None, agent=False, surface=False):
         self._writable()
         spec = self._spec_for_write(collection)
         self._staff_guard(spec, collection, agent=agent, op='archive' if archived else 'unarchive')
