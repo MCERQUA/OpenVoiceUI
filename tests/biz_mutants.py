@@ -749,7 +749,8 @@ MUTANTS += [
      [T_C6 + 'test_d_a_generic_create_never_names_the_base']),
     ('d-archived-base-counts', [(RT, "    if not rec or rec['archived_at'] or rec['data'].get('status') != 'APPROVED':\n        return False",
                                  "    if not rec or rec['data'].get('status') != 'APPROVED':\n        return False")],
-     [T_C6 + 'test_d_an_archived_approved_version_is_not_the_base']),
+     [T_C6 + 'test_d_an_archived_approved_version_is_not_the_base',
+      T_C6 + 'test_d_an_archived_set_is_never_the_base_even_with_a_current_approval']),
     ('d-approval-records-no-base', [(RT, "            'approved_against': {k: v for k, v in (diff['against'] or {'kind': 'none'}).items()\n"
                                          "                                 if k in ('kind', 'id', 'record_version', 'template_key')},",
                                      '')],

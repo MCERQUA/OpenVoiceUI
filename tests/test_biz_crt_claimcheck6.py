@@ -169,6 +169,24 @@ def test_d_an_archived_approved_version_is_not_the_base(h):
     assert d['against']['id'] == x['id'], d['against']
 
 
+def test_d_an_archived_set_is_never_the_base_even_with_a_current_approval(h):
+    """Archiving bumps the version (so the approval no longer matches); this pins the archived check on its own: a
+    confirmation written around the API at the archived version still never makes it the version in use."""
+    w = world(h, party_name='D Archived Two Inc')
+    x = _set(h, w['set']['id'])
+    y = h.ok(_revise(h, x['id'], {}, who='staff'), 201)['record']
+    _approve(h, y['id'])
+    z = h.ok(_revise(h, y['id'], {}), 201)['record']
+    h.staff()
+    y = h.ok(h.post(f'/crt_requirement_set/{y["id"]}/archive'))
+    _store(h).create('crt_confirmation', {'record_collection': 'crt_requirement_set', 'record_id': y['id'],
+                                          'record_version': y['version'], 'fields': ['items', 'status', 'form_functions'],
+                                          'confirmed_by': 'clerk:' + STAFF_1, 'on_staff_surface': True},
+                     by='clerk:' + STAFF_1, via_pack=True, surface=True)
+    d = h.ok(h.get(f'/crt/requirement-sets/{z["id"]}/diff'))
+    assert d['against']['id'] == x['id'] and [u['id'] for u in d['unapproved_between']] == [y['id']], d['against']
+
+
 def test_d_positive_control_watch_passes_an_honest_two_step_approval(h, dirs):
     """The D1 chain after the fix: the page showed 'ai_completed removed' against the approved set; staff approved it
     and re-pinned. Meets (by staff's decision); the watcher's RD finds the approved base and PASSes."""
