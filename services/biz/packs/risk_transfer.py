@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -33,7 +34,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.2.0'
+RULE_VERSION = 'crt-rules-1.3.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -55,6 +56,7 @@ UNMET_STATES = ('cant_tell', 'missing', 'variance', 'expired')
 PERSON_PREFIXES = ('clerk:', 'local:')
 REVIEW_STALE_DAYS = 30
 TEMPLATES_PATH = Path(__file__).resolve().parents[3] / 'default-schemas' / 'packs' / 'risk-transfer' / 'templates.json'
+PAGES_DIR = TEMPLATES_PATH.parent / 'pages'
 
 EVIDENCE = {'crt_policy', 'crt_endorsement'}
 PROJECT_CONTRACT_FIELDS = ('contract_requires_ai', 'contract_ai_parties')
@@ -80,7 +82,43 @@ ASSIGNMENT_FIELDS = ('crt_project_id', 'party_contact_id', 'requirement_set_id',
 LINK_FIELDS = ('crt_account_id', 'party_contact_id', 'status')
 CONTACT_NAME_FIELDS = ('name', 'company_name')
 _ANI_RE = re.compile(r'additional\s+named\s+insured', re.I)
-_SUFFIXES = {'llc', 'inc', 'co', 'corp', 'corporation', 'company', 'ltd', 'the', 'lp', 'llp', 'pllc', 'pc'}
+
+# Host ruling H2 (2026-11-17): the legal-entity suffix is part of the name (LLC != Inc != Corp); only
+# spellings of the SAME suffix are equal. Every other letter is kept, non-ASCII included (Moller != Muller).
+_SUFFIX_CANON = {'inc': 'inc', 'incorporated': 'inc', 'llc': 'llc', 'corp': 'corp', 'corporation': 'corp',
+                 'co': 'co', 'company': 'co', 'ltd': 'ltd', 'limited': 'ltd', 'lp': 'lp', 'llp': 'llp',
+                 'lllp': 'lllp', 'pllc': 'pllc', 'pc': 'pc', 'pa': 'pa', 'plc': 'plc'}
+_SUFFIX_PHRASES = ((('professional', 'limited', 'liability', 'company'), 'pllc'),
+                   (('limited', 'liability', 'company'), 'llc'),
+                   (('limited', 'liability', 'partnership'), 'llp'),
+                   (('limited', 'partnership'), 'lp'),
+                   (('professional', 'corporation'), 'pc'))
+
+# Host ruling H1 (2026-11-17): the trade is a structured category staff choose, never a substring; the
+# requirement set says which categories an exclusion item applies to (trade_categories) and which
+# exclusion classes it disallows (classes). Exclusions on a policy are staff-mapped classes; wording
+# that is not a class reads "Can't tell". 'none' is staff saying "policy exclusions reviewed: none".
+TRADE_CATEGORIES = (
+    'excavation', 'trenching', 'earthwork', 'grading', 'demolition', 'blasting', 'shoring',
+    'underground_utilities', 'pile_driving', 'tunneling', 'structural_steel', 'steel_erection', 'crane_rigging',
+    'heavy_civil', 'roofing', 'waterproofing', 'windows_glazing', 'curtain_wall', 'siding_cladding', 'hvac',
+    'electrical', 'plumbing', 'fire_protection', 'concrete', 'framing', 'masonry', 'painting', 'drywall',
+    'flooring', 'tile', 'landscaping', 'signage', 'architect', 'engineer', 'other')
+EXCLUSION_NONE = 'none'
+EXCLUSION_CLASSES = (
+    EXCLUSION_NONE, 'xcu', 'explosion', 'collapse', 'underground', 'water_intrusion', 'moisture',
+    'water_damage_sublimit', 'insured_vs_insured', 'residential', 'eifs', 'subsidence', 'mold', 'silica',
+    'pollution', 'action_over', 'designated_ongoing_operations', 'classification_limitation',
+    'height_limitation', 'other_reviewed')
+# what an exclusion item disallows when the set names no classes of its own
+EXCLUSION_FAMILIES = {'xcu': ('xcu', 'explosion', 'collapse', 'underground'),
+                      'water': ('water_intrusion', 'moisture', 'water_damage_sublimit')}
+# Host ruling H3: a non-manuscript form's number says what it is. CG 20 10 is never completed operations.
+ISO_FORM_FUNCTION = {'CG2010': 'ai_ongoing', 'CG2033': 'ai_ongoing', 'CG2038': 'ai_ongoing',
+                     'CG2037': 'ai_completed', 'CG2001': 'pnc', 'CG2503': 'project_aggregate',
+                     'CG2545': 'completed_ops_aggregate', 'CG2404': 'waiver_of_subrogation'}
+_MONTHS = {m: i for i, m in enumerate(('JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT',
+                                       'NOV', 'DEC'), start=1)}
 
 
 # ── small helpers ───────────────────────────────────────────────────────────
@@ -89,11 +127,59 @@ def _err(status, code, message, **extra):
 
 
 def norm_name(s) -> str:
+    """NFKC + casefold, punctuation and spacing collapsed, every letter kept, the entity suffix kept in one
+    spelling per kind (host ruling H2): 'Acme Builders, L.L.C.' == 'ACME BUILDERS LLC' != 'Acme Builders Inc'."""
     if not isinstance(s, str):
         return ''
-    s = s.lower().replace('&', ' and ')
-    words = [w for w in re.split(r'[^a-z0-9]+', s) if w and w not in _SUFFIXES]
-    return ' '.join(words)
+    s = unicodedata.normalize('NFKC', s).casefold().replace('&', ' and ')
+    toks, run = [], []
+    for t in re.split(r'[\W_]+', s):
+        if not t:
+            continue
+        if len(t) == 1 and t.isalpha():          # L.L.C. / P.C.: initials read as one word
+            run.append(t)
+            continue
+        if run:
+            toks.append(''.join(run))
+            run = []
+        toks.append(t)
+    if run:
+        toks.append(''.join(run))
+    out, i = [], 0
+    while i < len(toks):
+        for phrase, canon in _SUFFIX_PHRASES:
+            if tuple(toks[i:i + len(phrase)]) == phrase:
+                out.append(canon)
+                i += len(phrase)
+                break
+        else:
+            out.append(_SUFFIX_CANON.get(toks[i], toks[i]))
+            i += 1
+    return ' '.join(out)
+
+
+def category_key(s):
+    """A trade category as staff picked it ('Steel erection' -> 'steel_erection'); None when it is not one
+    of TRADE_CATEGORIES (free text is never matched by substring: host ruling H1)."""
+    k = re.sub(r'[\W_]+', '_', unicodedata.normalize('NFKC', str(s or '')).casefold()).strip('_')
+    return k if k in TRADE_CATEGORIES else None
+
+
+def exclusion_classes(values):
+    """(classes, unmapped) for a policy's confirmed exclusions. A blank list is NOT 'no exclusions' (H1)."""
+    classes, unmapped = [], []
+    for v in values if isinstance(values, list) else ([] if values in (None, '') else [values]):
+        k = re.sub(r'[\W_]+', '_', unicodedata.normalize('NFKC', str(v)).casefold()).strip('_')
+        if k in EXCLUSION_CLASSES:
+            if k not in classes:
+                classes.append(k)
+        else:
+            unmapped.append(str(v)[:120])
+    return classes, unmapped
+
+
+def form_key(s) -> str:
+    return re.sub(r'[^A-Z0-9]', '', unicodedata.normalize('NFKC', str(s or '')).upper())
 
 
 def is_person(by) -> bool:
@@ -170,11 +256,25 @@ def _add_years(d: date, years: int) -> date:
 
 
 def _edition_year(edition):
-    m = re.match(r'^\s*(\d{2})\s*/?\s*(\d{2})\s*$', str(edition or ''))
-    if not m:
+    """The year of an ISO edition date written the ways a form footer prints it: '04 13', '11-85', '(11/85)',
+    '1185', '11/1985', 'Nov 1985', 'CG 20 10 11 85'. None when it is empty or not a date (MED ruling)."""
+    s = unicodedata.normalize('NFKC', str(edition or '')).upper().strip()
+    s = re.sub(r'^[A-Z]{2}\s*\d{2}\s*\d{2}(?=\s|\(|$)', ' ', s)      # the form number printed before it
+    s = re.sub(r'[()\[\]]', ' ', s).strip().rstrip('.').strip()
+    m = re.match(r'^([A-Z]{3})[A-Z]*\.?\s*,?\s*(\d{2}|\d{4})$', s)
+    if m and m.group(1) in _MONTHS:
+        month, year = _MONTHS[m.group(1)], m.group(2)
+    else:
+        m = re.match(r'^(\d{1,2})\s*[-/.\s]?\s*(\d{2}|\d{4})$', s)
+        if not m:
+            return None
+        month, year = int(m.group(1)), m.group(2)
+    if not 1 <= month <= 12:
         return None
-    yy = int(m.group(2))
-    return 1900 + yy if yy >= 50 else 2000 + yy
+    y = int(year)
+    if len(year) == 2:
+        y = 1900 + y if y >= 50 else 2000 + y
+    return y if 1950 <= y <= 2100 else None
 
 
 def load_templates() -> dict:
@@ -213,6 +313,29 @@ def validate_items(items, trade_category=None) -> list:
             if yr is not None and yr < 2004:
                 raise _err(422, 'pre_2004_edition_refused', 'Pre-2004 ISO forms are not issuable by most '
                                                             'carriers (guide p.18, p.41). Use 2004 or later.', item=iid)
+            forms = it.get('forms')
+            if forms is not None and (not isinstance(forms, list) or not all(isinstance(f, str) and form_key(f)
+                                                                             for f in forms)):
+                raise _err(422, 'bad_requirement_items', 'forms lists the accepted form numbers, e.g. ["CG 20 37"]',
+                           item=iid)
+        if kind == 'disallowed_exclusion':
+            if it.get('when_trade') is not None:
+                raise _err(422, 'when_trade_retired', 'Trade applicability is a list of trade categories '
+                                                      '(trade_categories), never words matched inside the trade '
+                                                      '(host ruling H1)', item=iid)
+            cats = it.get('trade_categories')
+            if cats is not None and (not isinstance(cats, list) or not cats or
+                                     any(category_key(c) != c for c in cats)):
+                raise _err(422, 'bad_requirement_items', 'trade_categories must list categories from: '
+                           + ', '.join(TRADE_CATEGORIES), item=iid)
+            classes = it.get('classes')
+            if classes is None:
+                classes = EXCLUSION_FAMILIES.get(it.get('code'))
+            if not isinstance(classes, (list, tuple)) or not classes or \
+                    any(c not in EXCLUSION_CLASSES or c == EXCLUSION_NONE for c in classes):
+                raise _err(422, 'bad_requirement_items', 'classes must list the exclusion classes this item '
+                           'disallows, from: ' + ', '.join(c for c in EXCLUSION_CLASSES if c != EXCLUSION_NONE),
+                           item=iid)
         if is_ai and line in ('pl', 'auto'):
             warnings.append({'item': iid, 'warning': f'Additional insured on {line.upper()} is cautioned against '
                                                      '(guide p.25, p.23). PL takes certificate holder only.'})
@@ -271,7 +394,20 @@ def gather(store, assignment_id) -> dict:
         'waivers': _all(store, 'crt_waiver', {'crt_assignment_id': assignment_id}),
         'reviews': _all(store, 'crt_review', {'crt_assignment_id': assignment_id}),
         'account_id': account_id, 'party_id': party_id, 'writers': {}, 'cert_files': set(),
+        'newer_sets': [],
     }
+    # LOW ruling: later revisions of the pinned set (the verdict stays pinned; a newer APPROVED one is noted)
+    if inputs['set']:
+        sets = _all(store, 'crt_requirement_set')
+        parent = {r['id']: r['data'].get('supersedes') for r in sets}
+        for r in sets:
+            cur, seen = parent.get(r['id']), set()
+            while cur and cur not in seen and len(seen) < 100:
+                if cur == inputs['set']['id']:
+                    inputs['newer_sets'].append(r)
+                    break
+                seen.add(cur)
+                cur = parent.get(cur)
     if account_id and party_id:
         inputs['policies'] = _all(store, 'crt_policy', {'party_contact_id': party_id, 'crt_account_id': account_id})
         pids = [p['id'] for p in inputs['policies']]
@@ -283,6 +419,7 @@ def gather(store, assignment_id) -> dict:
         if inputs[k]:
             record_ids.append(inputs[k]['id'])
     record_ids += [r['id'] for r in inputs['links']]
+    record_ids += [r['id'] for r in inputs['newer_sets']]
     for i in range(0, len(record_ids), 200):
         inputs['confirmations'] += _all(store, 'crt_confirmation', {'record_id': {'$in': record_ids[i:i + 200]}})
     doc_ids = set()
@@ -539,7 +676,8 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         proj('crt_account_id')       # which account's evidence is read at all (ruling N1)
     sc, sc_ok = (proj('substantial_completion') if project else (None, False))
     sc_d = _d(sc) if sc_ok else None
-    trade = str(asg['data'].get('trade_category') or '').lower()
+    trade_ok = conf.ok(asg, 'crt_assignment', 'trade_category', need_source=False, person_ok=True)
+    trade = category_key(asg['data'].get('trade_category')) if trade_ok else None
     size = pd.get('size_flag')
 
     for it in items:
@@ -606,10 +744,25 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
             else:
                 cells[iid] = 'OK'
         elif kind == 'disallowed_exclusion':
-            when = it.get('when_trade')
-            if when and not any(w in trade for w in when):
-                cells[iid] = 'N/A'
+            # host ruling H1: which trades the item covers is a list of staff-chosen categories, never words
+            # found inside the trade; a set still carrying the old substring rule is not read at all
+            if it.get('when_trade') is not None:
+                unc('crt_requirement_set', 'items')
+                cells[iid] = 'UNCONFIRMED'
                 continue
+            cats = it.get('trade_categories')
+            if cats:
+                if not trade_ok:
+                    cells[iid] = 'UNCONFIRMED'           # UNCONFIRMED:crt_assignment.trade_category is recorded
+                    continue
+                if trade is None:                       # not one of the categories: nobody can say it applies
+                    unc('crt_assignment', 'trade_category')
+                    notes.append(f'{iid}: the trade is not one of the listed trade categories; staff pick one')
+                    cells[iid] = 'UNCONFIRMED'
+                    continue
+                if trade not in cats:
+                    cells[iid] = 'N/A'
+                    continue
             pol = policy_for(line, iid)
             if pol is None:
                 continue
@@ -617,10 +770,19 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 unc('crt_policy', 'exclusions')
                 cells[iid] = 'UNCONFIRMED'
                 continue
-            have = [str(x).lower() for x in (pol['data'].get('exclusions') or [])]
+            have, unmapped = exclusion_classes(pol['data'].get('exclusions'))
+            if unmapped or not have or (EXCLUSION_NONE in have and len(have) > 1):
+                # wording not mapped to a class, a blank list, or "none" beside a class: nobody has said what
+                # the policy excludes (host ruling H1: blank is "none" only when staff confirmed "none")
+                unc('crt_policy', 'exclusions')
+                notes.append(f'{iid}: policy exclusions need a staff check (map each to a class, or confirm '
+                             '"policy exclusions reviewed: none")')
+                cells[iid] = 'UNCONFIRMED'
+                continue
+            banned = it.get('classes') or EXCLUSION_FAMILIES.get(it.get('code')) or ()
             code = f"EXCLUSION:{it.get('code')}"
-            if any(it.get('code') in h for h in have):
-                variances.append(code)
+            if any(c in banned for c in have):
+                _add(variances, code)
                 cells[iid] = code
             else:
                 cells[iid] = 'OK'
@@ -679,8 +841,29 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                         _file_id(inputs['documents'].get(e_doc)) in inputs.get('cert_files', ()):
                     item_codes.append(f'MISSING:{fn}')      # the certificate is a summary; the endorsement is the proof
                     continue
+                # host ruling H3: the form number staff confirmed must be one the item accepts; a known ISO form
+                # for another purpose is not this endorsement at all (CG 20 10 is never completed operations)
+                if e['data'].get('manuscript') is not True:
+                    fk = form_key(e['data'].get('form'))
+                    accepted = {form_key(f) for f in it.get('forms') or []}
+                    if not accepted and ISO_FORM_FUNCTION.get(fk) == fn:
+                        accepted = {fk}
+                    if fk not in accepted:
+                        if ISO_FORM_FUNCTION.get(fk) not in (None, fn):
+                            item_codes.append(f'MISSING:{fn}')
+                        else:
+                            unc('crt_endorsement', 'form')
+                            notes.append(f"{iid}: form {e['data'].get('form') or '(blank)'} is not a listed form "
+                                         'for this item; list the equivalent in the requirement set or confirm '
+                                         'it as a manuscript form')
+                            item_codes.append('UNCONFIRMED')
+                        continue
                 ed_year = _edition_year(e['data'].get('edition'))
-                if ed_year is not None and ed_year < 2004:
+                if ed_year is None:                     # MED ruling: an empty or unreadable edition is no pass
+                    unc('crt_endorsement', 'edition')
+                    item_codes.append('UNCONFIRMED')
+                    continue
+                if ed_year < 2004:
                     item_codes.append(f'WRONG_FORM:{fn}')
                     continue
                 if fn in AI_FUNCTIONS or it.get('names_parties'):
@@ -796,6 +979,18 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
     label = LABELS[state]
     if state == 'meets_accepted' and expiring and expiring['days'] <= 30:
         label = ACCEPTED_EXPIRING_LABELS[15 if expiring['days'] <= 15 else 30]
+    # LOW ruling: a newer APPROVED revision of the pinned set is said on the label; the verdict stays pinned
+    newer = [r for r in inputs.get('newer_sets') or [] if not r['archived_at']
+             and r['data'].get('status') == 'APPROVED'
+             and conf.ok(r, 'crt_requirement_set', 'status', need_source=False)
+             and conf.ok(r, 'crt_requirement_set', 'items', need_source=False)]
+    newer_set = None
+    if newer:
+        n = max(newer, key=lambda r: int(r['data'].get('set_version') or 0))
+        newer_set = {'id': n['id'], 'set_version': n['data'].get('set_version'), 'name': n['data'].get('name')}
+        label += '; newer requirement set available'
+        notes.append(f"newer requirement set available: {n['data'].get('name') or n['id']} version "
+                     f"{n['data'].get('set_version')}; this verdict stays on the pinned set until staff re-pin it")
     codes = unconfirmed + missing + variances + expired
     stale = True
     if last_review:
@@ -815,6 +1010,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
         'last_review_at': (last_review['data'].get('reviewed_at') if last_review else None),
         'requirement_set_id': s_rec['id'] if s_rec else None,
         'requirement_set_version': s_rec['data'].get('set_version') if s_rec else None,
+        'newer_requirement_set': newer_set,
         'policies_read': sorted(checked_policies), 'confirmation_ids': sorted(conf.used),
         'rule_version': RULE_VERSION, 'disclaimer': DISCLAIMER, 'as_of': today.isoformat(),
         'advisory': '[probation] advisory only; never auto-holds, auto-sends or gates a pay application',
@@ -937,6 +1133,9 @@ def register_routes(bp, api, ctx):
     def today_arg():
         raw = request.args.get('today')
         if raw:
+            if ctx.is_agent():          # LOW ruling: an as-of date other than today is a staff what-if only
+                raise _err(403, 'today_staff_only', 'Only a person (staff session) may ask for the state as of '
+                                                    'another date; an agent key reads today only')
             d = _d(raw)
             if d is None:
                 raise _err(400, 'bad_query', 'today must be YYYY-MM-DD')
@@ -955,7 +1154,16 @@ def register_routes(bp, api, ctx):
 
     @route('/templates', ['GET'], 'templates')
     def templates():
-        return jsonify(load_templates())
+        return jsonify({**load_templates(), 'trade_categories': list(TRADE_CATEGORIES),
+                        'exclusion_classes': list(EXCLUSION_CLASSES)})
+
+    @route('/staff/<page>', ['GET'], 'staff_surface')
+    def staff_surface(page):
+        """Host ruling H4: the staff pages (confirm, approve, review, waiver, hold, set-up) ship in the OVU image
+        and are served here, never from the tenant's canvas-pages (which the agent can write). Each render
+        carries a per-render token bound to this staff session; only requests carrying it may write."""
+        ctx.require_person('open the staff pages')
+        return ctx.staff_surface_page(PAGES_DIR, page)
 
     @route('/requirement-sets/from-template', ['POST'], 'set_from_template')
     def set_from_template():
@@ -976,6 +1184,7 @@ def register_routes(bp, api, ctx):
     @route('/requirement-sets/<sid>/approve', ['POST'], 'set_approve')
     def set_approve(sid):
         ctx.require_person('approve a requirement set')
+        ctx.require_staff_surface()
         store = ctx.store()
         rec = store.get('crt_requirement_set', sid)
         warnings = validate_items(rec['data'].get('items'), rec['data'].get('trade_category'))
@@ -1009,6 +1218,7 @@ def register_routes(bp, api, ctx):
     @route('/confirm', ['POST'], 'confirm')
     def confirm():
         ctx.require_person('confirm a reading')
+        ctx.require_staff_surface()
         body = ctx.body()
         store = ctx.store()
         coll, rid, fields = body.get('record_collection'), body.get('record_id'), body.get('fields')
@@ -1054,6 +1264,7 @@ def register_routes(bp, api, ctx):
     @route('/assignment/<aid>/review', ['POST'], 'review')
     def review(aid):
         ctx.require_person('record a review')
+        ctx.require_staff_surface()
         store = ctx.store()
         ev = evaluate(store, aid, datetime.now(timezone.utc).date())
         now = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
@@ -1069,6 +1280,7 @@ def register_routes(bp, api, ctx):
     @route('/assignment/<aid>/chase-sent', ['POST'], 'chase_sent')
     def chase_sent(aid):
         ctx.require_person('mark a chase as sent')
+        ctx.require_staff_surface()
         body = ctx.body()
         store = ctx.store()
         store.get('crt_assignment', aid)

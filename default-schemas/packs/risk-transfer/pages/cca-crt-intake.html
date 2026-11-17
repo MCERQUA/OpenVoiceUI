@@ -59,6 +59,7 @@ th{color:var(--muted);font-weight:600} .scroll{overflow-x:auto;border:1px solid 
 <div><label for="pe">Effective</label><input id="pe" type="date"></div><div><label for="px">Expiration</label><input id="px" type="date"></div>
 <div><label for="po">Each occurrence / claim ($)</label><input id="po" type="number"></div><div><label for="pa">Aggregate ($)</label><input id="pa" type="number"></div>
 <div><label for="pni">Named insured</label><input id="pni"></div><div><label for="pch">Certificate holder</label><input id="pch"></div>
+<div><label for="pex">Policy exclusions (classes; hold Ctrl to pick several)</label><select id="pex" multiple size="5"></select></div>
 <div><label for="pai">Additional insured box</label><select id="pai"><option value="">Not shown</option><option value="1">Checked</option><option value="0">Not checked</option></select></div>
 <div><label for="ppn">Producer</label><input id="ppn"></div><div><label for="ppp">Producer phone</label><input id="ppp"></div><div><label for="ppe">Producer email</label><input id="ppe" type="email"></div>
 <div><label for="pd">Certificate document</label><select id="pd"></select></div>
@@ -97,8 +98,13 @@ Readings count only after staff confirm them against the stored document. Nothin
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
   function name(c) { var d = (c && c.data) || {}; return d.company_name || d.name || '(no name)'; }
   function link(file, params, text) {
+    var q = new URLSearchParams(params);
+    if (jb.staffBase) {                   // a platform staff page links to the other staff pages (host ruling H4)
+      if (jb.sandbox) q.set('sandbox', jb.sandbox);
+      return el('a', {href: jb.staffBase + file + '?' + q.toString(), text: text});
+    }
     var base = jb.sandbox ? '/pages/sandbox/' + jb.sandbox + '/' : '/pages/';
-    return el('a', {href: base + file + '?' + new URLSearchParams(params).toString(), text: text});
+    return el('a', {href: base + file + '?' + q.toString(), text: text});
   }
   function field(lbl, input) { return el('div', {}, [el('label', {text: lbl}), input]); }
   var api = jb.pack('crt');
@@ -125,8 +131,8 @@ Readings count only after staff confirm them against the stored document. Nothin
       docs.forEach(function (d) { dsel.appendChild(el('option', {value: d.id, text: d.data.title || d.data.kind, selected: d.id === defaultDoc ? 'selected' : null})); });
       form.appendChild(U.field('Checked against this stored document', dsel));
     }
-    form.appendChild(el('p', {'class': 'row'}, [el('button', {type: 'submit', text: 'Confirm checked fields'}),
-      el('button', {type: 'button', 'class': 'ghost', text: 'Tick all', on: {click: function () { boxes.forEach(function (b) { b.checked = true; }); }}})]));
+    // host ruling H3: no bulk "tick all"; each field is ticked after it was read against the document
+    form.appendChild(el('p', {'class': 'row'}, [el('button', {type: 'submit', text: 'Confirm checked fields'})]));
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       var fs = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
@@ -186,6 +192,13 @@ Readings count only after staff confirm them against the stored document. Nothin
     if (U.Q.get('account')) acctSel.value = U.Q.get('account');
     return loadParties();
   }).then(function () { if (U.Q.get('party')) { partySel.value = U.Q.get('party'); return load(); } }).catch(U.fail);
+  // host ruling H1: exclusions are classes staff pick; "none" is staff saying the policy's exclusions were reviewed
+  U.api.get('templates').then(function (t) {
+    var sel = document.getElementById('pex');
+    (t.exclusion_classes || []).forEach(function (c) {
+      sel.appendChild(el('option', {value: c, text: c === 'none' ? 'Policy exclusions reviewed: none' : c.replace(/_/g, ' ')}));
+    });
+  }).catch(U.fail);
   acctSel.addEventListener('change', function () { loadParties().catch(U.fail); });
   partySel.addEventListener('change', function () { load(); });
   document.getElementById('up').addEventListener('submit', function (ev) {
@@ -209,7 +222,8 @@ Readings count only after staff confirm them against the stored document. Nothin
       policy_number: v('pn') || undefined, carrier: v('pc') || undefined, effective: v('pe') || undefined, expiration: v('px') || undefined,
       limits: limits, named_insured: v('pni') || undefined, certificate_holder: v('pch') || undefined,
       addl_insd: v('pai') === '' ? undefined : v('pai') === '1', producer_name: v('ppn') || undefined,
-      producer_phone: v('ppp') || undefined, producer_email: v('ppe') || undefined, source_document_id: v('pd') || undefined})
+      producer_phone: v('ppp') || undefined, producer_email: v('ppe') || undefined, source_document_id: v('pd') || undefined,
+      exclusions: Array.prototype.map.call(document.getElementById('pex').selectedOptions, function (o) { return o.value; })})
       .then(function () { ev.target.reset(); U.say('Reading added: confirm it above', true); return load(); }).catch(U.fail);
   });
 })(U);

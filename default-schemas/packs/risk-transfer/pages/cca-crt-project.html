@@ -47,7 +47,7 @@ th{color:var(--muted);font-weight:600} .scroll{overflow-x:auto;border:1px solid 
 <form id="adda" class="card"><div class="grid">
 <div><label for="as">Sub (linked to this account)</label><select id="as" required></select></div>
 <div><label for="ar">Approved requirement set</label><select id="ar" required></select></div>
-<div><label for="at">Trade</label><input id="at" placeholder="e.g. electrical, roofing, excavation"></div>
+<div><label for="at">Trade category</label><select id="at"><option value="">Choose the trade category</option></select></div>
 <div><label for="ac">Subcontract signed</label><input id="ac" type="date"></div>
 </div><p><button type="submit">Add to project</button></p></form>
 <p class="disclaimer">Evidence check against the requirement set you approved. Not a coverage opinion or legal advice.
@@ -84,8 +84,13 @@ Readings count only after staff confirm them against the stored document. Nothin
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
   function name(c) { var d = (c && c.data) || {}; return d.company_name || d.name || '(no name)'; }
   function link(file, params, text) {
+    var q = new URLSearchParams(params);
+    if (jb.staffBase) {                   // a platform staff page links to the other staff pages (host ruling H4)
+      if (jb.sandbox) q.set('sandbox', jb.sandbox);
+      return el('a', {href: jb.staffBase + file + '?' + q.toString(), text: text});
+    }
     var base = jb.sandbox ? '/pages/sandbox/' + jb.sandbox + '/' : '/pages/';
-    return el('a', {href: base + file + '?' + new URLSearchParams(params).toString(), text: text});
+    return el('a', {href: base + file + '?' + q.toString(), text: text});
   }
   function field(lbl, input) { return el('div', {}, [el('label', {text: lbl}), input]); }
   var api = jb.pack('crt');
@@ -148,6 +153,11 @@ Readings count only after staff confirm them against the stored document. Nothin
       trade_category: v('at') || undefined, contract_signed_at: v('ac') || undefined})
       .then(function () { U.say('Sub added to the project', true); return load(); }).catch(U.fail);
   });
+  // host ruling H1: the trade is a category staff choose from the list, never free text
+  U.api.get('templates').then(function (t) {
+    var sel = document.getElementById('at');
+    (t.trade_categories || []).forEach(function (c) { sel.appendChild(el('option', {value: c, text: c.replace(/_/g, ' ')})); });
+  }).catch(U.fail);
   load();
 })(U);
 })();

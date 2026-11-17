@@ -75,8 +75,13 @@ Readings count only after staff confirm them against the stored document. Nothin
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
   function name(c) { var d = (c && c.data) || {}; return d.company_name || d.name || '(no name)'; }
   function link(file, params, text) {
+    var q = new URLSearchParams(params);
+    if (jb.staffBase) {                   // a platform staff page links to the other staff pages (host ruling H4)
+      if (jb.sandbox) q.set('sandbox', jb.sandbox);
+      return el('a', {href: jb.staffBase + file + '?' + q.toString(), text: text});
+    }
     var base = jb.sandbox ? '/pages/sandbox/' + jb.sandbox + '/' : '/pages/';
-    return el('a', {href: base + file + '?' + new URLSearchParams(params).toString(), text: text});
+    return el('a', {href: base + file + '?' + q.toString(), text: text});
   }
   function field(lbl, input) { return el('div', {}, [el('label', {text: lbl}), input]); }
   var api = jb.pack('crt');

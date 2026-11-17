@@ -63,7 +63,9 @@
           "function": "ai_ongoing",
           "line": "gl",
           "forms": [
-            "CG 20 10"
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
           ],
           "edition": "04 13",
           "required": true,
@@ -117,13 +119,25 @@
           "line": "gl",
           "code": "xcu",
           "required": true,
-          "when_trade": [
+          "cite": "p.20, p.47 (no XCU exclusion for excavation, demolition or blasting; categories are staff-chosen, never words in the trade)",
+          "trade_categories": [
             "excavation",
+            "trenching",
+            "earthwork",
+            "grading",
             "demolition",
-            "demo",
-            "shoring"
+            "blasting",
+            "shoring",
+            "underground_utilities",
+            "pile_driving",
+            "tunneling"
           ],
-          "cite": "p.20 (no XCU exclusion where explosion, collapse or underground is needed)"
+          "classes": [
+            "xcu",
+            "explosion",
+            "collapse",
+            "underground"
+          ]
         },
         {
           "id": "auto_csl",
@@ -202,7 +216,9 @@
           "function": "ai_ongoing",
           "line": "gl",
           "forms": [
-            "CG 20 10"
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
           ],
           "edition": "04 13",
           "required": true,
@@ -256,7 +272,12 @@
           "line": "gl",
           "code": "water",
           "required": true,
-          "cite": "p.24 (inspect for water-intrusion exclusions or sub-limits)"
+          "cite": "p.24 (inspect for water-intrusion exclusions or sub-limits)",
+          "classes": [
+            "water_intrusion",
+            "moisture",
+            "water_damage_sublimit"
+          ]
         },
         {
           "id": "producer",
@@ -322,7 +343,9 @@
           "function": "ai_ongoing",
           "line": "gl",
           "forms": [
-            "CG 20 10"
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
           ],
           "edition": "04 13",
           "required": true,
@@ -425,7 +448,9 @@
           "function": "ai_ongoing",
           "line": "gl",
           "forms": [
-            "CG 20 10"
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
           ],
           "edition": "04 13",
           "required": true,
@@ -538,7 +563,9 @@
           "function": "ai_ongoing",
           "line": "gl",
           "forms": [
-            "CG 20 10"
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
           ],
           "edition": "04 13",
           "required": true,
