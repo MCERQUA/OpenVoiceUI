@@ -150,6 +150,9 @@ def test_h2_the_entity_suffix_is_part_of_the_named_insured(h, other, same):
     assert ev['state'] == 'variance' and codes(ev) == ['WRONG_INSURED'], ev
     w2 = world(h, policies=_pols(named_insured=same), party_name='Sparky Electric Inc')     # control: one suffix
     assert h.state(w2['asg']['id'])['state'] == 'meets'
+    # the full legal name inside a longer one is still another company (N8: exact, never containment)
+    w3 = world(h, policies=_pols(named_insured='Sparky Electric Inc of Nevada'), party_name='Sparky Electric Inc')
+    assert codes(h.state(w3['asg']['id'])) == ['WRONG_INSURED']
 
 
 @pytest.mark.parametrize('scheduled,ok', [
@@ -163,6 +166,22 @@ def test_h2_the_entity_suffix_is_part_of_the_scheduled_name(h, scheduled, ok):
         assert ev['state'] == 'meets', ev
     else:
         assert codes(ev) == ['WRONG_PARTY'], ev
+        w2 = world(h, endorsements=_ends(scheduled_names=['Acme Builders LLC Holdings', 'Mesa Health District']),
+                   party_name='Second Sub Inc')
+        assert codes(h.state(w2['asg']['id'])) == ['WRONG_PARTY']        # containing the legal name is not it
+
+
+@pytest.mark.parametrize('holder', ['Acme Builders Inc', 'Acme Builders LLC West'])
+def test_h2_the_certificate_holder_is_the_account_with_its_suffix(h, holder):
+    def pols(hd):
+        return {'pl': {'line': 'pl', 'policy_number': 'PL-1', 'addl_insd': False, 'occurrence_or_claims_made': 'occurrence',
+                       'certificate_holder': hd, 'limits': {'each_claim': 2 * M, 'aggregate': 2 * M}},
+                'gl': {'line': 'gl', 'policy_number': 'GL-1', 'limits': {'each_occurrence': 1 * M, 'general_aggregate': 2 * M}}}
+    w = world(h, template='design_pro', trade='engineer', policies=pols(holder), endorsements={})
+    assert codes(h.state(w['asg']['id'])) == ['WRONG_HOLDER']
+    w2 = world(h, template='design_pro', trade='engineer', policies=pols('ACME BUILDERS, L.L.C.'), endorsements={},
+               party_name='Design Co Inc')
+    assert h.state(w2['asg']['id'])['state'] == 'meets'
 
 
 def test_h2_non_ascii_letters_are_kept(h):
@@ -184,8 +203,12 @@ def test_watch_h2_fails_a_meets_on_a_scheduled_name_with_another_suffix(h, dirs)
     w = world(h, endorsements=_ends(scheduled_names=['Acme Builders Inc', 'Mesa Health District']))
     assert codes(h.state(w['asg']['id'])) == ['WRONG_PARTY']
     _forge_meets(h, w)
+    w2 = world(h, endorsements=_ends(scheduled_names=['Acme Builders LLC Holdings', 'Mesa Health District']),
+               party_name='Second Sub Inc')
+    _forge_meets(h, w2)
     v, rows, _ = _watch(dirs)
-    assert v == 'FAIL' and any(r.startswith('R4') for r in rows[0]['reasons']), rows
+    assert v == 'FAIL' and len(rows) == 2, rows
+    assert all(r['watch'] == 'FAIL' and any(x.startswith('R4') for x in r['reasons']) for r in rows), rows
 
 
 # ── H3: the form number is compared; no bulk tick ───────────────────────────
