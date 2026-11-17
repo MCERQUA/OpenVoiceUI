@@ -8,6 +8,7 @@ world with ONE thing changed, so it fails for one reason only. Fake data only.
 import hashlib
 import io
 import json
+import re
 from datetime import date, timedelta
 
 import pytest
@@ -49,6 +50,8 @@ class H:
         self.c = client
         self.mp = monkeypatch
         self.who = None
+        self.surface_ready = False          # set once the pack is on: staff then act through the staff pages
+        self.surface = {}
         self.staff()
 
     def staff(self, user=STAFF_1):
@@ -62,9 +65,26 @@ class H:
         self.who = ('agent', None)
         return self
 
+    def surface_token(self, user=None):
+        """What a platform staff page holds (host ruling H4): got by opening the page the real way, a top-level
+        navigation, as this staff user. None before the pack is on."""
+        user = user or self.who[1]
+        if not self.surface_ready:
+            return None
+        if user not in self.surface:
+            r = self.c.get(f'{B}/crt/staff/cca-crt-intake.html?sandbox={SBX}',
+                           headers={'Authorization': 'Bearer tok', 'Sec-Fetch-Mode': 'navigate',
+                                    'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Site': 'none'})
+            assert r.status_code == 200, (r.status_code, r.data[:300])
+            self.surface[user] = re.search(rb'"token": "([^"]+)"', r.data).group(1).decode()
+        return self.surface[user]
+
     @property
     def h(self):
-        return {'X-Agent-Key': SBX_KEY} if self.who[0] == 'agent' else {'X-Biz-Sandbox': SBX}
+        if self.who[0] == 'agent':
+            return {'X-Agent-Key': SBX_KEY}
+        tok = self.surface_token()
+        return {'X-Biz-Sandbox': SBX, **({'X-JB-Staff-Surface': tok, 'Sec-Fetch-Site': 'same-origin'} if tok else {})}
 
     def _src(self, body):
         if self.who[0] == 'agent' and isinstance(body, dict) and 'source' not in body:
@@ -95,7 +115,15 @@ class H:
         return self.ok(r)
 
     def state(self, aid, today=TODAY):
-        return self.ok(self.get(f'/crt/assignment/{aid}/state?today={iso(today)}'))
+        # rules 1.3.0 (LOW ruling): an as-of date is a staff what-if, so the fixture date is read as staff. The
+        # verdict never depends on who reads it; the agent's own ?today= is refused (test_low_today_*).
+        who = self.who
+        if who[0] == 'agent':
+            self.staff()
+        try:
+            return self.ok(self.get(f'/crt/assignment/{aid}/state?today={iso(today)}'))
+        finally:
+            self.who = who
 
 
 @pytest.fixture()
@@ -121,6 +149,7 @@ def h(dirs, monkeypatch):
     helper = H(app.test_client(), monkeypatch)
     helper.app = app
     helper.ok(helper.post('/packs/risk-transfer/enable'))
+    helper.surface_ready = True
     yield helper
     for store in list(app.extensions.get('biz', {}).values()):
         if hasattr(store, 'close'):
@@ -191,7 +220,7 @@ def world(h, template='mep', trade='electrical', today=TODAY, policies=None, end
     base = {'crt_account_id': w['account']['id'], 'party_contact_id': w['party']['id'], 'carrier': 'Sample Mutual',
             'effective': iso(today - timedelta(days=100)), 'expiration': iso(today + timedelta(days=200)),
             'named_insured': party_name, 'certificate_holder': account_name, 'addl_insd': True,
-            'occurrence_or_claims_made': 'occurrence', 'exclusions': [], 'tail': False,
+            'occurrence_or_claims_made': 'occurrence', 'exclusions': ['none'], 'tail': False,   # 1.3.0 (H1): staff say "none"
             'source_document_id': w['docs']['cert']['id'], **prod}
     pols = policies if policies is not None else {
         'gl': {'line': 'gl', 'policy_number': 'GL-100', 'limits': {'each_occurrence': 2 * M, 'general_aggregate': 2 * M}},
@@ -554,7 +583,8 @@ def test_high_severity_xcu_exclusion_on_excavation(h):
 
 
 def test_envelope_water_exclusion(h):
-    pols = {'gl': {'line': 'gl', 'policy_number': 'GL-1', 'exclusions': ['water intrusion sub-limit'],
+    # rules 1.3.0 (H1): staff map the wording to a class; unmapped wording is Can't tell (test_h1_* in claimcheck3)
+    pols = {'gl': {'line': 'gl', 'policy_number': 'GL-1', 'exclusions': ['water_damage_sublimit'],
                    'limits': {'each_occurrence': 2 * M, 'general_aggregate': 2 * M}},
             'umbrella': {'line': 'umbrella', 'policy_number': 'UM-1', 'limits': {'each_occurrence': 5 * M}}}
     w = world(h, template='envelope', trade='roofing', policies=pols)
@@ -888,17 +918,23 @@ def test_pages_use_no_browser_storage_and_only_the_sdk():
 
 
 def test_pages_publish_register_and_serve_in_the_sandbox(h):
+    """Rules 1.3.0 (host ruling H4): the pack's staff pages are served from the image, never published by the
+    agent. The agent's PUT of a platform page name is refused; staff open each page by a top-level navigation and
+    get the image's own bytes (scripts nonce'd, a per-render token, not frameable, its own browsing-context group)."""
     h.agent()
     for p in PAGES:
         html = (_page_dir() / p).read_text(encoding='utf-8')
         r = h.c.put(f'{B}/dev/pages/{p}', json={'html': html, 'source': SRC}, headers=h.h)
-        assert r.status_code == 200, r.get_json()
-    meta = json.loads((_page_dir() / 'registry.json').read_text(encoding='utf-8'))
-    for row in meta['pages']:
-        h.ok(h.post('/registry/pages', {**row}), 201)
+        assert r.status_code == 409 and r.get_json()['code'] == 'platform_page_reserved', r.get_json()
     h.staff()
-    shell = h.ok(h.get('/registry/shell'))
-    files = {pg['file'] for sec in shell['sections'] for pg in sec['pages']}
-    assert set(PAGES) <= files
-    html = h.c.get(f'/pages/sandbox/{SBX}/cca-crt-book.html').get_data(as_text=True)
-    assert 'data-sandbox="josh"' in html and 'data-page="cca-crt-book"' in html
+    nav = {'Authorization': 'Bearer tok', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document'}
+    for p in PAGES:
+        r = h.c.get(f'{B}/crt/staff/{p}?sandbox={SBX}', headers=nav)
+        assert r.status_code == 200, (p, r.status_code)
+        body = r.get_data(as_text=True)
+        assert 'window.__JB_SURFACE__' in body and '"sandbox": "josh"' in body
+        assert 'Tick all' not in body
+        assert all('nonce="' in tag for tag in re.findall(r'<script[^>]*>', body)), p
+        csp = r.headers['Content-Security-Policy']
+        assert "frame-ancestors 'none'" in csp and "'unsafe-inline'" not in csp.split('script-src')[1].split(';')[0]
+        assert r.headers['Cross-Origin-Opener-Policy'] == 'same-origin' and r.headers['X-Frame-Options'] == 'DENY'

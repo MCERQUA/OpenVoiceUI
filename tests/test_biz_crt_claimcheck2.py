@@ -112,7 +112,8 @@ def test_n1_the_subs_legal_name_written_by_the_agent_needs_a_person(h):
     w = world(h, policies=pols)
     p = _get(h, 'contact', w['party']['id'])
     h.agent()
-    p = h.ok(h.patch(f'/contact/{p["id"]}', {'data': {'company_name': 'Sparky Electric Holdings of Nevada'}},
+    # rules 1.3.0 (host ruling H2): the entity suffix is part of the name, so the agent writes the full legal name
+    p = h.ok(h.patch(f'/contact/{p["id"]}', {'data': {'company_name': 'Sparky Electric Holdings of Nevada LLC'}},
                      p['version']))
     h.staff()
     p = h.ok(h.patch(f'/contact/{p["id"]}', {'data': {'notes': 'called the sub'}}, p['version']))
