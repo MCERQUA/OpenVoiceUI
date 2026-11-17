@@ -1076,8 +1076,10 @@ def _notify_brain(event_type: str, **data) -> None:
     try:
         event = {'type': event_type, 'timestamp': datetime.now().isoformat()}
         event.update(data)
-        with open(BRAIN_EVENTS_PATH, 'a') as f:
-            f.write(json.dumps(event) + '\n')
+        # owner-checked, no-follow append (services/events_file.py): /tmp is
+        # shared with the terminal sandbox user
+        from services.events_file import append_event
+        append_event(event, BRAIN_EVENTS_PATH)
     except Exception:
         pass  # Non-critical
 

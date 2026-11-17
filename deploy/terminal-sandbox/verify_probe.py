@@ -22,6 +22,20 @@ KEY = os.environ["AGENT_API_KEY"]
 auth_mod.get_token_from_request = lambda *a, **k: None
 auth_mod.verify_clerk_token = lambda *a, **k: None
 
+import services.terminal_sandbox as ts  # noqa: E402
+from services.events_file import append_event, ensure_private  # noqa: E402
+
+if os.environ.get("PROBE_LEGACY") == "1":
+    ts.SANDBOX_HELPER = "/nonexistent"  # negative control: the old same-user shell
+
+# What the server does at boot, and then a private conversation event.
+ensure_private()
+append_event({"type": "conversation", "message": "owner said something private"})
+# Inheritable fds the server might hold (one low, one above the old 65536 cap).
+_fd = os.open("/app/server.py", os.O_RDONLY)
+os.dup2(_fd, 9, inheritable=True)
+os.dup2(_fd, 70000, inheritable=True)
+
 tree = ast.parse(open("/app/server.py").read())
 node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "terminal_websocket")
 node.decorator_list = []
@@ -64,6 +78,11 @@ echo hi > /app/server.py.probe 2>/dev/null && echo "@""@APP_CODE=WRITABLE" || ec
 touch ./sandbox-made 2>/dev/null && echo "@""@WORKSPACE=writable" || echo "@""@WORKSPACE=denied"
 su -c id root </dev/null >/dev/null 2>&1 && echo "@""@SU=ROOT" || echo "@""@SU=denied"
 /usr/local/libexec/ovu-sandbox-shell </dev/null >/dev/null 2>&1 && echo "@""@HELPER_REENTRY=ALLOWED" || echo "@""@HELPER_REENTRY=denied"
+cat <&9 >/dev/null 2>&1 && echo "@""@FD9=READABLE" || echo "@""@FD9=closed"
+cat <&70000 >/dev/null 2>&1 && echo "@""@FD70000=READABLE" || echo "@""@FD70000=closed"
+[ -r /tmp/openvoiceui-events.jsonl ] && echo "@""@EVENTS_FILE=READABLE" || echo "@""@EVENTS_FILE=denied"
+echo "@""@ULIMITS=nproc:$(ulimit -u) as_kb:$(ulimit -v) cpu_s:$(ulimit -t) fsize_blk:$(ulimit -f) nofile:$(ulimit -n)"
+setsid nohup sleep 300 >/dev/null 2>&1 </dev/null &
 echo "@""@PROBE_DONE=1"
 exit
 """
@@ -88,19 +107,22 @@ for line in text.splitlines():
 print(f"SERVER_UID={os.getuid()}")
 
 
-def _procs_of(uid):
+def _procs_of(uid, zombies=False):
+    """Count live (or, with zombies=True, zombie) processes whose real uid is uid."""
     n = 0
     for d in os.listdir("/proc"):
         if d.isdigit():
             try:
                 with open(f"/proc/{d}/status") as fh:
-                    for ln in fh:
-                        if ln.startswith("Uid:") and ln.split()[1] == str(uid):
-                            n += 1
-            except OSError:
+                    f = dict(ln.split(":", 1) for ln in fh if ":" in ln)
+                if f["Uid"].split()[0] == str(uid) and (f["State"].strip().startswith("Z") == zombies):
+                    n += 1
+            except (OSError, KeyError):
                 pass
     return n
 
 
 time.sleep(2)  # the handler has closed the pty master; the shell must be gone
 print(f"SANDBOX_PROCS_AFTER_CLOSE={_procs_of(1500)}")
+print(f"SANDBOX_ZOMBIES_AFTER_CLOSE={_procs_of(1500, zombies=True)}")
+print(f"SERVER_UID_PROCS_BESIDES_SERVER={_procs_of(os.getuid()) - 1}")

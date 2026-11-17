@@ -29,6 +29,7 @@ from flask import Blueprint, jsonify, request
 
 from tts_providers import get_provider
 from services.paths import UPLOADS_DIR
+from services.safe_open import UnsafePath, read_beneath
 
 logger = logging.getLogger(__name__)
 audio_clips_bp = Blueprint('audio_clips', __name__)
@@ -226,11 +227,18 @@ def email_clip():
     if not clip:
         return jsonify({'error': 'clip not found'}), 404
 
-    file_path = AUDIO_CLIPS_DIR / clip['filename']
-    if not file_path.exists():
+    # The manifest lives in uploads/ (agent-writable), so clip['filename'] is
+    # untrusted: one plain name, opened no-follow inside the clips dir. An
+    # absolute name or a planted symlink used to be read and EMAILED out.
+    fname = str(clip.get('filename') or '')
+    if '/' in fname:
+        return jsonify({'error': 'clip file missing on disk'}), 404
+    try:
+        raw = read_beneath(AUDIO_CLIPS_DIR, fname)
+    except (OSError, UnsafePath):
         return jsonify({'error': 'clip file missing on disk'}), 404
 
-    encoded = base64.b64encode(file_path.read_bytes()).decode('ascii')
+    encoded = base64.b64encode(raw).decode('ascii')
 
     text_body = body or f"Audio clip attached: {clip['label']}"
     html_body = '<p>' + text_body.replace('\n\n', '</p><p>').replace('\n', '<br>') + '</p>'

@@ -12,7 +12,12 @@
 #   - works in /srv/code-workspace, shared with the server through the
 #     `sandbox` group so the Monaco editor block sees the same files
 #
-# Used by the Dockerfile and by tests/test_terminal_sandbox_image.sh, so the
+#   - runs under resource limits set by the helper (NPROC 256, AS 4 GiB,
+#     CPU 3600 s/process, FSIZE 1 GiB, NOFILE 4096, no core dumps), and every
+#     sandbox process is killed when the last terminal session closes
+#     (`ovu-sandbox-shell --reap`)
+#
+# Used by the Dockerfile and by deploy/terminal-sandbox/verify-image.sh, so the
 # image and the proof run the same steps.
 set -eu
 

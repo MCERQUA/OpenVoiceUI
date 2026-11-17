@@ -34,6 +34,7 @@ static_files_bp = Blueprint('static_files', __name__)
 # ---------------------------------------------------------------------------
 
 from services.paths import APP_ROOT, SOUNDS_DIR, UPLOADS_DIR, KNOWN_FACES_DIR, STATIC_DIR
+from services.safe_open import UnsafePath, fd_path, open_beneath
 
 BASE_DIR = APP_ROOT
 
@@ -125,6 +126,29 @@ DJ_SOUNDS = {
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+def send_file_beneath(base_dir, rel, download_name=None):
+    """send_file for a file an untrusted party can plant or swap (uploads/ is
+    read-write in the tenant agent's container).
+
+    The file is opened ONCE with no symlink followed at any component
+    (services/safe_open.py) and served from /proc/self/fd/<fd>, which reopens
+    that same inode; a check-then-send_file(path) let a swapped symlink serve
+    any file the server can read. Returns None when the file is absent, a
+    symlink or not a regular file (callers answer 404)."""
+    try:
+        fd = open_beneath(base_dir, rel)
+    except (OSError, UnsafePath):
+        return None
+    try:
+        st = os.fstat(fd)
+        name = download_name or rel.rsplit('/', 1)[-1]
+        return send_file(fd_path(fd), download_name=name,
+                         etag=f'{st.st_ino:x}-{st.st_size:x}-{int(st.st_mtime_ns):x}',
+                         last_modified=st.st_mtime)
+    finally:
+        os.close(fd)  # send_file holds its own handle on the inode by now
+
 
 def _safe_path(base_dir: Path, *parts) -> Path | None:
     """
@@ -1195,7 +1219,9 @@ def serve_upload(filename):
         return denied
     if not upload_path.exists():
         return jsonify({"error": "File not found"}), 404
-    resp = send_file(upload_path)
+    resp = send_file_beneath(UPLOADS_DIR, filename)
+    if resp is None:
+        return jsonify({"error": "File not found"}), 404
     resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
     # F-5 (2026-07-15): neutralize STORED XSS. Uploads are user/agent-supplied; an
     # .html or .svg served with a rendering content-type executes in OUR origin and can

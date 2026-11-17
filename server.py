@@ -494,6 +494,10 @@ init_db()
 # ---------------------------------------------------------------------------
 
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+# The Brain events file in /tmp carries conversation text and /tmp is shared
+# with the terminal sandbox user: create it 0600 now, or refuse a planted one.
+from services.events_file import ensure_private as _ensure_private_events
+_ensure_private_events()
 
 
 # ---------------------------------------------------------------------------
@@ -2583,7 +2587,8 @@ def terminal_websocket(ws):
     from services.auth import verify_clerk_token, get_token_from_request
     from services.paths import CODE_WORKSPACE_DIR
     from services.terminal_sandbox import (
-        TerminalSandboxUnavailable, exec_terminal_child, plan_terminal_child)
+        TerminalSandboxUnavailable, exec_terminal_child, plan_terminal_child,
+        session_closed, session_opened)
 
     # --- auth: valid Clerk session OR internal agent key ---
     token = get_token_from_request()
@@ -2617,7 +2622,12 @@ def terminal_websocket(ws):
             pass
         return
 
-    pid, master_fd = pty.fork()
+    session_opened()
+    try:
+        pid, master_fd = pty.fork()
+    except Exception:
+        session_closed(child_plan)
+        raise
     if pid == 0:
         # --- child: become the sandboxed login shell (never returns) ---
         exec_terminal_child(child_plan)
@@ -2685,6 +2695,11 @@ def terminal_websocket(ws):
             os.close(master_fd)
         except Exception:
             pass
+
+        # When the last terminal session closes, the helper's --reap mode kills
+        # every sandbox process, including setsid/nohup survivors the hangup
+        # never reaches (review of PR #597, L1).
+        session_closed(child_plan)
 
         # Reap off the handler thread: never block it on a child that is slow
         # to die (a sandboxed one cannot be SIGKILLed from here).

@@ -281,7 +281,12 @@ def serve_album_photo(album_id: str, filename: str):
         return denied
     if not exists:
         return 'Not found', 404
-    resp = send_file(str(dest))
+    # One no-follow open (uploads/albums is agent-writable): a symlinked album
+    # dir or photo is refused, never followed, and cannot be swapped in later.
+    from routes.static_files import send_file_beneath
+    resp = send_file_beneath(ALBUMS_DIR, f'{safe_id}/{safe_file}')
+    if resp is None:
+        return 'Not found', 404
     resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
     resp.headers['X-Content-Type-Options'] = 'nosniff'
     return resp

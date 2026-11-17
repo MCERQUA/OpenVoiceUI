@@ -230,14 +230,16 @@ class MemoryClient:
         Returns:
             List of {content, role, time} dicts
         """
-        if not VOICE_EVENTS.exists():
+        from services.events_file import open_for_read
+        f = open_for_read(VOICE_EVENTS)  # only the server's own file, never a planted one
+        if f is None:
             return []
 
         results = []
         query_lower = query.lower()
 
         try:
-            with open(VOICE_EVENTS, 'r') as f:
+            with f:
                 for line in f:
                     try:
                         event = json.loads(line)

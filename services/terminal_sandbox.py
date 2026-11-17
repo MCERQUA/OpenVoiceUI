@@ -4,39 +4,55 @@ The terminal canvas block gets a real shell. That shell must NOT be the
 server's own identity: the server's environment holds every platform key, and
 its uid owns the db, vault and code. So the child execs a small setuid helper
 (deploy/terminal-sandbox/ovu-sandbox-shell.c) that drops to the unprivileged
-`sandbox` user with a fresh environment before starting bash.
+`sandbox` user with a fresh environment and resource limits before starting
+bash.
 
-Modes (env TERMINAL_SANDBOX):
-  required  helper must be present, else the terminal is refused (default on a
-            hosted tenant, i.e. CANVAS_REQUIRE_AUTH=true)
+Modes:
+  required  the helper must be present, else the terminal is refused. ALWAYS
+            the mode on a hosted tenant (CANVAS_REQUIRE_AUTH=true), whatever
+            TERMINAL_SANDBOX says.
   auto      helper if present, else a same-user shell with a scrubbed env
-            (default for local / self-hosted installs, which have no helper)
+            (local / self-hosted installs, which have no helper; TERMINAL_SANDBOX=auto)
 
 Everything the child needs is computed BEFORE fork (plan_terminal_child), so
 the forked child of this multithreaded server only calls execve.
+
+Session close: the server cannot signal a uid-1500 process, and a shell can
+leave `setsid nohup ... &` survivors that outlive the pty hangup. When the LAST
+open terminal session closes, the server runs the helper's one other mode,
+`--reap`, which drops to the sandbox uid and kill(-1, SIGKILL)s every sandbox
+process (session_opened / session_closed).
 """
 
 import os
-from pathlib import Path
+import subprocess
+import threading
+import time
 
-SANDBOX_HELPER = os.getenv('TERMINAL_SANDBOX_HELPER', '/usr/local/libexec/ovu-sandbox-shell')
+SANDBOX_HELPER = '/usr/local/libexec/ovu-sandbox-shell'
+SANDBOX_UID = 1500
 
 # The only variables a same-user (local-mode) shell inherits. Everything else —
 # API keys, tokens, Clerk secrets, signing keys — is dropped.
 _LOCAL_ENV_KEEP = ('PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TZ', 'SHELL')
+
+_sessions_lock = threading.Lock()
+_open_sessions = 0
 
 
 class TerminalSandboxUnavailable(RuntimeError):
     """The sandbox is required here but the helper is missing."""
 
 
+def _hosted() -> bool:
+    return os.getenv('CANVAS_REQUIRE_AUTH', '').strip().lower() == 'true'
+
+
 def sandbox_mode() -> str:
-    mode = os.getenv('TERMINAL_SANDBOX', '').strip().lower()
-    if mode in ('required', 'auto'):
-        return mode
-    if os.getenv('CANVAS_REQUIRE_AUTH', '').strip().lower() == 'true':
+    if _hosted():
         return 'required'
-    return 'auto'
+    mode = os.getenv('TERMINAL_SANDBOX', '').strip().lower()
+    return 'required' if mode == 'required' else 'auto'
 
 
 def helper_available(helper: str = None) -> bool:
@@ -86,23 +102,78 @@ def exec_terminal_child(plan) -> None:
     os._exit(127)
 
 
-def share_with_sandbox(path, root=None) -> None:
-    """Make a server-written workspace file/dir group-writable for the sandbox.
+def session_opened() -> None:
+    global _open_sessions
+    with _sessions_lock:
+        _open_sessions += 1
 
-    The server's umask is 022; without this a file saved from the Monaco editor
-    is read-only in the terminal. With `root`, the directories between `path`
-    and `root` that the server just created are shared as well. Best effort.
+
+def session_closed(plan, helper: str = None) -> bool:
+    """Count a session closed; when none remain, reap every sandbox process.
+
+    Only for sandboxed sessions (the plan exec'd the helper). The reap runs under
+    the session lock so a session opening at the same moment spawns its shell
+    after the reap, never before it. Returns True when a reap ran successfully.
     """
-    p = Path(path)
-    targets = [p]
-    if root is not None:
-        root = Path(root)
-        targets += [d for d in p.parents if root in d.parents]
-    for t in targets:
+    global _open_sessions
+    helper = helper or SANDBOX_HELPER
+    with _sessions_lock:
+        _open_sessions = max(0, _open_sessions - 1)
+        if _open_sessions or plan is None or plan[0] != helper:
+            return False
         try:
-            if t.is_symlink():
+            r = subprocess.run([helper, '--reap'], env={}, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=10, close_fds=True)
+            ok = r.returncode == 0
+        except Exception:
+            ok = False
+        _reap_sandbox_zombies()
+        return ok
+
+
+def _sandbox_tasks():
+    """[(pid, ppid, state)] of every process whose real uid is the sandbox uid."""
+    out = []
+    try:
+        names = os.listdir('/proc')
+    except OSError:
+        return out
+    for d in names:
+        if not d.isdigit():
+            continue
+        try:
+            with open(f'/proc/{d}/status') as fh:
+                fields = dict(ln.split(':', 1) for ln in fh if ':' in ln)
+            if fields.get('Uid', '').split()[0] != str(SANDBOX_UID):
                 continue
-            mode = t.stat().st_mode & 0o7777
-            os.chmod(t, mode | (0o2070 if t.is_dir() else 0o060))
-        except OSError:
-            pass
+            out.append((int(d), int(fields.get('PPid', '0').strip() or 0),
+                        fields.get('State', '?').strip()[:1]))
+        except (OSError, ValueError, IndexError):
+            continue
+    return out
+
+
+def _reap_sandbox_zombies(timeout=2.0) -> None:
+    """Collect the killed sandbox processes that were re-parented to THIS process.
+
+    In the container the server is pid 1, so every orphaned sandbox process (a
+    setsid/nohup survivor) becomes our child; killed and never waited for, it
+    stays a zombie that still counts against the sandbox's RLIMIT_NPROC. Only
+    uid-1500 zombies whose parent is us are waited for, by pid, so no other
+    thread's subprocess is ever reaped out from under it."""
+    me = os.getpid()
+    end = time.time() + timeout
+    while True:
+        tasks = _sandbox_tasks()
+        for pid, ppid, state in tasks:
+            if ppid == me and state == 'Z':
+                try:
+                    os.waitpid(pid, os.WNOHANG)
+                except OSError:
+                    pass
+        if not any(state != 'Z' or ppid == me for pid, ppid, state in _sandbox_tasks()):
+            return
+        if time.time() >= end:
+            return
+        time.sleep(0.05)

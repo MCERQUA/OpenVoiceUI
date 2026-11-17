@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import threading
 import time
 from datetime import datetime, timezone
@@ -44,7 +45,9 @@ from services.canvas_versioning import (
 # ---------------------------------------------------------------------------
 
 from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR, CODE_WORKSPACE_DIR
-from services.terminal_sandbox import share_with_sandbox
+from services.safe_open import (
+    UnsafePath, open_beneath as safe_open_beneath, open_dir_beneath as safe_open_dir_beneath,
+    read_fd as safe_read_fd, split_rel as safe_split_rel, write_beneath as safe_write_beneath)
 CANVAS_SSE_PORT = int(os.getenv('CANVAS_SSE_PORT', '3030'))
 CANVAS_SESSION_PORT = int(os.getenv('CANVAS_SESSION_PORT', '3002'))
 BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
@@ -135,8 +138,10 @@ def _notify_brain(event_type: str, **data) -> None:
     try:
         event = {'type': event_type, 'timestamp': datetime.now().isoformat()}
         event.update(data)
-        with open(BRAIN_EVENTS_PATH, 'a') as f:
-            f.write(json.dumps(event) + '\n')
+        # owner-checked, no-follow append (services/events_file.py): /tmp is
+        # shared with the terminal sandbox user
+        from services.events_file import append_event
+        append_event(event, BRAIN_EVENTS_PATH)
     except Exception as exc:
         logging.getLogger(__name__).debug(f'Brain notification failed (non-critical): {exc}')
 
@@ -2030,12 +2035,21 @@ def canvas_data_write(filename):
 
 # ---------------------------------------------------------------------------
 # Workspace file API — backs the Monaco code-editor canvas block.
-# Scoped to WORKSPACE_DIR (/app/runtime/workspace). NOT under the public
-# /api/canvas/ prefix, so the global Clerk before_request gate protects every
-# read/write when auth is enabled. _safe_canvas_path blocks traversal.
+# Scoped to CODE_WORKSPACE_DIR. NOT under the public /api/canvas/ prefix, so the
+# global Clerk before_request gate protects every read/write when auth is
+# enabled (it is in app.py _ADMIN_ONLY_PREFIXES).
+#
+# In the image this tree is shared with the terminal's `sandbox` user, who owns
+# it and can rename/symlink anything in it at any moment. So the server NEVER
+# resolves-then-opens by name here: every read, write, mkdir and listing walks
+# the path with no-follow fds (services/safe_open.py). A symlink anywhere in the
+# path is refused, and a directory swapped for a symlink mid-request cannot
+# redirect the I/O (review of PR #597, M1).
 # ---------------------------------------------------------------------------
 _WORKSPACE_MAX_BYTES = 5 * 1024 * 1024  # 5MB per-file ceiling for the editor
 _WORKSPACE_SKIP_SEGMENTS = {'.git', 'node_modules', '__pycache__', '.cache'}
+_WORKSPACE_DIR_MODE = 0o2770   # setgid: new entries stay in the sandbox group
+_WORKSPACE_FILE_MODE = 0o664   # editable from the terminal's sandbox user too
 
 
 def _workspace_root() -> Path:
@@ -2043,75 +2057,105 @@ def _workspace_root() -> Path:
     return CODE_WORKSPACE_DIR
 
 
+def _workspace_rel(raw) -> str | None:
+    """The caller's path as a plain relative path, or None (no '..', no absolute)."""
+    try:
+        return '/'.join(safe_split_rel((raw or '').strip()))
+    except UnsafePath:
+        return None
+
+
 @canvas_bp.route('/api/workspace/tree', methods=['GET'])
 def workspace_tree():
-    """Return the workspace file tree (relative paths, dirs + files)."""
+    """Return the workspace file tree (relative paths, dirs + files). Symlinks are not listed."""
     root = _workspace_root()
     entries = []
     try:
-        for p in sorted(root.rglob('*')):
-            rel = p.relative_to(root)
-            parts = rel.parts
-            if any(seg in _WORKSPACE_SKIP_SEGMENTS for seg in parts):
-                continue
-            if len(parts) > 12:  # avoid pathological deep trees
-                continue
-            try:
-                is_dir = p.is_dir()
-                entries.append({
-                    'path': str(rel),
-                    'name': p.name,
-                    'type': 'dir' if is_dir else 'file',
-                    'size': 0 if is_dir else p.stat().st_size,
-                })
-            except OSError:
-                continue
+        for dirpath, dirnames, filenames, dirfd in os.fwalk(str(root), follow_symlinks=False):
+            rel_dir = os.path.relpath(dirpath, str(root))
+            rel_parts = () if rel_dir == '.' else tuple(rel_dir.split('/'))
+            keep = []
+            for name in sorted(dirnames):
+                try:
+                    st = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if not stat.S_ISDIR(st.st_mode) or name in _WORKSPACE_SKIP_SEGMENTS:
+                    continue
+                if len(rel_parts) + 1 > 12:  # avoid pathological deep trees
+                    continue
+                keep.append(name)
+                entries.append({'path': '/'.join(rel_parts + (name,)), 'name': name,
+                                'type': 'dir', 'size': 0})
+            dirnames[:] = keep  # never descend into skipped dirs or symlinks
+            for name in sorted(filenames):
+                try:
+                    st = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
+                except OSError:
+                    continue
+                if not stat.S_ISREG(st.st_mode) or len(rel_parts) + 1 > 12:
+                    continue  # symlinks / fifos / sockets are not listed (no lstat-of-target leak)
+                entries.append({'path': '/'.join(rel_parts + (name,)), 'name': name,
+                                'type': 'file', 'size': st.st_size})
     except Exception as exc:
         logger.error(f'workspace_tree error: {exc}')
         return jsonify({'error': str(exc)}), 500
+    entries.sort(key=lambda e: e['path'])
     return jsonify({'root': 'workspace', 'entries': entries})
 
 
 @canvas_bp.route('/api/workspace/file', methods=['GET'])
 def workspace_file_read():
     """Read a single workspace file as UTF-8 text for the editor."""
-    rel = request.args.get('path', '').strip()
-    if not rel:
+    raw = request.args.get('path', '').strip()
+    if not raw:
         return jsonify({'error': 'path required'}), 400
-    resolved = _safe_canvas_path(str(_workspace_root()), rel)
-    if resolved is None or not resolved.exists() or not resolved.is_file():
+    rel = _workspace_rel(raw)
+    if rel is None:
         return jsonify({'error': 'not found'}), 404
-    if resolved.stat().st_size > _WORKSPACE_MAX_BYTES:
-        return jsonify({'error': 'file too large to edit'}), 413
     try:
-        content = resolved.read_text(encoding='utf-8')
+        fd = safe_open_beneath(str(_workspace_root()), rel)
+    except (OSError, UnsafePath):
+        return jsonify({'error': 'not found'}), 404
+    try:
+        if os.fstat(fd).st_size > _WORKSPACE_MAX_BYTES:
+            return jsonify({'error': 'file too large to edit'}), 413
+        data = safe_read_fd(fd, _WORKSPACE_MAX_BYTES)
+    except (OSError, UnsafePath):
+        return jsonify({'error': 'file too large to edit'}), 413
+    finally:
+        os.close(fd)
+    try:
+        content = data.decode('utf-8')
     except UnicodeDecodeError:
         return jsonify({'error': 'binary file — not editable'}), 415
-    return jsonify({'path': rel, 'content': content})
+    return jsonify({'path': raw, 'content': content})
 
 
 @canvas_bp.route('/api/workspace/file', methods=['POST'])
 def workspace_file_write():
     """Create or overwrite a workspace file (also creates parent dirs)."""
     data = request.get_json(silent=True) or {}
-    rel = (data.get('path') or '').strip()
+    raw = (data.get('path') or '').strip()
     content = data.get('content')
-    if not rel or content is None:
+    if not raw or content is None:
         return jsonify({'error': 'path and content required'}), 400
     if not isinstance(content, str):
         return jsonify({'error': 'content must be a string'}), 400
-    if len(content.encode('utf-8')) > _WORKSPACE_MAX_BYTES:
+    encoded = content.encode('utf-8')
+    if len(encoded) > _WORKSPACE_MAX_BYTES:
         return jsonify({'error': 'content too large'}), 413
-    resolved = _safe_canvas_path(str(_workspace_root()), rel)
-    if resolved is None:
+    rel = _workspace_rel(raw)
+    if rel is None:
         return jsonify({'error': 'invalid path'}), 400
-    if resolved.exists() and resolved.is_dir():
-        return jsonify({'error': 'path is a directory'}), 400
     try:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(content, encoding='utf-8')
-        share_with_sandbox(resolved, _workspace_root())  # editable from the terminal's sandbox user
-        return jsonify({'ok': True, 'path': rel, 'bytes': len(content.encode('utf-8'))})
+        safe_write_beneath(str(_workspace_root()), rel, encoded, mode=_WORKSPACE_FILE_MODE,
+                           create_dirs=True, dir_mode=_WORKSPACE_DIR_MODE)
+        return jsonify({'ok': True, 'path': raw, 'bytes': len(encoded)})
+    except IsADirectoryError:
+        return jsonify({'error': 'path is a directory'}), 400
+    except UnsafePath:
+        return jsonify({'error': 'invalid path'}), 400
     except Exception as exc:
         logger.error(f'workspace_file_write error: {exc}')
         return jsonify({'error': str(exc)}), 500
@@ -2121,16 +2165,18 @@ def workspace_file_write():
 def workspace_mkdir():
     """Create a directory inside the workspace."""
     data = request.get_json(silent=True) or {}
-    rel = (data.get('path') or '').strip()
-    if not rel:
+    raw = (data.get('path') or '').strip()
+    if not raw:
         return jsonify({'error': 'path required'}), 400
-    resolved = _safe_canvas_path(str(_workspace_root()), rel)
-    if resolved is None:
+    rel = _workspace_rel(raw)
+    if rel is None:
         return jsonify({'error': 'invalid path'}), 400
     try:
-        resolved.mkdir(parents=True, exist_ok=True)
-        share_with_sandbox(resolved, _workspace_root())
-        return jsonify({'ok': True, 'path': rel})
+        os.close(safe_open_dir_beneath(str(_workspace_root()), rel, create=True,
+                                       dir_mode=_WORKSPACE_DIR_MODE))
+        return jsonify({'ok': True, 'path': raw})
+    except UnsafePath:
+        return jsonify({'error': 'invalid path'}), 400
     except Exception as exc:
         logger.error(f'workspace_mkdir error: {exc}')
         return jsonify({'error': str(exc)}), 500

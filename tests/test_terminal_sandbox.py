@@ -139,6 +139,7 @@ def test_hosted_tenant_without_helper_refuses_instead_of_server_shell(terminal, 
 
 
 def test_local_shell_inherits_no_secret_names(terminal, monkeypatch):
+    monkeypatch.delenv("CANVAS_REQUIRE_AUTH", raising=False)
     monkeypatch.setenv("TERMINAL_SANDBOX", "auto")
     ws = FakeWS()
     t = _run(terminal, ws)
@@ -181,23 +182,39 @@ def test_plan_unit_contract(tmp_path, monkeypatch):
     path, argv, env, cwd = ts.plan_terminal_child(tmp_path, helper=str(tmp_path / "missing"), mode="auto")
     assert not set(env) & set(SECRET_NAMES)
     assert cwd == str(tmp_path) and argv[-1] == "-l"
-    monkeypatch.setenv("CANVAS_REQUIRE_AUTH", "true")
-    monkeypatch.delenv("TERMINAL_SANDBOX", raising=False)
-    assert ts.sandbox_mode() == "required"
+    monkeypatch.delenv("CANVAS_REQUIRE_AUTH", raising=False)
     monkeypatch.setenv("TERMINAL_SANDBOX", "auto")
     assert ts.sandbox_mode() == "auto"
+    monkeypatch.setenv("TERMINAL_SANDBOX", "required")
+    assert ts.sandbox_mode() == "required"
 
 
-def test_share_with_sandbox_makes_editor_files_group_writable(tmp_path):
+def test_hosted_tenant_is_always_required_even_with_terminal_sandbox_auto(monkeypatch):
+    """Review nit: TERMINAL_SANDBOX=auto must not re-open the same-uid fallback on a hosted tenant."""
     import services.terminal_sandbox as ts
-    root = tmp_path / "ws"
-    f = root / "a" / "b" / "file.txt"
-    f.parent.mkdir(parents=True)
-    f.write_text("x")
-    for p in (root, root / "a", root / "a" / "b", f):
-        os.chmod(p, 0o755 if p.is_dir() else 0o644)
-    ts.share_with_sandbox(f, root)
-    assert f.stat().st_mode & 0o060 == 0o060
-    assert (root / "a").stat().st_mode & 0o070 == 0o070
-    assert (root / "a" / "b").stat().st_mode & 0o070 == 0o070
-    assert root.stat().st_mode & 0o020 == 0  # the root itself is not touched
+    monkeypatch.setenv("CANVAS_REQUIRE_AUTH", "true")
+    monkeypatch.setenv("TERMINAL_SANDBOX", "auto")
+    assert ts.sandbox_mode() == "required"
+
+
+def test_last_session_close_runs_the_helper_reap_mode(terminal, monkeypatch, tmp_path):
+    """Review L1: the server cannot signal uid-1500 processes, so on the last close it
+    must run `helper --reap` (which kills every sandbox process, setsid survivors too)."""
+    import services.terminal_sandbox as ts
+    log = tmp_path / "helper-calls.log"
+    helper = tmp_path / "fake-helper"
+    helper.write_text(
+        "#!/bin/sh\n"
+        f"echo \"argv:$*\" >> {log}\n"
+        "[ \"$1\" = --reap ] && exit 0\n"
+        "echo READY; exec cat\n")
+    helper.chmod(0o755)
+    monkeypatch.setattr(ts, "SANDBOX_HELPER", str(helper))
+    monkeypatch.setenv("CANVAS_REQUIRE_AUTH", "true")
+    ws = FakeWS()
+    t = _run(terminal, ws)
+    ws.wait_for("READY")
+    ws.hangup()
+    t.join(timeout=10)
+    calls = log.read_text().splitlines() if log.exists() else []
+    assert "argv:--reap" in calls, f"no reap on session close; helper calls: {calls}"
