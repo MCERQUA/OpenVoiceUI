@@ -14,23 +14,32 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
   R2 every confirmation the review says it read exists, is not archived and was made by a person
   R3 every required line (limit / ai items) has a policy for this sub, received for THIS account,
      person-confirmed (line, effective, expiration, source document) against a stored file whose bytes
-     still hash to the confirmed sha256, and IN FORCE on the claim date (effective <= date < expiration)
+     still hash to the confirmed sha256, that file's document received for THIS account and THIS sub,
+     and IN FORCE on the claim date (effective <= date < expiration)
   R4 every required additional-insured endorsement (ai_ongoing / ai_completed, or names_parties) has an
-     endorsement on that line, for this account, whose OWN document is of kind 'endorsement' (never the
-     certificate), hash-verified and person-confirmed, that names this account and this project (or is
+     endorsement on that line, for this account, whose OWN document is of kind 'endorsement' with that
+     kind written or confirmed by a PERSON, for this account and sub, hash-verified, whose file is NOT
+     any certificate file of this sub, person-confirmed (including which policy it attaches to), that
+     names this account EXACTLY (normalised equality, never containment) and this project (or is
      blanket with the project's contract tick person-confirmed true). A naming miss (WRONG_PARTY,
-     WRONG_PROJECT, BLANKET_UNBACKED) counts only when a person recorded an unexpired waiver backed by the
-     contractor's written OK (kind contractor_waiver_ok). A missing document is never waivable. Ongoing
-     ops are not required after substantial completion; completed ops not after the statute of repose.
-  R5 the account, sub, project and assignment rows exist and the sub is linked to the account
-  R6 the assignment was last written by a person (not the agent key), names the set the verdict used,
-     and pinned that set's current version
+     WRONG_PROJECT, BLANKET_UNBACKED) counts only when a person recorded an unexpired waiver backed by
+     THIS account's written OK (kind contractor_waiver_ok). A missing document is never waivable.
+     Ongoing ops are not required after substantial completion; completed ops not after the statute
+     of repose.
+  R5 the account, sub, project and assignment rows exist, the sub is linked to the account, and the
+     names, the project's account and its dates were each written or confirmed by a person
+  R6 each assignment field the verdict reads (project, sub, set, set version, trade, scope change) was
+     last written by a person or person-confirmed (per field, read from the activity log: a staff
+     hold or note never vouches for a field the agent wrote), names the set the verdict used, and
+     pinned that set's current version
 If a record the claim read was changed after the claim, the watcher cannot see the old version:
-that claim is CANNOT-TELL, never PASS.
+that claim is CANNOT-TELL, never PASS. If the claim is backed by the documents as they were at the
+claim, but a document or record it read was archived since, the row is STALE (right when made, not
+now; re-review), never a disagreement.
 
 Verdict: PASS (exit 0) every Meets is backed / FAIL (exit 1) at least one Meets is NOT backed — the
-watcher disagrees with the stored verdict / CANNOT-TELL (exit 3) unreadable store, nothing to check, or
-a review it cannot judge. Output is a report on stdout (--json for machines). Nothing else.
+watcher disagrees with the stored verdict / CANNOT-TELL (exit 3) unreadable store, nothing to check, a
+review it cannot judge, or a STALE review. Output is a report on stdout (--json for machines).
 
   tools/biz/crt-verdict-watch.py --db-dir /mnt/clients/<tenant>/openvoiceui/db
   tools/biz/crt-verdict-watch.py --db-dir <db dir>/sandboxes/josh --json
@@ -48,10 +57,14 @@ import sqlite3
 import sys
 from datetime import date, datetime
 
-PASS, FAIL, CANNOT = 'PASS', 'FAIL', 'CANNOT-TELL'
+PASS, FAIL, CANNOT, STALE = 'PASS', 'FAIL', 'CANNOT-TELL', 'STALE'
 EXIT = {PASS: 0, FAIL: 1, CANNOT: 3}
 MEETS_STATES = ('meets', 'meets_accepted', 'expiring_30', 'expiring_15')
 PERSON = ('clerk:', 'local:')
+ASG_FIELDS = ('crt_project_id', 'party_contact_id', 'requirement_set_id', 'requirement_set_version',
+              'trade_category', 'scope_changed_at')
+PROJECT_FIELDS = ('crt_account_id', 'name', 'substantial_completion', 'repose_years')
+_ABSENT = object()
 _SUFFIX = {'llc', 'inc', 'co', 'corp', 'corporation', 'company', 'ltd', 'the', 'lp', 'llp', 'pllc', 'pc'}
 
 
@@ -62,8 +75,15 @@ def _norm(s):
 
 
 def _named(wanted, texts):
+    """Project naming (whole words): the engine reads WRONG_PROJECT the same way."""
     w = _norm(wanted)
     return bool(w) and any(_norm(t) == w or f' {w} ' in f' {_norm(t)} ' for t in (texts or []))
+
+
+def _named_exact(wanted, texts):
+    """Party naming: the same legal name after normalising, never a longer name containing it."""
+    w = _norm(wanted)
+    return bool(w) and any(_norm(t) == w for t in (texts or []))
 
 
 def _day(s):
@@ -95,15 +115,57 @@ class Store:
             self.rows[r['id']] = {'id': r['id'], 'collection': r['collection'], 'version': r['version'],
                                   'created_by': r['created_by'], 'updated_by': r['updated_by'],
                                   'updated_at': r['updated_at'], 'archived': bool(r['archived_at']),
-                                  'data': json.loads(r['data'])}
+                                  'archived_at': r['archived_at'], 'data': json.loads(r['data'])}
+        self.events = {}
+        for a in self.conn.execute("SELECT record_id, type, by, diff FROM activity "
+                                   "WHERE type IN ('created', 'updated') ORDER BY id"):
+            self.events.setdefault(a['record_id'], []).append(
+                (a['type'], a['by'], json.loads(a['diff']) if a['diff'] else {}))
+        self.toggles = {}         # archive / unarchive times per record: each bumped the version, not the data
+        for a in self.conn.execute("SELECT record_id, at FROM activity WHERE type IN ('archived', 'unarchived')"):
+            self.toggles.setdefault(a['record_id'], []).append(a['at'])
         self._hash = {}
+        self.at = None            # None: as things are now; an ISO time: as they were at that claim
+
+    def view(self, at):
+        v = object.__new__(Store)
+        v.__dict__.update(self.__dict__)
+        v.at = at
+        return v
+
+    def _visible(self, r):
+        return not r['archived'] or (self.at is not None and (r['archived_at'] or '') > self.at)
 
     def all(self, coll):
-        return [r for r in self.rows.values() if r['collection'] == coll and not r['archived']]
+        return [r for r in self.rows.values() if r['collection'] == coll and self._visible(r)]
+
+    def version(self, rec):
+        """The record's version at the claim: archiving and unarchiving since then changed no data."""
+        if self.at is None:
+            return rec['version']
+        return rec['version'] - sum(1 for t in self.toggles.get(rec['id'], []) if t > self.at)
+
+    def all_ever(self, coll):
+        return [r for r in self.rows.values() if r['collection'] == coll]
 
     def get(self, coll, rid):
         r = self.rows.get(rid)
-        return r if r and r['collection'] == coll and not r['archived'] else None
+        return r if r and r['collection'] == coll and self._visible(r) else None
+
+    def wrote(self, rec, field):
+        """Who last set or changed this ONE field, read from the activity log; None when the log does
+        not explain the field's current value (nobody vouches for it)."""
+        last, creator = _ABSENT, None
+        for typ, by, diff in self.events.get(rec['id'], []):
+            if typ == 'created':
+                creator = by
+                if field in (diff.get('set') or {}):
+                    last = (by, diff['set'][field])
+            elif field in (diff.get('changed') or {}):
+                last = (by, (diff['changed'][field] or [None, None])[-1])
+        if last is _ABSENT:
+            return creator if field not in rec['data'] else None
+        return last[0] if last[1] == rec['data'].get(field) else None
 
     def file_ok(self, sha):
         """The file is in the private store and its bytes hash to sha (re-hashed here)."""
@@ -127,12 +189,34 @@ class Store:
         return url[len('biz-file:'):] if url.startswith('biz-file:') else None
 
 
-def _person_confs(st, rec, fields, need_file=True):
-    """Person confirmations of rec at its current version covering every field (file-verified if asked)."""
+def _person_field(st, rec, field):
+    """THIS field was last written by a person, or a person confirmed it at the record's current version."""
+    return str(st.wrote(rec, field) or '').startswith(PERSON) or bool(_person_confs(st, rec, [field], need_file=False))
+
+
+def _doc_backs(st, did, acct, party=None, kind=None):
+    """The document is this account's (and this sub's) paper, of this kind, its identity written or
+    confirmed by a person, and its bytes still hash to its id."""
+    doc = st.get('document', did) if did else None
+    if not doc:
+        return False
+    d = doc['data']
+    if d.get('crt_account_id') != acct['id'] or (party is not None and d.get('contact_id') != party['id']):
+        return False
+    if kind is not None and d.get('kind') != kind:
+        return False
+    fields = ['crt_account_id', 'file_url'] + (['contact_id'] if party is not None else []) + \
+        (['kind'] if kind is not None else [])
+    return all(_person_field(st, doc, f) for f in fields) and st.file_ok(st.doc_sha(did))
+
+
+def _person_confs(st, rec, fields, need_file=True, acct=None, party=None):
+    """Person confirmations of rec at its current version covering every field (file-verified if asked,
+    and, when acct is given, read from THIS account's (and sub's) own paper)."""
     out = []
     for c in st.all('crt_confirmation'):
         d = c['data']
-        if d.get('record_id') != rec['id'] or d.get('record_version') != rec['version']:
+        if d.get('record_id') != rec['id'] or d.get('record_version') != st.version(rec):
             continue
         if not str(d.get('confirmed_by') or '').startswith(PERSON) or not str(c['created_by']).startswith(PERSON):
             continue
@@ -142,6 +226,8 @@ def _person_confs(st, rec, fields, need_file=True):
             sha = st.doc_sha(d.get('source_document_id'))
             if not sha or sha != d.get('source_sha256') or not st.file_ok(sha):
                 continue
+            if acct is not None and not _doc_backs(st, d.get('source_document_id'), acct, party):
+                continue
         out.append(c)
     return out
 
@@ -149,8 +235,8 @@ def _person_confs(st, rec, fields, need_file=True):
 WAIVABLE_NAME_CODES = ('WRONG_PARTY', 'WRONG_PROJECT', 'BLANKET_UNBACKED')
 
 
-def _waived(st, asg, code, on):
-    """A person-recorded, unexpired waiver of exactly this code, backed by the contractor's written OK."""
+def _waived(st, asg, code, on, acct):
+    """A person-recorded, unexpired waiver of exactly this code, backed by THIS account's written OK."""
     for w in st.all('crt_waiver'):
         wd = w['data']
         if wd.get('crt_assignment_id') != asg['id'] or wd.get('variance_code') != code:
@@ -159,8 +245,7 @@ def _waived(st, asg, code, on):
             continue
         exp = _day(wd.get('expires'))
         doc = st.get('document', wd.get('acceptance_document_id'))
-        if exp and on and exp > on and doc and doc['data'].get('kind') == 'contractor_waiver_ok' \
-                and st.file_ok(st.doc_sha(doc['id'])):
+        if exp and on and exp > on and doc and _doc_backs(st, doc['id'], acct, kind='contractor_waiver_ok'):
             return True
     return False
 
@@ -170,7 +255,20 @@ def judge(st, claim):
 
     claim = {assignment_id, state, on (date), at (ISO time the claim was made), set_id or None,
              confirmation_ids or None, kind: 'review' | 'live'}
+
+    Judged twice: with the records as they were at the claim (anything archived since still counted)
+    and as they are now. Backed then but not now is STALE (right when made), never a disagreement.
     """
+    then = _judge(st.view(claim['at']), claim)
+    if then[0] != PASS:
+        return then
+    now = _judge(st.view(None), claim)
+    if now[0] == PASS:
+        return now
+    return STALE, ['STALE: backed by the records as they were at the claim; since then: ' + '; '.join(now[1])]
+
+
+def _judge(st, claim):
     why, cannot = [], []
     on, at = claim['on'], claim['at']
     asg = st.get('crt_assignment', claim['assignment_id'])
@@ -184,8 +282,9 @@ def judge(st, claim):
     if changed_since(asg):
         cannot.append('R6 the assignment changed after the claim')
     else:
-        if str(asg['updated_by']).startswith('agent:'):
-            why.append('R6 assignment last written by the agent key (its set, trade or scope are unconfirmed)')
+        agent_fields = [f for f in ASG_FIELDS if not _person_field(st, asg, f)]
+        if agent_fields:
+            why.append('R6 assignment field(s) not written or confirmed by a person: ' + ', '.join(agent_fields))
         if claim.get('set_id') and claim['set_id'] != asg['data'].get('requirement_set_id'):
             why.append('R6 the verdict used a different requirement set than the assignment names')
     proj = st.get('crt_project', asg['data'].get('crt_project_id'))
@@ -194,8 +293,17 @@ def judge(st, claim):
     if not (proj and acct and party):
         return FAIL, ['R5 project, account or sub missing']
     if not any(ln['data'].get('crt_account_id') == acct['id'] and ln['data'].get('party_contact_id') == party['id']
-               and ln['data'].get('status', 'active') == 'active' for ln in st.all('crt_account_party')):
-        why.append('R5 sub not linked to the account')
+               and ln['data'].get('status', 'active') == 'active'
+               and all(_person_field(st, ln, f) for f in ('crt_account_id', 'party_contact_id', 'status'))
+               for ln in st.all('crt_account_party')):
+        why.append('R5 sub not linked to the account by a person')
+    for rec, fields, what in ((acct, ('name', 'company_name'), 'account name'),
+                              (party, ('name', 'company_name'), 'sub name'),
+                              (proj, PROJECT_FIELDS, 'project')):
+        bad = [f for f in fields if not _person_field(st, rec, f)]
+        if bad:
+            (cannot if changed_since(rec) else why).append(
+                f'R5 {what} field(s) not written or confirmed by a person: ' + ', '.join(bad))
 
     s = st.get('crt_requirement_set', claim.get('set_id') or asg['data'].get('requirement_set_id'))
     if not s:
@@ -232,7 +340,8 @@ def judge(st, claim):
                     continue
                 eff, exp = _day(p['data'].get('effective')), _day(p['data'].get('expiration'))
                 if eff and exp and on and eff <= on < exp and \
-                        _person_confs(st, p, ['line', 'effective', 'expiration', 'source_document_id']):
+                        _person_confs(st, p, ['line', 'effective', 'expiration', 'source_document_id'], acct=acct,
+                                      party=party):
                     good = True
             if not good:
                 (cannot if changed else why).append(f'R3 no person-confirmed, file-backed {line} policy in force')
@@ -242,6 +351,10 @@ def judge(st, claim):
             if fn == 'ai_completed' and sc and on and on > sc and isinstance(repose, int) and on >= _add_years(sc, repose):
                 continue
             good = changed = False
+            # every certificate file of this sub for this account: never the endorsement (host ruling N2)
+            cert_shas = {st.doc_sha(d['id']) for d in st.all_ever('document') if d['data'].get('kind') == 'coi_acord25'
+                         and d['data'].get('crt_account_id') == acct['id'] and d['data'].get('contact_id') == party['id']}
+            cert_shas |= {st.doc_sha(p['data'].get('source_document_id')) for p in policies}
             for e in st.all('crt_endorsement'):
                 ed = e['data']
                 pol = st.get('crt_policy', ed.get('crt_policy_id'))
@@ -252,24 +365,26 @@ def judge(st, claim):
                     changed = True
                     continue
                 doc = st.get('document', ed.get('document_id'))
-                # the endorsement's own document: kind endorsement, not the certificate, bytes verified
-                if not doc or doc['data'].get('kind') != 'endorsement' or \
-                        doc['id'] == pol['data'].get('source_document_id') or not st.file_ok(st.doc_sha(doc['id'])):
+                # the endorsement's own document: kind endorsement (a person said so), this sub's, not a
+                # certificate's file, bytes verified
+                if not doc or not _doc_backs(st, doc['id'], acct, party, kind='endorsement') or \
+                        doc['id'] == pol['data'].get('source_document_id') or st.doc_sha(doc['id']) in cert_shas:
                     continue
                 if not _person_confs(st, e, ['function', 'document_id', 'scheduled_names', 'scheduled_projects',
-                                             'blanket']):
+                                             'blanket', 'crt_policy_id'], acct=acct, party=party):
                     continue
                 if ed.get('blanket'):
                     backed = proj['data'].get('contract_requires_ai') is True and \
                         bool(_person_confs(st, proj, ['contract_requires_ai']))
                     name_code = None if backed else 'BLANKET_UNBACKED'
-                elif not _named(acct_name, ed.get('scheduled_names')):
+                elif not _named_exact(acct_name, ed.get('scheduled_names')) or \
+                        not all(_named_exact(n, ed.get('scheduled_names')) for n in proj['data'].get('contract_ai_parties') or []):
                     name_code = 'WRONG_PARTY'
                 elif not _named(pname, ed.get('scheduled_projects')):
                     name_code = 'WRONG_PROJECT'
                 else:
                     name_code = None
-                if name_code is None or _waived(st, asg, name_code, on):
+                if name_code is None or _waived(st, asg, name_code, on, acct):
                     good = True
             if not good:
                 (cannot if changed else why).append(
@@ -339,8 +454,9 @@ def watch(db_dir, live=None):
         return FAIL, rows, f'{vs.count(FAIL)} Meets verdict(s) NOT backed by confirmed inputs'
     if not rows:
         return CANNOT, rows, 'no Meets verdicts to check (silence is not health)'
-    if CANNOT in vs:
-        return CANNOT, rows, f'{vs.count(CANNOT)} claim(s) could not be judged'
+    if CANNOT in vs or STALE in vs:
+        return CANNOT, rows, (f'{vs.count(CANNOT)} claim(s) could not be judged, {vs.count(STALE)} stale review(s) '
+                              '(right when made, an input archived since: re-review)')
     return PASS, rows, f'{len(rows)} Meets verdict(s) backed by person-confirmed, file-verified inputs'
 
 
@@ -372,7 +488,7 @@ def main(argv=None):
     else:
         for x in rows:
             if x['watch'] != PASS:
-                print(f"{'DISAGREE' if x['watch'] == FAIL else 'CANNOT-TELL'}: {x['kind']} '{x['stored_state']}' "
+                print(f"{'DISAGREE' if x['watch'] == FAIL else x['watch']}: {x['kind']} '{x['stored_state']}' "
                       f"for assignment {x['assignment_id']} - " + '; '.join(x['reasons']))
         print(f'crt-verdict-watch: {verdict} - {summary} [probation, advisory only]')
     return EXIT[verdict]
