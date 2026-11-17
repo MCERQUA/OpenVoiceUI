@@ -102,7 +102,7 @@ class _Pool(SQLitePool):
 
 
 class BizStore(PageRegistryMixin):
-    def __init__(self, db_dir: Path, tenant: str, *, core_dir=None, library_path=None):
+    def __init__(self, db_dir: Path, tenant: str, *, core_dir=None, library_path=None, packs_dir=None):
         if not TENANT_RE.match(tenant or ''):
             raise _err(503, 'biz_tenant_invalid', 'invalid tenant id')
         self.tenant = tenant
@@ -116,6 +116,8 @@ class BizStore(PageRegistryMixin):
             kw['core_dir'] = core_dir
         if library_path is not None:
             kw['library_path'] = library_path
+        if packs_dir is not None:
+            kw['packs_dir'] = packs_dir
         self.registry = Registry(self.db_dir / 'schema' / 'custom', **kw)
         self.read_only = False
         self.mode_reason = None
@@ -131,6 +133,7 @@ class BizStore(PageRegistryMixin):
             self.pool.close()
             raise
         self._migrate()
+        self.registry.set_packs(self.packs_enabled())
 
     # ── plumbing ─────────────────────────────────────────────────────────
     @contextmanager
@@ -311,6 +314,55 @@ class BizStore(PageRegistryMixin):
             raise _err(403, 'staff_only_field', 'Only a person (staff session) may set these fields; '
                                                 'an agent key cannot', collection=collection, fields=hit)
 
+    def _pack_hooks(self, op, collection, data, current, *, by, agent, via_pack):
+        """Run every enabled pack's check_write for this collection (contract: services/biz/packs)."""
+        from services.biz import packs as _packs
+        for pack in self.registry.pack_of(collection):
+            mod = _packs.hooks_for(pack)
+            fn = getattr(mod, 'check_write', None) if mod is not None else None
+            if fn is not None:
+                fn(self, op, collection, data, current, by=by, agent=agent, via_pack=via_pack)
+
+    # ── packs ────────────────────────────────────────────────────────────
+    def packs_enabled(self) -> list:
+        with self._read() as conn:
+            raw = self._meta(conn, 'packs')
+        try:
+            names = json.loads(raw) if raw else []
+        except ValueError:
+            names = []
+        return [n for n in names if isinstance(n, str)]
+
+    def pack_enabled(self, name: str) -> bool:
+        return name in self.registry.enabled_packs
+
+    def enable_pack(self, name, *, by, source=None, agent=False):
+        """Turn a shipped pack on for this business. Additive and permanent (never turned off)."""
+        self._writable()
+        source = self.check_source(source, agent=agent)
+        if not isinstance(name, str) or name not in self.registry.available_packs:
+            raise _err(404, 'unknown_pack', 'No such pack ships with this engine', pack=str(name)[:40])
+        with self._tx() as conn:
+            raw = self._meta(conn, 'packs')
+            names = json.loads(raw) if raw else []
+            already = name in names
+            if not already:
+                names.append(name)
+                conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('packs', ?)", (json.dumps(names),))
+                self._activity(conn, collection=None, record_id=None, type_='pack_enabled', by=by, source=source,
+                               diff={'pack': name, 'version': self.registry.available_packs[name].get('version')})
+        self.registry.set_packs(names)
+        return {'pack': name, 'enabled': True, 'already': already, 'enabled_packs': list(self.registry.enabled_packs)}
+
+    def note_activity(self, *, collection, record_id, type_, by, source=None, diff=None):
+        """Append one activity row (pack routes: e.g. a person marked a drafted chase as sent)."""
+        self._writable()
+        if not isinstance(type_, str) or not re.match(r'^[a-z][a-z0-9_]{0,40}$', type_):
+            raise _err(422, 'bad_request', 'activity type is lower-case letters, digits and _')
+        with self._tx() as conn:
+            self._activity(conn, collection=collection, record_id=record_id, type_=type_, by=by,
+                           source=source, diff=diff)
+
     def _activity(self, conn, *, collection, record_id, type_, by, source=None, diff=None):
         conn.execute(
             'INSERT INTO activity(tenant, at, collection, record_id, type, by, channel, ref, diff) '
@@ -319,7 +371,7 @@ class BizStore(PageRegistryMixin):
              (source or {}).get('channel'), (source or {}).get('ref'),
              json.dumps(diff) if diff is not None else None))
 
-    def create(self, collection, data, *, by, source=None, agent=False):
+    def create(self, collection, data, *, by, source=None, agent=False, via_pack=False):
         self._writable()
         spec = self._spec_for_write(collection)
         self._staff_guard(spec, collection, agent=agent, op='create',
@@ -327,6 +379,7 @@ class BizStore(PageRegistryMixin):
         source = self.check_source(source, agent=agent)
         clean, refs = self.registry.validate(collection, data, partial=False, engine_too_old=self.engine_too_old)
         clean = {k: v for k, v in clean.items() if v is not None}
+        self._pack_hooks('create', collection, clean, None, by=by, agent=agent, via_pack=via_pack)
         blob = json.dumps(clean, separators=(',', ':'))
         if len(blob) > MAX_RECORD_BYTES:
             raise _err(413, 'record_too_large', 'Record is larger than 256 KB')
@@ -357,7 +410,8 @@ class BizStore(PageRegistryMixin):
             raise _err(404, 'not_found', 'No such record')
         return self._row_to_record(row)
 
-    def update(self, collection, rid, patch, *, expected_version, by, source=None, agent=False, clear=None):
+    def update(self, collection, rid, patch, *, expected_version, by, source=None, agent=False, clear=None,
+               via_pack=False):
         self._writable()
         spec = self._spec_for_write(collection)
         self._staff_guard(spec, collection, agent=agent, op='edit',
@@ -383,6 +437,18 @@ class BizStore(PageRegistryMixin):
         current = self.get(collection, rid)
         if current['archived_at']:
             raise _err(409, 'archived', 'This record is archived; unarchive it first')
+        if self.registry.pack_of(collection):
+            after = dict(current['data'])
+            for k, v in clean.items():
+                if v in _EMPTY and after.get(k) not in _EMPTY:
+                    continue
+                if v is None:
+                    after.pop(k, None)
+                else:
+                    after[k] = v
+            for c in clear:
+                after.pop(c, None)
+            self._pack_hooks('edit', collection, after, current, by=by, agent=agent, via_pack=via_pack)
         with self._tx() as conn:
             row = conn.execute('SELECT * FROM records WHERE id = ? AND collection = ?', (rid, collection)).fetchone()
             if row is None:
@@ -438,7 +504,10 @@ class BizStore(PageRegistryMixin):
         spec = self._spec_for_write(collection)
         self._staff_guard(spec, collection, agent=agent, op='archive' if archived else 'unarchive')
         source = self.check_source(source, agent=agent)
-        self.get(collection, rid)
+        current = self.get(collection, rid)
+        if self.registry.pack_of(collection) and bool(current['archived_at']) != archived:
+            self._pack_hooks('archive' if archived else 'unarchive', collection, current['data'], current,
+                             by=by, agent=agent, via_pack=False)
         with self._tx() as conn:
             row = conn.execute('SELECT * FROM records WHERE id = ? AND collection = ?', (rid, collection)).fetchone()
             if bool(row['archived_at']) == archived:
@@ -847,7 +916,15 @@ class BizStore(PageRegistryMixin):
             'library_version': self.registry.library.get('library_version'),
             'collections': self.collection_counts(), 'last_backup': self.last_backup,
             'shell': BIZ_API, 'registered_pages': self._registered_count(),
+            'packs': list(self.registry.enabled_packs), 'files': self._files_count(),
         }
+
+    def _files_count(self):
+        try:
+            with self._read() as conn:
+                return conn.execute('SELECT COUNT(*) FROM files').fetchone()[0]
+        except sqlite3.OperationalError:
+            return None
 
     def _registered_count(self):
         try:

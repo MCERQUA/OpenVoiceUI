@@ -33,6 +33,7 @@ from pathlib import Path
 from services.paths import BIZ_SCHEMAS_DIR
 
 CORE_DIR = BIZ_SCHEMAS_DIR / 'core'
+PACKS_DIR = BIZ_SCHEMAS_DIR / 'packs'
 LIBRARY_PATH = BIZ_SCHEMAS_DIR / 'fields' / 'library.json'
 LIBRARY_KEY_RE = re.compile(r'^(sf|bi|fg|gen)_[a-z0-9][a-z0-9_]{0,40}$')
 
@@ -133,14 +134,29 @@ def _load_json_dir(path: Path) -> dict:
 class Registry:
     """Merged core + tenant overlay. Reloaded from disk on every change."""
 
-    def __init__(self, overlay_dir: Path, core_dir: Path = CORE_DIR, library_path: Path = LIBRARY_PATH):
+    def __init__(self, overlay_dir: Path, core_dir: Path = CORE_DIR, library_path: Path = LIBRARY_PATH,
+                 packs_dir: Path = PACKS_DIR):
+        from services.biz import packs as _packs
         self.core_dir = Path(core_dir)
         self.overlay_dir = Path(overlay_dir)
         self._lock = threading.Lock()
         self._core = _load_json_dir(self.core_dir)
         self.library = load_library(library_path)
+        self.available_packs = _packs.load_packs(packs_dir, self._core.keys())
+        self.enabled_packs = []
         self._merged = {}
         self.reload()
+
+    def set_packs(self, names):
+        """The packs this business turned on (from meta). Unknown names are ignored, never guessed."""
+        self.enabled_packs = [n for n in (names or []) if n in self.available_packs]
+        self.reload()
+
+    def pack_of(self, collection: str):
+        """The enabled packs that own or extend a collection (their hooks run on its writes)."""
+        spec = self._merged.get(collection) or {}
+        names = ([spec['pack']] if spec.get('pack') else []) + list(spec.get('packs') or [])
+        return [self.available_packs[n] for n in names if n in self.available_packs]
 
     # ── reading ──────────────────────────────────────────────────────────
     def reload(self):
@@ -149,6 +165,9 @@ class Registry:
         for name, spec in self._core.items():
             merged[name] = json.loads(json.dumps(spec))
             merged[name]['layer'] = 'core'
+        from services.biz import packs as _packs
+        for pname in self.enabled_packs:
+            _packs.merge_into(merged, self.available_packs[pname])
         for name, ov in overlay.items():
             if name in merged:
                 for fname, fspec in (ov.get('fields') or {}).items():
@@ -365,7 +384,8 @@ class Registry:
         with self._lock:
             self.reload()
             existing = self._merged.get(name)
-            is_core = existing is not None and existing.get('layer') == 'core'
+            # a pack collection is governed like a core one: tenants add x_ fields only
+            is_core = existing is not None and existing.get('layer') in ('core', 'pack')
             if existing is not None and existing.get('system'):
                 raise SchemaError(409, 'system_collection', 'This collection is reserved')
             if existing is None and not CUSTOM_COLLECTION_RE.match(name):

@@ -199,3 +199,28 @@ the backend. A sandbox key is used exactly like an agent key (`X-Agent-Key`) and
 Pages in a sandbox use the same `jb.js` and read the sandbox's own data automatically. On a business's
 own server these calls do not exist (404), so nothing written for a sandbox needs changing later
 except the base URL and key.
+
+## Packs and the private file store (engine 1.2)
+
+A **pack** is a set of collections that ships with the engine (`default-schemas/packs/<name>/`) and a
+business turns on. It is never turned off; its collections and the fields it adds to core collections
+are named `<prefix>_...`.
+
+```js
+await jb.packs.list();                       // {available: [...], enabled: [...]}
+await jb.packs.enable('risk-transfer');      // a person, or an agent with a source
+const book = await jb.pack('crt').get('book');            // GET  /api/biz/v1/crt/book
+await jb.pack('crt').post('confirm', {...});              // POST /api/biz/v1/crt/confirm
+```
+
+Some collections and fields are **staff-only** (`"staff_only": true` in `jb.schema()`): only a person's
+session creates, edits, archives or unarchives them. An agent key gets `403 staff_only` /
+`403 staff_only_field`.
+
+**Files are never public.** Store them in the backend-private file store, not `/uploads`:
+
+```js
+const f = await jb.files.upload(fileInput.files[0], { source });  // {id, url: 'biz-file:<sha256>', ...}
+await jb.create('document', { title: 'COI', file_url: f.url });
+const blobUrl = await jb.files.open(jb.files.idOf(doc.data.file_url));  // a person's session only
+```

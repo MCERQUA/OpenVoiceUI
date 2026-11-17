@@ -31,6 +31,9 @@ GET    /api/biz/v1/export                  whole tenant as JSON (owner only)
 POST   /api/biz/v1/files                   multipart "file" (+ "source" JSON, "name"): backend-private store
 GET    /api/biz/v1/files/<id>              the bytes, as an attachment (a person's session only)
 GET    /api/biz/v1/files/<id>/meta         {id, sha256, url: biz-file:<id>, content_type, size, name}
+GET    /api/biz/v1/packs                   the packs this engine ships + the ones this business turned on
+POST   /api/biz/v1/packs/<name>/enable     turn a pack on (additive, permanent; agent writes need a source)
+       /api/biz/v1/<prefix>/...            a turned-on pack's own routes (contract: services/biz/packs)
 
 Company system (phase 2, design section 9):
 GET    /api/biz/v1/registry/pages          ?archived=1   the pages of this company system
@@ -360,6 +363,58 @@ def file_get_meta(fid):
     if not FILE_ID_RE.match(fid or ''):
         raise SchemaError(404, 'not_found', 'No such file')
     return jsonify(g.biz_store.file_meta(fid))
+
+
+# ── packs (design section 6; contract in services/biz/packs/__init__.py) ──────
+@biz_bp.get(f'{API}/packs')
+def packs_list():
+    reg = g.biz_store.registry
+    return jsonify({'enabled': list(reg.enabled_packs), 'routes_loaded': list(PACK_ROUTES), 'available': [
+        {'name': p['name'], 'prefix': p['prefix'], 'version': p['version'], 'label': p['label'],
+         'description': p['description'], 'collections': sorted(p['collections']),
+         'extends': sorted(p['extends'])} for p in reg.available_packs.values()]})
+
+
+@biz_bp.post(f'{API}/packs/<name>/enable')
+def packs_enable(name):
+    return jsonify(g.biz_store.enable_pack(name, source=_body().get('source'), **_w()))
+
+
+class PackContext:
+    """What a pack's routes may use (and nothing else): the caller's store, role and body."""
+    api = API
+    SchemaError = SchemaError
+
+    @staticmethod
+    def store():
+        return g.biz_store
+
+    @staticmethod
+    def is_agent() -> bool:
+        return _agent()
+
+    @staticmethod
+    def by() -> str:
+        return g.biz_by
+
+    @staticmethod
+    def body() -> dict:
+        return _body()
+
+    @staticmethod
+    def require_pack(name):
+        if not g.biz_store.pack_enabled(name):
+            raise SchemaError(404, 'pack_not_enabled', f'The {name} pack is not turned on for this business')
+
+    @staticmethod
+    def require_person(what='do this'):
+        if _agent():
+            raise SchemaError(403, 'staff_only', f'Only a person (staff session) may {what}; an agent key cannot')
+
+    @staticmethod
+    def core_names():
+        from services.biz.schema import CORE_DIR, _load_json_dir
+        return _load_json_dir(CORE_DIR).keys()
 
 
 # ── company system: page registry + shell model ───────────────────────────
@@ -692,3 +747,17 @@ def shell_injection(rel_path: str, content: bytes) -> bytes:
     except Exception:
         logger.warning('biz: shell injection skipped for %s', rel_path, exc_info=True)
         return b''
+
+
+# ── pack routes: added once at import, before the blueprint is registered ──
+def _register_pack_routes():
+    from services.biz import packs as _packs
+    from services.biz.schema import PACKS_DIR
+    try:
+        return _packs.register_routes(biz_bp, API, PackContext, PACKS_DIR)
+    except Exception:
+        logger.exception('biz: pack routes not registered')
+        return []
+
+
+PACK_ROUTES = _register_pack_routes()

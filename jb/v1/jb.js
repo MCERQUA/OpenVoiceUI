@@ -220,6 +220,63 @@
       archive: function (id, opts) { return call('POST', '/registry/pages/' + enc(id) + '/archive', { source: (opts || {}).source }); },
       unarchive: function (id, opts) { return call('POST', '/registry/pages/' + enc(id) + '/unarchive', { source: (opts || {}).source }); }
     },
+    /**
+     * Packs: collections a business turns on (e.g. 'risk-transfer'). jb.pack('crt').get('book')
+     * calls the turned-on pack's own routes under /api/biz/v1/<prefix>/...
+     */
+    packs: {
+      list: function () { return call('GET', '/packs'); },
+      enable: function (name, opts) { return call('POST', '/packs/' + enc(name) + '/enable', { source: (opts || {}).source }); }
+    },
+    pack: function (prefix) {
+      if (!/^[a-z]{2,8}$/.test(String(prefix))) throw new JbError(400, { code: 'bad_pack', error: 'pack prefix is 2-8 letters' });
+      function p(path) {
+        path = String(path || '');
+        if (!/^[A-Za-z0-9_\-\/]*$/.test(path) || path.indexOf('..') !== -1) {
+          throw new JbError(400, { code: 'bad_path', error: 'pack paths are letters, digits, - _ and /' });
+        }
+        return '/' + prefix + (path ? '/' + path : '');
+      }
+      return {
+        get: function (path, params) { return call('GET', p(path) + qs(params || {})); },
+        post: function (path, body) { return call('POST', p(path), body || {}); }
+      };
+    },
+
+    /**
+     * The backend-private file store. upload(file, {source, name}) -> {id, url: 'biz-file:<id>', ...}.
+     * Files are never public: open(id) fetches the bytes with the person's session and returns a
+     * blob: URL for this page only (nothing is kept in the browser).
+     */
+    files: {
+      upload: function (file, opts) {
+        opts = opts || {};
+        var fd = new FormData();
+        fd.append('file', file, opts.name || (file && file.name) || 'file');
+        if (opts.source) fd.append('source', JSON.stringify(opts.source));
+        var headers = { 'Accept': 'application/json' };
+        if (SANDBOX) headers['X-Biz-Sandbox'] = SANDBOX;
+        return doFetch(BASE + '/files', { method: 'POST', headers: headers, body: fd }).then(function (resp) {
+          return resp.text().then(function (text) {
+            var data = null;
+            try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text }; }
+            if (!resp.ok) throw new JbError(resp.status, data);
+            return data;
+          });
+        });
+      },
+      meta: function (id) { return call('GET', '/files/' + enc(id) + '/meta'); },
+      idOf: function (url) { var m = /^biz-file:([0-9a-f]{64})$/.exec(String(url || '')); return m ? m[1] : null; },
+      open: function (id) {
+        var headers = {};
+        if (SANDBOX) headers['X-Biz-Sandbox'] = SANDBOX;
+        return doFetch(BASE + '/files/' + enc(id), { method: 'GET', headers: headers }).then(function (resp) {
+          if (!resp.ok) return resp.text().then(function (t) { var d = null; try { d = JSON.parse(t); } catch (e) { d = { error: t }; } throw new JbError(resp.status, d); });
+          return resp.blob().then(function (b) { return global.URL.createObjectURL(b); });
+        });
+      }
+    },
+
     /** The menu model the shell draws: {sections, tabs, more, company, theme, icons}. */
     shell: function (pageId) { return call('GET', '/registry/shell' + qs({ page: pageId })); },
 
