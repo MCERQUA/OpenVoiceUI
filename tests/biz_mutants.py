@@ -707,6 +707,121 @@ _REBASE_1_5_0 = {
 }
 MUTANTS = [(n, _REBASE_1_5_0.get(n, e), t) for n, e, t in MUTANTS]
 
+# rules 1.6.0 (re-check #6): anchors the 1.6.0 engine / watcher rewrote, rebased onto the new lines (same intent)
+_REBASE_1_6_0 = {
+    'combined-too-lenient': [(RT, "                    if isinstance(uv, (int, float)) and not isinstance(uv, bool) and \\\n"
+                                  "                            val + uv >= comb['gl_occ_plus_umbrella_min']:",
+                              "                    if isinstance(uv, (int, float)) and not isinstance(uv, bool):")],
+    'watch-blind-to-waivers': [(WA, '                if all(_waived(st, asg, c, on, acct, fn, edoc) for c in name_codes):',
+                                '                if not name_codes:')],
+    'n10-wrong-insured-waivable': [(RT, ' or code in NEVER_WAIVABLE:\n                continue', ':\n                continue')],
+    'h3-form-not-compared': [(RT, "                elif e['data'].get('manuscript') is not True or fk in form_fn or iso:\n"
+                                  "                    accepted = ", '                elif False:\n                    accepted = ')],
+    'watch-med-limits-off': [(WA, "                    if not ok and not _waived(st, asg, f'LIMIT_LOW:{line}', on, acct, it.get('id'),\n"
+                                  "                                              pd.get('source_document_id')):",
+                              '                    if False:')],
+    'watch-med-exclusions-off': [(WA, "                if cls & banned and not _waived(st, asg, f'EXCLUSION:{code}', on, acct, it.get('id'),\n"
+                                      "                                                p['data'].get('source_document_id')):",
+                                  '                if False:')],
+    'r3-manuscript-overrides-iso': [(RT, "                elif e['data'].get('manuscript') is not True or fk in form_fn or iso:",
+                                     "                elif e['data'].get('manuscript') is not True:")],
+    'watch-r3-cg2010': [(WA, "                if fn == 'ai_completed' and (fkey == _NEVER_COMPLETED or fkey in _NOT_COMPLETED):     # RG\n"
+                             "                    continue", '                if False:\n                    continue'),
+                        (WA, "                if ed.get('manuscript') is not True or fkey in table or iso:",
+                         "                if ed.get('manuscript') is not True:")],
+    'e5-waiver-clears-any-code': [(RT, '            if code not in live_waivers or not code.startswith(WAIVABLE_PREFIXES)',
+                                   '            if not live_waivers or not code.startswith(WAIVABLE_PREFIXES)'),
+                                  (RT, '                     for w in live_waivers[code] for b in',
+                                   '                     for ws in live_waivers.values() for w in ws for b in'),
+                                  (RT, '            w0 = live_waivers[code][0]',
+                                   '            w0 = next(iter(live_waivers.values()))[0]')],
+    'f5-approval-not-bound-to-diff': [(RT, "        if shown != diff['sha256']:", '        if False:')],
+}
+MUTANTS = [(n, _REBASE_1_6_0.get(n, e), t) for n, e, t in MUTANTS]
+T_C6 = 'tests/test_biz_crt_claimcheck6.py::'
+MUTANTS += [
+    # ── rules 1.6.0, host rulings D / M / U / G / W / K / X4 (each names the regression test that must catch it) ──
+    ('d-diff-base-is-the-parent', [(RT, '        if set_approved(store, prev):\n            return prev, hops',
+                                    '        if True:\n            return prev, hops')],
+     [T_C6 + 'test_d_a_draft_of_a_draft_is_compared_with_the_approved_version']),
+    ('d-generic-create-names-base', [(RT, '            moved = [k for k in SET_SERVER_FIELDS if data.get(k) != was_d.get(k)]',
+                                      '            moved = []')],
+     [T_C6 + 'test_d_a_generic_create_never_names_the_base']),
+    ('d-archived-base-counts', [(RT, "    if not rec or rec['archived_at'] or rec['data'].get('status') != 'APPROVED':\n        return False",
+                                 "    if not rec or rec['data'].get('status') != 'APPROVED':\n        return False")],
+     [T_C6 + 'test_d_an_archived_approved_version_is_not_the_base']),
+    ('d-approval-records-no-base', [(RT, "            'approved_against': {k: v for k, v in (diff['against'] or {'kind': 'none'}).items()\n"
+                                         "                                 if k in ('kind', 'id', 'record_version', 'template_key')},",
+                                     '')],
+     [T_C6 + 'test_d_approval_records_the_approved_base']),
+    ('watch-d-draft-base-ok', [(WA, "            return 'RD the approval was compared against a version nobody approved (a draft)'",
+                                '            return None')],
+     [T_C6 + 'test_watch_d_an_approval_compared_with_a_draft_is_not_backed']),
+    ('m-null-min-is-zero', [(RT, '            need = limit_need(it)                # ruling M: a missing / null min is the floor, never $0',
+                             "            need = it.get('min', it.get('floor')) or 0")],
+     [T_C6 + 'test_m_a_null_or_missing_min_is_the_floor']),
+    ('m-unknown-key-allowed', [(RT, '        if unknown:                     # host ruling M', '        if False:                       # host ruling M')],
+     [T_C6 + 'test_m_an_unknown_item_key_is_refused']),
+    ('m-identity-swap-allowed', [(RT, "        moved = [k for k in ITEM_IDENTITY_KEYS if was[it['id']].get(k) != it.get(k)]",
+                                  '        moved = []')],
+     [T_C6 + 'test_m_an_item_never_changes_what_it_measures_under_the_same_id',
+      T_C6 + 'test_m_a_staff_generic_edit_cannot_swap_a_key_either']),
+    ('m-min-below-floor-allowed', [(RT, '                    not isinstance(fl, bool) and mn < fl:', '                    not isinstance(fl, bool) and mn < 0:')],
+     [T_C6 + 'test_m_a_min_below_its_floor_is_refused']),
+    ('m-no-floor-allowed', [(RT, "            if limit_need(it) is None:      # host ruling M: no minimum and no floor is never $0",
+                             '            if False:')],
+     [T_C6 + 'test_m_a_limit_item_with_no_min_and_no_floor_is_refused']),
+    ('m-diff-fixed-columns', [(RT, '    v = {k: it.get(k) for k in sorted(it, key=str)}',
+                               "    v = {k: it.get(k) for k in ('function', 'required', 'forms', 'edition', 'trade_categories', "
+                               "'classes', 'min') if k in it}")],
+     [T_C6 + 'test_m_the_diff_lists_every_key_of_every_item_then_and_now']),
+    ('watch-m-null-min-zero', [(WA, "    return _num(it.get('min')) if _num(it.get('min')) is not None else _num(it.get('floor'))",
+                                "    return it.get('min', it.get('floor')) or 0")],
+     [T_C6 + 'test_watch_m_a_null_min_meets_is_not_backed']),
+    ('u-umbrella-unchecked', [(RT, "                        checked_policies[umb['id']] = umb\n", '')],
+     [T_C6 + 'test_u_the_combined_tests_umbrella_must_name_this_sub']),
+    ('watch-u-umbrella-unchecked', [(WA, "if confirmed(u, 'limits') and uv is not None and confirmed(u, 'named_insured') and \\\n"
+                                         "                                    _norm(party_name) != '' and _norm(u['data'].get('named_insured')) == _norm(party_name) \\\n"
+                                         "                                    and val + uv",
+                                     "if confirmed(u, 'limits') and uv is not None and val + uv")],
+     [T_C6 + 'test_watch_u_a_combined_meets_on_another_companys_umbrella_is_not_backed']),
+    ('g-iso-read-as-manuscript', [(RT, '                iso = is_iso_number(fk)', '                iso = False')],
+     [T_C6 + 'test_g_a_manuscript_flag_on_an_unlisted_iso_number_is_read_as_that_iso_form']),
+    ('g-cg2026-completed-ops', [(RT, "                if fn == 'ai_completed' and (fk in NEVER_COMPLETED_OPS or fk in ISO_NOT_COMPLETED):",
+                                 "                if fn == 'ai_completed' and fk in NEVER_COMPLETED_OPS:")],
+     [T_C6 + 'test_g_cg2026_and_cg2011_confirmed_manuscript_never_cover_completed_ops']),
+    ('g-note-says-manuscript', [(RT, "                                             'this coverage' if iso else",
+                                 "                                             'this coverage' if False else")],
+     [T_C6 + 'test_g_the_note_never_asks_staff_to_confirm_an_iso_form_as_manuscript']),
+    ('watch-g-iso-manuscript', [(WA, "                if fn == 'ai_completed' and (fkey == _NEVER_COMPLETED or fkey in _NOT_COMPLETED):     # RG",
+                                 "                if fn == 'ai_completed' and fkey == _NEVER_COMPLETED:"),
+                                (WA, "                iso = fkey in _ISO_FLOOR or fkey in _NOT_COMPLETED or bool(_ISO_AI.match(fkey or ''))",
+                                 '                iso = False')],
+     [T_C6 + 'test_watch_g_a_cg2026_manuscript_meets_is_not_backed']),
+    ('w-binding-ignored', [(RT, '            if not need or uncovered:', '            if False:')],
+     [T_C6 + 'test_w_a_later_miss_on_other_paper_is_raised_again', T_C6 + 'test_w_a_changed_document_raises_it_again']),
+    ('w-binding-from-caller', [(RT, "            data['bound_evidence'] = list((ev.get('raised') or {}).get(data.get('variance_code')) or [])",
+                                "            data.setdefault('bound_evidence', list((ev.get('raised') or {}).get(data.get('variance_code')) or []))")],
+     [T_C6 + 'test_w_the_server_stamps_the_binding_and_ignores_the_callers']),
+    ('w-binding-editable', [(RT, "            if moved:\n                raise _err(409, 'waiver_binding_fixed'",
+                             "            if False:\n                raise _err(409, 'waiver_binding_fixed'")],
+     [T_C6 + 'test_w_the_binding_never_changes_after_the_fact']),
+    ('watch-w-binding-ignored', [(WA, '        if fn is not None:\n            sha = st.doc_sha(did) if did else None',
+                                  '        if False:\n            sha = st.doc_sha(did) if did else None')],
+     [T_C6 + 'test_watch_w_a_waiver_of_other_paper_never_backs_the_meets']),
+    ('k-blanket-skips-schedule', [(RT, "                    if e['data'].get('blanket') and not (e['data'].get('scheduled_names') or\n"
+                                       "                                                         e['data'].get('scheduled_projects')):",
+                                   "                    if e['data'].get('blanket'):")],
+     [T_C6 + 'test_k_a_blanket_flag_beside_a_schedule_naming_another_gc_is_checked']),
+    ('watch-k-blanket-skips-schedule', [(WA, "                if ed.get('blanket') and not (ed.get('scheduled_names') or ed.get('scheduled_projects')):",
+                                         "                if ed.get('blanket'):")],
+     [T_C6 + 'test_watch_k_a_blanket_meets_beside_a_wrong_schedule_is_not_backed']),
+    ('watch-x4-no-diff-ok', [(WA, "        return 'RD the approval names no diff it was shown (X4)'", '        pass')],
+     [T_C6 + 'test_watch_x4_an_approval_that_names_no_diff_is_not_backed']),
+    ('x4-diff-hash-optional', [(RT, '        if not isinstance(shown, str) or not shown:', '        if shown is None:')],
+     [T_C6 + 'test_x4_an_approval_without_the_diff_hash_is_refused']),
+]
+
 
 def _copy(name):
     dest = os.path.join(SCRATCH, name)
