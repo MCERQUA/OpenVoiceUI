@@ -95,7 +95,11 @@ Readings count only after staff confirm them against the stored document. Nothin
     if (it.kind === 'limit') return (it.line || '').toUpperCase() + ' ' + it.limit.replace(/_/g, ' ') + ' at least ' + U.money(it.min) +
       (it.ceiling && it.ceiling !== it.floor ? ' (guide range ' + U.money(it.floor) + ' to ' + U.money(it.ceiling) + ')' : '') +
       (it.combined ? '; or GL ' + U.money(it.combined.gl_occ_floor) + '+ with GL + umbrella at least ' + U.money(it.combined.gl_occ_plus_umbrella_min) : '');
-    if (it.kind === 'endorsement') return (it.required === false ? 'Suggested: ' : '') + (it.forms || []).join('/') + ' ' + (it.edition || '') + ' (' + it.function.replace(/_/g, ' ') + ')' + (it.names_parties ? ', naming you and this project' : '');
+    // rules 1.8.0 (H5): the edition is the one the verdict applies (the diff's edition_applied: from the edition field or
+    // the form list), said in words, so an edition moved between the two never reads the same as a dropped one
+    if (it.kind === 'endorsement') return (it.required === false ? 'Suggested: ' : '') + (it.forms || []).join('/') + ' (' + it.function.replace(/_/g, ' ') + ')' +
+      ', edition: ' + (it.edition_applied !== undefined && it.edition_applied !== null ? it.edition_applied : (it.edition ? it.edition + ' (as written)' : 'any edition')) +
+      (it.names_parties ? ', naming you and this project' : '');
     if (it.kind === 'ai') return (it.line || '').toUpperCase() + ' additional insured box checked';
     if (it.kind === 'cert_holder') return (it.line || '').toUpperCase() + ': certificate holder only (not additional insured)';
     if (it.kind === 'tail') return (it.line || '').toUpperCase() + ': tail in place if claims-made';
@@ -181,9 +185,12 @@ Readings count only after staff confirm them against the stored document. Nothin
       r[1].records.forEach(function (s) {
         var approved = s.data.status === 'APPROVED';
         var diffBox = el('div', {'class': 'diff'});
+        // rules 1.8.0 (H5): the set's requirement list is rendered from the server's reading (the diff's item views,
+        // with edition_applied), never from the stored keys alone
+        var listBox = el('div', {}, el('p', {'class': 'muted', text: 'Reading the requirements as the verdict applies them...'}));
         var approveBtn = approved ? null : el('button', {type: 'button', text: 'Approve these changes (staff)', disabled: 'disabled'});
         sb.appendChild(el('div', {'class': 'card'}, [el('h2', {}, [s.data.name + ' (v' + (s.data.set_version || 1) + ') ', approved ? U.chip('meets', 'APPROVED') : U.chip('cant_tell', 'DRAFT')]),
-          s.data.notes ? el('p', {'class': 'muted', text: 'Notes (written by whoever drafted this set): ' + s.data.notes}) : null, itemsList(s.data.items || []),
+          s.data.notes ? el('p', {'class': 'muted', text: 'Notes (written by whoever drafted this set): ' + s.data.notes}) : null, listBox,
           diffBox,
           el('p', {'class': 'row'}, [approveBtn,
             el('button', {type: 'button', 'class': 'ghost', text: 'Make a new version', on: {click: function () {
@@ -191,6 +198,7 @@ Readings count only after staff confirm them against the stored document. Nothin
         // host ruling F: the approval shows the FULL change against the version it replaces (every item's form
         // list, edition, trades and exclusion classes, and the whole form-equivalence table) before the button works
         U.api.get('requirement-sets/' + s.id + '/diff').then(function (d) {
+          U.clear(listBox).appendChild(itemsList(d.items.filter(function (x) { return x.now; }).map(function (x) { return x.now; })));
           renderDiff(diffBox, d);
           if (approveBtn) {
             if (d.floor_violations && d.floor_violations.length) return;

@@ -75,6 +75,14 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
   RC7 a form number is read however it is written ('CG 20 10 04 13', 'ISO CG 20 10', CG 20 xx inside other text):
      CG 20 10 / 20 26 / 20 11 anywhere in it is never completed operations and never a manuscript; the set's table and
      form lists are read the same way; a number printed with another edition than the edition field is not backed
+  (rules 1.8.0, gate-4 re-check #8, checked here with this file's own code)
+  RN8 one normalization of form numbers and editions (this file's own copy of the contract, cross-checked with the
+     engine's by a test): NFKC, upper case, look-alike letters (Cyrillic, Greek, ...) to Latin, any Unicode digit to
+     ASCII, a letter O inside a number read as 0. A form or edition that needed any of that is not backed, and a
+     number one character away from a CG 20 xx is never a manuscript
+  RE8 an edition written after the number in the item's form list is the item's edition when its edition field is
+     empty; two different editions for one item, or an edition field holding a form number, is below the floor
+  RG8 an endorsement whose edition field names another form number than its form field is not backed
   R6 each assignment field the verdict reads (project, sub, set, set version, trade, scope change) was
      last written by a person or person-confirmed (per field, read from the activity log: a staff
      hold or note never vouches for a field the agent wrote), names the set the verdict used, and
@@ -181,8 +189,74 @@ def _excl(values):
     return cls, bad
 
 
+# RN8 (rules 1.8.0): this file's own copy of the normalization contract (never imported from the engine)
+_LOOKALIKE = {
+    '\u0410': 'A', '\u0412': 'B', '\u0421': 'C', '\u0415': 'E', '\u041d': 'H', '\u0406': 'I', '\u0408': 'J',
+    '\u041a': 'K', '\u041c': 'M', '\u041e': 'O', '\u0420': 'P', '\u0405': 'S', '\u0422': 'T', '\u0425': 'X',
+    '\u0423': 'Y', '\u04ae': 'Y', '\u050c': 'G', '\u051a': 'Q', '\u051c': 'W', '\u0417': '3', '\u04c0': 'I',
+    '\u04cf': 'I', '\u0400': 'E', '\u0401': 'E', '\u0407': 'I',
+    '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H', '\u0399': 'I', '\u039a': 'K',
+    '\u039c': 'M', '\u039d': 'N', '\u039f': 'O', '\u03a1': 'P', '\u03a4': 'T', '\u03a5': 'Y', '\u03a7': 'X',
+    '\u03f9': 'C', '\u037f': 'J', '\u03dc': 'F',
+    '\u0555': 'O', '\u054d': 'U', '\u0261': 'G', '\ua7ac': 'G', '\u0262': 'G', '\u1d04': 'C', '\u1d0f': 'O',
+    '\u0131': 'I', '\u01c0': 'I', '\u2c9e': 'O', '\u2ca2': 'P', '\u2ca4': 'C',
+}
+_LATIN = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
+
+
+def _fold(s):
+    """RN8: NFKC, upper case, a look-alike letter to its Latin letter, any Unicode decimal digit to its ASCII digit."""
+    out = ''
+    for ch in unicodedata.normalize('NFKC', str(s or '')).upper():
+        if ch in _LOOKALIKE:
+            out += _LOOKALIKE[ch]
+        elif not ch.isascii() and unicodedata.decimal(ch, None) is not None:
+            out += str(unicodedata.decimal(ch))
+        else:
+            out += ch
+    return out
+
+
+def _zero(t):
+    """RN8: a letter O inside a number is the digit 0: right after a digit, or starting a number (no letter right
+    before it) when a digit follows its run of O's."""
+    res = ''
+    for i in range(len(t)):
+        ch = t[i]
+        if ch == 'O':
+            before = res[-1:]
+            if before and before in '0123456789':
+                ch = '0'
+            elif not (before and before.isascii() and before.isupper()):
+                rest = t[i:].lstrip('O')
+                if rest[:1] and rest[:1] in '0123456789':
+                    ch = '0'
+        res += ch
+    return res
+
+
 def _squash(s):
-    return ''.join(ch for ch in unicodedata.normalize('NFKC', str(s or '')).upper() if ch.isalnum())
+    return _zero(''.join(ch for ch in _fold(s) if ch in _LATIN))
+
+
+def _refold(s):
+    """RN8: the value is not plain ASCII, or a letter O stands inside a number: not backed as written."""
+    if s is None:
+        return False
+    if not str(s).isascii():
+        return True
+    k = ''.join(ch for ch in _fold(s) if ch in _LATIN)
+    return _zero(k) != k
+
+
+def _near_iso(s):
+    """RN8: a CG 20 xx number, or one character away from one, anywhere in the field: never a manuscript."""
+    k = _squash(s)
+    for i in range(len(k) - 5):
+        miss = sum(1 for a, b in zip(k[i:i + 4], 'CG20') if a != b) + sum(1 for c in k[i + 4:i + 6] if not c.isdigit())
+        if miss <= 1:
+            return True
+    return False
 
 
 def _form_parts(s):
@@ -239,25 +313,67 @@ def _edition(s):
     return my[1] if my else None
 
 
-def _edition_my(s):
-    """(month, year) of an ISO edition date as printed, or None."""
-    t = unicodedata.normalize('NFKC', str(s or '')).upper()
-    t = ' '.join(''.join(ch if ch.isalnum() else ' ' for ch in t).split())
-    parts = t.split()
-    if len(parts) >= 3 and parts[0].isalpha() and len(parts[0]) == 2 and parts[1].isdigit() and parts[2].isdigit():
-        parts = parts[3:]                  # 'CG 20 10' printed before the date
-    t = ''.join(parts) if all(x.isdigit() for x in parts) else ' '.join(parts)
+def _edition_read(s):
+    """RE8/RN8 (own code): (form number printed before the edition or None, (month, year) or None). Folded; any mark
+    other than a letter or digit is a gap; a run of letters and a run of digits are separate words."""
+    t = _zero(''.join(ch if ch in _LATIN else ' ' for ch in _fold(s)))
+    words, cur = [], ''
+    for ch in t:
+        if cur and (ch == ' ' or ch.isdigit() != cur[-1].isdigit()):
+            words.append(cur)
+            cur = ''
+        if ch != ' ':
+            cur += ch
+    if cur:
+        words.append(cur)
+    form = None
+    if len(words) >= 2 and len(words[0]) == 2 and words[0].isalpha() and words[1].isdigit():
+        num, j = '', 1
+        while j < len(words) and words[j].isdigit() and len(num) < 4:
+            num += words[j]
+            j += 1
+        if len(num) >= 4:
+            form = words[0] + num[:4]
+            words = ([num[4:]] if num[4:] else []) + words[j:]
     mon = yr = None
-    if parts and parts[0][:3] in _MON and len(parts) == 2 and parts[1].isdigit():
-        mon, yr = _MON.index(parts[0][:3]) + 1, parts[1]
-    elif t.isdigit() and len(t) in (3, 4, 5, 6):
-        mon, yr = (t[:-4], t[-4:]) if len(t) in (5, 6) and t[-4:-2] in ('19', '20') else (t[:-2], t[-2:])
-        mon = int(mon) if mon else None
-    if not mon or not yr or not 1 <= mon <= 12 or len(yr) not in (2, 4):
-        return None
+    if len(words) == 2 and words[0].isalpha() and words[0][:3] in _MON and words[1].isdigit():
+        mon, yr = _MON.index(words[0][:3]) + 1, words[1]
+    elif len(words) == 2 and words[0].isdigit() and words[1].isdigit():
+        mon, yr = (int(words[0]) if len(words[0]) < 3 else 0), words[1]
+    elif len(words) == 1 and words[0].isdigit() and 3 <= len(words[0]) <= 6:
+        t = words[0]
+        if len(t) >= 5 and t[-4:-2] not in ('19', '20'):
+            return form, None
+        mon, yr = (int(t[:-4]), t[-4:]) if len(t) >= 5 else (int(t[:-2]), t[-2:])
+    if mon is None or not 1 <= mon <= 12 or len(yr) not in (2, 4):
+        return form, None
     y = int(yr)
     y = (1900 + y if y >= 50 else 2000 + y) if len(yr) == 2 else y
-    return (mon, y) if 1950 <= y <= 2100 else None
+    return form, ((mon, y) if 1950 <= y <= 2100 else None)
+
+
+def _edition_my(s):
+    """(month, year) of an ISO edition date as printed, or None."""
+    return _edition_read(s)[1]
+
+
+def _item_ed(it):
+    """RE8 (own code): (the edition the item requires, or None for any; why it cannot be read, or None)."""
+    forms = it.get('forms') if isinstance(it.get('forms'), list) else []
+    listed = set()
+    for f in forms:
+        if isinstance(f, str) and _form_parts(f)[1] is not None:
+            listed.add(_form_parts(f)[1])
+    if it.get('edition') not in (None, ''):
+        want = _edition_my(it.get('edition'))
+        if want is None:
+            return None, 'edition is not a date'
+        if any(x != want for x in listed):
+            return None, 'the form list carries another edition than the edition field'
+        return want, None
+    if len(listed) > 1:
+        return None, 'the form list carries two editions'
+    return (list(listed)[0] if listed else None), None
 
 
 def _named(wanted, texts):
@@ -468,6 +584,8 @@ def _floor(sd):
         for k, v in ff.items():
             if _clash(k, v):                                       # RC7: however the number is written
                 out.append(f'table maps {k} to {v}')
+            if _refold(k):                                         # RN8
+                out.append(f'table key {k!a} is not plain letters and digits')
             table[_form(k)] = v
     for it in sd.get('items') or []:
         if isinstance(it, dict):
@@ -489,6 +607,12 @@ def _floor(sd):
         raw = [f for f in (it.get('forms') or []) if isinstance(f, str) and _form(f)]
         if not raw:
             out.append(f"item {it.get('id')} lists no forms")
+        if any(_refold(v) for v in [it.get('edition')] + raw):                     # RN8
+            out.append(f"item {it.get('id')} has a form or edition not in plain letters and digits")
+        if it.get('edition') and _edition_read(it.get('edition'))[0]:                # RE8 (H8)
+            out.append(f"item {it.get('id')} edition field holds a form number")
+        if _item_ed(it)[1]:                                                         # RE8 (H5)
+            out.append(f"item {it.get('id')}: {_item_ed(it)[1]}")
         for r in raw:
             f = _form(r)
             if _clash(r, fn):                                      # RC7: however the number is written
@@ -856,10 +980,12 @@ def _judge(st, claim):
                 fkey, form_my = _form_parts(ed.get('form'))      # RC7: however the number is written
                 if fn == 'ai_completed' and _never_completed(ed.get('form')):     # RG
                     continue
+                if _refold(ed.get('form')) or _refold(ed.get('edition')):         # RN8: look-alikes are not backed
+                    continue
                 table = {_form(k): v for k, v in set_ff.items()} if set_ff else {}
                 table.update(_ISO_FLOOR)                       # ruling F: an ISO number keeps its ISO category
                 iso = fkey in _ISO_FLOOR or fkey in _NOT_COMPLETED or bool(_ISO_AI.match(fkey or '')) or \
-                    bool(_iso_in(ed.get('form')))
+                    bool(_iso_in(ed.get('form'))) or _near_iso(ed.get('form'))    # RN8: near an ISO number too
                 if ed.get('manuscript') is not True or fkey in table or iso:        # RG: an ISO number is no manuscript
                     listed = {_form(f) for f in it.get('forms') or []}        # ruling F: the item's own list only
                     if fkey not in listed:
@@ -874,8 +1000,12 @@ def _judge(st, claim):
                     continue
                 if form_my is not None and form_my != _edition_my(ed.get('edition')):
                     continue                                   # RC7: the number's own edition disagrees with the field
-                # the set's edition for the item is a requirement (rules 1.4.0 LOW): same month and year
-                if it.get('edition') and _edition_my(it.get('edition')) != _edition_my(ed.get('edition')) and \
+                if _edition_read(ed.get('edition'))[0] not in (None, fkey):
+                    continue                                   # RG8: the edition field names another form number
+                # the set's edition for the item is a requirement (rules 1.4.0 LOW): same month and year; RE8: an
+                # edition written after the number in the item's form list is that requirement
+                want_my = _item_ed(it)[0]
+                if want_my and want_my != _edition_my(ed.get('edition')) and \
                         not _waived(st, asg, f'WRONG_EDITION:{fn}', on, acct, fn, edoc):
                     continue
                 # RE (rules 1.5.0): every naming check runs; each miss needs its OWN waiver

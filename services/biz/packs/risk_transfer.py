@@ -35,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.7.0'
+RULE_VERSION = 'crt-rules-1.8.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -164,8 +164,87 @@ _ISO_IN_RE = re.compile(r'(?=(CG\d{4}))')
 NEVER_COMPLETED_ANY = frozenset(NEVER_COMPLETED_OPS) | frozenset(ISO_NOT_COMPLETED)
 
 
+# Rules 1.8.0 (H6/H7, gate-4 re-check #8): ONE normalization contract for form numbers and editions. A requirement set
+# accepts ASCII only there (422 form_not_ascii; a letter O inside a run of digits, 422 form_lookalike). STORED data is
+# FOLDED before it is read: NFKC, upper case, the letters that only look like Latin ones (Cyrillic, Greek, Armenian,
+# small capitals) mapped to them, every Unicode decimal digit (Arabic-Indic and the rest) to its ASCII digit, and a
+# letter O inside a run of digits read as 0. A value that needed any of that reads Can't tell (never as written,
+# never as a manuscript). The watcher keeps its OWN copy of this contract (tools/biz/crt-verdict-watch.py, the
+# independence design); a test runs both over adversarial strings, random non-ASCII included, and they must agree.
+CONFUSABLES = {
+    # Cyrillic (upper case; lower case is upper-cased first)
+    '\u0410': 'A', '\u0412': 'B', '\u0421': 'C', '\u0415': 'E', '\u041d': 'H', '\u0406': 'I', '\u0408': 'J',
+    '\u041a': 'K', '\u041c': 'M', '\u041e': 'O', '\u0420': 'P', '\u0405': 'S', '\u0422': 'T', '\u0425': 'X',
+    '\u0423': 'Y', '\u04ae': 'Y', '\u050c': 'G', '\u051a': 'Q', '\u051c': 'W', '\u0417': '3', '\u04c0': 'I',
+    '\u04cf': 'I', '\u0400': 'E', '\u0401': 'E', '\u0407': 'I',
+    # Greek
+    '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H', '\u0399': 'I', '\u039a': 'K',
+    '\u039c': 'M', '\u039d': 'N', '\u039f': 'O', '\u03a1': 'P', '\u03a4': 'T', '\u03a5': 'Y', '\u03a7': 'X',
+    '\u03f9': 'C', '\u037f': 'J', '\u03dc': 'F',
+    # Armenian, Latin small capitals and script letters that upper-casing leaves alone
+    '\u0555': 'O', '\u054d': 'U', '\u0261': 'G', '\ua7ac': 'G', '\u0262': 'G', '\u1d04': 'C', '\u1d0f': 'O',
+    '\u0131': 'I', '\u01c0': 'I', '\u2c9e': 'O', '\u2ca2': 'P', '\u2ca4': 'C',
+}
+
+
+_DIGITS = frozenset('0123456789')
+
+
+def _fold_chars(s) -> str:
+    """NFKC, upper case, look-alike letters to Latin, any Unicode decimal digit to ASCII (no O swap yet)."""
+    out = []
+    for ch in unicodedata.normalize('NFKC', str(s or '')).upper():
+        d = None if ch.isascii() else unicodedata.decimal(ch, None)
+        out.append(CONFUSABLES.get(ch, str(d) if d is not None else ch))
+    return ''.join(out)
+
+
+def _o_is_zero(t) -> str:
+    """A letter O inside a number reads as 0 ('CG 2O 1O' -> 'CG 20 10'): an O right after a digit, or an O that starts
+    a number (no letter right before it) with a digit right after its run of O's. 'ACME CO 77' keeps its O."""
+    out = list(t)
+    for i, ch in enumerate(t):
+        if ch != 'O':
+            continue
+        prev = out[i - 1] if i else ''
+        if prev in _DIGITS:
+            out[i] = '0'
+            continue
+        if 'A' <= prev <= 'Z':
+            continue
+        j = i
+        while j < len(t) and t[j] == 'O':
+            j += 1
+        if j < len(t) and t[j] in _DIGITS:
+            out[i] = '0'
+    return ''.join(out)
+
+
 def _squash(s) -> str:
-    return re.sub(r'[^A-Z0-9]', '', unicodedata.normalize('NFKC', str(s or '')).upper())
+    return _o_is_zero(re.sub(r'[^A-Z0-9]', '', _fold_chars(s)))
+
+
+def needs_fold(s) -> bool:
+    """Rules 1.8.0 (H6): the value is not plain ASCII, or a letter O stands inside a number. Stored, it reads Can't tell."""
+    if s is None:
+        return False
+    raw = str(s)
+    if not raw.isascii():
+        return True
+    k = re.sub(r'[^A-Z0-9]', '', _fold_chars(raw))
+    return _o_is_zero(k) != k
+
+
+def near_iso_number(s) -> bool:
+    """Rules 1.8.0 (H6): the field holds a CG 20 xx number, or one character away from one, anywhere in it (after the
+    fold). Such a number is never invited, or read, as a manuscript."""
+    k = _squash(s)
+    for i in range(len(k) - 5):
+        w = k[i:i + 6]
+        if (w[0] != 'C') + (w[1] != 'G') + (w[2] != '2') + (w[3] != '0') + (not w[4].isdigit()) + \
+                (not w[5].isdigit()) <= 1:
+            return True
+    return False
 
 
 def form_parts(s):
@@ -396,25 +475,81 @@ def _edition_year(edition):
     return k[1] if k else None
 
 
-def _edition_key(edition):
-    """(month, year) of an ISO edition date as printed (see _edition_year), or None."""
-    s = unicodedata.normalize('NFKC', str(edition or '')).upper().strip()
-    s = re.sub(r'^[A-Z]{2}\s*\d{2}\s*\d{2}(?=\s|\(|$)', ' ', s)      # the form number printed before it
-    s = re.sub(r'[()\[\]]', ' ', s).strip().rstrip('.').strip()
-    m = re.match(r'^([A-Z]{3})[A-Z]*\.?\s*,?\s*(\d{2}|\d{4})$', s)
-    if m and m.group(1) in _MONTHS:
-        month, year = _MONTHS[m.group(1)], m.group(2)
+def edition_parts(edition):
+    """Rules 1.8.0 (one reading, H5/H7/H8): (the form number printed before the edition or None, (month, year) or None).
+    The value is folded (H6), every mark other than a letter or digit is a gap, and letters and digits are separate
+    words: 'CG 20 10 11 85' -> ('CG2010', (11, 1985)); '04 13', '(04/13)', '0413', '04/2013', 'Nov 2013' -> (None,
+    (4 or 11, year))."""
+    words = re.findall(r'[A-Z]+|[0-9]+', _o_is_zero(re.sub(r'[^A-Z0-9]', ' ', _fold_chars(edition))))
+    form = None
+    if len(words) >= 2 and len(words[0]) == 2 and words[0].isalpha() and words[1].isdigit():
+        digits, j = '', 1
+        while j < len(words) and words[j].isdigit() and len(digits) < 4:
+            digits, j = digits + words[j], j + 1
+        if len(digits) >= 4:
+            form = words[0] + digits[:4]
+            words = ([digits[4:]] if len(digits) > 4 else []) + words[j:]
+    if len(words) == 2 and words[0].isalpha() and words[0][:3] in _MONTHS and words[1].isdigit():
+        month, year = _MONTHS[words[0][:3]], words[1]
+    elif len(words) == 2 and words[0].isdigit() and words[1].isdigit():
+        month, year = (int(words[0]) if len(words[0]) <= 2 else 0), words[1]
+    elif len(words) == 1 and words[0].isdigit() and len(words[0]) in (3, 4, 5, 6):
+        d = words[0]
+        if len(d) in (5, 6):
+            if d[-4:-2] not in ('19', '20'):
+                return form, None
+            month, year = int(d[:-4]), d[-4:]
+        else:
+            month, year = int(d[:-2]), d[-2:]
     else:
-        m = re.match(r'^(\d{1,2})\s*[-/.\s]?\s*(\d{2}|\d{4})$', s)
-        if not m:
-            return None
-        month, year = int(m.group(1)), m.group(2)
-    if not 1 <= month <= 12:
-        return None
+        return form, None
+    if not 1 <= month <= 12 or len(year) not in (2, 4):
+        return form, None
     y = int(year)
     if len(year) == 2:
         y = 1900 + y if y >= 50 else 2000 + y
-    return (month, y) if 1950 <= y <= 2100 else None
+    return form, ((month, y) if 1950 <= y <= 2100 else None)
+
+
+def _edition_key(edition):
+    """(month, year) of an ISO edition date as printed (see _edition_year), or None."""
+    return edition_parts(edition)[1]
+
+
+def item_edition(it):
+    """Rules 1.8.0 (H5): (the edition an endorsement item REQUIRES as (month, year), or None for any edition; why it
+    cannot be read, or None). An edition written inside the item's form list ('CG 20 37 04 13') binds when the edition
+    field is absent, null or ""; two different editions (in the list, or the list against the field) cannot be read."""
+    it = it if isinstance(it, dict) else {}
+    forms = it.get('forms') if isinstance(it.get('forms'), list) else []
+    listed = {form_parts(f)[1] for f in forms if isinstance(f, str)} - {None}
+    field = it.get('edition')
+    if field is not None and field != '':
+        want = _edition_key(field)
+        if want is None:
+            return None, 'its edition is not a date'
+        if listed - {want}:
+            return None, 'its form list carries another edition than its edition field'
+        return want, None
+    if len(listed) > 1:
+        return None, 'its form list carries two different editions'
+    return (next(iter(listed)) if listed else None), None
+
+
+def edition_text(ed) -> str:
+    return f'{ed[0]:02d}/{ed[1]}' if ed else 'any edition'
+
+
+def _plain_or_refuse(v, iid=None):
+    """Rules 1.8.0 (H6): a form number or edition a requirement set is written with is plain ASCII, and never a letter O
+    standing inside a number (it would read as another form)."""
+    if not isinstance(v, str) or not needs_fold(v):
+        return
+    if not v.isascii():
+        raise _err(422, 'form_not_ascii', 'Form numbers and editions are written in plain letters and digits (ASCII): '
+                                          f'{v!a} carries other characters (rules 1.8.0)', item=iid, value=v[:40])
+    raise _err(422, 'form_lookalike', f'{v!r} has the letter O inside a number; write the digit 0 (rules 1.8.0)',
+               item=iid, value=v[:40])
 
 
 def validate_form_functions(ff):
@@ -424,6 +559,8 @@ def validate_form_functions(ff):
     if not isinstance(ff, dict) or not ff:
         raise _err(422, 'bad_form_functions', 'form_functions maps a form number to its function, '
                                               'e.g. {"CG 20 37": "ai_completed"}')
+    for k in ff:
+        _plain_or_refuse(k)                             # rules 1.8.0 (H6)
     for k, v in ff.items():
         if not isinstance(k, str) or not form_key(k) or v not in FORM_FUNCTIONS:
             raise _err(422, 'bad_form_functions', 'each form_functions entry is "<form number>": one of '
@@ -461,6 +598,8 @@ def floor_violations(set_data) -> list:
     if isinstance(ff, dict):
         for k, v in ff.items():
             fk = form_key(k)
+            if needs_fold(k):                           # rules 1.8.0 (H6): stored around the API
+                out.append(f'form_functions key {k!a} is not written in plain letters and digits')
             clash = iso_floor_clash(k, v)               # rules 1.7.0 (C): however the number is written
             if clash == 'never completed operations':
                 out.append(f'form_functions maps {k} to completed operations; it never is')
@@ -488,6 +627,15 @@ def floor_violations(set_data) -> list:
         if not isinstance(forms, list) or not [f for f in forms if isinstance(f, str) and form_key(f)]:
             out.append(f"item {it.get('id')}: its form list is empty")
             continue
+        # rules 1.8.0: a stored form or edition that needed folding (H6), an edition field holding a form number (H8)
+        # or two editions for one item (H5) cannot be read
+        for v in [it.get('edition')] + forms:
+            if needs_fold(v):
+                out.append(f"item {it.get('id')}: {v!a} is not written in plain letters and digits")
+        if it.get('edition') and edition_parts(it.get('edition'))[0]:
+            out.append(f"item {it.get('id')}: its edition field holds a form number ({it.get('edition')})")
+        if item_edition(it)[1]:
+            out.append(f"item {it.get('id')}: {item_edition(it)[1]}")
         for f in forms:
             fk = form_key(f)
             clash = iso_floor_clash(f, fn)              # rules 1.7.0 (C): however the number is written
@@ -546,9 +694,21 @@ def validate_items(items, trade_category=None) -> list:
             raise _err(422, 'ai_on_wc_refused', 'Workers compensation never carries additional insured '
                                                 '(guide p.11, p.37)', item=iid)
         if kind == 'endorsement':
+            # rules 1.8.0 (H6): form numbers and editions are plain ASCII letters and digits
+            for v in [it.get('edition')] + (it.get('forms') if isinstance(it.get('forms'), list) else []):
+                _plain_or_refuse(v, iid)
             yr = _edition_year(it.get('edition'))
-            if it.get('edition') and yr is None:
+            if it.get('edition') not in (None, '') and yr is None:     # 1.8.0: 0 / false are no edition either
                 raise _err(422, 'bad_requirement_items', 'edition is "MM YY", e.g. "04 13"', item=iid)
+            if it.get('edition') and edition_parts(it.get('edition'))[0]:
+                # rules 1.8.0 (H8): the edition field holds an edition only; the number goes in the form list
+                raise _err(422, 'edition_not_mm_yy', 'edition holds the edition only ("MM YY", e.g. "04 13"); the form '
+                                                     'number belongs in forms (rules 1.8.0)', item=iid)
+            if item_edition(it)[1]:
+                # rules 1.8.0 (H5): an edition written in the form list binds; two different ones are refused
+                raise _err(422, 'edition_conflict', 'This item names two different editions (' + item_edition(it)[1]
+                           + '). Write the edition once: in edition, or after the number in forms (rules 1.8.0)',
+                           item=iid)
             if yr is not None and yr < 2004:
                 raise _err(422, 'pre_2004_edition_refused', 'Pre-2004 ISO forms are not issuable by most '
                                                             'carriers (guide p.18, p.41). Use 2004 or later.', item=iid)
@@ -1259,12 +1419,20 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 # its manuscript flag says; CG 20 26 / 20 11 are never completed operations, like CG 20 10.
                 # C (rules 1.7.0): the number is read however it is written ('CG 20 10 04 13', 'ISO CG 20 10', a
                 # CG 20 xx inside other text): one reading (form_key / iso_numbers_in), as in the watcher
+                # 1.8.0 (H6): a number written with look-alike characters (or a letter O inside it) is read folded,
+                # reads Can't tell, and is never a manuscript; nor is a number one character away from a CG 20 xx
                 e_form = e['data'].get('form')
                 fk, form_ed = form_parts(e_form)
                 iso = is_iso_form(e_form)
+                near = near_iso_number(e_form) and not iso
                 if fn == 'ai_completed' and never_completed_ops(e_form):
                     ec(f'MISSING:{fn}')
-                elif e['data'].get('manuscript') is not True or fk in form_fn or iso:
+                elif needs_fold(e_form):
+                    ec('UNCONFIRMED:crt_endorsement.form')
+                    notes.append(f"{iid}: form {e_form!a} is written with characters that only look like letters or "
+                                 f'digits (it reads as {fk}); staff re-enter the number in plain letters and digits '
+                                 'as printed. It is never read as a manuscript')
+                elif e['data'].get('manuscript') is not True or fk in form_fn or iso or near:
                     accepted = {form_key(f) for f in it.get('forms') or []}
                     if fk not in accepted:
                         if form_fn.get(fk) not in (None, fn):
@@ -1276,6 +1444,9 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                                              'it is an ISO form, read as that form (never as a manuscript); list '
                                              'it in the requirement set only if your licensed staff accept it for '
                                              'this coverage' if iso else
+                                             'it is one character away from an ISO number (CG 20 xx), so it '
+                                             'is never read as a manuscript; staff check the number as printed'
+                                             if near else
                                              'list the equivalent in the requirement set or confirm it as a '
                                              'manuscript form'))
                 elif fn == 'ai_completed' and not (e['data'].get('completed_ops_wording') is True and
@@ -1284,9 +1455,19 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                     notes.append(f'{iid}: a manuscript endorsement counts for completed operations only when staff '
                                  'confirm its explicit completed-operations wording')
                 ed_year = _edition_year(e['data'].get('edition'))
-                want_ed = _edition_key(it.get('edition')) if it.get('edition') else None
+                want_ed = item_edition(it)[0]           # 1.8.0 (H5): an edition in the item's form list binds
+                ed_form = edition_parts(e['data'].get('edition'))[0]
                 if ed_year is None:                     # MED ruling: an empty or unreadable edition is no pass
                     ec('UNCONFIRMED:crt_endorsement.edition')
+                elif needs_fold(e['data'].get('edition')):  # 1.8.0 (H6)
+                    ec('UNCONFIRMED:crt_endorsement.edition')
+                    notes.append(f"{iid}: the edition {e['data'].get('edition')!a} is written with characters that "
+                                 'only look like digits; staff re-enter it as printed')
+                elif ed_form is not None and ed_form != fk:
+                    # 1.8.0 (H8 / re-check #8 G): the edition field names ANOTHER form number than the form field
+                    ec('UNCONFIRMED:crt_endorsement.edition')
+                    notes.append(f"{iid}: the edition {e['data'].get('edition')} names form {ed_form} but the form "
+                                 f'reads {fk}; staff check which it is')
                 elif form_ed is not None and form_ed != _edition_key(e['data'].get('edition')):
                     # C (rules 1.7.0): the form number carries one edition and the edition field another
                     ec('UNCONFIRMED:crt_endorsement.edition')
@@ -1662,6 +1843,10 @@ def _item_view(it):
     if it.get('kind') == 'endorsement' and isinstance(it.get('forms'), list):
         # rules 1.7.0 (C): each listed form as the verdict reads it ('CG 20 37 04 13' -> 'CG2037')
         v['forms_read_as'] = [form_key(f) for f in it['forms']]
+    if it.get('kind') == 'endorsement':
+        # rules 1.8.0 (H5): the edition the verdict compares, from the edition field or the form list
+        ed, why = item_edition(it)
+        v['edition_applied'] = f"can't tell: {why}" if why else edition_text(ed)
     return v
 
 
