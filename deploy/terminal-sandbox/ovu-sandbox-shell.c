@@ -13,14 +13,29 @@
  * Installed by deploy/terminal-sandbox/install.sh as root:appuser mode 4750,
  * so only the server's uid (and group) can run it; the sandbox user cannot.
  *
- * Two modes, nothing else:
+ * Three modes, nothing else:
  *   ovu-sandbox-shell          start the sandboxed login shell
  *   ovu-sandbox-shell --reap   drop to the sandbox uid and kill(-1, SIGKILL):
  *                              every sandbox process (setsid/nohup survivors
  *                              included) dies. The server runs this when the
  *                              last terminal session closes, because it cannot
- *                              signal another uid itself. No other argument
- *                              is accepted.
+ *                              signal another uid itself.
+ *   ovu-sandbox-shell --uid    print this container's sandbox uid (read-only)
+ *   No other argument is accepted.
+ *
+ * Per-tenant uid (review 2 of PR #597, M-A): RLIMIT_NPROC is counted per uid
+ * HOST-WIDE (no user-namespace remap), so one shared sandbox uid let one tenant's
+ * shell exhaust every tenant's process budget. The sandbox uid is therefore
+ * derived from a value unique to this container and already present: its
+ * lowest non-loopback IPv4 address, used as the 32-bit uid itself. Docker never
+ * gives two running containers the same address (networks cannot overlap), so
+ * two tenants cannot share a uid and no hashing/collision table is needed; every
+ * private address is far above the host's real uids (>= 65536). The uid needs no
+ * /etc/passwd entry. Without such an address (--network none) the fixed
+ * SANDBOX_FALLBACK_UID is used. The group stays SANDBOX_GID (the sandbox
+ * group the server shares the code workspace through), and on every shell start
+ * the helper (still root) fchowns the two fixed sandbox dirs (/srv/code-workspace,
+ * /home/sandbox; parents root-owned, opened O_NOFOLLOW) to the derived uid.
  *
  * Hardening:
  *   - refuses unless the REAL uid is the server uid (CALLER_UID)
@@ -49,7 +64,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <stdint.h>
 #include <signal.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
@@ -61,8 +81,8 @@
 #ifndef CALLER_UID
 #define CALLER_UID 1001
 #endif
-#ifndef SANDBOX_UID
-#define SANDBOX_UID 1500
+#ifndef SANDBOX_FALLBACK_UID
+#define SANDBOX_FALLBACK_UID 1500
 #endif
 #ifndef SANDBOX_GID
 #define SANDBOX_GID 1500
@@ -85,6 +105,45 @@ static void die(const char *what) {
     /* stderr is the pty, so the terminal user sees why it closed. */
     fprintf(stderr, "ovu-sandbox-shell: refused: %s (%s)\r\n", what, strerror(errno));
     _exit(126);
+}
+
+static uid_t sandbox_uid;   /* derived once in main() */
+
+#ifdef OVU_SANDBOX_TEST_BUILD
+/* Proof builds ONLY (deploy/terminal-sandbox/verify-image.sh): stand in for two
+ * containers with different addresses inside --network none throwaway runs. The
+ * image's real helper is never built with this. */
+static char test_ipv4[32];
+#endif
+
+static uid_t derive_sandbox_uid(void) {
+    struct ifaddrs *ifa = NULL, *p;
+    uint32_t best = 0;
+    int found = 0;
+#ifdef OVU_SANDBOX_TEST_BUILD
+    struct in_addr t;
+    if (test_ipv4[0] && inet_pton(AF_INET, test_ipv4, &t) == 1) { best = ntohl(t.s_addr); found = 1; }
+#endif
+    if (getifaddrs(&ifa) == 0) {
+        for (p = ifa; p; p = p->ifa_next) {
+            if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET) continue;
+            uint32_t a = ntohl(((struct sockaddr_in *)p->ifa_addr)->sin_addr.s_addr);
+            if ((a >> 24) == 127 || a == 0 || a == 0xFFFFFFFFu) continue;
+            if (!found || a < best) { best = a; found = 1; }
+        }
+        freeifaddrs(ifa);
+    }
+    if (!found || best < 65536u || best == 0xFFFFFFFFu) return (uid_t)SANDBOX_FALLBACK_UID;
+    return (uid_t)best;
+}
+
+static void own_sandbox_dir(const char *path) {
+    /* Fixed absolute paths in the image whose parents are root-owned: the sandbox
+     * cannot replace them; O_NOFOLLOW + O_DIRECTORY refuse anything else anyway. */
+    int fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return;
+    if (fchown(fd, sandbox_uid, SANDBOX_GID) != 0) { /* best effort */ }
+    close(fd);
 }
 
 static void close_inherited_fds(void) {
@@ -117,12 +176,12 @@ static void close_inherited_fds(void) {
 static void drop_to_sandbox(void) {
     if (setgroups(0, NULL) != 0) die("setgroups");
     if (setresgid(SANDBOX_GID, SANDBOX_GID, SANDBOX_GID) != 0) die("setresgid");
-    if (setresuid(SANDBOX_UID, SANDBOX_UID, SANDBOX_UID) != 0) die("setresuid");
+    if (setresuid(sandbox_uid, sandbox_uid, sandbox_uid) != 0) die("setresuid");
 
     /* Verify the drop is permanent. */
     uid_t r, e, s;
     gid_t rg, eg, sg;
-    if (getresuid(&r, &e, &s) != 0 || r != SANDBOX_UID || e != SANDBOX_UID || s != SANDBOX_UID)
+    if (getresuid(&r, &e, &s) != 0 || r != sandbox_uid || e != sandbox_uid || s != sandbox_uid)
         die("uid drop did not stick");
     if (getresgid(&rg, &eg, &sg) != 0 || rg != SANDBOX_GID || eg != SANDBOX_GID || sg != SANDBOX_GID)
         die("gid drop did not stick");
@@ -143,14 +202,28 @@ static void set_limit(int res, rlim_t v) {
 
 int main(int argc, char **argv) {
     errno = 0;
-    int reap = 0;
+    int reap = 0, print_uid = 0;
     if (argc == 2 && strcmp(argv[1], "--reap") == 0) reap = 1;
-    else if (argc != 1) die("takes no arguments except --reap");
+    else if (argc == 2 && strcmp(argv[1], "--uid") == 0) print_uid = 1;
+    else if (argc != 1) die("takes no arguments except --reap or --uid");
     if (getuid() != (uid_t)CALLER_UID) die("caller is not the OpenVoiceUI server user");
     if (geteuid() != 0) die("helper is not setuid root");
 
+#ifdef OVU_SANDBOX_TEST_BUILD
+    { const char *v = getenv("OVU_TEST_IPV4"); if (v) snprintf(test_ipv4, sizeof test_ipv4, "%s", v); }
+#endif
     close_inherited_fds();
     if (clearenv() != 0) die("clearenv");
+    sandbox_uid = derive_sandbox_uid();
+    if (print_uid) {
+        if (setresuid(CALLER_UID, CALLER_UID, CALLER_UID) != 0) die("setresuid");
+        printf("%u\n", (unsigned)sandbox_uid);
+        return 0;
+    }
+    if (!reap) {
+        own_sandbox_dir(SANDBOX_WORKSPACE);
+        own_sandbox_dir(SANDBOX_HOME);
+    }
     drop_to_sandbox();
 
     if (reap) {

@@ -56,6 +56,7 @@ from pathlib import Path
 import requests as http_requests
 
 from services.paths import CANVAS_PAGES_DIR, GENERATED_MUSIC_DIR
+from services.safe_open import Anchored
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,20 @@ _TENANT = os.environ.get('JAMBOT_TENANT') or os.environ.get('HOST_TENANT', '') o
 
 
 # ── shared helpers ───────────────────────────────────────────────────────────
+
+def _cache_anchor():
+    """The canvas-pages MOUNT that CACHE_DIR (= <canvas-pages>/_data/singalong) sits in.
+    Created if missing (a trusted server path; below it everything is walked no-follow)."""
+    root = CACHE_DIR.parent.parent
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _c(path):
+    """A path under canvas-pages/_data/singalong for a no-follow walk from the
+    canvas-pages MOUNT (agent-writable; review 2 of PR #597)."""
+    return Anchored(_cache_anchor(), path)
+
 
 def slug(filename: str) -> str:
     """MUST match sing-along.html `slug` (and the host sync) or the page reads another file."""
@@ -105,12 +120,9 @@ def save_aligned(audio_id: str, task_id: str, aligned: list, filename: str = '')
         return
     p = aligned_path(audio_id)
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(f'.json.tmp-{os.getpid()}-{threading.get_ident()}')
-        tmp.write_text(json.dumps({'audio_id': audio_id, 'task_id': task_id,
-                                   'filename': filename or None, 'saved': _now_iso(),
-                                   'alignedWords': aligned}))
-        os.replace(tmp, p)
+        _c(p).atomic_write_text(json.dumps({'audio_id': audio_id, 'task_id': task_id,
+                                            'filename': filename or None, 'saved': _now_iso(),
+                                            'alignedWords': aligned}), create_dirs=True)
     except OSError as exc:
         logger.warning(f'suno aligned words not saved ({p}): {exc}')
 
@@ -121,7 +133,7 @@ def load_aligned(audio_id: str) -> list | None:
     if not p.exists():
         return None
     try:
-        aw = json.loads(p.read_text()).get('alignedWords')
+        aw = json.loads(_c(p).read_text(max_bytes=64 * 1024 * 1024)).get('alignedWords')
     except Exception:  # noqa: BLE001
         return None
     return aw if isinstance(aw, list) and aw else None
@@ -175,8 +187,7 @@ def log_call(row: dict) -> None:
     try:
         full = {'ts': datetime.now(timezone.utc).isoformat(timespec='seconds'), 'tenant': _TENANT}
         full.update({k: v for k, v in row.items() if v is not None})
-        CALL_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(CALL_LOG, 'a') as f:
+        with Anchored(CALL_LOG.parent, CALL_LOG.name).open('a') as f:   # no-follow, in the generated_music mount
             f.write(json.dumps(full) + '\n')
     except Exception as exc:  # noqa: BLE001
         logger.warning(f'suno lyrics call log write failed: {exc}')
@@ -244,22 +255,18 @@ def _monotonic(lines: list) -> bool:
 def write_cache(filename: str, lines: list, n_aligned: int, task_id: str, audio_id: str) -> Path:
     """Same payload + atomic replace as the host sync's write_cache()."""
     out = cache_path(filename)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if out.exists():
+    _c(out.parent).mkdir(parents=True, exist_ok=True)
+    if _c(out).is_file():
         bak = out.with_suffix(f'.json.bak-pregen-{os.getpid()}')
-        bak.write_bytes(out.read_bytes())
+        _c(bak).atomic_write_bytes(_c(out).read_bytes(max_bytes=64 * 1024 * 1024))
     payload = {'source': 'suno', 'offset': 0, 'lines': lines,
                'filename': filename,
                'saved': _now_iso(),
                'sync': {'via': VIA, 'aligned_words': n_aligned,
                         'task_id': task_id, 'audio_id': audio_id}}
-    tmp = out.with_suffix(f'.json.tmp-{os.getpid()}-{threading.get_ident()}')
-    tmp.write_text(json.dumps(payload))
-    try:
-        os.chmod(tmp, 0o644)
-    except OSError:
-        pass
-    os.replace(tmp, out)
+    # random O_EXCL temp + rename in a no-follow-pinned dir (the old temp name was
+    # predictable: '.json.tmp-<pid>-<tid>' in agent-writable canvas-pages)
+    _c(out).atomic_write_text(json.dumps(payload), mode=0o644)
     return out
 
 
@@ -268,7 +275,7 @@ def cached_source(filename: str):
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text()).get('source')
+        return json.loads(_c(p).read_text(max_bytes=64 * 1024 * 1024)).get('source')
     except Exception:  # noqa: BLE001
         return 'UNPARSEABLE'
 
@@ -280,7 +287,7 @@ def read_marker(audio_id: str) -> dict | None:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text())
+        return json.loads(_c(p).read_text(max_bytes=1024 * 1024))
     except Exception:  # noqa: BLE001  (a claim mid-write reads as pending)
         return {'state': 'pending', 'ts': p.stat().st_mtime}
 
@@ -290,8 +297,14 @@ def _claim(audio_id: str, info: dict):
     None = could not write (then we must NOT pay: no marker means no idempotency)."""
     p = marker_path(audio_id)
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        # O_EXCL in a no-follow-pinned marker dir (canvas-pages is agent-writable)
+        from services.safe_open import open_dir_beneath
+        _mdfd = open_dir_beneath(_cache_anchor(), _c(p.parent).rel, create=True)
+        try:
+            fd = os.open(p.name, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o644,
+                         dir_fd=_mdfd)
+        finally:
+            os.close(_mdfd)
     except FileExistsError:
         return False
     except OSError as exc:
@@ -305,9 +318,7 @@ def _claim(audio_id: str, info: dict):
 def _finish_marker(audio_id: str, info: dict) -> None:
     p = marker_path(audio_id)
     try:
-        tmp = p.with_suffix(f'.json.tmp-{os.getpid()}-{threading.get_ident()}')
-        tmp.write_text(json.dumps({**info, 'ts': time.time(), 'at': _now_iso()}))
-        os.replace(tmp, p)
+        _c(p).atomic_write_text(json.dumps({**info, 'ts': time.time(), 'at': _now_iso()}))
     except OSError as exc:
         logger.warning(f'suno lyrics marker update failed ({p}): {exc}')
 
@@ -320,7 +331,7 @@ def known_instrumental(filename: str = '', audio_id: str = '') -> bool:
             return True
     if filename:
         try:
-            st = json.loads((CACHE_DIR / HOST_SYNC_STATE).read_text())
+            st = json.loads(_c(CACHE_DIR / HOST_SYNC_STATE).read_text(max_bytes=64 * 1024 * 1024))
             if (st.get(filename) or {}).get('instrumental'):
                 return True
         except Exception:  # noqa: BLE001
@@ -351,7 +362,7 @@ def saved_result(filename: str, audio_id: str) -> dict | None:
     if filename:
         p = cache_path(filename)
         try:
-            c = json.loads(p.read_text()) if p.exists() else None
+            c = json.loads(_c(p).read_text(max_bytes=64 * 1024 * 1024)) if p.exists() else None
         except Exception:  # noqa: BLE001
             c = None
         if c and c.get('source') == 'suno' and isinstance(c.get('lines'), list) and c['lines']:

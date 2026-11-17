@@ -29,6 +29,17 @@ _QUEUE = os.environ.get(
 )
 
 
+def _queue_file():
+    """The queue file for a no-follow append. It sits in canvas-pages (agent-writable),
+    so the walk starts at the canvas-pages mount; a symlinked .jambot-books/ or
+    queue.jsonl is refused instead of appended through."""
+    from services.safe_open import Anchored
+    q = os.path.normpath(_QUEUE)
+    mount = "/app/runtime/canvas-pages"
+    root = mount if q.startswith(mount + "/") else os.path.dirname(os.path.dirname(q))
+    return Anchored(root, q)
+
+
 def _source_container() -> str:
     """Stamp the row with a STABLE, origin-resolvable caller name.
 
@@ -134,8 +145,7 @@ def _record(response) -> None:
             "ts": _now_iso(),
             "provider_extras": extras,
         }
-        os.makedirs(os.path.dirname(_QUEUE), exist_ok=True)
-        with _lock, open(_QUEUE, "a") as fh:
+        with _lock, _queue_file().open("a", create_dirs=True) as fh:   # no-follow
             fh.write(json.dumps(rec) + "\n")
     except Exception:
         pass  # never break a voice turn
@@ -176,8 +186,7 @@ def record_provider_call(provider: str, endpoint: str = "", op: str | None = Non
             "ts": _now_iso(),
             "provider_extras": {"leg": "ovu-file-drop", "op": op, "units": units},
         }
-        os.makedirs(os.path.dirname(_QUEUE), exist_ok=True)
-        with _lock, open(_QUEUE, "a") as fh:
+        with _lock, _queue_file().open("a", create_dirs=True) as fh:   # no-follow
             fh.write(json.dumps(rec) + "\n")
     except Exception:
         pass

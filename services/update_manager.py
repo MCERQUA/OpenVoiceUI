@@ -225,10 +225,12 @@ class UpdateManager:
     # ── Git helpers ──────────────────────────────────────────────────────
 
     def _git(self, *args, timeout=30) -> subprocess.CompletedProcess:
+        from services.safe_proc import minimal_env
+        # /api/version/preview reaches this with the agent key: git gets no server secrets
         return subprocess.run(
             ["git"] + list(args),
             cwd=str(self.app_dir),
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, env=minimal_env(),
         )
 
     def _current_commit(self) -> str:
@@ -565,9 +567,13 @@ class UpdateManager:
         try:
             prompt_file.write_text(prompt)
         except Exception:
-            # Read-only filesystem — try /tmp
-            prompt_file = Path("/tmp/.openvoiceui-update-prompt.md")
-            prompt_file.write_text(prompt)
+            # Read-only app dir — the server-private dir, never a fixed name in /tmp
+            # (a pre-planted symlink there would redirect this write)
+            from services.private_dir import private_path
+            prompt_file = private_path('update-prompt.md')
+            _fd = os.open(str(prompt_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(_fd, 'w') as _f:
+                _f.write(prompt)
 
         # Build the agent command based on what CLI it is
         cmd = self._build_agent_command(agent_cmd, str(prompt_file))

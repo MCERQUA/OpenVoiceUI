@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 _home = Path.home()
 MEMORY_DB = Path(os.getenv('CLAWDBOT_MEMORY_DB', str(_home / '.clawdbot/memory/main.sqlite')))
 SESSIONS_DIR = Path(os.getenv('CLAWDBOT_SESSIONS_DIR', str(_home / '.clawdbot/agents/main/sessions/')))
-VOICE_EVENTS = Path('/tmp/openvoiceui-events.jsonl')
+from services.events_file import EVENTS_PATH as _EVENTS_PATH  # server-private, not /tmp
+VOICE_EVENTS = Path(_EVENTS_PATH)
 
 # Ambient transcripts directory
 AMBIENT_DIR = Path(__file__).parent / "ambient_transcripts"

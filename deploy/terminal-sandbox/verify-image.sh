@@ -16,6 +16,9 @@
 #                       FD9/FD70000 closed, EVENTS_FILE denied, the helper's
 #                       rlimits in ULIMITS, and SANDBOX_PROCS_AFTER_CLOSE=0 even
 #                       though the shell left a `setsid nohup sleep` behind.
+# Per-tenant uid: a proof-only helper build stands in for two containers (A, B) with
+#   different addresses: A exhausting its NPROC must not stop B forking, while a
+#   second shell with A's address (same uid, same budget) is refused (negative control).
 # Negative control (PROBE_LEGACY=1: helper hidden, not hosted): the old same-user shell,
 # which must show PROC1_ENVIRON=READABLE / DB_FILE=READABLE — proving the probe
 # can see a leak when there is one.
@@ -44,6 +47,13 @@ USER root
 $COPIES
 COPY --chown=appuser:appuser deploy/terminal-sandbox/ /app/deploy/terminal-sandbox/
 RUN sh /app/deploy/terminal-sandbox/install.sh
+# PROOF-ONLY variant (never in the real image): takes the container address from
+# OVU_TEST_IPV4 so two --network none runs can stand in for two tenants.
+RUN gcc -O2 -Wall -Wextra -Werror -DOVU_SANDBOX_TEST_BUILD -DCALLER_UID=1001 \
+        -DSANDBOX_FALLBACK_UID=1500 -DSANDBOX_GID=1500 '-DSANDBOX_WORKSPACE="/srv/code-workspace"' \
+        -o /usr/local/libexec/ovu-sandbox-shell-testaddr /app/deploy/terminal-sandbox/ovu-sandbox-shell.c \
+    && chown root:appuser /usr/local/libexec/ovu-sandbox-shell-testaddr \
+    && chmod 4750 /usr/local/libexec/ovu-sandbox-shell-testaddr
 ENV CODE_WORKSPACE_DIR=/srv/code-workspace
 USER appuser
 EOF
@@ -65,6 +75,53 @@ run() {  # $1 = label, rest = extra docker args
 }
 run "sandbox (hosted tenant, helper present)"
 run "negative control (legacy same-user shell)" -e PROBE_LEGACY=1 -e CANVAS_REQUIRE_AUTH=false -e TERMINAL_SANDBOX=auto
+echo "== per-tenant sandbox uid: NPROC is per tenant, not host-wide (review 2, M-A)"
+T=/usr/local/libexec/ovu-sandbox-shell-testaddr
+mkdir -p "$WORK/nproc"
+cat > "$WORK/nproc/fill.py" <<'PY'
+import os, time
+n = 0
+while n < 400:
+    try:
+        pid = os.fork()
+    except OSError:
+        break
+    if pid == 0:
+        time.sleep(40)
+        os._exit(0)
+    n += 1
+print(f"A_CHILDREN_LAUNCHED={n}", flush=True)
+time.sleep(30)
+PY
+cat > "$WORK/nproc/forks.py" <<'PY'
+import os, sys
+ok = 0
+for _ in range(20):
+    try:
+        pid = os.fork()
+    except OSError:
+        continue
+    if pid == 0:
+        os._exit(0)
+    os.waitpid(pid, 0)
+    ok += 1
+print(f"{sys.argv[1]}_FORKS_OK={ok}/20", flush=True)
+PY
+printf 'exec python3 /nproc/fill.py\n' > "$WORK/nproc/A.sh"
+printf 'exec python3 /nproc/forks.py B\n' > "$WORK/nproc/B.sh"
+printf 'exec python3 /nproc/forks.py A2_SAME_ADDRESS\n' > "$WORK/nproc/A2.sh"
+chmod -R a+rX "$WORK/nproc"
+probe() {  # $1 script name, $2 container address (proof helper only)
+    docker run --rm --network none --memory 512m -v "$WORK/nproc:/nproc:ro" --entrypoint sh "$TAG" -c \
+        "echo \"$1 sandbox_uid=\$(OVU_TEST_IPV4=$2 $T --uid)\"; OVU_TEST_IPV4=$2 $T < /nproc/$1.sh 2>&1"
+}
+# tenant A fills its own process budget (its children exit by themselves after 40 s)
+probe A 10.255.0.5 > "$WORK/nproc-A.out" 2>&1 &
+sleep 10
+probe B 10.255.0.6 2>&1 | grep -E "sandbox_uid=|FORKS|fork" || true
+probe A2 10.255.0.5 2>&1 | grep -E "sandbox_uid=|FORKS|fork" | sort | uniq -c || true
+wait || true
+grep -E "sandbox_uid=|A_CHILDREN" "$WORK/nproc-A.out" || true
 echo "== image facts"
 docker run --rm --network none --entrypoint sh "$TAG" -c \
     'stat -c "%a %U:%G %n" /app /mnt /srv/code-workspace /usr/local/libexec/ovu-sandbox-shell; id appuser; id sandbox'

@@ -3,7 +3,10 @@
 #
 # Runs as root at image build time, AFTER the `appuser` (server) user exists.
 # The server process (appuser, uid 1001) keeps every secret it already has;
-# the terminal shell runs as `sandbox` (uid 1500), which:
+# the terminal shell runs as a sandbox uid in group `sandbox` (gid 1500) — per
+# container, derived by the helper from the container's IPv4 address (so NPROC
+# is per tenant, not shared host-wide); `sandbox` (uid 1500) is the fallback —
+# which:
 #   - gets no inherited environment (no API keys, tokens, Clerk secret)
 #   - cannot read /proc/1/environ (different uid)
 #   - cannot enter /app (code, runtime/db, vault, uploads, every tenant mount
@@ -45,7 +48,7 @@ usermod -aG sandbox "$caller_user"
 # 3. the setuid helper (only the server's group may execute it)
 mkdir -p /usr/local/libexec
 gcc -O2 -Wall -Wextra -Werror \
-    -DCALLER_UID="$CALLER_UID" -DSANDBOX_UID="$SANDBOX_UID" -DSANDBOX_GID="$SANDBOX_UID" \
+    -DCALLER_UID="$CALLER_UID" -DSANDBOX_FALLBACK_UID="$SANDBOX_UID" -DSANDBOX_GID="$SANDBOX_UID" \
     -DSANDBOX_WORKSPACE="\"$WORKSPACE\"" \
     -o "$HELPER" "$SRC"
 chown "root:$caller_group" "$HELPER"

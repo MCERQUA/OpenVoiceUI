@@ -45,12 +45,14 @@ from services.canvas_versioning import (
 # ---------------------------------------------------------------------------
 
 from services.paths import APP_ROOT as _APP_ROOT, CANVAS_MANIFEST_PATH, CANVAS_PAGES_DIR, WORKSPACE_DIR, CODE_WORKSPACE_DIR
+from services.safe_open import Anchored  # noqa: E402
 from services.safe_open import (
     UnsafePath, open_beneath as safe_open_beneath, open_dir_beneath as safe_open_dir_beneath,
     read_fd as safe_read_fd, split_rel as safe_split_rel, write_beneath as safe_write_beneath)
 CANVAS_SSE_PORT = int(os.getenv('CANVAS_SSE_PORT', '3030'))
 CANVAS_SESSION_PORT = int(os.getenv('CANVAS_SESSION_PORT', '3002'))
-BRAIN_EVENTS_PATH = Path('/tmp/openvoiceui-events.jsonl')
+from services.events_file import EVENTS_PATH as _EVENTS_PATH  # server-private, not /tmp
+BRAIN_EVENTS_PATH = Path(_EVENTS_PATH)
 # Self-hosted installs: auth is disabled by default. Set CANVAS_REQUIRE_AUTH=true to enable Clerk JWT checks.
 CANVAS_REQUIRE_AUTH = os.getenv('CANVAS_REQUIRE_AUTH', 'false').lower() == 'true'
 
@@ -168,7 +170,7 @@ def extract_page_icon(html_content: str) -> str | None:
 def extract_page_icon_from_file(filepath: Path) -> str | None:
     """Read a canvas page HTML file and extract its icon meta tag."""
     try:
-        with open(filepath, 'r', errors='ignore') as f:
+        with Anchored(CANVAS_PAGES_DIR, filepath).open('r', errors='ignore') as f:  # no-follow
             head = f.read(2048)
         return extract_page_icon(head)
     except Exception:
@@ -209,10 +211,10 @@ def extract_canvas_page_content(page_path: str, max_chars: int = 1000) -> str:
     try:
         if page_path.startswith('/pages/'):
             page_path = page_path[7:]
-        full_path = CANVAS_PAGES_DIR / page_path
-        if not full_path.exists():
+        full_path = Anchored(CANVAS_PAGES_DIR, page_path)   # no-follow (agent-writable dir)
+        if not full_path.is_file():
             return ''
-        html_raw = full_path.read_text(errors='ignore')
+        html_raw = full_path.read_text(errors='ignore', max_bytes=8 * 1024 * 1024)
         html_raw = re.sub(r'<script[^>]*>.*?</script>', '', html_raw, flags=re.DOTALL | re.IGNORECASE)
         html_raw = re.sub(r'<style[^>]*>.*?</style>', '', html_raw, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'<[^>]+>', ' ', html_raw)
@@ -589,7 +591,8 @@ def _sync_canvas_manifest_locked() -> dict:
         filepath = CANVAS_PAGES_DIR / filename
         title = existing.get('display_name') or existing.get('title') or page_id.replace('-', ' ').title()
         try:
-            content = filepath.read_text()[:1000]
+            content = Anchored(CANVAS_PAGES_DIR, filepath).read_text(
+                errors='ignore', max_bytes=8 * 1024 * 1024)[:1000]
         except Exception:
             content = ''
         category = existing.get('category') or suggest_category(title, content)
@@ -700,23 +703,16 @@ def _write_page_replacing(filepath: Path, html_content: str) -> None:
     EACCES for this container's uid and the agent sees a bare 500, so a page it
     made last week can no longer be refreshed. The canvas-pages dir is writable
     by every writer, so a rename succeeds whoever owns the old file. It is also
-    atomic: a reader never gets a half-written page. The new file is left
-    group/world-writable so the other writers can still update it in place.
+    atomic: a reader never gets a half-written page.
+
+    canvas-pages is agent-writable, so (review 2 of PR #597): the temp name is
+    random and created O_EXCL|O_NOFOLLOW in a no-follow-pinned dir (it used to be
+    a predictable `.<page>.<pid>.<tid>.tmp` the agent could pre-plant as a symlink
+    to /app/*.py), and the page is left 0644, never 0666 (other writers replace
+    it by rename, as this function does; nothing needs it world-writable).
     """
-    tmp = filepath.with_name(f'.{filepath.name}.{os.getpid()}.{threading.get_ident()}.tmp')
-    try:
-        tmp.write_text(html_content, encoding='utf-8')
-        try:
-            os.chmod(tmp, 0o666)
-        except OSError:
-            pass
-        os.replace(tmp, filepath)
-    except BaseException:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
+    filepath = Path(filepath)   # always CANVAS_PAGES_DIR/<name>: anchored at that mount
+    Anchored(filepath.parent, filepath.name).atomic_write_text(html_content, mode=0o644)
 
 
 def add_page_to_manifest(filename: str, title: str, description: str = '', content: str = '') -> dict:
@@ -1100,9 +1096,18 @@ def canvas_pages_proxy(path):
                 return redirect('/pages/' + path + '.html', code=301)
         if resolved.is_file():
             # HTML files need custom processing (script stripping, CSS/error injection)
+            # canvas-pages is agent-writable: read/serve from ONE no-follow open of
+            # the requested path (review 2 of PR #597, H-C); a symlink is a 404.
+            try:
+                _page = Anchored(CANVAS_PAGES_DIR, path)
+            except UnsafePath:
+                return 'Page not found', 404
             if path.endswith('.html'):
-                with open(resolved, 'rb') as f:
-                    content = f.read()
+                try:
+                    content = _page.read_bytes(max_bytes=32 * 1024 * 1024)
+                    _page_st = _page.lstat()
+                except (OSError, UnsafePath):
+                    return 'Page not found', 404
                 # Tailwind CDN is allowed through — CSP controls script loading.
                 import re as _re
                 content_str = content.decode('utf-8', errors='replace')
@@ -1198,7 +1203,7 @@ def canvas_pages_proxy(path):
                 resp.headers['Cloudflare-CDN-Cache-Control'] = 'no-store'
                 # ETag based on file mtime to force revalidation
                 import os as _os
-                _mtime = str(int(_os.path.getmtime(resolved)))
+                _mtime = str(int(_page_st.st_mtime))
                 resp.headers['ETag'] = '"canvas-' + _mtime + '"'
                 # Canvas-specific CSP: allow inline scripts (interactive pages)
                 # Canvas CSP: allow scripts and styles inline, allow API connections
@@ -1239,10 +1244,9 @@ def canvas_pages_proxy(path):
                 # See docs/jambot/no-cache-policy.md.
                 # NOTE: conditional=True is kept so range requests still work for
                 # audio/video streaming playback; only the cache headers change.
-                resp = send_file(
-                    resolved,
-                    conditional=True,
-                )
+                resp = _page.send(conditional=True)
+                if resp is None:
+                    return 'Page not found', 404
                 resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
                 resp.headers['Pragma'] = 'no-cache'
                 resp.headers['Expires'] = '0'
@@ -1586,7 +1590,7 @@ def handle_page_metadata(page_id):
                         while bak_path.exists():
                             bak_path = filepath.with_name(f'{filepath.stem}.bak.{counter}')
                             counter += 1
-                        filepath.rename(bak_path)
+                        Anchored(CANVAS_PAGES_DIR, filepath).rename(bak_path.name)  # no-follow
                         logger.info(f'Archived canvas page: {filename} -> {bak_path.name}')
                 except Exception as exc:
                     logger.warning(f'Failed to archive file {filename}: {exc}')
@@ -1934,14 +1938,16 @@ def canvas_data(filename):
         return denied
     if not filename.endswith('.json'):
         return jsonify({'error': 'only .json files'}), 400
-    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
-    if resolved and resolved.exists() and resolved.is_file():
-        try:
-            return Response(resolved.read_bytes(), mimetype='application/json',
+    try:
+        f = _canvas_data_file(filename)
+        if f.is_file():
+            return Response(f.read_bytes(max_bytes=32 * 1024 * 1024), mimetype='application/json',
                             headers={'Cache-Control': 'no-cache'})
-        except Exception as exc:
-            logger.error(f'canvas_data read error: {exc}')
-            return jsonify({}), 200
+    except UnsafePath:
+        return jsonify({}), 200
+    except Exception as exc:
+        logger.error(f'canvas_data read error: {exc}')
+        return jsonify({}), 200
     return jsonify({}), 200
 
 
@@ -1956,16 +1962,21 @@ def canvas_data_static(filename):
     denied = _canvas_data_denied(filename)
     if denied:
         return denied
-    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
-    if resolved and resolved.exists() and resolved.is_file():
-        try:
-            return send_file(str(resolved), conditional=True,
-                             download_name=resolved.name,
-                             max_age=0)  # canvas no-cache rule
-        except Exception as exc:
-            logger.error(f'canvas_data_static read error: {exc}')
-            return jsonify({'error': 'read error'}), 500
-    return jsonify({'error': 'not found'}), 404
+    try:
+        resp = _canvas_data_file(filename).send(conditional=True, max_age=0)  # canvas no-cache rule
+    except UnsafePath:
+        resp = None
+    except Exception as exc:
+        logger.error(f'canvas_data_static read error: {exc}')
+        return jsonify({'error': 'read error'}), 500
+    if resp is None:
+        return jsonify({'error': 'not found'}), 404
+    return resp
+
+
+def _canvas_data_file(filename) -> Anchored:
+    """canvas-pages/_data/<filename>, anchored at the canvas-pages MOUNT (no-follow walk)."""
+    return Anchored(_CANVAS_DATA_DIR.parent, f'{_CANVAS_DATA_DIR.name}/{filename}')
 
 
 def _ovu_is_empty(v):
@@ -1995,38 +2006,53 @@ def canvas_data_write(filename):
     data = request.get_json(silent=True)
     if data is None:
         return jsonify({'error': 'invalid json'}), 400
-    resolved = _safe_canvas_path(str(_CANVAS_DATA_DIR), filename)
-    if resolved is None:
+    try:
+        target = _canvas_data_file(filename)
+    except UnsafePath:
         return jsonify({'error': 'invalid path'}), 400
     try:
-        resolved.parent.mkdir(parents=True, exist_ok=True)
+        # canvas-pages/_data is agent-writable: every read, backup copy and write is a
+        # no-follow walk from the canvas-pages mount (a `.backups -> /anywhere` or a
+        # swapped target symlink is refused; review 2 of PR #597, H-C).
+        parent_rel = target.rel.rsplit('/', 1)[0]
+        Anchored(target.root, parent_rel).mkdir(parents=True, exist_ok=True)
         # Scoped protection for the website-setup record: timestamped backup + a merge
         # that never blanks already-populated fields (prevents a full-record save from
         # wiping the stitch design block). All other canvas data keys keep replace.
-        if resolved.name in ('website-setup.json', 'website-creator.json'):
+        if target.name in ('website-setup.json', 'website-creator.json'):
             existing = {}
-            if resolved.exists():
+            if target.is_file():
                 try:
-                    existing = json.loads(resolved.read_text(encoding='utf-8'))
+                    raw_existing = target.read_bytes(max_bytes=32 * 1024 * 1024)
+                    existing = json.loads(raw_existing.decode('utf-8'))
                 except Exception:
-                    existing = {}
+                    raw_existing, existing = None, {}
                 try:
-                    bdir = resolved.parent / '.backups'
+                    bdir = Anchored(target.root, f'{parent_rel}/.backups')
                     bdir.mkdir(parents=True, exist_ok=True)
                     ts = datetime.now().strftime('%Y%m%dT%H%M%S')
-                    stem = resolved.stem  # website-setup | website-creator
-                    shutil.copy2(str(resolved), str(bdir / f'{stem}.{ts}.json'))
-                    baks = sorted(bdir.glob(f'{stem}.*.json'))
+                    stem = target.stem  # website-setup | website-creator
+                    if raw_existing is not None:
+                        bdir.child(f'{stem}.{ts}.json').atomic_write_bytes(raw_existing)
+                    baks = sorted(p for p in bdir.iterdir()
+                                  if p.name.startswith(f'{stem}.') and p.name.endswith('.json'))
                     for old in baks[:-30]:
                         try:
-                            old.unlink()
+                            from services.safe_open import open_dir_beneath as _odb
+                            _bfd = _odb(target.root, bdir.rel)
+                            try:
+                                os.unlink(old.name, dir_fd=_bfd)
+                            finally:
+                                os.close(_bfd)
                         except Exception:
                             pass
                 except Exception as bexc:
                     logger.warning(f'website-setup backup failed (non-fatal): {bexc}')
             if isinstance(existing, dict) and isinstance(data, dict):
                 data = _ovu_merge_preserve(existing, data)
-        resolved.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        # in place (no-follow, O_TRUNC) like before: keeps the owner/mode of a file
+        # the agent created, so the agent can still edit it
+        target.write_text(json.dumps(data, indent=2))
         return jsonify({'ok': True})
     except Exception as exc:
         logger.error(f'canvas_data write error: {exc}')
@@ -2266,7 +2292,8 @@ def _parse_jsonl_to_lines(jsonl_path):
     import json as _json
     results = []
     try:
-        with open(jsonl_path, encoding='utf-8', errors='replace') as _f:
+        # the agent's own workspace: no-follow walk from the workspace mount
+        with Anchored(WORKSPACE_DIR, jsonl_path).open('r', errors='replace') as _f:
             for raw in _f:
                 raw = raw.strip()
                 if not raw:
@@ -2366,7 +2393,7 @@ def canvas_build_log(project):
         status_path = CANVAS_PAGES_DIR / '_data' / 'builds' / f'{project}-status.json'
         if status_path.exists():
             try:
-                with open(status_path) as _sf:
+                with Anchored(CANVAS_PAGES_DIR, status_path).open('r') as _sf:  # no-follow
                     _sd = _json.load(_sf)
                 build_start_ts = _sd.get('startedAt', '')
             except Exception:

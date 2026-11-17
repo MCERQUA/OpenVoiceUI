@@ -80,7 +80,8 @@ su -c id root </dev/null >/dev/null 2>&1 && echo "@""@SU=ROOT" || echo "@""@SU=d
 /usr/local/libexec/ovu-sandbox-shell </dev/null >/dev/null 2>&1 && echo "@""@HELPER_REENTRY=ALLOWED" || echo "@""@HELPER_REENTRY=denied"
 cat <&9 >/dev/null 2>&1 && echo "@""@FD9=READABLE" || echo "@""@FD9=closed"
 cat <&70000 >/dev/null 2>&1 && echo "@""@FD70000=READABLE" || echo "@""@FD70000=closed"
-[ -r /tmp/openvoiceui-events.jsonl ] && echo "@""@EVENTS_FILE=READABLE" || echo "@""@EVENTS_FILE=denied"
+[ -r /app/runtime/.server-private/openvoiceui-events.jsonl ] && echo "@""@EVENTS_FILE=READABLE" || echo "@""@EVENTS_FILE=denied"
+ls /app/runtime/.server-private >/dev/null 2>&1 && echo "@""@PRIVATE_DIR=listable" || echo "@""@PRIVATE_DIR=denied"
 echo "@""@ULIMITS=nproc:$(ulimit -u) as_kb:$(ulimit -v) cpu_s:$(ulimit -t) fsize_blk:$(ulimit -f) nofile:$(ulimit -n)"
 setsid nohup sleep 300 >/dev/null 2>&1 </dev/null &
 echo "@""@PROBE_DONE=1"
@@ -105,6 +106,7 @@ for line in text.splitlines():
     if "refused" in line or "unavailable" in line:
         print(line.strip())
 print(f"SERVER_UID={os.getuid()}")
+print(f"HELPER_SANDBOX_UID={ts.sandbox_uid() if os.environ.get('PROBE_LEGACY') != '1' else 'n/a'}")
 
 
 def _procs_of(uid, zombies=False):
@@ -123,6 +125,7 @@ def _procs_of(uid, zombies=False):
 
 
 time.sleep(2)  # the handler has closed the pty master; the shell must be gone
-print(f"SANDBOX_PROCS_AFTER_CLOSE={_procs_of(1500)}")
-print(f"SANDBOX_ZOMBIES_AFTER_CLOSE={_procs_of(1500, zombies=True)}")
+_suid = ts.sandbox_uid() if os.environ.get('PROBE_LEGACY') != '1' else 1500
+print(f"SANDBOX_PROCS_AFTER_CLOSE={_procs_of(_suid)}")
+print(f"SANDBOX_ZOMBIES_AFTER_CLOSE={_procs_of(_suid, zombies=True)}")
 print(f"SERVER_UID_PROCS_BESIDES_SERVER={_procs_of(os.getuid()) - 1}")

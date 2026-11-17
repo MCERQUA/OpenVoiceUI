@@ -1,4 +1,4 @@
-"""The Brain events file (/tmp/openvoiceui-events.jsonl), kept private to the server.
+"""The Brain events file (<private dir>/openvoiceui-events.jsonl), kept private to the server.
 
 It carries conversation text (type 'conversation', 'message'), and /tmp is
 shared with the terminal's sandbox user. Before: the file was appended with
@@ -20,7 +20,18 @@ import logging
 import os
 import stat
 
-EVENTS_PATH = '/tmp/openvoiceui-events.jsonl'
+def _default_path():
+    # Server-private dir, not /tmp (review 2 of PR #597: no security-relevant file
+    # in a dir the sandbox shares). Falls back to a non-existent marker path if the
+    # private dir cannot be made, so events are simply disabled.
+    try:
+        from services.private_dir import private_path
+        return str(private_path('openvoiceui-events.jsonl'))
+    except Exception:
+        return '/nonexistent/openvoiceui-events.jsonl'
+
+
+EVENTS_PATH = _default_path()
 
 logger = logging.getLogger(__name__)
 

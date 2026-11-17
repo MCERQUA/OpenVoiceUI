@@ -30,7 +30,28 @@ import threading
 import time
 
 SANDBOX_HELPER = '/usr/local/libexec/ovu-sandbox-shell'
-SANDBOX_UID = 1500
+SANDBOX_FALLBACK_UID = 1500
+_sandbox_uid_cache = {}
+
+
+def sandbox_uid(helper: str = None) -> int:
+    """This container's sandbox uid, as the helper derives it (`--uid`).
+
+    Per container (from its IPv4 address) so RLIMIT_NPROC, which the kernel counts
+    per uid host-wide, is per tenant (review 2 of PR #597, M-A). Cached per helper;
+    falls back to the image's `sandbox` uid if the helper cannot say."""
+    helper = helper or SANDBOX_HELPER
+    if helper not in _sandbox_uid_cache:
+        uid = SANDBOX_FALLBACK_UID
+        try:
+            r = subprocess.run([helper, '--uid'], env={}, stdin=subprocess.DEVNULL,
+                               capture_output=True, timeout=5, close_fds=True)
+            if r.returncode == 0 and r.stdout.strip().isdigit():
+                uid = int(r.stdout.strip())
+        except Exception:
+            pass
+        _sandbox_uid_cache[helper] = uid
+    return _sandbox_uid_cache[helper]
 
 # The only variables a same-user (local-mode) shell inherits. Everything else —
 # API keys, tokens, Clerk secrets, signing keys — is dropped.
@@ -128,12 +149,12 @@ def session_closed(plan, helper: str = None) -> bool:
             ok = r.returncode == 0
         except Exception:
             ok = False
-        _reap_sandbox_zombies()
+        _reap_sandbox_zombies(sandbox_uid(helper))
         return ok
 
 
-def _sandbox_tasks():
-    """[(pid, ppid, state)] of every process whose real uid is the sandbox uid."""
+def _sandbox_tasks(uid):
+    """[(pid, ppid, state)] of every process whose real uid is `uid`."""
     out = []
     try:
         names = os.listdir('/proc')
@@ -145,7 +166,7 @@ def _sandbox_tasks():
         try:
             with open(f'/proc/{d}/status') as fh:
                 fields = dict(ln.split(':', 1) for ln in fh if ':' in ln)
-            if fields.get('Uid', '').split()[0] != str(SANDBOX_UID):
+            if fields.get('Uid', '').split()[0] != str(uid):
                 continue
             out.append((int(d), int(fields.get('PPid', '0').strip() or 0),
                         fields.get('State', '?').strip()[:1]))
@@ -154,25 +175,25 @@ def _sandbox_tasks():
     return out
 
 
-def _reap_sandbox_zombies(timeout=2.0) -> None:
+def _reap_sandbox_zombies(uid, timeout=2.0) -> None:
     """Collect the killed sandbox processes that were re-parented to THIS process.
 
     In the container the server is pid 1, so every orphaned sandbox process (a
     setsid/nohup survivor) becomes our child; killed and never waited for, it
     stays a zombie that still counts against the sandbox's RLIMIT_NPROC. Only
-    uid-1500 zombies whose parent is us are waited for, by pid, so no other
+    sandbox-uid zombies whose parent is us are waited for, by pid, so no other
     thread's subprocess is ever reaped out from under it."""
     me = os.getpid()
     end = time.time() + timeout
     while True:
-        tasks = _sandbox_tasks()
+        tasks = _sandbox_tasks(uid)
         for pid, ppid, state in tasks:
             if ppid == me and state == 'Z':
                 try:
                     os.waitpid(pid, os.WNOHANG)
                 except OSError:
                     pass
-        if not any(state != 'Z' or ppid == me for pid, ppid, state in _sandbox_tasks()):
+        if not any(state != 'Z' or ppid == me for pid, ppid, state in _sandbox_tasks(uid)):
             return
         if time.time() >= end:
             return
