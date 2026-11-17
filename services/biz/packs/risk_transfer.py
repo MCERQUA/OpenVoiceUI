@@ -35,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.10.0'
+RULE_VERSION = 'crt-rules-1.10.1'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -369,8 +369,19 @@ def needs_fold(s) -> bool:
     raw = str(s)
     if not raw.isascii():
         return True
-    k = re.sub(r'[^A-Z0-9]', '', _fold_chars(raw))
+    k = _month_words_kept(re.sub(r'[^A-Z0-9]', '', _fold_chars(raw)))
     return _o_is_zero(k) != k or _lookalike_changes_reading(raw)
+
+
+_MONTH_NAMES = ('JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER',
+                'NOVEMBER', 'DECEMBER')
+
+
+def _month_words_kept(k) -> str:
+    """Rules 1.10.1 (M2): a run of letters that is a month word ('OCT', 'Oct', 'OCTOBER', 'SEPT') is read as that word
+    before the O-inside-a-number test, so 'CG 20 10 OCT 2013' is October, not a look-alike."""
+    return re.sub(r'[A-Z]{3,}', lambda m: 'M' * len(m.group()) if any(n.startswith(m.group())
+                                                                        for n in _MONTH_NAMES) else m.group(), k)
 
 
 def near_iso_number(s) -> bool:
@@ -385,10 +396,13 @@ def _number_then_edition(s):
     'ISO CG 20 10'), followed by an edition the one edition reader reads ('Nov 1985', '(Nov 1985)', 'NOV 85',
     'Apr 2013', '1/85'). (form key, (month, year) or None, the words after it name a month but read as no date), or
     None when the field is not shaped that way."""
-    folded = _fold_chars(s)
-    if not all('A' <= c <= 'Z' or c in _DIGITS or c in _EDITION_GAPS for c in folded):
-        return None                                   # only the marks a footer prints between parts
-    words = re.findall(r'[A-Z]+|[0-9]+', _o_is_zero(re.sub(r'[^A-Z0-9]', ' ', folded)))
+    folded = re.sub(r"'(?=[0-9]{2}(?![0-9]))", ' ', _fold_chars(s))   # 1.10.1 (M1): 'YY reads as YY
+    marks = not all('A' <= c <= 'Z' or c in _DIGITS or c in _EDITION_GAPS for c in folded)
+    spaced = re.sub(r'[^A-Z0-9]', ' ', folded)
+    kept = _month_words_kept(spaced)                  # 1.10.1 (M2): a month word is never an O inside a number
+    zeroed = _o_is_zero(kept)
+    words = re.findall(r'[A-Z]+|[0-9]+', ''.join(o if k == 'M' and o != k else z
+                                                  for o, k, z in zip(spaced, kept, zeroed)))
     if words[:1] == ['ISO']:
         words = words[1:]
     if len(words) < 3 or len(words[0]) != 2 or not words[0].isalpha():
@@ -399,8 +413,13 @@ def _number_then_edition(s):
     if len(digits) != 4 or j >= len(words):
         return None
     rest = words[j:]
+    month = any(w.isalpha() and w[:3] in _MONTHS for w in rest)
+    if marks:                                         # 1.10.1 (M1): another mark beside a month word is no date,
+        return (words[0] + digits, None, True) if month else None   # never "any edition"
+    if rest[:1] in (['ED'], ['EDITION']) and len(rest) > 1:
+        rest = rest[1:]                               # 1.10.1 (M5): 'Ed. Nov 2013' as the footer prints it
     ed = edition_parts(' '.join(rest))[1]
-    return words[0] + digits, ed, ed is None and any(w.isalpha() and w[:3] in _MONTHS for w in rest)
+    return words[0] + digits, ed, ed is None and month
 
 
 def form_parts(s):
@@ -436,14 +455,25 @@ def is_iso_form(s) -> bool:
     return is_iso_number(form_key(s)) or bool(iso_numbers_in(s))
 
 
-def never_completed_ops(s) -> bool:
-    """The form field names CG 20 10 / 20 26 / 20 11 anywhere: never completed operations, by any route (R3, G, C)."""
+def exact_numbers(s) -> set:
+    """Rules 1.10.1 (D): every CG 20 xx the field reads as exactly through the look-alike classes (digit glyphs too)."""
+    return {r for r, _w in _exact_readings(s)}
+
+
+def names_never_completed(s) -> bool:
+    """The form field names CG 20 10 / 20 26 / 20 11 as written (however written, rules 1.7.0 C)."""
     return form_key(s) in NEVER_COMPLETED_ANY or bool(iso_numbers_in(s) & NEVER_COMPLETED_ANY)
+
+
+def never_completed_ops(s) -> bool:
+    """The form field names CG 20 10 / 20 26 / 20 11 anywhere: never completed operations, by any route (R3, G, C).
+    Rules 1.10.1 (D): or reads as one exactly through the look-alike classes ('CG 70 10', 'C9 70 10')."""
+    return names_never_completed(s) or bool(exact_numbers(s) & NEVER_COMPLETED_ANY)
 
 
 def iso_floor_clash(s, function):
     """Why mapping form field s to `function` would loosen the ISO floor (ruling F, read per rules 1.7.0 C), or None."""
-    for n in sorted({form_key(s)} | iso_numbers_in(s)):
+    for n in sorted({form_key(s)} | iso_numbers_in(s) | exact_numbers(s)):   # 1.10.1 (D): every exact reading
         if n in ISO_FLOOR and ISO_FLOOR[n] != function:
             return f'ISO {ISO_FLOOR[n]}'
     if function == 'ai_completed' and never_completed_ops(s):
@@ -1602,13 +1632,19 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 fk, form_ed = form_parts(e_form)
                 iso = is_iso_form(e_form)
                 near = near_iso_number(e_form) and not iso
-                if fn == 'ai_completed' and never_completed_ops(e_form):
+                if fn == 'ai_completed' and names_never_completed(e_form):
                     ec(f'MISSING:{fn}')
                 elif needs_fold(e_form):
                     ec('UNCONFIRMED:crt_endorsement.form')
                     notes.append(f"{iid}: form {e_form!a} is written with characters that only look like letters or "
                                  f'digits (it reads as {fk if iso else iso_exact_reading(e_form) or form_key(lookalike_reading(e_form))}); staff re-enter the '
                                  'number in plain letters and digits as printed. It is never read as a manuscript')
+                elif fn == 'ai_completed' and never_completed_ops(e_form):
+                    # 1.10.1 (D): it reads exactly as CG 20 10 / 20 26 / 20 11 through look-alikes (digit glyphs too):
+                    # never completed operations, whatever a set lists or maps
+                    ec(f'MISSING:{fn}')
+                    notes.append(f'{iid}: form {e_form} reads as {min(exact_numbers(e_form) & NEVER_COMPLETED_ANY)}, which never covers '
+                                 'completed operations')
                 elif e['data'].get('manuscript') is not True or fk in form_fn or iso or near:
                     accepted = {form_key(f) for f in it.get('forms') or []}
                     if fk not in accepted:
@@ -1621,9 +1657,11 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                                              'it is an ISO form, read as that form (never as a manuscript); list '
                                              'it in the requirement set only if your licensed staff accept it for '
                                              'this coverage' if iso else
-                                             'it is one character away from an ISO number (CG 20 xx), reading '
-                                             'I, L, |, ! as 1 and O as 0, so it is never read as a manuscript; '
-                                             'staff check the number as printed'
+                                             (f'it reads as {iso_exact_reading(e_form)} through characters that '
+                                              'look like its letters and digits' if iso_exact_reading(e_form) else
+                                              'it is one character away from an ISO number (CG 20 xx), reading '
+                                              'I, L, |, ! as 1 and O as 0') + ', so it is never read as a '
+                                             'manuscript; staff check the number as printed'
                                              if near else
                                              'list the equivalent in the requirement set or confirm it as a '
                                              'manuscript form'))

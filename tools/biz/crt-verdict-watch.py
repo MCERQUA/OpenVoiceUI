@@ -356,7 +356,7 @@ def _refold(s):
         return False
     if not str(s).isascii():
         return True
-    k = ''.join(ch for ch in _fold(s) if ch in _LATIN)
+    k = _months_as_words(''.join(ch for ch in _fold(s) if ch in _LATIN))
     if _zero(k) != k:
         return True
     m = _as_digits(s)
@@ -374,6 +374,28 @@ def _refold(s):
 
 def _iso_key(fk):
     return fk in _ISO_FLOOR or fk in _NOT_COMPLETED or bool(_ISO_AI.match(fk or ''))
+
+
+_MONTHS_FULL = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER',
+                'NOVEMBER', 'DECEMBER']
+
+
+def _months_as_words(k):
+    """RM11 (own code): a letter run of three or more that begins a month name is a word ('OCT 2013' is October), not
+    an O inside a number."""
+    out, i = '', 0
+    while i < len(k):
+        j = i
+        while j < len(k) and k[j].isalpha():
+            j += 1
+        if j > i:
+            run = k[i:j]
+            out += 'M' * len(run) if len(run) >= 3 and any(m.startswith(run) for m in _MONTHS_FULL) else run
+            i = j
+        else:
+            out += k[i]
+            i += 1
+    return out
 
 
 def _near_iso(s):
@@ -406,10 +428,17 @@ def _form_parts(s):
 def _num_ed(s):
     """RM10 (own code): (key, edition or None, a month word that reads as no date) for 'LL dd dd <edition>' / 'LLdddd
     <edition>' (optionally after ISO), the four digits in whole words; None for any other shape."""
-    f = _fold(s)
-    if any(ch not in _LATIN and ch not in ' \t\n\r\f\v()[]/-.,' for ch in f):
-        return None
-    t = _zero(''.join(ch if ch in _LATIN else ' ' for ch in f))
+    f = list(_fold(s))
+    for i, ch in enumerate(f):                            # RM11: an apostrophe year ('85) is the two-digit year
+        if ch == "'" and ''.join(f[i + 1:i + 3]).isdigit() and len(f[i + 1:i + 3]) == 2 and \
+                not (i + 3 < len(f) and f[i + 3].isdigit()):
+            f[i] = ' '
+    f = ''.join(f)
+    odd = any(ch not in _LATIN and ch not in ' \t\n\r\f\v()[]/-.,' for ch in f)
+    plain = ''.join(ch if ch in _LATIN else ' ' for ch in f)
+    masked = _months_as_words(plain)                      # RM11: a month word keeps its O
+    zeroed = _zero(masked)
+    t = ''.join(plain[i] if masked[i] != plain[i] else zeroed[i] for i in range(len(plain)))
     words, cur = [], ''
     for ch in t:
         if cur and (ch == ' ' or ch.isdigit() != cur[-1].isdigit()):
@@ -429,8 +458,13 @@ def _num_ed(s):
         j += 1
     if len(num) != 4 or j == len(words):
         return None
-    my = _edition_my(' '.join(words[j:]))
-    month = any(x.isalpha() and x[:3] in _MON for x in words[j:])
+    rest = words[j:]
+    month = any(x.isalpha() and x[:3] in _MON for x in rest)
+    if odd:                                               # RM11: another mark beside a month word: no date, never any
+        return (words[0] + num, None, True) if month else None
+    if rest[0] in ('ED', 'EDITION') and len(rest) > 1:    # RM11: 'Ed. Nov 2013'
+        rest = rest[1:]
+    my = _edition_my(' '.join(rest))
     return words[0] + num, my, my is None and month
 
 
@@ -451,12 +485,13 @@ def _iso_in(s):
 def _never_completed(s):
     """RG/RC7: CG 20 10 / 20 26 / 20 11 named anywhere in the form field: never completed operations."""
     bad = {_NEVER_COMPLETED} | _NOT_COMPLETED
-    return _form(s) in bad or bool(_iso_in(s) & bad)
+    exact = {r for r, _ in _exact_all(s)}                 # RD11: every exact look-alike reading counts too
+    return _form(s) in bad or bool((_iso_in(s) | exact) & bad)
 
 
 def _clash(s, fn):
     """RF read per RC7: why mapping form field s to fn loosens the ISO floor, or None."""
-    for n in {_form(s)} | _iso_in(s):
+    for n in {_form(s)} | _iso_in(s) | {r for r, _ in _exact_all(s)}:      # RD11
         if n in _ISO_FLOOR and _ISO_FLOOR[n] != fn:
             return f'ISO {_ISO_FLOOR[n]}'
     if fn == 'ai_completed' and _never_completed(s):
@@ -771,7 +806,7 @@ def _floor(sd):
         raw = [f for f in (it.get('forms') or []) if isinstance(f, str) and _form(f)]
         if not raw:
             out.append(f"item {it.get('id')} lists no forms")
-        if any(_refold(v) for v in [it.get('edition')] + raw):                     # RN8
+        if any(_refold(v) for v in [it.get('edition')] + (it['forms'] if isinstance(it.get('forms'), list) else [])):   # RN8 / N3
             out.append(f"item {it.get('id')} has a form or edition not in plain letters and digits")
         if it.get('edition') and _edition_read(it.get('edition'))[0]:                # RE8 (H8)
             out.append(f"item {it.get('id')} edition field holds a form number")
