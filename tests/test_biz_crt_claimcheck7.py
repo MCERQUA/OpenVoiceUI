@@ -231,6 +231,19 @@ def test_b_every_waivable_code_is_raised_with_its_paper():
     assert rt.EVENT_BOUND_CODES == ('SCOPE_CHANGED',) and not 'MISSING'.startswith(rt.WAIVABLE_PREFIXES)
 
 
+def test_b_a_paperless_place_is_never_covered_whatever_the_binding_says():
+    """The coverage rule itself: a waivable code raised with no document or no file hash is never covered, even by a
+    waiver bound to exactly that empty place; the event-bound SCOPE_CHANGED is (bound to its timestamp)."""
+    from services.biz.packs import risk_transfer as rt
+    for place in [('ai_completed', None, None), ('ai_completed', 'doc-1', None), ('gl_occ', None, 'a' * 64)]:
+        assert rt.waiver_uncovered('COMPLETED_OPS_LAPSED', [place], {place}) == [place], place
+        assert rt.waiver_uncovered('LIMIT_LOW:gl', [place], {place}) == [place], place
+    paper = ('ai_completed', 'doc-1', 'a' * 64)
+    assert rt.waiver_uncovered('COMPLETED_OPS_LAPSED', [paper], {paper}) == []          # positive control
+    scope = ('scope@2026-11-01T00:00:00Z', None, None)
+    assert rt.waiver_uncovered('SCOPE_CHANGED', [scope], {scope}) == []
+
+
 def test_b_positive_control_the_same_term_stays_accepted(h):
     w = _lapsed_world(h, 'B Same Inc')
     _waive(h, w, 'COMPLETED_OPS_LAPSED')

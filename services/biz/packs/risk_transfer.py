@@ -79,6 +79,14 @@ NEVER_WAIVABLE = ('WRONG_INSURED',)
 # Rules 1.7.0 (B): every waivable code is raised by a piece of paper (a document and its file hash) and a waiver covers
 # it only on that paper. The one exception is bound to an event instead: SCOPE_CHANGED (its scope_changed_at time).
 EVENT_BOUND_CODES = ('SCOPE_CHANGED',)
+
+
+def waiver_uncovered(code, need, bound) -> list:
+    """The places (function, document id, file hash) raising `code` now that no waiver binding covers (ruling W).
+    B (rules 1.7.0): a place with no paper (no document or no file hash) matches every later term, so a waiver never
+    covers it; only an event-bound code (the scope change, bound to its timestamp) is raised without paper."""
+    return [o for o in need if o not in bound or
+            (code not in EVENT_BOUND_CODES and (o[1] is None or o[2] is None))]
 # Assignment fields the verdict reads: they count only when a person wrote the assignment's current
 # version, or a person confirmed them (claim-check H1).
 ASSIGNMENT_FIELDS = ('crt_project_id', 'party_contact_id', 'requirement_set_id', 'requirement_set_version',
@@ -1399,10 +1407,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                      for w in live_waivers[code] for b in (w['data'].get('bound_evidence') or [])
                      if isinstance(b, dict)}
             need = [(o['function'], o['document_id'], o['sha256']) for o in raised.get(code) or []]
-            # B (rules 1.7.0): a place with no paper (no document, no file hash) matches every later term, so a waiver
-            # never covers it; only an event-bound code (the scope change, bound to its timestamp) has no paper
-            uncovered = [o for o in need if o not in bound or
-                         (code not in EVENT_BOUND_CODES and (o[1] is None or o[2] is None))]
+            uncovered = waiver_uncovered(code, need, bound)
             if not need or uncovered:
                 notes.append(f'{code}: the contractor accepted this on other paper; it is raised again here '
                              '(' + ', '.join(f'{fn_} on document {d_ or "-"}' for fn_, d_, _s in uncovered[:3])
