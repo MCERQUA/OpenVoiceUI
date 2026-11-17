@@ -93,6 +93,30 @@ async function test(name, fn) {
         assert.strictEqual(removed[0], boot);
         assert.strictEqual(jb.staffBase, '/api/biz/v1/crt/staff/');
     });
+    await test('a platform staff page shows a Sign out control that ends the staff session', async () => {
+        const calls = [], appended = [];
+        const listeners = {};
+        const doc = {
+            readyState: 'complete',
+            getElementById: () => null,
+            createElement: (tag) => ({ tag, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; },
+                addEventListener(e, fn) { listeners[e] = fn; } }),
+            body: { appendChild: (n) => appended.push(n) },
+        };
+        const jb = loadSdk('/api/biz/v1/crt/staff/cca-crt-book.html', calls,
+            { token: 'v2.t', sandbox: null, base: '/api/biz/v1/crt/staff/' }, doc);
+        let went = null;
+        lastCtx.location.replace = (u) => { went = u; };
+        assert.strictEqual(appended.length, 1);
+        assert.strictEqual(appended[0].id, 'jb-staff-signout');
+        assert.strictEqual(appended[0].textContent, 'Sign out');
+        listeners.click();
+        await new Promise((r) => setTimeout(r, 0));
+        assert.strictEqual(calls[0].url, '/api/biz/v1/crt/staff/signout');
+        assert.strictEqual(calls[0].opts.method, 'POST');
+        assert.strictEqual(went, '/api/biz/v1/crt/staff/signin');
+        assert.strictEqual(typeof jb.staffSignOut, 'function');
+    });
     await test('a canvas page (no platform boot) never sends a surface token', async () => {
         const calls = [];
         const jb = loadSdk('/pages/sandbox/josh/agent-intake.html', calls);

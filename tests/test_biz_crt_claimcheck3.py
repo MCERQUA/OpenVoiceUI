@@ -266,16 +266,18 @@ def test_h3_the_intake_page_has_no_bulk_tick():
 def test_med_edition_dates_read_as_printed_and_empty_is_cant_tell(h, ed, state, code):
     w = world(h, endorsements=_ends(edition=ed))
     ev = h.state(w['asg']['id'])
-    assert ev['state'] == state and codes(ev) == ([code] if code else []), ev
+    # rules 1.5.0 (host ruling E): a pre-2004 finding no longer stops the edition comparison; both codes show
+    want = [code] + (['WRONG_EDITION:ai_ongoing'] if code.startswith('WRONG_FORM') else [])
+    assert ev['state'] == state and codes(ev) == want, ev
 
 
 def test_med_controls_2013_spellings_meet_and_1185_is_pre_2004_but_11_dash_85_too(h):
     for i, ed in enumerate(('04/13', '(04 13)')):
         assert h.state(world(h, endorsements=_ends(edition=ed), party_name=f'Sub {i} Inc')['asg']['id'])['state'] == 'meets'
     assert codes(h.state(world(h, endorsements=_ends(edition='1185'), party_name='Sub 3 Inc')['asg']['id'])) == \
-        ['WRONG_FORM:ai_ongoing']
+        ['WRONG_FORM:ai_ongoing', 'WRONG_EDITION:ai_ongoing']                   # rules 1.5.0 (E): both checks run
     assert codes(h.state(world(h, endorsements=_ends(edition='11-85'), party_name='Sub 4 Inc')['asg']['id'])) == \
-        ['WRONG_FORM:ai_ongoing']
+        ['WRONG_FORM:ai_ongoing', 'WRONG_EDITION:ai_ongoing']
 
 
 # ── MED: the watcher reads limits, named insured, exclusions and forms itself ─

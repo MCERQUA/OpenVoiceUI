@@ -253,8 +253,7 @@ def world(h, template='mep', trade='electrical', today=TODAY, policies=None, end
     # the agent proposes readings (unconfirmed until staff check them)
     h.agent()
     prod = {'producer_name': 'Desert Risk Partners', 'producer_contact': 'Pat Lee',
-            'producer_phone': '602-555-0100', 'producer_email': 'pat@example.com',
-            'producer_is_cca': producer_is_cca}
+            'producer_phone': '602-555-0100', 'producer_email': 'pat@example.com'}
     base = {'crt_account_id': w['account']['id'], 'party_contact_id': w['party']['id'], 'carrier': 'Sample Mutual',
             'effective': iso(today - timedelta(days=100)), 'expiration': iso(today + timedelta(days=200)),
             'named_insured': party_name, 'certificate_holder': account_name, 'addl_insd': True,
@@ -285,6 +284,12 @@ def world(h, template='mep', trade='electrical', today=TODAY, policies=None, end
             ed['document_id'] = w['docs'][dk]['id']
         w['end'][k] = h.mk('crt_endorsement', {'crt_account_id': w['account']['id'],
                                                 'crt_policy_id': w['pol'][pol_key]['id'], **ed})
+    # host ruling C (rules 1.5.0): producer_is_cca is a staff-only field, said by staff on the staff surface
+    h.staff()
+    for k, p in list(w['pol'].items()):
+        cur = h.ok(h.get(f'/crt_policy/{p["id"]}'))
+        w['pol'][k] = h.ok(h.patch(f'/crt_policy/{p["id"]}', {'data': {'producer_is_cca': producer_is_cca}},
+                                   cur['version']))
     if confirm_all:
         # the agent filed these documents: staff check each one's kind, account, sub and file (rules 1.2.0)
         for d in w['docs'].values():

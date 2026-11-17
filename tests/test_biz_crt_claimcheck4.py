@@ -533,40 +533,22 @@ def test_r4_cg2038_stays_ongoing_and_equivalences_are_part_of_the_approved_set(h
     assert s['data']['form_functions']['CG 20 10'] == 'ai_ongoing'
     confs = h.ok(h.get('/crt_confirmation', query_string={'where': '{"record_id": "%s"}' % s['id']}))['records']
     assert any('form_functions' in c['data']['fields'] for c in confs)          # approved WITH the set
-    # the set's own table is what classifies a form: re-mapped there (items untouched), CG 20 38 on completed ops
-    # is no longer "a form for another purpose" (MISSING) but a form the item does not list yet (Can't tell)
+    # Rules 1.5.0 (host ruling F, safety floor): a built-in ISO number keeps its ISO category in EVERY set, so CG 20 38
+    # can no longer be re-mapped to completed operations by a set version (the R4 per-set re-map is superseded).
     h.staff()
-    only_map = h.ok(h.post(f'/crt/requirement-sets/{s["id"]}/revise',
-                           {'form_functions': dict(s['data']['form_functions'], **{'CG 20 38': 'ai_completed'})}),
-                    201)['record']
-    only_map = h.ok(h.post(f'/crt/requirement-sets/{only_map["id"]}/approve'))['record']
-    w3 = world(h, endorsements=_completed(form='CG 20 38', blanket=True, scheduled_names=[], scheduled_projects=[]),
-               party_name='Map Only Sub Inc')
-    a3 = h.ok(h.get(f'/crt_assignment/{w3["asg"]["id"]}'))
-    h.ok(h.patch(f'/crt_assignment/{a3["id"]}', {'data': {'requirement_set_id': only_map['id'],
-                                                          'requirement_set_version': only_map['version']}}, a3['version']))
-    ev3 = h.state(w3['asg']['id'])
-    assert ev3['items']['ai_completed'] == 'UNCONFIRMED' and 'UNCONFIRMED:crt_endorsement.form' in codes(ev3), ev3
-    # licensed staff re-map CG 20 38 in a NEW set version; the old version keeps its reading
-    ff = dict(s['data']['form_functions'], **{'CG 20 38': 'ai_completed'})
+    r = h.post(f'/crt/requirement-sets/{s["id"]}/revise',
+               {'form_functions': dict(s['data']['form_functions'], **{'CG 20 38': 'ai_completed'})})
+    assert r.status_code == 422 and r.get_json()['code'] == 'iso_form_floor', r.get_json()
     items = []
     for it in s['data']['items']:
-        if it['id'] == 'ai_ongoing':
-            it = dict(it, forms=['CG 20 10', 'CG 20 33'])
         if it['id'] == 'ai_completed':
             it = dict(it, forms=['CG 20 37', 'CG 20 38'])
         items.append(it)
-    new = h.ok(h.post(f'/crt/requirement-sets/{s["id"]}/revise', {'items': items, 'form_functions': ff}), 201)['record']
-    assert new['data'].get('status') != 'APPROVED'
-    new = h.ok(h.post(f'/crt/requirement-sets/{new["id"]}/approve'))['record']
+    r = h.post(f'/crt/requirement-sets/{s["id"]}/revise', {'items': items})
+    assert r.status_code == 422 and r.get_json()['code'] == 'safety_floor', r.get_json()
     w2 = world(h, endorsements=_completed(form='CG 20 38', blanket=True, scheduled_names=[], scheduled_projects=[]),
                party_name='Remap Sub Inc')
-    assert 'MISSING:ai_completed' in codes(h.state(w2['asg']['id']))            # old version: ongoing only
-    a = h.ok(h.get(f'/crt_assignment/{w2["asg"]["id"]}'))
-    h.ok(h.patch(f'/crt_assignment/{a["id"]}', {'data': {'requirement_set_id': new['id'],
-                                                         'requirement_set_version': new['version']}}, a['version']))
-    ev = h.state(w2['asg']['id'])
-    assert ev['items']['ai_completed'] == 'OK', ev
+    assert 'MISSING:ai_completed' in codes(h.state(w2['asg']['id']))            # ongoing only, in every set
 
 
 def test_r4_an_unapproved_change_to_the_equivalences_is_cant_tell(h):
@@ -575,9 +557,16 @@ def test_r4_an_unapproved_change_to_the_equivalences_is_cant_tell(h):
     s = h.ok(h.get(f'/crt_requirement_set/{w["set"]["id"]}'))
     from services.biz.packs import risk_transfer as rt
     store = h.app.extensions['biz']['sandbox:josh']
-    store.update('crt_requirement_set', s['id'], {'form_functions': dict(s['data']['form_functions'], **{'CG 20 33': 'pnc'})},
-                 expected_version=s['version'], by='agent:test-dev', agent=True, source=SRC, via_pack=True)
-    assert rt.RULE_VERSION == 'crt-rules-1.4.0'
+    # rules 1.5.0 (ruling F): the agent no longer edits a set at all, and CG 20 33 -> pnc is below the floor; the
+    # unapproved change is a staff edit of a non-ISO equivalence, made around the approval route
+    import pytest as _pt
+    with _pt.raises(rt.SchemaError) as ex:
+        store.update('crt_requirement_set', s['id'], {'form_functions': dict(s['data']['form_functions'], **{'ACME 99': 'pnc'})},
+                     expected_version=s['version'], by='agent:test-dev', agent=True, source=SRC, via_pack=True)
+    assert ex.value.status == 403
+    store.update('crt_requirement_set', s['id'], {'form_functions': dict(s['data']['form_functions'], **{'ACME 99': 'pnc'})},
+                 expected_version=s['version'], by='clerk:' + STAFF_1, agent=False, via_pack=True, surface=True)
+    assert rt.RULE_VERSION == 'crt-rules-1.5.0'
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'cant_tell', ev
 
