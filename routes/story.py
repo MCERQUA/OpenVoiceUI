@@ -9,6 +9,7 @@ Assets are written to the tenant's canvas-pages/stories/{story_id}/ directory.
 """
 
 import os
+import re
 import json
 import time
 import base64
@@ -22,6 +23,9 @@ from flask import Blueprint, jsonify, request
 logger = logging.getLogger(__name__)
 
 story_bp = Blueprint('story', __name__)
+
+# Ids that become path segments (story dir, sfx file names): slugs only.
+_SAFE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,100}$')
 
 # ── Keys ──────────────────────────────────────────────────────────────────────
 HF_TOKEN        = os.getenv('HF_TOKEN', '')
@@ -207,6 +211,11 @@ def generate_scene():
 
     if not choice_text:
         return jsonify({'error': 'choice_text required'}), 400
+    # story_id names a directory under canvas-pages/stories/ and is chmod'ed:
+    # a slug only. '../../db' or an absolute path previously escaped the
+    # stories dir and chmod 0777'ed whatever it named.
+    if not isinstance(story_id, str) or not _SAFE_ID_RE.fullmatch(story_id):
+        return jsonify({'error': 'story_id must be 1-100 letters, digits, - or _'}), 400
 
     # 1. Generate scene JSON via LLM
     try:
@@ -216,11 +225,18 @@ def generate_scene():
         return jsonify({'error': f'Scene generation failed: {e}'}), 500
 
     scene_id = f'scene_{scene_index:03d}'
-    story_dir = CANVAS_PAGES_DIR / 'stories' / story_id
+    stories_root = CANVAS_PAGES_DIR / 'stories'
+    story_dir = stories_root / story_id
+    # Containment after symlink resolution: neither stories/ nor stories/<id>
+    # may point anywhere else (canvas-pages is agent-writable, so a planted
+    # symlink would otherwise aim the chmod below at e.g. the db dir).
+    if (stories_root.resolve().parent != CANVAS_PAGES_DIR.resolve()
+            or story_dir.resolve().parent != stories_root.resolve()):
+        return jsonify({'error': 'invalid story_id'}), 400
     story_dir.mkdir(parents=True, exist_ok=True)
     try:
         story_dir.chmod(0o777)
-        (CANVAS_PAGES_DIR / 'stories').chmod(0o777)
+        stories_root.chmod(0o777)
     except Exception:
         pass
 
@@ -252,7 +268,9 @@ def generate_scene():
     # prompt but not guaranteed. Backfill missing ids so indexing never KeyErrors.
     sfx_list = scene_data.get('sfx', [])
     for _i, _sfx in enumerate(sfx_list):
-        if not _sfx.get('id'):
+        # The id becomes a filename; it comes from LLM output, so it is a slug
+        # or it is replaced (never a path).
+        if not _sfx.get('id') or not _SAFE_ID_RE.fullmatch(str(_sfx['id'])):
             _sfx['id'] = f'sfx_{_i}'
     for sfx in sfx_list:
         sfx_file = story_dir / f'{scene_id}_{sfx["id"]}.mp3'

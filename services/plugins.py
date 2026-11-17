@@ -24,6 +24,7 @@ import json
 import logging
 import importlib.util
 import os
+import re
 import shutil
 import tempfile
 import zipfile
@@ -312,6 +313,27 @@ def _run_lifecycle_hook(manifest: dict, hook_name: str, config: dict = None) -> 
 # ── Install / Uninstall ────────────────────────────────────────────────
 
 
+_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+
+
+def _plugin_path(base: Path, plugin_id: str) -> Optional[Path]:
+    """`base/plugin_id` only if plugin_id is a plain name that stays inside base.
+
+    plugin_id arrives from the URL. `..` used to make uninstall rmtree the
+    parent of PLUGIN_DIR (/app); a symlinked plugin dir would point it
+    anywhere. Returns None for anything that is not one directory level below
+    base after resolving symlinks."""
+    if not isinstance(plugin_id, str) or not _PLUGIN_ID_RE.fullmatch(plugin_id) or ".." in plugin_id:
+        return None
+    candidate = base / plugin_id
+    try:
+        if candidate.resolve().parent != base.resolve():
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
 def install_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
     """Install a plugin from the local catalog or remote repo.
 
@@ -323,7 +345,9 @@ def install_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
         config: Optional configuration dict (API keys, provider selection)
                 passed through to the provisioning service for gateway plugins.
     """
-    dest = PLUGIN_DIR / plugin_id
+    dest = _plugin_path(PLUGIN_DIR, plugin_id)
+    if dest is None:
+        return None  # not a valid plugin id
     if dest.exists():
         return None  # Already installed
 
@@ -387,8 +411,8 @@ def install_plugin(plugin_id: str, config: dict = None) -> Optional[dict]:
 
 def uninstall_plugin(plugin_id: str) -> bool:
     """Uninstall a plugin by removing its directory."""
-    dest = PLUGIN_DIR / plugin_id
-    if not dest.exists():
+    dest = _plugin_path(PLUGIN_DIR, plugin_id)
+    if dest is None or not dest.is_dir():
         return False
 
     # Run pre_uninstall lifecycle hook (container deprovisioning)

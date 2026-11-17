@@ -526,6 +526,33 @@ def _encode_cover_data_url(cover_path: str) -> str | None:
 
 
 _COVER_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+_COVER_PATH_EXTS = _COVER_EXTS + (".gif",)
+
+
+def _resolve_cover_path(raw_path):
+    """Confine a caller-supplied push-song `cover_path` to the image dirs.
+
+    The bytes are base64'd and sent to AI-Radio, so an unconfined path was a
+    read-any-file primitive for anyone holding the agent key (e.g. the db
+    dir's key files). Accepts what set-image accepts (`/uploads/x.png`, a bare
+    filename) plus an absolute path that is already inside a whitelisted dir;
+    the file must be an image by extension. Returns a Path or None."""
+    if not raw_path or not isinstance(raw_path, str) or ".." in raw_path:
+        return None
+    candidate = _resolve_image_path(raw_path)
+    if candidate is None and raw_path.startswith("/"):
+        p = Path(raw_path).resolve()
+        if p.is_file():
+            for allowed in _IMAGE_WHITELIST_DIRS:
+                try:
+                    p.relative_to(allowed)
+                    candidate = p
+                    break
+                except ValueError:
+                    continue
+    if candidate is None or candidate.suffix.lower() not in _COVER_PATH_EXTS:
+        return None
+    return candidate
 
 
 def _find_sibling_cover(song_path: Path) -> str | None:
@@ -646,6 +673,18 @@ def push_song():
     playlist = body.get("playlist", "library")
     title = body.get("title")
     cover_path = body.get("cover_path")
+    if cover_path:
+        safe_cover = _resolve_cover_path(cover_path)
+        if safe_cover is None:
+            return jsonify({
+                "ok": False,
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": "cover_path must be an image inside uploads/ "
+                               "(e.g. /uploads/cover.png or cover.png)",
+                },
+            }), 400
+        cover_path = str(safe_cover)
 
     local_path, meta = _resolve_local_song(filename, playlist)
     if local_path is None:
