@@ -1808,7 +1808,7 @@ def _stem_write_pending(name_stem: str, task_id: str, sep_type: str):
 
 def _stem_clear_pending(name_stem: str):
     try:
-        _stem_pending_path(name_stem).unlink(missing_ok=True)
+        Anchored(_CANVAS_ROOT, _stem_pending_path(name_stem)).unlink(missing_ok=True)  # no-follow
     except OSError:
         pass
 

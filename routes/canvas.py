@@ -708,11 +708,15 @@ def _write_page_replacing(filepath: Path, html_content: str) -> None:
     canvas-pages is agent-writable, so (review 2 of PR #597): the temp name is
     random and created O_EXCL|O_NOFOLLOW in a no-follow-pinned dir (it used to be
     a predictable `.<page>.<pid>.<tid>.tmp` the agent could pre-plant as a symlink
-    to /app/*.py), and the page is left 0644, never 0666 (other writers replace
-    it by rename, as this function does; nothing needs it world-writable).
+    to /app/*.py). The page itself is 0666 (review 3 of PR #597, host ruling):
+    the openclaw agent (uid 1000, no group shared with this uid 1001) edits pages
+    IN PLACE with fs.writeFile (O_WRONLY|O_TRUNC), not by rename, so a 0644 page
+    the server wrote would be EACCES for it. The vulnerability was the
+    predictable temp name, never the mode; fchmod sets the exact mode on the
+    no-follow temp fd before the rename, whatever the umask.
     """
     filepath = Path(filepath)   # always CANVAS_PAGES_DIR/<name>: anchored at that mount
-    Anchored(filepath.parent, filepath.name).atomic_write_text(html_content, mode=0o644)
+    Anchored(filepath.parent, filepath.name).atomic_write_text(html_content, mode=0o666)
 
 
 def add_page_to_manifest(filename: str, title: str, description: str = '', content: str = '') -> dict:
@@ -2034,8 +2038,9 @@ def canvas_data_write(filename):
                     stem = target.stem  # website-setup | website-creator
                     if raw_existing is not None:
                         bdir.child(f'{stem}.{ts}.json').atomic_write_bytes(raw_existing)
-                    baks = sorted(p for p in bdir.iterdir()
-                                  if p.name.startswith(f'{stem}.') and p.name.endswith('.json'))
+                    baks = sorted((p for p in bdir.iterdir()
+                                   if p.name.startswith(f'{stem}.') and p.name.endswith('.json')),
+                                  key=lambda p: p.name)   # Anchored has no ordering of its own
                     for old in baks[:-30]:
                         try:
                             from services.safe_open import open_dir_beneath as _odb

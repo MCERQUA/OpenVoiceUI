@@ -95,9 +95,14 @@ def parse_chatgpt_export(zip_path: Path, output_dir: Path) -> dict:
 
 
 def _extract_conversations_json(zip_path: Path) -> str | None:
-    """Extract conversations.json from the ZIP, searching common locations."""
+    """Extract conversations.json from the ZIP, searching common locations.
+
+    The ZIP sits in uploads/ (agent-writable): open it no-follow beneath that mount and
+    hand zipfile the file object, never the name (review 3 of PR #597)."""
+    from services.paths import UPLOADS_DIR
+    from services.safe_open import Anchored
     try:
-        with zipfile.ZipFile(zip_path, 'r') as zf:
+        with Anchored(UPLOADS_DIR, zip_path).open('rb') as fh, zipfile.ZipFile(fh, 'r') as zf:
             for name in zf.namelist():
                 if name.endswith('conversations.json'):
                     return zf.read(name).decode('utf-8')

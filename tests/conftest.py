@@ -43,3 +43,23 @@ def config():
     """Return the singleton config for testing config loading."""
     from config.loader import Config
     return Config()
+
+
+# Review 3 of PR #597: the reviewer's probe files are kept byte-identical (cmp-checked).
+# One probe locates the PRE-FIX line `_intel_path.write_text(` in routes/conversation.py by
+# text and asserts the guard flags it; the B2 fix removed that line, so on a fixed tree the
+# lookup raises StopIteration. It is marked xfail ONLY for that exception: if the by-name
+# line comes back and the guard misses it, the probe fails with its own AssertionError.
+# The guard's coverage of the pattern is asserted by
+# tests/test_agent_writable_io_guard.py::test_scanner_flags_the_review3_b2_pattern.
+_PREFIX_LINE_PROBES = {
+    'test_zz_review3_conversation_image_intel.py::test_guard_does_not_see_the_sidecar_write',
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if f'{item.path.name}::{item.name}' in _PREFIX_LINE_PROBES:
+            item.add_marker(pytest.mark.xfail(
+                raises=StopIteration, strict=True,
+                reason='probe looks up the pre-fix vulnerable line by text; the B2 fix removed it'))

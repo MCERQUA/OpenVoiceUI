@@ -100,7 +100,9 @@ def _cleanup_versions(page_stem: str, suffix: str = '.html') -> None:
     )
     for old_version in versions[MAX_VERSIONS_PER_PAGE:]:
         try:
-            old_version.unlink()
+            # no-follow walk: a `.versions` swapped for a symlink after the glob cannot
+            # redirect the prune into another directory (review 3 of PR #597)
+            Anchored(CANVAS_PAGES_DIR, old_version).unlink()
             logger.debug(f'Pruned old version: {old_version.name}')
         except Exception:
             pass

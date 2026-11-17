@@ -47,6 +47,11 @@ from flask import Blueprint, jsonify, request
 
 from services.paths import UPLOADS_DIR
 
+try:   # no-follow, beneath-root I/O (OVU >= PR #597)
+    from services.safe_open import Anchored as _Anchored
+except ImportError:   # an older OVU image: this plugin dir is mounted per tenant and is
+    _Anchored = None  # rolled separately from the image, so it must work on both
+
 logger = logging.getLogger(__name__)
 
 booking_bp = Blueprint("booking", __name__)
@@ -89,21 +94,132 @@ NOTIFY_QUEUE_DIR = UPLOADS_DIR / ".booking-notify-queue"
 # Config persistence (mirror of routes/onboarding.py + airadio_bridge.py)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# No-follow file I/O. uploads/ is agent-writable (the tenant's openclaw agent
+# mounts it read-write), so every file this plugin touches there is opened
+# without following symlinks, relative to a pinned directory fd, and replaced
+# through an UNPREDICTABLE O_EXCL temp. The old `booking-config.json.tmp` /
+# `<ts>.json.tmp` names were predictable: the agent could pre-plant one as a
+# symlink to /app/server.py (or the vault, or the server's private dir) and
+# POST /api/booking/config wrote agent-chosen JSON into it (review 3 of
+# OpenVoiceUI PR #597, B3).
+# ---------------------------------------------------------------------------
+
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _root_fd(root) -> int:
+    """fd on the uploads MOUNT point (its own path is not agent-replaceable)."""
+    return os.open(str(root), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+
+
+def _subdir_fd(root, sub, create=False) -> int:
+    """fd on root/sub (one component, '' = root), never following a symlink."""
+    rfd = _root_fd(root)
+    if not sub:
+        return rfd
+    try:
+        try:
+            return os.open(sub, _DIR_FLAGS, dir_fd=rfd)
+        except FileNotFoundError:
+            if not create:
+                raise
+            try:
+                os.mkdir(sub, 0o755, dir_fd=rfd)
+            except FileExistsError:
+                pass
+            return os.open(sub, _DIR_FLAGS, dir_fd=rfd)
+    finally:
+        os.close(rfd)
+
+
+def _split(rel):
+    parts = [p for p in str(rel).split("/") if p]
+    if not parts or len(parts) > 2 or any(p in (".", "..") for p in parts):
+        raise ValueError(f"booking: bad relative path {rel!r}")
+    return ("/".join(parts[:-1]), parts[-1])
+
+
+def _read_text(root, rel):
+    """root/rel as text, or None if absent. Refuses a symlink."""
+    if _Anchored is not None:
+        a = _Anchored(root, rel)
+        return a.read_text() if a.is_file() else None
+    sub, name = _split(rel)
+    dfd = _subdir_fd(root, sub)
+    try:
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd)
+        except FileNotFoundError:
+            return None
+        with os.fdopen(fd, "r", encoding="utf-8") as f:
+            return f.read()
+    finally:
+        os.close(dfd)
+
+
+def _atomic_write_text(root, rel, text, create_dirs=False) -> None:
+    """Replace root/rel: random O_EXCL|O_NOFOLLOW temp in the pinned dir, then rename."""
+    if _Anchored is not None:
+        _Anchored(root, rel).atomic_write_text(text, create_dirs=create_dirs)
+        return
+    sub, name = _split(rel)
+    dfd = _subdir_fd(root, sub, create=create_dirs)
+    try:
+        for _ in range(16):
+            tmp = f".{name[:40]}.{os.urandom(8).hex()}.tmp"
+            try:
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             0o644, dir_fd=dfd)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise OSError("booking: could not create a temp file")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+        except BaseException:
+            try:
+                os.unlink(tmp, dir_fd=dfd)
+            except OSError:
+                pass
+            raise
+    finally:
+        os.close(dfd)
+
+
+def _append_text(root, rel, text) -> None:
+    """Append to root/rel, creating it; refuses a symlink."""
+    if _Anchored is not None:
+        _Anchored(root, rel).append_text(text)
+        return
+    sub, name = _split(rel)
+    dfd = _subdir_fd(root, sub)
+    try:
+        fd = os.open(name, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                     0o644, dir_fd=dfd)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(text)
+    finally:
+        os.close(dfd)
+
+
 def _load_config() -> dict:
     """Read the server-side config file. Returns {} if absent/unreadable."""
     try:
-        if CONFIG_PATH.is_file():
-            return json.loads(CONFIG_PATH.read_text())
+        raw = _read_text(CONFIG_PATH.parent, CONFIG_PATH.name)
+        if raw is not None:
+            return json.loads(raw)
     except (OSError, ValueError) as e:
         logger.warning("booking: cannot read config file: %s", e)
     return {}
 
 
 def _save_config(data: dict) -> None:
-    """Persist the config file atomically-ish (write then replace)."""
-    tmp = CONFIG_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    tmp.replace(CONFIG_PATH)
+    """Persist the config file atomically (no-follow temp, then rename)."""
+    _atomic_write_text(CONFIG_PATH.parent, CONFIG_PATH.name, json.dumps(data, indent=2))
 
 
 def _api_url() -> str:
@@ -334,8 +450,7 @@ def _verify_signature(raw_body: bytes, signature: str, secret: str) -> bool:
 def _log_event(record: dict) -> None:
     """Append a webhook event to the per-tenant JSONL log."""
     try:
-        with WEBHOOK_LOG_PATH.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+        _append_text(WEBHOOK_LOG_PATH.parent, WEBHOOK_LOG_PATH.name, json.dumps(record) + "\n")
     except OSError as e:
         logger.error("booking: cannot write event log: %s", e)
 
@@ -375,15 +490,12 @@ def notify_sms(event_type: str, payload: dict) -> None:
     msg = f"{customer_name} {verb} '{title}'" + (f" — {start_time}" if start_time and verb != "cancelled" else "") + "."
 
     try:
-        NOTIFY_QUEUE_DIR.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
-        qfile = NOTIFY_QUEUE_DIR / f"{ts}.json"
-        tmp = qfile.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({
+        # temp is a dotfile (`.<ts>.json.<random>.tmp`): the host drain's *.json glob skips it
+        _atomic_write_text(NOTIFY_QUEUE_DIR.parent, f"{NOTIFY_QUEUE_DIR.name}/{ts}.json", json.dumps({
             "notify_phone": notify_phone, "identity": identity, "body": msg,
             "event": event_type, "queued_at": datetime.now(timezone.utc).isoformat(),
-        }))
-        tmp.replace(qfile)
+        }), create_dirs=True)
         logger.info("booking: notify_sms queued for %s -> %s", event_type, notify_phone)
     except OSError as e:
         logger.error("booking: notify_sms queue write failed: %s", e)

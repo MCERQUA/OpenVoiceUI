@@ -33,8 +33,9 @@ def test_replace_write_succeeds_on_foreign_page(tmp_path):
     page = _readonly_page(tmp_path)
     _write_page_replacing(page, '<p>new</p>')
     assert page.read_text(encoding='utf-8') == '<p>new</p>'
-    # 0644, not 0666 (PR #597 review 2: never world-writable; other writers replace by rename)
-    assert stat.S_IMODE(page.stat().st_mode) == 0o644
+    # 0666 (PR #597 review 3, host ruling): the openclaw agent (uid 1000, no shared group)
+    # edits pages in place with fs.writeFile, so the page must stay writable for it.
+    assert stat.S_IMODE(page.stat().st_mode) == 0o666
     assert [p.name for p in tmp_path.iterdir()] == ['job-profits.html']
 
 

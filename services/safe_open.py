@@ -340,6 +340,25 @@ def rename_beneath(root, src_rel, dst_rel, replace=True) -> None:
         os.close(sfd)
 
 
+def unlink_beneath(root, rel, missing_ok=False) -> None:
+    """Remove root/rel with its parent pinned no-follow. unlink() never follows the last
+    component (a symlink there is removed, not its target), so only the walk matters."""
+    parent, name = _parent_and_name(rel)
+    try:
+        dfd = open_dir_beneath(root, parent)
+    except FileNotFoundError:
+        if missing_ok:
+            return
+        raise
+    try:
+        os.unlink(name, dir_fd=dfd)
+    except FileNotFoundError:
+        if not missing_ok:
+            raise
+    finally:
+        os.close(dfd)
+
+
 def chmod_beneath(root, rel, mode) -> None:
     """fchmod on the regular file or directory root/rel, opened no-follow."""
     parent, name = _parent_and_name(rel)
@@ -428,8 +447,12 @@ class Anchored:
     def __str__(self):
         return self.path
 
-    def __fspath__(self):  # for logging / names only; I/O goes through the methods
-        return self.path
+    def __fspath__(self):
+        # Review 3 of PR #597: an Anchored handed to open()/send_file()/os.* would be
+        # opened BY NAME, following symlinks. Refuse; I/O goes through the methods
+        # (str(a) / a.path stay available for logging and are flagged by the guard
+        # when they reach a sink).
+        raise TypeError('Anchored is not a filesystem path: use its no-follow methods')
 
     def child(self, name):
         return Anchored(self.root, f'{self.rel}/{name}')
@@ -503,6 +526,9 @@ class Anchored:
 
     def chmod(self, mode):
         chmod_beneath(self.root, self.rel, mode)
+
+    def unlink(self, missing_ok=False):
+        unlink_beneath(self.root, self.rel, missing_ok=missing_ok)
 
     def mkdir(self, mode=0o755, parents=False, exist_ok=False):
         if not exist_ok and self.exists():
