@@ -709,7 +709,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                         if not all(names_equal(w, sched) for w in wanted):     # N8: exact, like M3
                             item_codes.append('WRONG_PARTY')
                             continue
-                        if not names_match(pname, e['data'].get('scheduled_projects') or []):
+                        if not names_equal(pname, e['data'].get('scheduled_projects') or []):   # host ruling (a): exact
                             item_codes.append('WRONG_PROJECT')
                             continue
                 good = True

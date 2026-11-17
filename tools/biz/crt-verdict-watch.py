@@ -20,7 +20,7 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
      endorsement on that line, for this account, whose OWN document is of kind 'endorsement' with that
      kind written or confirmed by a PERSON, for this account and sub, hash-verified, whose file is NOT
      any certificate file of this sub, person-confirmed (including which policy it attaches to), that
-     names this account EXACTLY (normalised equality, never containment) and this project (or is
+     names this account and this project EXACTLY (normalised equality, never containment) (or is
      blanket with the project's contract tick person-confirmed true). A naming miss (WRONG_PARTY,
      WRONG_PROJECT, BLANKET_UNBACKED) counts only when a person recorded an unexpired waiver backed by
      THIS account's written OK (kind contractor_waiver_ok). A missing document is never waivable.
@@ -380,7 +380,7 @@ def _judge(st, claim):
                 elif not _named_exact(acct_name, ed.get('scheduled_names')) or \
                         not all(_named_exact(n, ed.get('scheduled_names')) for n in proj['data'].get('contract_ai_parties') or []):
                     name_code = 'WRONG_PARTY'
-                elif not _named(pname, ed.get('scheduled_projects')):
+                elif not _named_exact(pname, ed.get('scheduled_projects')):
                     name_code = 'WRONG_PROJECT'
                 else:
                     name_code = None

@@ -388,3 +388,26 @@ def test_n1_unexplained_value_has_no_writer(h):
                      (w['asg']['id'],))
     ev = h.state(w['asg']['id'])
     assert ev['state'] == 'cant_tell' and codes(ev) == ['UNCONFIRMED:crt_assignment.trade_category'], ev
+
+
+# ── host ruling (a): WRONG_PROJECT is an exact normalised match too ─────────
+def _longer_project_ends():
+    named = {'scheduled_names': ['Acme Builders LLC', 'Mesa Health District'],
+             'scheduled_projects': ['Mesa Clinic Expansion Phase 2'], 'blanket': False, 'manuscript': False}
+    return {'ai_ongoing': {'function': 'ai_ongoing', 'form': 'CG 20 10', 'edition': '04 13', 'doc': 'e_ongoing', **named},
+            'ai_completed': {'function': 'ai_completed', 'form': 'CG 20 37', 'edition': '04 13', 'doc': 'e_completed',
+                             **named},
+            'pnc': {'function': 'pnc', 'form': 'CG 20 01', 'edition': '04 13', 'doc': 'e_pnc', **named}}
+
+
+def test_a_a_longer_project_name_containing_this_project_is_another_project(h):
+    w = world(h, endorsements=_longer_project_ends())
+    ev = h.state(w['asg']['id'])
+    assert ev['state'] == 'variance' and codes(ev) == ['WRONG_PROJECT'], ev
+
+
+def test_watch_a_fails_a_meets_on_a_longer_project_name(h, dirs):
+    w = world(h, endorsements=_longer_project_ends())
+    _forge_meets(h, w)
+    v, rows, _ = _watch(dirs)
+    assert v == 'FAIL' and any(r.startswith('R4') for r in rows[0]['reasons']), rows
