@@ -134,7 +134,7 @@ def test_l_watch_a_stored_ascii_look_alike_in_a_sets_form_list_is_below_the_floo
 
 
 # ═════════════════════════ L: one map, two copies (engine vs watcher over a look-alike generator) ═════════════════
-_LOOK = {'1': 'IiLl|!', '0': 'Oo'}
+_LOOK = {'1': 'IiLl|!', '0': 'OoQqDd', '2': 'Zz', '5': 'Ss', '8': 'Bb', '6': 'Gg'}    # 1.9.1: the widened map
 _ISO_SEEDS = ['CG 20 10', 'CG 20 11', 'CG 20 26', 'CG 20 37', 'CG 20 01', 'CG 20 33', 'CG 20 38', 'CG 20 10 04 13',
               'CG 20 11 07 04', 'ISO CG 20 10']
 _ASCII = 'CGILOcgilo0123456789|!#_*:;~ ./-(),' + "'"
@@ -181,7 +181,8 @@ def test_l_engine_and_watcher_agree_on_a_look_alike_generator():
            if _engine_reading(rt, s) != _watcher_reading(w, s)]
     assert not bad, bad[:5]
     dist = [s for s in spellings + randoms
-            if rt.iso_distance(rt.lookalike_reading(s)) != w._gap_to_iso(w._as_digits(s))]
+            if (rt.iso_distance(s), rt.iso_distance(s, lookalikes=False), rt.lookalike_reading(s)) !=
+            (w._gap_to_iso(s), w._gap_to_iso(s, look=False), w._as_digits(s))]
     assert not dist, dist[:5]
 
 
@@ -249,4 +250,109 @@ def test_p_watch_a_stored_pre_2004_requirement_is_below_the_floor(h, dirs):
 
 def test_rules_version_is_1_9_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.9.0'
+    assert rt.RULE_VERSION == 'crt-rules-1.9.1'          # rules 1.9.1 (host ruling: widened map) keeps every 1.9.0 rule
+
+
+# ═════════════════════════ 1.9.1 (host ruling): the widened map, S 5 / Z 2 / B 8 / G 6 / Q and D 0 ═════════════════
+# Each case fails on 2d60b14 (rules 1.9.0) and passes on 1.9.1, except the manuscript controls, which read the same on
+# both (the ruling: real manuscript numbers that are not within one edit of CG 20 xx are unaffected).
+# one new look-alike letter each: within one edit of CG 20 xx already on 1.9.0 (Can't tell on the paper), but the SET
+# accepted them there; 1.9.1 reads them as the ISO number and refuses them (422 form_lookalike)
+W_ONE = ['CG Z0 10', 'CG 20 1Q', 'CG 2D 11', 'CG 20 3B', 'CG 20 3G', 'CG 20 S0']
+W_ONE_IDS = ['Z', 'Q', 'D', 'B', 'G', 'S']
+# two new look-alike letters each: two edits from CG 20 xx on 1.9.0, so the paper was still invited as a manuscript
+W_TWO = ['CG ZD 10', 'CG 2D 1Q', 'CG 2Q 3B', 'CG 2D 3G', 'CG ZO 3S']
+W_TWO_IDS = ['Z-D-2010', 'D-Q-2010', 'Q-B-2038', 'D-G-2036', 'Z-S-2035']
+# real-shaped manuscript numbers carrying S / B / G / Z / Q / D that are NOT within one edit of CG 20 xx
+W_MANUSCRIPTS = ['ZURICH U-GL-1175-B', 'QBE AI-BLANKET 2019', 'DESIGNATED INSURED SB-0042', 'GSB 4471 ADD',
+                 'SBG-AI-0417']
+
+
+@pytest.mark.parametrize('form', W_ONE, ids=W_ONE_IDS)
+@pytest.mark.parametrize('who', ['agent', 'staff'])
+def test_w_a_set_refuses_a_widened_look_alike_in_a_form_list(h, form, who):
+    w = world(h, party_name=f'W91 Set {form} {who} Inc')
+    x = _set(h, w['set']['id'])
+    getattr(h, who)()
+    r = h.post(f'/crt/requirement-sets/{x["id"]}/revise',
+               {'items': _items_with(x, 'ai_ongoing', {'forms': ['CG 20 10', form]})})
+    assert r.status_code == 422 and r.get_json()['code'] == 'form_lookalike', r.get_json()
+
+
+@pytest.mark.parametrize('form', W_ONE, ids=W_ONE_IDS)
+def test_w_a_sets_table_refuses_a_widened_look_alike(h, form):
+    w = world(h, party_name=f'W91 Table {form} Inc')
+    x = _set(h, w['set']['id'])
+    h.agent()
+    r = h.post(f'/crt/requirement-sets/{x["id"]}/revise',
+               {'items': _items_with(x, 'ai_completed', {'forms': ['CG 20 37', form]}),
+                'form_functions': dict(x['data']['form_functions'], **{form: 'ai_completed'})})
+    assert r.status_code == 422 and r.get_json()['code'] == 'form_lookalike', r.get_json()
+
+
+@pytest.mark.parametrize('form', W_TWO, ids=W_TWO_IDS)
+def test_w_a_widened_look_alike_is_never_invited_as_a_manuscript(h, form):
+    w = world(h, endorsements=_completed(form=form), party_name=f'W91 Invite {form} Inc')
+    ev = h.state(w['asg']['id'])
+    note = [n for n in ev['notes'] if n.startswith('ai_completed:')]
+    assert ev['state'] == 'cant_tell' and 'UNCONFIRMED:crt_endorsement.form' in codes(ev), ev
+    assert note and not any('confirm it as a manuscript' in n for n in note), note
+
+
+@pytest.mark.parametrize('form', W_TWO, ids=W_TWO_IDS)
+def test_w_a_confirmed_widened_look_alike_manuscript_never_meets(h, form):
+    w = world(h, endorsements=_completed(form=form, manuscript=True), party_name=f'W91 Manuscript {form} Inc')
+    _staff_confirm_wording(h, w)
+    ev = h.state(w['asg']['id'])
+    assert ev['state'] in ('cant_tell', 'missing') and ev['items'].get('ai_completed') != 'OK', ev
+
+
+@pytest.mark.parametrize('form', W_TWO, ids=W_TWO_IDS)
+def test_w_watch_a_meets_on_a_widened_look_alike_manuscript_is_not_backed(h, dirs, form):
+    w = world(h, endorsements=_completed(form=form, manuscript=True), party_name=f'W91 Watch {form} Inc')
+    _staff_confirm_wording(h, w)
+    _forge(h, w)
+    v, rows, _ = _watch(dirs)
+    assert v == 'FAIL' and any(r.startswith('R4') and 'ai_completed' in r for r in _reasons(rows)), rows
+
+
+@pytest.mark.parametrize('form', W_MANUSCRIPTS)
+def test_w_positive_control_real_manuscripts_with_s_b_g_z_q_d_read_as_before(h, form):
+    """Not within one edit of CG 20 xx: invited as a manuscript on the paper, a confirmed one Meets, and a set may
+    list and map it (the same on 2d60b14 and 1.9.1)."""
+    from services.biz.packs import risk_transfer as rt
+    assert not rt.near_iso_number(form) and not rt.needs_fold(form)
+    w = world(h, endorsements=_completed(form=form), party_name=f'W91 Control {form} Inc')
+    assert any('confirm it as a manuscript form' in n for n in h.state(w['asg']['id'])['notes'])
+    w2 = world(h, endorsements=_completed(form=form, manuscript=True), party_name=f'W91 Control Ms {form} Inc')
+    _staff_confirm_wording(h, w2)
+    assert h.state(w2['asg']['id'])['state'] == 'meets'
+    x = _set(h, w['set']['id'])
+    h.staff()
+    r = h.post(f'/crt/requirement-sets/{x["id"]}/revise',
+               {'items': _items_with(x, 'ai_completed', {'forms': ['CG 20 37', form]}),
+                'form_functions': dict(x['data']['form_functions'], **{form: 'ai_completed'})})
+    assert r.status_code == 201, r.get_json()
+
+
+def test_w_engine_and_watcher_agree_on_the_widened_map():
+    """Every widened spelling is near (and a look-alike) in both copies, the controls are neither, and the readings
+    agree over random strings built from the widened alphabet."""
+    from services.biz.packs import risk_transfer as rt
+    w = _watcher()
+    assert all(rt.near_iso_number(s) and w._near_iso(s) and rt.needs_fold(s) and w._refold(s) for s in W_ONE + W_TWO)
+    assert not any(rt.needs_fold(s) or w._refold(s) for s in W_MANUSCRIPTS + _LEGIT + ['AUG 2013', 'SEP 2013', 'DEC 2013'])
+    rnd = random.Random(191)
+    alpha = 'CGSZBQDILOcgszbqdilo0123456789|! ./-'
+    strs = [''.join(rnd.choice(alpha) for _ in range(rnd.randint(1, 14))) for _ in range(12000)]
+    bad = [(s, _engine_reading(rt, s), _watcher_reading(w, s)) for s in strs
+           if _engine_reading(rt, s) != _watcher_reading(w, s) or rt.lookalike_reading(s) != w._as_digits(s)]
+    assert not bad, bad[:5]
+
+
+def test_w_the_cg_prefix_keeps_its_g():
+    from services.biz.packs import risk_transfer as rt
+    assert rt.lookalike_reading('CG 2D 3G') == 'CG 20 36' and rt.lookalike_reading('C G Z0 1O') == 'C G 20 10'
+    assert rt.form_key(rt.lookalike_reading('CG 20 37 I1 13')) == 'CG2037' and rt.RULE_VERSION == 'crt-rules-1.9.1'
+    # the class distance: 6 fills the G, two look-alike marks are two digits (never dropped first)
+    assert rt.iso_distance('C6 20 10') == 0 and rt.near_iso_number('CG 20 |!') and rt.iso_distance('CG 20 |!') == 0

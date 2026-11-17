@@ -1082,6 +1082,46 @@ _REBASE_1_9_0 = {
 }
 MUTANTS = [(n, _REBASE_1_9_0.get(n, e), t) for n, e, t in MUTANTS]
 
+# ── rules 1.9.1 (host ruling: the widened map S 5 / Z 2 / B 8 / G 6 / Q and D 0, by class; the G of a CG prefix) ──
+_ENG_MAP = ("LOOKALIKE_DIGITS = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0', 'Q': '0', 'D': '0',\n"
+            "                    'S': '5', 'Z': '2', 'B': '8', 'G': '6'}")
+_WAT_MAP = ("_DIGIT_LIKE = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0', 'Q': '0', 'D': '0',\n"
+            "               'S': '5', 'Z': '2', 'B': '8', 'G': '6'}")
+_W191 = 'tests/test_biz_crt_claimcheck9.py::'
+_REBASE_1_9_1 = {
+    'l9-no-lookalike-map': [(RT, _ENG_MAP, 'LOOKALIKE_DIGITS = {}')],
+    'l9-marks-dropped': [(RT, _ENG_MAP, _ENG_MAP.replace("'|': '1', '!': '1', ", ''))],
+    'l9-near-on-squashed': [(RT, '    return iso_distance(s) <= 1', '    return iso_distance(_squash(s)) <= 1')],
+    'l9-set-near-gain-off': [(RT, "    if d <= 1 and d < iso_distance(raw, lookalikes=False):\n        return True",
+                              "    if False:\n        return True")],
+    'watch-l9-no-map': [(WA, _WAT_MAP, '_DIGIT_LIKE = {}')],
+    'watch-l9-bang-not-mapped': [(WA, _WAT_MAP, _WAT_MAP.replace("'!': '1', ", ''))],
+    'watch-l9-near-on-squashed': [(WA, '    return _gap_to_iso(s) <= 1', '    return _gap_to_iso(_squash(s)) <= 1')],
+    'watch-l9-refold-map-off': [(WA, '    m = _as_digits(s)\n    if _gap_to_iso(s) <= 1',
+                                 '    return False\n    m = _as_digits(s)\n    if _gap_to_iso(s) <= 1')],
+}
+MUTANTS = [(n, _REBASE_1_9_1.get(n, e), t) for n, e, t in MUTANTS]
+MUTANTS[[n for n, _, _ in MUTANTS].index('l9-near-on-squashed')][2].append(_W191 + 'test_w_the_cg_prefix_keeps_its_g')
+_W_SET = _W191 + 'test_w_a_set_refuses_a_widened_look_alike_in_a_form_list'
+_W_AGREE = _W191 + 'test_w_engine_and_watcher_agree_on_the_widened_map'
+MUTANTS += [
+    # engine: each new letter dropped from the map (the set refuses the one-letter spelling with it)
+    *[(f'w91-{x}-not-mapped', [(RT, _ENG_MAP, _ENG_MAP.replace(f"'{x}': '{d}', ", '').replace(f", '{x}': '{d}'", ''))],
+       [_W_SET, _W191 + 'test_w_a_widened_look_alike_is_never_invited_as_a_manuscript'])
+      for x, d in (('Q', '0'), ('D', '0'), ('S', '5'), ('Z', '2'), ('B', '8'), ('G', '6'))],
+    ('w91-g-not-six-at-the-g', [(RT, "(w == 'G' and c == '6')", 'False')],
+     [_W191 + 'test_w_the_cg_prefix_keeps_its_g', _W_AGREE]),
+    ('w91-cg-prefix-g-read-as-6', [(RT, "        out.append(c if c == 'G' and last == 'C' else LOOKALIKE_DIGITS.get(c, c))",
+                                    "        out.append(LOOKALIKE_DIGITS.get(c, c))")],
+     [_W191 + 'test_w_the_cg_prefix_keeps_its_g', 'tests/test_biz_crt_claimcheck9.py::test_l_a_set_refuses_an_ascii_look_alike_in_a_form_list']),
+    # watcher (RL9): each new letter dropped from its own map, the G / 6 class, the CG prefix
+    *[(f'watch-w91-{x}-not-mapped', [(WA, _WAT_MAP, _WAT_MAP.replace(f"'{x}': '{d}', ", '').replace(f", '{x}': '{d}'", ''))],
+       [_W191 + 'test_w_watch_a_meets_on_a_widened_look_alike_manuscript_is_not_backed', _W_AGREE])
+      for x, d in (('Q', '0'), ('D', '0'), ('S', '5'), ('Z', '2'), ('B', '8'), ('G', '6'))],
+    ('watch-w91-g-not-six', [(WA, "pat = [{'C'}, {'G', '6'},", "pat = [{'C'}, {'G'},")], [_W_AGREE]),
+    ('watch-w91-cg-prefix-off', [(WA, "        keep = ch == 'G' and before[-1:] == ['C']", '        keep = False')], [_W_AGREE]),
+]
+
 
 def _copy(name):
     dest = os.path.join(SCRATCH, name)
