@@ -35,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.10.1'
+RULE_VERSION = 'crt-rules-1.10.2'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -396,6 +396,7 @@ def _number_then_edition(s):
     'ISO CG 20 10'), followed by an edition the one edition reader reads ('Nov 1985', '(Nov 1985)', 'NOV 85',
     'Apr 2013', '1/85'). (form key, (month, year) or None, the words after it name a month but read as no date), or
     None when the field is not shaped that way."""
+    apos_year = re.search(r"'[0-9]{2}(?![0-9])", _fold_chars(s)) is not None
     folded = re.sub(r"'(?=[0-9]{2}(?![0-9]))", ' ', _fold_chars(s))   # 1.10.1 (M1): 'YY reads as YY
     marks = not all('A' <= c <= 'Z' or c in _DIGITS or c in _EDITION_GAPS for c in folded)
     spaced = re.sub(r'[^A-Z0-9]', ' ', folded)
@@ -419,7 +420,10 @@ def _number_then_edition(s):
     if rest[:1] in (['ED'], ['EDITION']) and len(rest) > 1:
         rest = rest[1:]                               # 1.10.1 (M5): 'Ed. Nov 2013' as the footer prints it
     ed = edition_parts(' '.join(rest))[1]
-    return words[0] + digits, ed, ed is None and month
+    # 1.10.2 (M2f): a year-like run ('19xx', '20xx', an apostrophe year) that reads as no date ('0CT 1985', 'N0V 1985',
+    # a bare "'85") is unreadable too, never "any edition"
+    yearlike = apos_year or any(w.isdigit() and len(w) == 4 and w[:2] in ('19', '20') for w in rest)
+    return words[0] + digits, ed, ed is None and (month or yearlike)
 
 
 def form_parts(s):
@@ -455,9 +459,52 @@ def is_iso_form(s) -> bool:
     return is_iso_number(form_key(s)) or bool(iso_numbers_in(s))
 
 
+# Rules 1.10.2 (D11, host ruling): the look-alike check covers EVERY number in the floor table, of every category,
+# derived from the table itself (a new floor form is covered automatically). Each position of the floor number takes
+# its look-alike class: C and G as in the exact reading; 2 and 0 their classes; any other digit itself or a glyph that
+# reads as it ('CG 74 04' reads as CG 24 04 through 7 for 2).
+def floor_numbers() -> list:
+    """Rules 1.10.2 (D11): the floor table's numbers, read from the table on every call."""
+    return sorted(set(ISO_FLOOR) | set(ISO_NOT_COMPLETED))
+
+
+def _digit_class(d) -> frozenset:
+    if d == '2':
+        return _EXACT_CLASSES[2]
+    if d == '0':
+        return _EXACT_CLASSES[3]
+    return frozenset(d) | {g for g, v in _EXACT_DIGIT.items() if v == d}
+
+
+def floor_readings(s) -> set:
+    """Rules 1.10.2 (D11): every floor-table number the field reads as exactly through the look-alike classes (no edit;
+    a mark may be passed as a gap, a letter or digit never is)."""
+    t = _fold_chars(s)
+    out = set()
+    for number in floor_numbers():
+        classes = [_EXACT_CLASSES[0], _EXACT_CLASSES[1]] + [_digit_class(d) for d in number[2:]]
+
+        def walk(i, p, _classes=classes, _number=number):
+            if p == len(_classes):
+                return True
+            if i >= len(t):
+                return False
+            c = t[i]
+            if _number[p:p + 1] == '0' and t[i:i + 2] in _EXACT_PAIRS and walk(i + 2, p + 1):
+                return True
+            if c in _classes[p] and walk(i + 1, p + 1):
+                return True
+            return not ('A' <= c <= 'Z' or c in _DIGITS) and walk(i + 1, p)
+
+        if any(t[k] in _EXACT_CLASSES[0] and walk(k, 0) for k in range(len(t))):
+            out.add(number)
+    return out
+
+
 def exact_numbers(s) -> set:
-    """Rules 1.10.1 (D): every CG 20 xx the field reads as exactly through the look-alike classes (digit glyphs too)."""
-    return {r for r, _w in _exact_readings(s)}
+    """Rules 1.10.1 (D): every CG 20 xx the field reads as exactly through the look-alike classes (digit glyphs too).
+    Rules 1.10.2 (D11): and every floor-table number it reads as exactly."""
+    return {r for r, _w in _exact_readings(s)} | floor_readings(s)
 
 
 def names_never_completed(s) -> bool:
@@ -1630,14 +1677,17 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 # reads Can't tell, and is never a manuscript; nor is a number one character away from a CG 20 xx
                 e_form = e['data'].get('form')
                 fk, form_ed = form_parts(e_form)
-                iso = is_iso_form(e_form)
-                near = near_iso_number(e_form) and not iso
+                iso_written = is_iso_form(e_form)
+                floor_look = set() if iso_written else floor_readings(e_form)   # 1.10.2 (D11): a floor look-alike
+                iso = iso_written or bool(floor_look)                           # is that ISO form too (G)
+                near = near_iso_number(e_form) and not iso_written
+                reads_as = iso_exact_reading(e_form) or (min(floor_look) if floor_look else None)
                 if fn == 'ai_completed' and names_never_completed(e_form):
                     ec(f'MISSING:{fn}')
                 elif needs_fold(e_form):
                     ec('UNCONFIRMED:crt_endorsement.form')
                     notes.append(f"{iid}: form {e_form!a} is written with characters that only look like letters or "
-                                 f'digits (it reads as {fk if iso else iso_exact_reading(e_form) or form_key(lookalike_reading(e_form))}); staff re-enter the '
+                                 f'digits (it reads as {fk if iso_written else reads_as or form_key(lookalike_reading(e_form))}); staff re-enter the '
                                  'number in plain letters and digits as printed. It is never read as a manuscript')
                 elif fn == 'ai_completed' and never_completed_ops(e_form):
                     # 1.10.1 (D): it reads exactly as CG 20 10 / 20 26 / 20 11 through look-alikes (digit glyphs too):
@@ -1656,13 +1706,13 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                                          'for this item; ' + (
                                              'it is an ISO form, read as that form (never as a manuscript); list '
                                              'it in the requirement set only if your licensed staff accept it for '
-                                             'this coverage' if iso else
-                                             (f'it reads as {iso_exact_reading(e_form)} through characters that '
-                                              'look like its letters and digits' if iso_exact_reading(e_form) else
+                                             'this coverage' if iso_written else
+                                             (f'it reads as {reads_as} through characters that '
+                                              'look like its letters and digits' if reads_as else
                                               'it is one character away from an ISO number (CG 20 xx), reading '
                                               'I, L, |, ! as 1 and O as 0') + ', so it is never read as a '
                                              'manuscript; staff check the number as printed'
-                                             if near else
+                                             if near or floor_look else
                                              'list the equivalent in the requirement set or confirm it as a '
                                              'manuscript form'))
                 elif fn == 'ai_completed' and not (e['data'].get('completed_ops_wording') is True and

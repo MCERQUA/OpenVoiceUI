@@ -96,6 +96,13 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
   RF10 a look-alike counts only in an exact reading of CG 20 xx; with one real edit only I L | ! / O are read; an
      edition gained through the map counts only when the number carrying it is an ISO number
   RX10 weak glyphs in the exact reading: ( < [ { for C, & 9 for G, ? 7 for 2, U C () [] for 0, ] [ J T / ' for 1
+  (rules 1.10.1 / 1.10.2, gate-4 re-checks #11 / #12, checked here with this file's own code)
+  RD11 / RD12 the floor and never-completed checks read every exact look-alike reading: CG 20 xx (digit glyphs too)
+     and every number of the floor table ('CG 74 04' is CG 24 04); a field that reads as a floor number is no manuscript
+  RM11 / RM12 in a form list: an apostrophe year is the two-digit year; another mark beside a month word, or a year-like
+     run that reads as no date ('0CT 1985', a bare '85), is below the floor, never "any edition"; a month word is read
+     before the O-inside-a-number fold; 'Ed.' before the edition is skipped
+  N3 / N3b the floor reads every form, keyless ones included
   RP9 an item that requires a pre-2004 edition (the edition the verdict applies: its field, or the edition written in
      its form list) is below the floor
   R6 each assignment field the verdict reads (project, sub, set, set version, trade, scope change) was
@@ -312,6 +319,44 @@ def _exact_all(s):
     return seen
 
 
+def _floor_exact(s):
+    """RD12 (own code): every number of this file's floor table (_ISO_FLOOR, _NOT_COMPLETED) the field reads as exactly:
+    C and G by their classes, 2 and 0 by theirs, any other digit itself or a glyph that reads as it."""
+    f = _fold(s)
+    found = set()
+    for num in sorted(set(_ISO_FLOOR) | set(_NOT_COMPLETED)):
+        want = [_EXACT_AT[0], _EXACT_AT[1]]
+        for d in num[2:]:
+            if d == '2':
+                want.append(_EXACT_AT[2])
+            elif d == '0':
+                want.append(_EXACT_AT[3])
+            else:
+                want.append({d} | {g for g in _DIGIT_LIKE if _DIGIT_LIKE[g] == d} | {g for g in _EXACT_ONE if _EXACT_ONE[g] == d})
+        for first in range(len(f)):
+            if f[first] not in want[0]:
+                continue
+            stack, hit = [(first, 0)], False
+            while stack and not hit:
+                i, p = stack.pop()
+                if p == len(want):
+                    hit = True
+                    break
+                if i >= len(f):
+                    continue
+                ch = f[i]
+                if ch not in _LATIN:
+                    stack.append((i + 1, p))
+                if num[p] == '0' and f[i:i + 2] in ('()', '[]'):
+                    stack.append((i + 2, p + 1))
+                if ch in want[p]:
+                    stack.append((i + 1, p + 1))
+            if hit:
+                found.add(num)
+                break
+    return found
+
+
 def _exact_iso(s):
     """RX10: the lowest CG20dd the field reads as exactly, or None (as the engine names it)."""
     seen = _exact_all(s)
@@ -429,10 +474,12 @@ def _num_ed(s):
     """RM10 (own code): (key, edition or None, a month word that reads as no date) for 'LL dd dd <edition>' / 'LLdddd
     <edition>' (optionally after ISO), the four digits in whole words; None for any other shape."""
     f = list(_fold(s))
+    apos = False
     for i, ch in enumerate(f):                            # RM11: an apostrophe year ('85) is the two-digit year
         if ch == "'" and ''.join(f[i + 1:i + 3]).isdigit() and len(f[i + 1:i + 3]) == 2 and \
                 not (i + 3 < len(f) and f[i + 3].isdigit()):
             f[i] = ' '
+            apos = True
     f = ''.join(f)
     odd = any(ch not in _LATIN and ch not in ' \t\n\r\f\v()[]/-.,' for ch in f)
     plain = ''.join(ch if ch in _LATIN else ' ' for ch in f)
@@ -465,7 +512,9 @@ def _num_ed(s):
     if rest[0] in ('ED', 'EDITION') and len(rest) > 1:    # RM11: 'Ed. Nov 2013'
         rest = rest[1:]
     my = _edition_my(' '.join(rest))
-    return words[0] + num, my, my is None and month
+    # RM12: a year-like run (19xx / 20xx / an apostrophe year) that reads as no date is unreadable, never "any"
+    yearish = apos or any(x.isdigit() and len(x) == 4 and x[:2] in ('19', '20') for x in rest)
+    return words[0] + num, my, my is None and (month or yearish)
 
 
 def _form(s):
@@ -485,13 +534,13 @@ def _iso_in(s):
 def _never_completed(s):
     """RG/RC7: CG 20 10 / 20 26 / 20 11 named anywhere in the form field: never completed operations."""
     bad = {_NEVER_COMPLETED} | _NOT_COMPLETED
-    exact = {r for r, _ in _exact_all(s)}                 # RD11: every exact look-alike reading counts too
+    exact = {r for r, _ in _exact_all(s)} | _floor_exact(s)   # RD11 / RD12: every exact look-alike reading counts
     return _form(s) in bad or bool((_iso_in(s) | exact) & bad)
 
 
 def _clash(s, fn):
     """RF read per RC7: why mapping form field s to fn loosens the ISO floor, or None."""
-    for n in {_form(s)} | _iso_in(s) | {r for r, _ in _exact_all(s)}:      # RD11
+    for n in {_form(s)} | _iso_in(s) | {r for r, _ in _exact_all(s)} | _floor_exact(s):      # RD11 / RD12
         if n in _ISO_FLOOR and _ISO_FLOOR[n] != fn:
             return f'ISO {_ISO_FLOOR[n]}'
     if fn == 'ai_completed' and _never_completed(s):
@@ -814,7 +863,7 @@ def _floor(sd):
             out.append(f"item {it.get('id')}: {_item_ed(it)[1]}")
         elif _item_ed(it)[0] is not None and _item_ed(it)[0][1] < 2004:            # RP9: the APPLIED edition
             out.append(f"item {it.get('id')} requires a pre-2004 edition")
-        for r in raw:
+        for r in (it['forms'] if isinstance(it.get('forms'), list) else []):   # N3b: every form, keyless too
             f = _form(r)
             if _clash(r, fn):                                      # RC7: however the number is written
                 out.append(f"item {it.get('id')} ({fn}) lists {r}: {_clash(r, fn)}")
@@ -1186,7 +1235,8 @@ def _judge(st, claim):
                 table = {_form(k): v for k, v in set_ff.items()} if set_ff else {}
                 table.update(_ISO_FLOOR)                       # ruling F: an ISO number keeps its ISO category
                 iso = fkey in _ISO_FLOOR or fkey in _NOT_COMPLETED or bool(_ISO_AI.match(fkey or '')) or \
-                    bool(_iso_in(ed.get('form'))) or _near_iso(ed.get('form'))    # RN8: near an ISO number too
+                    bool(_iso_in(ed.get('form'))) or _near_iso(ed.get('form')) or \
+                    bool(_floor_exact(ed.get('form')))                              # RD12: a floor look-alike
                 if ed.get('manuscript') is not True or fkey in table or iso:        # RG: an ISO number is no manuscript
                     listed = {_form(f) for f in it.get('forms') or []}        # ruling F: the item's own list only
                     if fkey not in listed:
