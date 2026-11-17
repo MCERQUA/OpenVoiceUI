@@ -186,8 +186,9 @@ def test_watch_is_an_independent_instrument():
     src = (ROOT / 'tools' / 'biz' / 'crt-verdict-watch.py').read_text()
     assert 'from services' not in src and 'import services' not in src and 'from routes' not in src
     assert 'mode=ro' in src
-    for word in ('requests.', 'urllib', 'smtplib', 'mesh-send', 'inkbox', '.execute(\'INSERT', 'UPDATE records'):
-        assert word not in src, word
+    for word in ('requests.', 'smtplib', 'mesh-send', 'inkbox', '.execute(\'INSERT', 'UPDATE records',
+                 'method=', 'data=', 'POST', 'PATCH', 'DELETE'):
+        assert word not in src, word                       # the optional live read is GET-only, no body
 
 
 def test_watch_cli_exit_codes(h, dirs):

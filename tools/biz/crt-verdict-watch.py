@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
 """crt-verdict-watch.py — independent watcher for pack:risk-transfer verdicts (NEWBORN, advisory only).
 
-For every sub-on-project whose LATEST stored review (crt_review) says "Meets requirements", it
-re-derives, from the human-confirmed readings in the database and the bytes in the private file
-store, whether those inputs actually support Meets. It is a different instrument from the engine:
-it imports nothing from the OVU code, opens business.db READ-ONLY, re-hashes files itself, and has
-its own (deliberately narrow) rules. It never changes a verdict, never writes, never messages anyone.
+Two kinds of Meets claim are judged: every sub-on-project whose LATEST stored review (crt_review) says
+Meets (plain, contractor-accepted, or expiring), and, when given (--live-url / --live-json), every LIVE
+Meets state the API shows staff. For each it re-derives, from the human-confirmed readings in the
+database and the bytes in the private file store, whether those inputs actually support Meets. It is a
+different instrument from the engine: it imports nothing from the OVU code, opens business.db READ-ONLY,
+re-hashes files itself, and has its own (deliberately narrow) rules. It never changes a verdict, never
+writes, never messages anyone.
 
-What a stored Meets must be backed by (plan S18, design section 4.4 rule 1):
+What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check 2026-11-17):
   R1 the requirement set is APPROVED and a PERSON confirmed it (crt_confirmation by clerk:/local:)
   R2 every confirmation the review says it read exists, is not archived and was made by a person
   R3 every required line (limit / ai items) has a policy for this sub, received for THIS account,
-     person-confirmed against a stored file whose bytes still hash to the confirmed sha256, and not
-     expired on the review date
+     person-confirmed (line, effective, expiration, source document) against a stored file whose bytes
+     still hash to the confirmed sha256, and IN FORCE on the claim date (effective <= date < expiration)
   R4 every required additional-insured endorsement (ai_ongoing / ai_completed, or names_parties) has an
-     endorsement on that line, for this account, with its own document in the private store
-     (hash-verified), person-confirmed against a verified file, that names this account and this project
-     (or is blanket with the project's contract tick person-confirmed true). Ongoing ops are not required
-     after substantial completion; completed ops not after the statute of repose.
+     endorsement on that line, for this account, whose OWN document is of kind 'endorsement' (never the
+     certificate), hash-verified and person-confirmed, that names this account and this project (or is
+     blanket with the project's contract tick person-confirmed true). A naming miss (WRONG_PARTY,
+     WRONG_PROJECT, BLANKET_UNBACKED) counts only when a person recorded an unexpired waiver backed by the
+     contractor's written OK (kind contractor_waiver_ok). A missing document is never waivable. Ongoing
+     ops are not required after substantial completion; completed ops not after the statute of repose.
   R5 the account, sub, project and assignment rows exist and the sub is linked to the account
-If a record the review read was changed after the review, the watcher cannot see the old version:
-that review is CANNOT-TELL, never PASS.
+  R6 the assignment was last written by a person (not the agent key), names the set the verdict used,
+     and pinned that set's current version
+If a record the claim read was changed after the claim, the watcher cannot see the old version:
+that claim is CANNOT-TELL, never PASS.
 
 Verdict: PASS (exit 0) every Meets is backed / FAIL (exit 1) at least one Meets is NOT backed — the
 watcher disagrees with the stored verdict / CANNOT-TELL (exit 3) unreadable store, nothing to check, or
@@ -28,6 +34,8 @@ a review it cannot judge. Output is a report on stdout (--json for machines). No
 
   tools/biz/crt-verdict-watch.py --db-dir /mnt/clients/<tenant>/openvoiceui/db
   tools/biz/crt-verdict-watch.py --db-dir <db dir>/sandboxes/josh --json
+  BIZ_WATCH_KEY=... tools/biz/crt-verdict-watch.py --db-dir <db dir>/sandboxes/josh \\
+      --live-url https://test-dev.jam-bot.com --sandbox josh                       (also the live states)
 """
 from __future__ import annotations
 
@@ -42,7 +50,7 @@ from datetime import date, datetime
 
 PASS, FAIL, CANNOT = 'PASS', 'FAIL', 'CANNOT-TELL'
 EXIT = {PASS: 0, FAIL: 1, CANNOT: 3}
-MEETS_STATES = ('meets', 'expiring_30', 'expiring_15')
+MEETS_STATES = ('meets', 'meets_accepted', 'expiring_30', 'expiring_15')
 PERSON = ('clerk:', 'local:')
 _SUFFIX = {'llc', 'inc', 'co', 'corp', 'corporation', 'company', 'ltd', 'the', 'lp', 'llp', 'pllc', 'pc'}
 
@@ -138,14 +146,48 @@ def _person_confs(st, rec, fields, need_file=True):
     return out
 
 
-def judge(st, review):
-    """(verdict, [reasons]) for one stored Meets review."""
-    rd = review['data']
+WAIVABLE_NAME_CODES = ('WRONG_PARTY', 'WRONG_PROJECT', 'BLANKET_UNBACKED')
+
+
+def _waived(st, asg, code, on):
+    """A person-recorded, unexpired waiver of exactly this code, backed by the contractor's written OK."""
+    for w in st.all('crt_waiver'):
+        wd = w['data']
+        if wd.get('crt_assignment_id') != asg['id'] or wd.get('variance_code') != code:
+            continue
+        if not str(w['created_by']).startswith(PERSON):
+            continue
+        exp = _day(wd.get('expires'))
+        doc = st.get('document', wd.get('acceptance_document_id'))
+        if exp and on and exp > on and doc and doc['data'].get('kind') == 'contractor_waiver_ok' \
+                and st.file_ok(st.doc_sha(doc['id'])):
+            return True
+    return False
+
+
+def judge(st, claim):
+    """(verdict, [reasons]) for one Meets claim: a stored review, or a live state read from the API.
+
+    claim = {assignment_id, state, on (date), at (ISO time the claim was made), set_id or None,
+             confirmation_ids or None, kind: 'review' | 'live'}
+    """
     why, cannot = [], []
-    on = _day(rd.get('reviewed_at')) or _day(review['updated_at'])
-    asg = st.get('crt_assignment', rd.get('crt_assignment_id'))
+    on, at = claim['on'], claim['at']
+    asg = st.get('crt_assignment', claim['assignment_id'])
     if not asg:
         return FAIL, ['R5 assignment missing']
+
+    def changed_since(rec):
+        return rec['updated_at'] > at
+
+    # R6 the assignment (set, version, trade, scope) was written by a person, and points at the set judged
+    if changed_since(asg):
+        cannot.append('R6 the assignment changed after the claim')
+    else:
+        if str(asg['updated_by']).startswith('agent:'):
+            why.append('R6 assignment last written by the agent key (its set, trade or scope are unconfirmed)')
+        if claim.get('set_id') and claim['set_id'] != asg['data'].get('requirement_set_id'):
+            why.append('R6 the verdict used a different requirement set than the assignment names')
     proj = st.get('crt_project', asg['data'].get('crt_project_id'))
     acct = st.get('contact', (proj or {}).get('data', {}).get('crt_account_id'))
     party = st.get('contact', asg['data'].get('party_contact_id'))
@@ -154,17 +196,15 @@ def judge(st, review):
     if not any(ln['data'].get('crt_account_id') == acct['id'] and ln['data'].get('party_contact_id') == party['id']
                and ln['data'].get('status', 'active') == 'active' for ln in st.all('crt_account_party')):
         why.append('R5 sub not linked to the account')
-    reviewed_at = rd.get('reviewed_at') or review['updated_at']
 
-    def changed_since(rec):
-        return rec['updated_at'] > reviewed_at
-
-    s = st.get('crt_requirement_set', rd.get('requirement_set_id'))
+    s = st.get('crt_requirement_set', claim.get('set_id') or asg['data'].get('requirement_set_id'))
     if not s:
         return FAIL, ['R1 requirement set missing']
     if s['data'].get('status') != 'APPROVED' or not _person_confs(st, s, ['status'], need_file=False):
         (cannot if changed_since(s) else why).append('R1 set not approved by a person')
-    for cid in rd.get('confirmation_ids') or []:
+    if not changed_since(s) and not changed_since(asg) and asg['data'].get('requirement_set_version') != s['version']:
+        why.append('R6 the assignment did not pin this version of the set')
+    for cid in claim.get('confirmation_ids') or []:
         c = st.get('crt_confirmation', cid)
         if not c or not str(c['data'].get('confirmed_by') or '').startswith(PERSON) \
                 or not str(c['created_by']).startswith(PERSON):
@@ -190,11 +230,12 @@ def judge(st, review):
                 if changed_since(p):
                     changed = True
                     continue
-                exp = _day(p['data'].get('expiration'))
-                if exp and on and exp > on and _person_confs(st, p, ['line', 'expiration', 'source_document_id']):
+                eff, exp = _day(p['data'].get('effective')), _day(p['data'].get('expiration'))
+                if eff and exp and on and eff <= on < exp and \
+                        _person_confs(st, p, ['line', 'effective', 'expiration', 'source_document_id']):
                     good = True
             if not good:
-                (cannot if changed else why).append(f'R3 no person-confirmed, file-backed, current {line} policy')
+                (cannot if changed else why).append(f'R3 no person-confirmed, file-backed {line} policy in force')
         elif kind == 'endorsement' and (fn in ('ai_ongoing', 'ai_completed') or it.get('names_parties')):
             if fn == 'ai_ongoing' and sc and on and on > sc:
                 continue
@@ -210,28 +251,61 @@ def judge(st, review):
                 if changed_since(e) or changed_since(proj):
                     changed = True
                     continue
-                if not st.file_ok(st.doc_sha(ed.get('document_id'))):
+                doc = st.get('document', ed.get('document_id'))
+                # the endorsement's own document: kind endorsement, not the certificate, bytes verified
+                if not doc or doc['data'].get('kind') != 'endorsement' or \
+                        doc['id'] == pol['data'].get('source_document_id') or not st.file_ok(st.doc_sha(doc['id'])):
                     continue
                 if not _person_confs(st, e, ['function', 'document_id', 'scheduled_names', 'scheduled_projects',
                                              'blanket']):
                     continue
                 if ed.get('blanket'):
-                    if proj['data'].get('contract_requires_ai') is True and \
-                            _person_confs(st, proj, ['contract_requires_ai']):
-                        good = True
-                elif _named(acct_name, ed.get('scheduled_names')) and _named(pname, ed.get('scheduled_projects')):
+                    backed = proj['data'].get('contract_requires_ai') is True and \
+                        bool(_person_confs(st, proj, ['contract_requires_ai']))
+                    name_code = None if backed else 'BLANKET_UNBACKED'
+                elif not _named(acct_name, ed.get('scheduled_names')):
+                    name_code = 'WRONG_PARTY'
+                elif not _named(pname, ed.get('scheduled_projects')):
+                    name_code = 'WRONG_PROJECT'
+                else:
+                    name_code = None
+                if name_code is None or _waived(st, asg, name_code, on):
                     good = True
             if not good:
                 (cannot if changed else why).append(
-                    f'R4 no person-confirmed {fn} endorsement document naming this account and project')
+                    f'R4 no person-confirmed {fn} endorsement document naming this account and project '
+                    '(or a contractor-accepted waiver of the naming)')
     if why:
         return FAIL, sorted(set(why))
     if cannot:
-        return CANNOT, sorted(set(cannot)) + ['(a record changed after the review; old version not visible)']
+        return CANNOT, sorted(set(cannot)) + ['(a record changed after the claim; old version not visible)']
     return PASS, []
 
 
-def watch(db_dir):
+def fetch_live_claims(url, key, sandbox=None, timeout=20):
+    """Live Meets claims from the API (GET /crt_assignment, then /crt/assignment/<id>/state). Read only."""
+    import urllib.request
+    hdr = {'X-Agent-Key': key, 'Accept': 'application/json'}
+    if sandbox:
+        hdr['X-Biz-Sandbox'] = sandbox
+
+    def get(path):
+        with urllib.request.urlopen(urllib.request.Request(url.rstrip('/') + path, headers=hdr), timeout=timeout) as r:
+            return json.loads(r.read())
+    out, cursor = [], None
+    while True:
+        page = get('/api/biz/v1/crt_assignment?limit=500' + (f'&cursor={cursor}' if cursor else ''))
+        for a in page['records']:
+            ev = get(f'/api/biz/v1/crt/assignment/{a["id"]}/state')
+            out.append({'assignment_id': a['id'], 'state': ev['state'], 'as_of': ev['as_of'],
+                        'set_id': ev.get('requirement_set_id')})
+        cursor = page.get('next_cursor')
+        if not cursor:
+            return out
+
+
+def watch(db_dir, live=None):
+    """Judge every latest stored Meets review, plus every live Meets claim given (list of state dicts)."""
     try:
         st = Store(db_dir)
     except (OSError, sqlite3.Error) as e:
@@ -242,37 +316,63 @@ def watch(db_dir):
         key = r['data'].get('reviewed_at') or r['updated_at']
         if aid not in latest or key > (latest[aid]['data'].get('reviewed_at') or latest[aid]['updated_at']):
             latest[aid] = r
-    rows = []
+    claims = []
     for aid, r in sorted(latest.items(), key=lambda kv: kv[0] or ''):
-        if r['data'].get('state') not in MEETS_STATES:
-            continue
-        v, reasons = judge(st, r)
-        rows.append({'assignment_id': aid, 'review_id': r['id'], 'stored_state': r['data'].get('state'),
-                     'watch': v, 'reasons': reasons})
+        if r['data'].get('state') in MEETS_STATES:
+            at = r['data'].get('reviewed_at') or r['updated_at']
+            claims.append({'kind': 'review', 'review_id': r['id'], 'assignment_id': aid, 'state': r['data']['state'],
+                           'on': _day(at), 'at': at, 'set_id': r['data'].get('requirement_set_id'),
+                           'confirmation_ids': r['data'].get('confirmation_ids')})
+    for c in live or []:
+        if c.get('state') in MEETS_STATES:
+            claims.append({'kind': 'live', 'assignment_id': c['assignment_id'], 'state': c['state'],
+                           'on': _day(c.get('as_of')), 'at': '9999', 'set_id': c.get('set_id'),
+                           'confirmation_ids': None})
+    rows = []
+    for c in claims:
+        v, reasons = judge(st, c)
+        rows.append({'kind': c['kind'], 'assignment_id': c['assignment_id'], 'review_id': c.get('review_id'),
+                     'stored_state': c['state'], 'watch': v, 'reasons': reasons})
     st.conn.close()
     vs = [x['watch'] for x in rows]
     if FAIL in vs:
-        return FAIL, rows, f'{vs.count(FAIL)} stored Meets verdict(s) NOT backed by confirmed inputs'
+        return FAIL, rows, f'{vs.count(FAIL)} Meets verdict(s) NOT backed by confirmed inputs'
     if not rows:
-        return CANNOT, rows, 'no stored Meets verdicts to check (silence is not health)'
+        return CANNOT, rows, 'no Meets verdicts to check (silence is not health)'
     if CANNOT in vs:
-        return CANNOT, rows, f'{vs.count(CANNOT)} review(s) could not be judged'
-    return PASS, rows, f'{len(rows)} stored Meets verdict(s) backed by person-confirmed, file-verified inputs'
+        return CANNOT, rows, f'{vs.count(CANNOT)} claim(s) could not be judged'
+    return PASS, rows, f'{len(rows)} Meets verdict(s) backed by person-confirmed, file-verified inputs'
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description='Independent watcher for risk-transfer Meets verdicts (advisory)')
     ap.add_argument('--db-dir', required=True, help="the store's db dir (holds business.db and files/)")
+    ap.add_argument('--live-url', help='also judge live states: GET them from this server (key from env BIZ_WATCH_KEY)')
+    ap.add_argument('--sandbox', help='dev sandbox name for --live-url (X-Biz-Sandbox)')
+    ap.add_argument('--live-json', help='also judge live states from this file ([{assignment_id, state, as_of, set_id}])')
     ap.add_argument('--json', action='store_true')
     a = ap.parse_args(argv)
-    verdict, rows, summary = watch(a.db_dir)
+    live = None
+    if a.live_json:
+        live = json.load(open(a.live_json))
+    elif a.live_url:
+        key = os.environ.get('BIZ_WATCH_KEY', '').strip()
+        if not key:
+            print('crt-verdict-watch: CANNOT-TELL - no BIZ_WATCH_KEY in env for --live-url')
+            return EXIT[CANNOT]
+        try:
+            live = fetch_live_claims(a.live_url, key, a.sandbox)
+        except Exception as e:
+            print(f'crt-verdict-watch: CANNOT-TELL - live states unreadable ({type(e).__name__})')
+            return EXIT[CANNOT]
+    verdict, rows, summary = watch(a.db_dir, live)
     if a.json:
         print(json.dumps({'verdict': verdict, 'summary': summary, 'checked': rows,
                           'advisory': '[probation] NEWBORN watcher: reports only; changes nothing'}, indent=1))
     else:
         for x in rows:
             if x['watch'] != PASS:
-                print(f"{'DISAGREE' if x['watch'] == FAIL else 'CANNOT-TELL'}: stored '{x['stored_state']}' "
+                print(f"{'DISAGREE' if x['watch'] == FAIL else 'CANNOT-TELL'}: {x['kind']} '{x['stored_state']}' "
                       f"for assignment {x['assignment_id']} - " + '; '.join(x['reasons']))
         print(f'crt-verdict-watch: {verdict} - {summary} [probation, advisory only]')
     return EXIT[verdict]
