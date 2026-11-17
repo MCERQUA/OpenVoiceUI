@@ -253,7 +253,7 @@ def test_p_watch_a_stored_pre_2004_requirement_is_below_the_floor(h, dirs):
 
 def test_rules_version_is_1_9_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.10.1'         # rules 1.9.1-1.10.1 keep every 1.9.0 rule
+    assert rt.RULE_VERSION == 'crt-rules-1.10.2'         # rules 1.9.1-1.10.1 keep every 1.9.0 rule
 
 
 # ═════════════════════════ 1.9.1 (host ruling): the widened map, S 5 / Z 2 / B 8 / G 6 / Q and D 0 ═════════════════
@@ -356,6 +356,6 @@ def test_w_engine_and_watcher_agree_on_the_widened_map():
 def test_w_the_cg_prefix_keeps_its_g():
     from services.biz.packs import risk_transfer as rt
     assert rt.lookalike_reading('CG 2D 3G') == 'CG 20 36' and rt.lookalike_reading('C G Z0 1O') == 'C G 20 10'
-    assert rt.form_key(rt.lookalike_reading('CG 20 37 I1 13')) == 'CG2037' and rt.RULE_VERSION == 'crt-rules-1.10.1'
+    assert rt.form_key(rt.lookalike_reading('CG 20 37 I1 13')) == 'CG2037' and rt.RULE_VERSION == 'crt-rules-1.10.2'
     # the class distance: 6 fills the G, two look-alike marks are two digits (never dropped first)
     assert rt.iso_distance('C6 20 10') == 0 and rt.near_iso_number('CG 20 |!') and rt.iso_distance('CG 20 |!') == 0

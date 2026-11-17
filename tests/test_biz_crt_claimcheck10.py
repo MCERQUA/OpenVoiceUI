@@ -267,4 +267,4 @@ def test_engine_and_watcher_agree_on_the_1_10_0_readings():
 
 def test_rules_version_is_1_10_0():
     from services.biz.packs import risk_transfer as rt
-    assert rt.RULE_VERSION == 'crt-rules-1.10.1'          # rules 1.10.1 (re-check #11) keeps every 1.10.0 rule
+    assert rt.RULE_VERSION == 'crt-rules-1.10.2'          # rules 1.10.1 / 1.10.2 keep every 1.10.0 rule

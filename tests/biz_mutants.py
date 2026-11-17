@@ -1264,6 +1264,61 @@ _REBASE_1_10_1 = {
 }
 MUTANTS = [(n, _REBASE_1_10_1.get(n, e), t) for n, e, t in MUTANTS]
 
+# ── rules 1.10.2 (gate-4 re-check #12, host rulings N3b / D11 / M2f) ──
+T_C12 = 'tests/test_biz_crt_claimcheck12.py::'
+_REBASE_1_10_2 = {
+    'g-note-says-manuscript': [(RT, "                                             'this coverage' if iso_written else",
+                                "                                             'this coverage' if False else")],
+    'n10-note-names-the-squashed-key': [(RT, "{fk if iso_written else reads_as or form_key(lookalike_reading(e_form))}",
+                                         "{fk if iso_written else form_key(lookalike_reading(e_form))}")],
+    'g-iso-read-as-manuscript': [(RT, '                iso_written = is_iso_form(e_form)', '                iso_written = False')],
+    'h8-near-iso-is-manuscript': [(RT, "                near = near_iso_number(e_form) and not iso_written\n",
+                                   "                near = False\n")],
+    'd11-note-not-named': [(RT, "                                             (f'it reads as {reads_as} through characters that '",
+                            "                                             (f'it is near {str(reads_as)[:0]} through characters that '")],
+    'watch-h8-near-off': [(WA, "bool(_iso_in(ed.get('form'))) or _near_iso(ed.get('form')) or \\\n",
+                           "bool(_iso_in(ed.get('form'))) or \\\n")],
+    'watch-d11-clash-written-only': [(WA, "{r for r, _ in _exact_all(s)} | _floor_exact(s):      # RD11 / RD12",
+                                      "_floor_exact(s):      # RD11 / RD12")],
+}
+MUTANTS = [(n, _REBASE_1_10_2.get(n, e), t) for n, e, t in MUTANTS]
+T_P12 = 'tests/test_claimcheck12_probes.py::'
+MUTANTS += [
+    # N3b: the watcher's floor reads every form
+    ('watch-n3b-keyed-forms-only', [(WA, "        for r in (it['forms'] if isinstance(it.get('forms'), list) else []):   # N3b: every form, keyless too",
+                                     "        for r in raw:   # N3b: every form, keyless too")],
+     [T_P12 + 'test_R12_N3b_HOLE_a_keyless_form_beside_cg2037_on_a_completed_item_breaks_both_floors',
+      T_C12 + 'test_n3b_a_keyless_ascii_form_on_a_completed_item_breaks_both_floors']),
+    # D11: every floor-table number (engine, watcher RD12)
+    ('d12-floor-readings-unused', [(RT, "    return {r for r, _w in _exact_readings(s)} | floor_readings(s)\n", "    return {r for r, _w in _exact_readings(s)}\n")],
+     [T_P12 + 'test_R12_D11_WATCH_a_digit_glyph_spelling_of_a_non_cg20_floor_number_maps_to_completed_ops',
+      T_C12 + 'test_d11_a_floor_look_alike_mapped_to_another_category_is_refused_and_honest_numbers_list']),
+    ('d12-floor-numbers-fixed', [(RT, "    return sorted(set(ISO_FLOOR) | set(ISO_NOT_COMPLETED))\n", "    return ['CG2404', 'CG2503', 'CG2545']\n")],
+     [T_C12 + 'test_d11_the_readings_come_from_the_floor_table_itself']),
+    ('d12-other-digits-literal', [(RT, "    return frozenset(d) | {g for g, v in _EXACT_DIGIT.items() if v == d}\n", "    return frozenset(d)\n")],
+     [T_C12 + 'test_d11_the_readings_come_from_the_floor_table_itself']),
+    ('d12-floor-look-alike-is-a-manuscript', [(RT, "                iso = iso_written or bool(floor_look)", "                iso = iso_written")],
+     [T_C12 + 'test_d11_a_floor_look_alike_on_the_paper_is_never_a_manuscript']),
+    ('watch-d12-clash-skips-floor', [(WA, "    for n in {_form(s)} | _iso_in(s) | {r for r, _ in _exact_all(s)} | _floor_exact(s):      # RD11 / RD12",
+                                      "    for n in {_form(s)} | _iso_in(s) | {r for r, _ in _exact_all(s)}:      # RD11 / RD12")],
+     [T_C12 + 'test_d11_watch_a_meets_on_a_stored_floor_look_alike_mapping_is_not_backed', T_C12 + 'test_engine_and_watcher_agree_on_the_1_10_2_readings']),
+    ('watch-d12-other-digits-literal', [(WA, "                want.append({d} | {g for g in _DIGIT_LIKE if _DIGIT_LIKE[g] == d} | {g for g in _EXACT_ONE if _EXACT_ONE[g] == d})",
+                                         "                want.append({d})")],
+     [T_C12 + 'test_d11_the_readings_come_from_the_floor_table_itself']),
+    ('watch-d12-floor-fixed', [(WA, "    for num in sorted(set(_ISO_FLOOR) | set(_NOT_COMPLETED)):", "    for num in ['CG2404', 'CG2503', 'CG2545']:")],
+     [T_C12 + 'test_d11_the_readings_come_from_the_floor_table_itself']),
+    # M2f: a year-like run that reads as no date (engine, watcher RM12)
+    ('m12-year-unread-is-any', [(RT, "    return words[0] + digits, ed, ed is None and (month or yearlike)\n", "    return words[0] + digits, ed, ed is None and month\n")],
+     [T_P12 + 'test_R12_M2f_WATCH_a_digit_for_letter_month_or_bare_year_reads_any_edition',
+      T_C12 + 'test_m2f_a_year_that_reads_as_no_date_is_refused_never_any_edition']),
+    ('m12-bare-apostrophe-year-is-any', [(RT, "    yearlike = apos_year or any(", "    yearlike = any(")],
+     [T_C12 + 'test_m2f_a_year_that_reads_as_no_date_is_refused_never_any_edition']),
+    ('watch-m12-year-unread-is-any', [(WA, "    return words[0] + num, my, my is None and (month or yearish)\n", "    return words[0] + num, my, my is None and month\n")],
+     [T_C12 + 'test_m2f_a_stored_one_breaks_the_floor_in_both_copies', T_C12 + 'test_engine_and_watcher_agree_on_the_1_10_2_readings']),
+    ('watch-m12-bare-apostrophe-year-is-any', [(WA, "    yearish = apos or any(", "    yearish = any(")],
+     [T_C12 + 'test_m2f_a_stored_one_breaks_the_floor_in_both_copies']),
+]
+
 
 def _copy(name):
     dest = os.path.join(SCRATCH, name)
