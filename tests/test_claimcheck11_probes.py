@@ -303,7 +303,8 @@ def test_R11_M5_WATCH_an_ed_prefixed_month_word_edition_is_refused_as_unreadable
     _x, r = _revise(h, w, 'ai_ongoing', forms=['CG 20 10', 'CG 20 10 Ed. Nov 2013', 'CG 20 33', 'CG 20 38'],
                     edition=None)
     print('M5', r.status_code, (r.get_json() or {}).get('code'))
-    assert r.status_code == 422 and (r.get_json() or {}).get('code') == 'edition_unreadable', r.get_json()
+    # WATCH flipped by the host ruling (rules 1.10.1, M5 fix): the Ed. prefix is read, the edition binds
+    assert r.status_code == 201, r.get_json()
 
 
 # ───────────── FP1: narrowed ─────────────
@@ -483,4 +484,5 @@ def test_R11_N3_WATCH_a_stored_keyless_non_ascii_form_breaks_only_the_engine_flo
     it = {'id': 'x', 'kind': 'endorsement', 'function': 'ai_ongoing', 'forms': [form, 'CG 20 33']}
     eng, wat = rt.floor_violations({'items': [it]}), wt._floor({'items': [it]})
     print('N3', ascii(form), eng, wat)
-    assert eng and not wat
+    # WATCH flipped by the host ruling (rules 1.10.1, N3 fix): both copies' floors see it
+    assert eng and wat
