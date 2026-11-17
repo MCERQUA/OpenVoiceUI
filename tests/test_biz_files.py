@@ -252,10 +252,55 @@ def test_a_file_id_is_never_mistaken_for_a_card_number():
     sha = 'ab' + '4111111111111111' + 'c' * 46                 # a hex id containing a Luhn-valid 16-digit run
     assert len(sha) == 64
     assert not contains_card_number('biz-file:' + sha)
-    assert not contains_card_number({'source_sha256': sha.upper()})
     # a real card number is still refused, alone or next to an id
     assert contains_card_number('card 4111 1111 1111 1111')
     assert contains_card_number('biz-file:' + sha + ' and card 4111111111111111')
+
+
+@pytest.mark.parametrize('text', ['ref 4111111111111111' + 'a' * 48 + ' exp 12/29', 'x 5555555555554444' + 'b' * 48,
+                                  'ab' + '4111111111111111' + 'c' * 46, 'biz-file:' + 'a' * 63 + ' 4111111111111111'])
+def test_a_card_number_padded_into_hex_is_still_refused(text):
+    """Claim-check M4 / P8: only the exact biz-file:<64 hex> token is skipped, never a bare 64-hex run."""
+    from services.biz.schema import contains_card_number
+    assert contains_card_number(text)
+
+
+def test_card_padded_into_hex_refused_through_the_api_for_owner_and_agent(client, monkeypatch):
+    _as(monkeypatch, OWNER)
+    for note in ('card 4111111111111111 exp 12/29', 'ref 4111111111111111' + 'a' * 48 + ' exp 12/29'):
+        r = client.post(f'{B}/contact', json={'data': {'name': 'Card Probe', 'notes': note}})
+        assert r.status_code == 422 and r.get_json()['code'] == 'card_number_refused', note
+    _as(monkeypatch, None)
+    r = client.post(f'{B}/contact', json={'data': {'name': 'Card Probe', 'notes': 'x 5555555555554444' + 'b' * 48},
+                                          'source': json.loads(SRC)}, headers=AG)
+    assert r.status_code == 422 and r.get_json()['code'] == 'card_number_refused'
+
+
+def test_sha256_format_fields_are_strict_and_skip_the_card_scan(tmp_path):
+    import shutil
+    from services.biz.schema import CORE_DIR, SchemaError
+    from services.biz.store import BizStore
+    core = tmp_path / 'core'
+    shutil.copytree(CORE_DIR, core)
+    (core / 'zz_hashrec.json').write_text(json.dumps({'collection': 'zz_hashrec', 'required': [], 'fields': {
+        'h': {'type': 'string', 'format': 'sha256'}, 'note': {'type': 'string'}}}))
+    st = BizStore(tmp_path / 'db', 'tenant-a', core_dir=core)
+    try:
+        sha = 'ab' + '4111111111111111' + 'c' * 46
+        assert st.create('zz_hashrec', {'h': sha}, by='local:owner')['data']['h'] == sha
+        for bad in (sha.upper(), sha + '\n', sha[:-1], 'card 4111111111111111'):
+            with pytest.raises(SchemaError):
+                st.create('zz_hashrec', {'h': bad}, by='local:owner')
+        with pytest.raises(SchemaError) as e:
+            st.create('zz_hashrec', {'note': sha}, by='local:owner')      # same text in a free field: refused
+        assert e.value.code == 'card_number_refused'
+    finally:
+        st.close()
+
+
+def test_file_id_pattern_refuses_a_trailing_newline():
+    from services.biz.store import FILE_ID_RE
+    assert FILE_ID_RE.match('a' * 64) and not FILE_ID_RE.match('a' * 64 + '\n')
 
 
 def test_document_pointing_at_a_luhn_looking_file_id_is_accepted(client, monkeypatch):

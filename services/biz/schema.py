@@ -64,9 +64,13 @@ _PAN_RE = re.compile(r'(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)')
 # Record ids (uuid4) are blanked before the scan: about 0.2% of random uuid4 ids carry a
 # dash-separated 13-19 digit run that passes Luhn, and were refused as card numbers.
 _UUID_TOKEN_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.I)
-# Stored-file ids are sha256 hex (biz-file:<64 hex>, source hashes): about 1% of them carry a
-# Luhn-valid 13-19 digit run, and a document pointing at its own file was refused as a card number.
-_SHA256_TOKEN_RE = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
+# Stored-file ids are sha256 hex: about 1% carry a Luhn-valid 13-19 digit run, and a document
+# pointing at its own file (biz-file:<id>) was refused as a card number. Only the exact
+# 'biz-file:<64 hex>' token is blanked (a bare 64-hex run is NOT: padding a card number with hex
+# letters must not smuggle it past the scan). Fields declared "format": "sha256" are validated as
+# exactly 64 lower-case hex characters and left out of the scan instead.
+_BIZ_FILE_TOKEN_RE = re.compile(r'biz-file:[0-9a-f]{64}(?![0-9A-Za-z])')
+SHA256_RE = re.compile(r'^[0-9a-f]{64}\Z')
 
 
 class SchemaError(Exception):
@@ -99,7 +103,7 @@ def _luhn_ok(digits: str) -> bool:
 def contains_card_number(value) -> bool:
     """True if any string inside value carries a Luhn-valid 13-19 digit run."""
     if isinstance(value, str):
-        value = _SHA256_TOKEN_RE.sub(' ', _UUID_TOKEN_RE.sub(' ', value))
+        value = _BIZ_FILE_TOKEN_RE.sub(' ', _UUID_TOKEN_RE.sub(' ', value))
         for m in _PAN_RE.finditer(value):
             digits = re.sub(r'\D', '', m.group(0))
             if 13 <= len(digits) <= 19 and _luhn_ok(digits):
@@ -250,7 +254,8 @@ class Registry:
                                   fields=errors)
             raise SchemaError(422, 'validation_failed', 'Record does not match the schema', fields=errors)
         # ref values are record ids, never free text: they are not scanned at all
-        if contains_card_number({k: v for k, v in clean.items() if fields.get(k, {}).get('type') != 'ref'}):
+        if contains_card_number({k: v for k, v in clean.items() if fields.get(k, {}).get('type') != 'ref'
+                                 and fields.get(k, {}).get('format') != 'sha256'}):
             raise SchemaError(422, 'card_number_refused',
                               'Card and bank numbers are never stored. Keep the last 4 digits only.')
         return clean, refs
@@ -266,6 +271,8 @@ class Registry:
                 return 'not an email address'
             if t == 'url' and value and not (value.startswith(('http://', 'https://', '/'))):
                 return 'not a link (http(s):// or /path)'
+            if fspec.get('format') == 'sha256' and not SHA256_RE.match(value):
+                return 'must be a sha256 id (64 lower-case hex characters)'
             return None
         if t in ('number', 'money', 'integer'):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):

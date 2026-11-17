@@ -49,7 +49,7 @@ TABLES = ('records', 'activity', 'counters', 'field_proposals', 'app_pages', 'fi
 # Backend-private file store (migration 0003): <db dir>/files/<sha256>, served only by
 # GET /api/biz/v1/files/<id>. Type is decided from the bytes, never from the client's claim.
 FILE_MAX_BYTES = 15 * 1024 * 1024
-FILE_ID_RE = re.compile(r'^[0-9a-f]{64}$')
+FILE_ID_RE = re.compile(r'^[0-9a-f]{64}\Z')
 FILE_URL_PREFIX = 'biz-file:'
 FILE_TYPES = ((b'%PDF-', 'application/pdf', '.pdf'),
               (b'\x89PNG\r\n\x1a\n', 'image/png', '.png'),
