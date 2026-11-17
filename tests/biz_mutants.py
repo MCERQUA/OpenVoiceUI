@@ -22,6 +22,9 @@ T_CRT = 'tests/test_biz_crt_pack.py::'
 T_SO = 'tests/test_biz_staff_only.py::'
 T_F = 'tests/test_biz_files.py::'
 T_P = 'tests/test_biz_packs.py::'
+T_T = 'tests/test_biz_crt_tools.py::'
+PR = 'tools/biz/isolation-probe.py'
+WA = 'tools/biz/crt-verdict-watch.py'
 
 # (name, [(file, old, new)], [tests that must fail])
 MUTANTS = [
@@ -54,6 +57,10 @@ MUTANTS = [
     ('file-size-uncapped', [(ST, "        if len(blob) > FILE_MAX_BYTES:\n            raise _err(413",
                              "        if False:\n            raise _err(413")],
      [T_F + 'test_size_cap']),
+    ('file-id-read-as-card-number', [(SC, "        value = _SHA256_TOKEN_RE.sub(' ', _UUID_TOKEN_RE.sub(' ', value))",
+                                      "        value = _UUID_TOKEN_RE.sub(' ', value)")],
+     [T_F + 'test_a_file_id_is_never_mistaken_for_a_card_number',
+      T_F + 'test_document_pointing_at_a_luhn_looking_file_id_is_accepted']),
     # ── shared backend: packs ──
     ('pack-always-on', [(SC, "        for pname in self.enabled_packs:\n            _packs.merge_into",
                          "        for pname in self.available_packs:\n            _packs.merge_into")],
@@ -178,6 +185,42 @@ MUTANTS = [
     ('page-uses-localstorage', [('default-schemas/packs/risk-transfer/pages/cca-crt-book.html', "  load();\n}",
                                  "  try { localStorage.setItem('crt', '1'); } catch (e) {}\n  load();\n}")],
      [T_CRT + 'test_pages_use_no_browser_storage_and_only_the_sdk']),
+    # ── isolation probe (P0): it must FAIL when a wall is broken, and the probe itself must not go soft ──
+    ('sandboxes-share-one-store', [(RB, "    slot = 'store' if sandbox is None else 'sandbox:' + sandbox\n    store = ext.get(slot)",
+                                    "    slot = 'store'\n    store = ext.get(slot)")],
+     [T_T + 'test_probe_positive_control_passes']),
+    ('staff-only-off-seen-by-probe', [(ST, "        if spec.get('staff_only'):\n            raise _err(403, 'staff_only'",
+                                       "        if False and spec.get('staff_only'):\n            raise _err(403, 'staff_only'")],
+     [T_T + 'test_probe_positive_control_passes']),
+    ('file-meta-cross-store-seen-by-probe', [(RB, "    if not FILE_ID_RE.match(fid or ''):\n        raise SchemaError(404, 'not_found', 'No such file')\n    return jsonify(g.biz_store.file_meta(fid))",
+                                              "    return jsonify({'id': fid})")],
+     [T_T + 'test_probe_positive_control_passes']),
+    ('probe-accepts-cross-reads', [(PR, "            self.expect(f'{tag}: read {coll}', st, {404})",
+                                    "            self.expect(f'{tag}: read {coll}', st, {404, 200})"),
+                                   (PR, "            self.record(f'{tag}: list {coll}', FAIL if leaked else PASS, f'{len(leaked)} foreign rows')",
+                                    "            self.record(f'{tag}: list {coll}', PASS, f'{len(leaked)} foreign rows')")],
+     [T_T + 'test_probe_negative_control_planted_foreign_row_fails']),
+    ('probe-writes-to-business-stores', [(PR, "        if not body.get('sandbox'):", "        if False:")],
+     [T_T + 'test_probe_refuses_to_write_into_a_business_store']),
+    ('probe-silence-is-pass', [(PR, "        if not vs or CANNOT in vs:\n            return CANNOT", "        if False:\n            return CANNOT")],
+     [T_T + 'test_probe_cannot_tell_on_server_errors']),
+    # ── verdict watcher: it must disagree with a forged Meets ──
+    ('watch-ignores-names', [(WA, "                elif _named(acct_name, ed.get('scheduled_names')) and _named(pname, ed.get('scheduled_projects')):",
+                              "                elif True:")],
+     [T_T + 'test_watch_fails_a_forged_meets_on_a_wrong_party_endorsement']),
+    ('watch-trusts-agent-confirmations', [(WA, "        if not c or not str(c['data'].get('confirmed_by') or '').startswith(PERSON) \\\n                or not str(c['created_by']).startswith(PERSON):",
+                                           "        if not c:")],
+     [T_T + 'test_watch_fails_a_meets_that_read_an_agent_confirmation']),
+    ('watch-skips-file-hash', [(WA, "                ok = h.hexdigest() == sha", "                ok = True")],
+     [T_T + 'test_watch_fails_when_the_endorsement_file_no_longer_matches']),
+    ('watch-skips-policy-check', [(WA, "                (cannot if changed else why).append(f'R3 no person-confirmed, file-backed, current {line} policy')",
+                                   "                pass")],
+     [T_T + 'test_watch_fails_a_forged_meets_with_nothing_confirmed']),
+    ('watch-silence-is-pass', [(WA, "    if not rows:\n        return CANNOT, rows", "    if False:\n        return CANNOT, rows")],
+     [T_T + 'test_watch_cannot_tell_with_nothing_to_check_or_no_store']),
+    ('watch-blind-to-later-change', [(WA, "    def changed_since(rec):\n        return rec['updated_at'] > reviewed_at",
+                                      "    def changed_since(rec):\n        return False")],
+     [T_T + 'test_watch_cannot_tell_when_an_input_changed_after_the_review']),
     ('wording-compliant', [(RT, "    'meets': 'Meets requirements (documents reviewed)',", "    'meets': 'COMPLIANT',")],
      [T_CRT + 'test_positive_fully_confirmed_mep_meets_requirements']),
 ]
