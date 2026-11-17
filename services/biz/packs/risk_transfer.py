@@ -35,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.9.1'
+RULE_VERSION = 'crt-rules-1.10.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -250,45 +250,112 @@ def lookalike_reading(s) -> str:
     return ''.join(out)
 
 
-def _iso_hit(c, w, lookalikes) -> bool:
-    """Does character c fill position w of CG 20 xx (None: any digit)? With lookalikes, by class: a digit position takes
-    a digit or any look-alike, '2' takes Z, '0' takes O / Q / D, and the G takes 6 (G and 6 are one class)."""
-    if w is None:
-        return c in _DIGITS or (lookalikes and c in LOOKALIKE_DIGITS)
-    return c == w or (lookalikes and (LOOKALIKE_DIGITS.get(c) == w or (w == 'G' and c == '6')))
+# Rules 1.10.0 (X1, host ruling: widen, fail-closed): the weak glyphs join the classes, for an EXACT reading only:
+# ( < [ { read as C; & and 9 as G; ? and 7 as 2; U, C and the pairs () and [] as 0; ] [ J T / ' as 1 (j, t, u fold to
+# upper case). Any other mark may be passed as a gap. The exact reading (no edit at all) of a CG 20 xx through these
+# classes, plus the 1.9.1 map, is distance 0.
+# Rules 1.10.0 (FP1, host ruling: narrow, option 1): a look-alike counts only in that exact reading. With one real edit
+# (substitution, insertion, deletion) only the 1.9.0 map (I L | ! for 1, O for 0) is read, so a carrier's
+# 'CG D3 60 09 07' (an inserted 2 next to D for 0) is two edits away again, as it was before 1.9.1.
+_WEAK_AT = ('(<[{', '&9C', '?7', 'UC689')            # the weak glyphs for C, G, 2 and 0 (host ruling X1)
+_EXACT_CLASSES = (frozenset('C' + _WEAK_AT[0]), frozenset('G6' + _WEAK_AT[1]),
+                  frozenset('2' + _WEAK_AT[2]) | {k for k, v in LOOKALIKE_DIGITS.items() if v == '2'},
+                  frozenset('0' + _WEAK_AT[3]) | {k for k, v in LOOKALIKE_DIGITS.items() if v == '0'})
+# a printed digit read as another position's digit (7 for 2, 9 for G, 6 / 8 / 9 for 0) blocks the manuscript route like
+# any glyph, but for a set's 422 / a stored Can't tell it counts as the one-character difference it is (it is a digit)
+_EXACT_DIGIT_GLYPHS = (frozenset(), frozenset('9'), frozenset('7'), frozenset('689'))
+_EXACT_DIGIT = dict(LOOKALIKE_DIGITS, **{']': '1', '[': '1', 'J': '1', 'T': '1', '/': '1', "'": '1',
+                                          'U': '0', 'C': '0', '?': '2'})
+_EXACT_PAIRS = ('()', '[]')                           # two marks read as one 0
+_MAP_1_9_0 = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}
 
 
-def iso_distance(s, lookalikes=True) -> int:
-    """Fewest single-character edits (substitute, insert, delete) that make some stretch of the field read CG 20 xx
-    (xx: any two digits), on the field as written (folded) and, with lookalikes, by the look-alike classes. A gap (not
-    A-Z, not 0-9, and not a look-alike mark) costs nothing to pass."""
+def _exact_readings(s) -> set:
+    """Rules 1.10.0: every (CG 20 xx, digit glyphs used) the field reads as exactly through the look-alike classes (no
+    edit; a mark may be passed as a gap, a letter or digit never is)."""
+    t = _fold_chars(s)
+    found = set()
+
+    def walk(i, p, got, weak):
+        if p == 6:
+            found.add(('CG20' + got, weak))
+            return
+        if i >= len(t):
+            return
+        c = t[i]
+        if p >= 3 and t[i:i + 2] in _EXACT_PAIRS:
+            walk(i + 2, p + 1, got if p == 3 else got + '0', weak)
+        if p < 4 and c in _EXACT_CLASSES[p]:
+            walk(i + 1, p + 1, got, weak + (c in _EXACT_DIGIT_GLYPHS[p]))
+        elif p >= 4 and (c in _DIGITS or c in _EXACT_DIGIT):
+            walk(i + 1, p + 1, got + (c if c in _DIGITS else _EXACT_DIGIT[c]), weak)
+        if not ('A' <= c <= 'Z' or c in _DIGITS):
+            walk(i + 1, p, got, weak)                 # a mark may be passed as a gap
+
+    for start in range(len(t)):
+        if t[start] in _EXACT_CLASSES[0]:
+            walk(start, 0, '', 0)
+    return found
+
+
+def iso_exact_reading(s):
+    """Rules 1.10.0: the CG 20 xx ('CG20dd') the field reads as exactly through the look-alike classes, the lowest one
+    when it reads several ways, or None."""
+    found = _exact_readings(s)
+    return min(r for r, _w in found) if found else None
+
+
+def fold_distance(s) -> int:
+    """Rules 1.10.0: the distance the set-side look-alike check reads: an exact reading costs one per digit glyph in it
+    (7 for 2, 9 for G, 6 / 8 / 9 for 0), else the 1.9.0-map edit distance."""
+    found = _exact_readings(s)
+    d = _indel_distance(s, _MAP_1_9_0)
+    return min([d] + [w for _r, w in found])
+
+
+def _indel_distance(s, digit_map) -> int:
+    """Fewest single-character edits (substitute, insert, delete) that make some stretch of the field read CG 20 xx,
+    reading digit_map's characters as their digits; any other character but A-Z / 0-9 is a gap (passed at no cost)."""
     want = ('C', 'G', '2', '0', None, None)           # None: any digit
     col = list(range(len(want) + 1))                  # col[i]: cheapest way to have read want[:i], ending here
     best = col[-1]
     for c in _fold_chars(s):
-        if not ('A' <= c <= 'Z' or c in _DIGITS or (lookalikes and c in LOOKALIKE_DIGITS)):
+        if not ('A' <= c <= 'Z' or c in _DIGITS or c in digit_map):
             continue
+        d = digit_map.get(c, c)
         nxt = [0]                                     # the number may start anywhere in the field
         for i, w in enumerate(want, start=1):
-            hit = _iso_hit(c, w, lookalikes)
+            hit = (d in _DIGITS) if w is None else (d == w)
             nxt.append(min(col[i - 1] + (0 if hit else 1), col[i] + 1, nxt[i - 1] + 1))
         col = nxt
         best = min(best, col[-1])
     return best
 
 
+def iso_distance(s, lookalikes=True) -> int:
+    """How far the field is from CG 20 xx. With lookalikes: 0 when it reads as one exactly through the look-alike
+    classes (iso_exact_reading), else the edit distance reading only the 1.9.0 map (FP1). Without: the plain edit
+    distance, nothing read as a digit."""
+    if not lookalikes:
+        return _indel_distance(s, {})
+    if iso_exact_reading(s) is not None:
+        return 0
+    return _indel_distance(s, _MAP_1_9_0)
+
+
 def _lookalike_changes_reading(raw) -> bool:
     """Rules 1.9.0 (L): reading the look-alikes as digits gives the field an ISO number, an edition, or a closeness to
     CG 20 xx (within one character) that it does not have as written."""
     mapped = lookalike_reading(raw)
-    d = iso_distance(raw)
+    d = fold_distance(raw)
     if d <= 1 and d < iso_distance(raw, lookalikes=False):
         return True
     if iso_numbers_in(mapped) - iso_numbers_in(raw) or (is_iso_form(mapped) and not is_iso_form(raw)):
         return True
-    for read in (lambda x: form_parts(x)[1], lambda x: edition_parts(x)[1]):   # an edition it did not have
-        got = read(mapped)
-        if got is not None and got != read(raw):
+    # an edition it did not have; rules 1.10.0 (FP1): only when the number carrying it is an ISO number
+    for read in (form_parts, edition_parts):
+        form, got = read(mapped)
+        if got is not None and got != read(raw)[1] and form and is_iso_number(form):
             return True
     return False
 
@@ -313,8 +380,32 @@ def near_iso_number(s) -> bool:
     return iso_distance(s) <= 1
 
 
+def _number_then_edition(s):
+    """Rules 1.10.0 (M): a form number written as two letters and four digits in whole words ('CG 20 10', 'CG2010',
+    'ISO CG 20 10'), followed by an edition the one edition reader reads ('Nov 1985', '(Nov 1985)', 'NOV 85',
+    'Apr 2013', '1/85'). (form key, (month, year) or None, the words after it name a month but read as no date), or
+    None when the field is not shaped that way."""
+    folded = _fold_chars(s)
+    if not all('A' <= c <= 'Z' or c in _DIGITS or c in _EDITION_GAPS for c in folded):
+        return None                                   # only the marks a footer prints between parts
+    words = re.findall(r'[A-Z]+|[0-9]+', _o_is_zero(re.sub(r'[^A-Z0-9]', ' ', folded)))
+    if words[:1] == ['ISO']:
+        words = words[1:]
+    if len(words) < 3 or len(words[0]) != 2 or not words[0].isalpha():
+        return None
+    digits, j = '', 1
+    while j < len(words) and words[j].isdigit() and len(digits) < 4:
+        digits, j = digits + words[j], j + 1
+    if len(digits) != 4 or j >= len(words):
+        return None
+    rest = words[j:]
+    ed = edition_parts(' '.join(rest))[1]
+    return words[0] + digits, ed, ed is None and any(w.isalpha() and w[:3] in _MONTHS for w in rest)
+
+
 def form_parts(s):
-    """(form key, (month, year) of an edition written after the number, or None)."""
+    """(form key, (month, year) of an edition written after the number, or None). Rules 1.10.0 (M): an edition written
+    in month words or with a one-digit month ('CG 20 10 Apr 2013', 'CG 20 37 1/85') splits off too."""
     k = _squash(s)
     m = _ISO_STYLE_RE.match(k)
     if m:
@@ -324,6 +415,9 @@ def form_parts(s):
         ek = _edition_key(ed)
         if ek is not None:
             return m.group(1), ek
+    fb = _number_then_edition(s)
+    if fb and fb[1] is not None:
+        return fb[0], fb[1]
     return k, None
 
 
@@ -591,6 +685,10 @@ def item_edition(it):
     field is absent, null or ""; two different editions (in the list, or the list against the field) cannot be read."""
     it = it if isinstance(it, dict) else {}
     forms = it.get('forms') if isinstance(it.get('forms'), list) else []
+    for f in forms:                                   # rules 1.10.0 (M): never "any edition" for an unreadable one
+        fb = _number_then_edition(f) if isinstance(f, str) else None
+        if fb and fb[2]:
+            return None, f'its form list carries an edition that cannot be read ({f})'
     listed = {form_parts(f)[1] for f in forms if isinstance(f, str)} - {None}
     field = it.get('edition')
     if field is not None and field != '':
@@ -778,6 +876,10 @@ def validate_items(items, trade_category=None) -> list:
                 # rules 1.8.0 (H8): the edition field holds an edition only; the number goes in the form list
                 raise _err(422, 'edition_not_mm_yy', 'edition holds the edition only ("MM YY", e.g. "04 13"); the form '
                                                      'number belongs in forms (rules 1.8.0)', item=iid)
+            if item_edition(it)[1] and 'cannot be read' in item_edition(it)[1]:
+                # rules 1.10.0 (M): an edition in month words that does not read as a date is refused, never "any"
+                raise _err(422, 'edition_unreadable', 'This item ' + item_edition(it)[1] + '. Write the edition as '
+                           '"MM YY" or a month and year ("Nov 2013") (rules 1.10.0)', item=iid)
             if item_edition(it)[1]:
                 # rules 1.8.0 (H5): an edition written in the form list binds; two different ones are refused
                 raise _err(422, 'edition_conflict', 'This item names two different editions (' + item_edition(it)[1]
@@ -1505,7 +1607,7 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 elif needs_fold(e_form):
                     ec('UNCONFIRMED:crt_endorsement.form')
                     notes.append(f"{iid}: form {e_form!a} is written with characters that only look like letters or "
-                                 f'digits (it reads as {fk if iso else form_key(lookalike_reading(e_form))}); staff re-enter the '
+                                 f'digits (it reads as {fk if iso else iso_exact_reading(e_form) or form_key(lookalike_reading(e_form))}); staff re-enter the '
                                  'number in plain letters and digits as printed. It is never read as a manuscript')
                 elif e['data'].get('manuscript') is not True or fk in form_fn or iso or near:
                     accepted = {form_key(f) for f in it.get('forms') or []}

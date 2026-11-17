@@ -89,6 +89,13 @@ What a Meets must be backed by (plan S18, design section 4.4 rule 1, claim-check
      number within one edit (substitution, insertion, deletion) of CG 20 xx read that way is never a manuscript; a
      form or edition whose look-alikes give it an ISO number, an edition or that closeness is not backed (and is below
      the floor in a set)
+  (rules 1.10.0, gate-4 re-check #10, checked here with this file's own code)
+  RM10 an edition written after the number in month words or with a one-digit month ('CG 20 10 Nov 1985', 'NOV 85',
+     'Apr 2013', '1/85') is that number's edition (binds, pre-2004 is below the floor, a conflict is below the floor);
+     a month word that reads as no date is below the floor, never "any edition"
+  RF10 a look-alike counts only in an exact reading of CG 20 xx; with one real edit only I L | ! / O are read; an
+     edition gained through the map counts only when the number carrying it is an ISO number
+  RX10 weak glyphs in the exact reading: ( < [ { for C, & 9 for G, ? 7 for 2, U C () [] for 0, ] [ J T / ' for 1
   RP9 an item that requires a pre-2004 edition (the edition the verdict applies: its field, or the edition written in
      its form list) is below the floor
   R6 each assignment field the verdict reads (project, sub, set, set version, trade, scope change) was
@@ -267,16 +274,65 @@ def _as_digits(s):
     return res
 
 
-def _gap_to_iso(s, look=True):
-    """RL9 (own code): the edit distance (substitute / insert / delete) from CG 20 xx to the closest stretch of the
-    folded field; with look, each position takes its look-alike class (G or 6; 2 or Z; 0, O, Q or D; a digit or any
-    look-alike)."""
-    digitish = set('0123456789') | (set(_DIGIT_LIKE) if look else set())
+# RX10 (rules 1.10.0, own code): the weak glyphs, for an EXACT reading only. C: ( < [ {; G: & 9; 2: ? 7; 0: U C and
+# the pairs () []; 1: ] [ J T / ' . Any other mark may be passed as a gap; a letter or digit never is.
+_WEAK = {0: '(<[{', 1: '&9C', 2: '?7', 3: 'UC689'}      # weak glyphs for C, G, 2, 0
+_EXACT_AT = [set('C') | set(_WEAK[0]), set('G6') | set(_WEAK[1]),
+             {'2'} | set(_WEAK[2]) | {k for k in _DIGIT_LIKE if _DIGIT_LIKE[k] == '2'},
+             {'0'} | set(_WEAK[3]) | {k for k in _DIGIT_LIKE if _DIGIT_LIKE[k] == '0'}]
+_EXACT_DIGIT_AT = [set(), {'9'}, {'7'}, {'6', '8', '9'}]     # a printed digit: one character off for the set side
+_EXACT_ONE = {']': '1', '[': '1', 'J': '1', 'T': '1', '/': '1', "'": '1', 'U': '0', 'C': '0', '?': '2'}
+
+
+def _exact_all(s):
+    """RX10 (own code): [(CG20dd, digit glyphs used)] for every exact reading of the field through the classes."""
+    f = _fold(s)
+    seen = []
+    for first in range(len(f)):
+        if f[first] not in _EXACT_AT[0]:
+            continue
+        stack = [(first, 0, '', 0)]                       # (index, pattern position, digits read, digit glyphs)
+        while stack:
+            i, p, got, wk = stack.pop()
+            if p == 6:
+                seen.append(('CG20' + got, wk))
+                continue
+            if i >= len(f):
+                continue
+            ch = f[i]
+            if ch not in _LATIN:
+                stack.append((i + 1, p, got, wk))         # a mark: pass it as a gap
+            if p >= 3 and f[i:i + 2] in ('()', '[]'):
+                stack.append((i + 2, p + 1, got if p == 3 else got + '0', wk))
+            if p < 4 and ch in _EXACT_AT[p]:
+                stack.append((i + 1, p + 1, got, wk + (1 if ch in _EXACT_DIGIT_AT[p] else 0)))
+            elif p >= 4 and (ch.isdigit() or ch in _DIGIT_LIKE or ch in _EXACT_ONE):
+                d = ch if ch.isdigit() else _DIGIT_LIKE.get(ch) or _EXACT_ONE[ch]
+                stack.append((i + 1, p + 1, got + d, wk))
+    return seen
+
+
+def _exact_iso(s):
+    """RX10: the lowest CG20dd the field reads as exactly, or None (as the engine names it)."""
+    seen = _exact_all(s)
+    return min(r for r, _ in seen) if seen else None
+
+
+def _fold_gap(s):
+    """RX10 / RF10: the set-side distance: an exact reading costs one per digit glyph; else the 1.9.0-map distance."""
+    return min([_gap_to_iso(s, look=False, map190=True)] + [wk for _, wk in _exact_all(s)])
+
+
+def _gap_to_iso(s, look=True, map190=False):
+    """RL9 / RF10 (own code): with look, 0 when the field reads exactly as a CG 20 xx (RX10), else the edit distance
+    (substitute / insert / delete) reading only the 1.9.0 map (I L | ! as 1, O as 0); without, plain."""
+    if look and _exact_iso(s) is not None:
+        return 0
+    one = {'I', 'L', '|', '!'} if look or map190 else set()
+    zero = {'O'} if look or map190 else set()
+    digitish = set('0123456789') | one | zero
     seq = [ch for ch in _fold(s) if ch in _LATIN or ch in digitish]
-    if look:
-        pat = [{'C'}, {'G', '6'}, {'2', 'Z'}, {'0', 'O', 'Q', 'D'}, digitish, digitish]
-    else:
-        pat = [{'C'}, {'G'}, {'2'}, {'0'}, digitish, digitish]
+    pat = [{'C'}, {'G'}, {'2'}, {'0'} | zero, digitish, digitish]
     row = [0] * (len(seq) + 1)                            # pattern row 0: the stretch may start anywhere
     for p in pat:
         new = [row[0] + 1]
@@ -304,13 +360,20 @@ def _refold(s):
     if _zero(k) != k:
         return True
     m = _as_digits(s)
-    if _gap_to_iso(s) <= 1 and _gap_to_iso(s) < _gap_to_iso(s, look=False):
+    if _fold_gap(s) <= 1 and _fold_gap(s) < _gap_to_iso(s, look=False):
         return True
     if not _iso_in(m) <= _iso_in(s) or (_is_iso(m) and not _is_iso(s)):
         return True
-    if _form_parts(m)[1] not in (None, _form_parts(s)[1]):
+    # RF10: an edition gained counts only when the number carrying it is an ISO number
+    fm, em = _form_parts(m)
+    if em not in (None, _form_parts(s)[1]) and _iso_key(fm):
         return True
-    return _edition_read(m)[1] not in (None, _edition_read(s)[1])
+    fm, em = _edition_read(m)
+    return em not in (None, _edition_read(s)[1]) and bool(fm) and _iso_key(fm)
+
+
+def _iso_key(fk):
+    return fk in _ISO_FLOOR or fk in _NOT_COMPLETED or bool(_ISO_AI.match(fk or ''))
 
 
 def _near_iso(s):
@@ -334,7 +397,41 @@ def _form_parts(s):
             my = _edition_my(rest)
             if my:
                 return body[:6], my
+    nb = _num_ed(s)                                       # RM10: a month-word / one-digit-month edition after it
+    if nb and nb[1] is not None:
+        return nb[0], nb[1]
     return k, None
+
+
+def _num_ed(s):
+    """RM10 (own code): (key, edition or None, a month word that reads as no date) for 'LL dd dd <edition>' / 'LLdddd
+    <edition>' (optionally after ISO), the four digits in whole words; None for any other shape."""
+    f = _fold(s)
+    if any(ch not in _LATIN and ch not in ' \t\n\r\f\v()[]/-.,' for ch in f):
+        return None
+    t = _zero(''.join(ch if ch in _LATIN else ' ' for ch in f))
+    words, cur = [], ''
+    for ch in t:
+        if cur and (ch == ' ' or ch.isdigit() != cur[-1].isdigit()):
+            words.append(cur)
+            cur = ''
+        if ch != ' ':
+            cur += ch
+    if cur:
+        words.append(cur)
+    if words and words[0] == 'ISO':
+        words.pop(0)
+    if len(words) < 3 or len(words[0]) != 2 or not words[0].isalpha():
+        return None
+    num, j = '', 1
+    while j < len(words) and words[j].isdigit() and len(num) < 4:
+        num += words[j]
+        j += 1
+    if len(num) != 4 or j == len(words):
+        return None
+    my = _edition_my(' '.join(words[j:]))
+    month = any(x.isalpha() and x[:3] in _MON for x in words[j:])
+    return words[0] + num, my, my is None and month
 
 
 def _form(s):
@@ -424,6 +521,9 @@ def _edition_my(s):
 def _item_ed(it):
     """RE8 (own code): (the edition the item requires, or None for any; why it cannot be read, or None)."""
     forms = it.get('forms') if isinstance(it.get('forms'), list) else []
+    for f in forms:                                       # RM10: an unreadable month-word edition is never "any"
+        if isinstance(f, str) and (_num_ed(f) or (0, 0, False))[2]:
+            return None, f'the form list carries an edition that cannot be read ({f})'
     listed = set()
     for f in forms:
         if isinstance(f, str) and _form_parts(f)[1] is not None:
