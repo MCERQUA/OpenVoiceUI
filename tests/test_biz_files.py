@@ -244,3 +244,37 @@ def test_phase2_database_migrates_to_the_file_store_with_a_verified_backup(tmp_p
         assert new.put_file(PDF, by='local:owner')['existed'] is False
     finally:
         new.close()
+
+
+def test_a_file_id_is_never_mistaken_for_a_card_number():
+    """sha256 ids sometimes carry a Luhn-valid digit run; a record pointing at its file must not be refused."""
+    from services.biz.schema import contains_card_number
+    sha = 'ab' + '4111111111111111' + 'c' * 46                 # a hex id containing a Luhn-valid 16-digit run
+    assert len(sha) == 64
+    assert not contains_card_number('biz-file:' + sha)
+    assert not contains_card_number({'source_sha256': sha.upper()})
+    # a real card number is still refused, alone or next to an id
+    assert contains_card_number('card 4111 1111 1111 1111')
+    assert contains_card_number('biz-file:' + sha + ' and card 4111111111111111')
+
+
+def test_document_pointing_at_a_luhn_looking_file_id_is_accepted(client, monkeypatch):
+    import services.biz.store as store_mod
+    _as(monkeypatch, OWNER)
+    sha = 'ab' + '4111111111111111' + 'c' * 46
+    real = store_mod.hashlib.sha256
+
+    class Fixed:
+        def __init__(self, *a):
+            self.h = real(*a)
+
+        def update(self, b):
+            self.h.update(b)
+
+        def hexdigest(self):
+            return sha
+    monkeypatch.setattr(store_mod.hashlib, 'sha256', Fixed)
+    meta = _up(client, PDF).get_json()
+    assert meta['id'] == sha
+    r = client.post(f'{B}/document', json={'data': {'title': 'coi', 'file_url': meta['url']}})
+    assert r.status_code == 201, r.get_json()

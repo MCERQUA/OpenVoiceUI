@@ -64,6 +64,9 @@ _PAN_RE = re.compile(r'(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)')
 # Record ids (uuid4) are blanked before the scan: about 0.2% of random uuid4 ids carry a
 # dash-separated 13-19 digit run that passes Luhn, and were refused as card numbers.
 _UUID_TOKEN_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.I)
+# Stored-file ids are sha256 hex (biz-file:<64 hex>, source hashes): about 1% of them carry a
+# Luhn-valid 13-19 digit run, and a document pointing at its own file was refused as a card number.
+_SHA256_TOKEN_RE = re.compile(r'(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])', re.I)
 
 
 class SchemaError(Exception):
@@ -96,7 +99,7 @@ def _luhn_ok(digits: str) -> bool:
 def contains_card_number(value) -> bool:
     """True if any string inside value carries a Luhn-valid 13-19 digit run."""
     if isinstance(value, str):
-        value = _UUID_TOKEN_RE.sub(' ', value)
+        value = _SHA256_TOKEN_RE.sub(' ', _UUID_TOKEN_RE.sub(' ', value))
         for m in _PAN_RE.finditer(value):
             digits = re.sub(r'\D', '', m.group(0))
             if 13 <= len(digits) <= 19 and _luhn_ok(digits):
