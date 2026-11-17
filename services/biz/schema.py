@@ -60,6 +60,9 @@ MAX_CUSTOM_COLLECTIONS = 100
 
 # Card / bank numbers: a 13-19 digit run (spaces or dashes allowed) that passes Luhn.
 _PAN_RE = re.compile(r'(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)')
+# Record ids (uuid4) are blanked before the scan: about 0.2% of random uuid4 ids carry a
+# dash-separated 13-19 digit run that passes Luhn, and were refused as card numbers.
+_UUID_TOKEN_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.I)
 
 
 class SchemaError(Exception):
@@ -92,6 +95,7 @@ def _luhn_ok(digits: str) -> bool:
 def contains_card_number(value) -> bool:
     """True if any string inside value carries a Luhn-valid 13-19 digit run."""
     if isinstance(value, str):
+        value = _UUID_TOKEN_RE.sub(' ', value)
         for m in _PAN_RE.finditer(value):
             digits = re.sub(r'\D', '', m.group(0))
             if 13 <= len(digits) <= 19 and _luhn_ok(digits):
@@ -223,7 +227,8 @@ class Registry:
                                   'This record uses fields a newer engine added; this engine will not write them',
                                   fields=errors)
             raise SchemaError(422, 'validation_failed', 'Record does not match the schema', fields=errors)
-        if contains_card_number(clean):
+        # ref values are record ids, never free text: they are not scanned at all
+        if contains_card_number({k: v for k, v in clean.items() if fields.get(k, {}).get('type') != 'ref'}):
             raise SchemaError(422, 'card_number_refused',
                               'Card and bank numbers are never stored. Keep the last 4 digits only.')
         return clean, refs

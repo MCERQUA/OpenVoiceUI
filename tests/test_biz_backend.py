@@ -556,3 +556,32 @@ def test_newer_db_is_read_forward_compatible(store_a, env):
         assert exc.value.code == 'engine_too_old'
     finally:
         s.close()
+
+
+# ── regression: a record id must never be mistaken for a card number ─────────
+# Root cause of the PR 593 flake: the card-number scan ran over ref values, and
+# ~0.2% of uuid4 ids contain a dash-separated 13-19 digit run that passes Luhn
+# (measured over 200k ids). A job pointing at such a contact was refused as
+# card_number_refused. These ids were found by that measurement.
+CARD_SHAPED_IDS = ['e04c39fb-6544-4445-8417-21ef943ab98f', 'f29aef39-a798-4425-8299-99a505169f14',
+                   'b9191631-7f48-4740-8039-7392bb341f95']
+
+
+@pytest.mark.parametrize('rid', CARD_SHAPED_IDS)
+def test_card_shaped_record_id_is_not_a_card(client, owner, monkeypatch, rid):
+    import services.biz.store as store_mod
+    monkeypatch.setattr(store_mod.uuid, 'uuid4', lambda: uuid.UUID(rid))
+    c = _create(client, 'contact', {'name': 'x'})
+    assert c.status_code == 201 and c.get_json()['id'] == rid
+    monkeypatch.undo()
+    _as(monkeypatch, OWNER)
+    j = _create(client, 'job', {'title': 'x', 'contact_id': rid, 'notes': f'see contact {rid}'})
+    assert j.status_code == 201, j.get_json()
+
+
+def test_card_scan_still_catches_real_cards_next_to_ids():
+    from services.biz.schema import contains_card_number
+    for rid in CARD_SHAPED_IDS:
+        assert not contains_card_number({'contact_id': rid, 'notes': f'ref {rid}'})
+    assert contains_card_number({'notes': f'{CARD_SHAPED_IDS[0]} paid with 4111 1111 1111 1111'})
+    assert contains_card_number({'notes': 'CC4111111111111111'})
