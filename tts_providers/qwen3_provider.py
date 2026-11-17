@@ -21,6 +21,8 @@ from typing import Optional
 
 import httpx
 
+from services.safe_proc import minimal_env  # spawned tools get no server secrets
+
 from .base_provider import (
     CloneCapableTTSProvider, CloneInfo, CloneRequest, CloneResult,
     soft_retire_clone_dir,
@@ -401,7 +403,7 @@ class Qwen3Provider(CloneCapableTTSProvider):
                 '-f', 'mp3', 'pipe:1'
             ]
             proc = subprocess.run(
-                cmd, input=audio_bytes, capture_output=True, timeout=30
+                cmd, input=audio_bytes, capture_output=True, timeout=30, env=minimal_env()
             )
             if proc.returncode == 0 and proc.stdout:
                 logger.info(

@@ -94,13 +94,15 @@ def test_canvas_pages_html_and_assets_serve(pages):
     assert c.get("/pages/missing.html").status_code == 404
 
 
-def test_canvas_page_write_is_atomic_and_0644(pages):
+def test_canvas_page_write_is_atomic_and_0666(pages):
     c, root = pages
     import routes.canvas as canvas
     canvas._write_page_replacing(root / "made.html", "<html>v1</html>")
     canvas._write_page_replacing(root / "made.html", "<html>v2</html>")
     assert (root / "made.html").read_text() == "<html>v2</html>"
-    assert stat.S_IMODE((root / "made.html").stat().st_mode) == 0o644
+    # 0666 (PR #597 review 3, host ruling): the agent (uid 1000, no group shared with the
+    # server) edits pages in place; the hole was the predictable temp name, not the mode
+    assert stat.S_IMODE((root / "made.html").stat().st_mode) == 0o666
     assert not [p for p in root.iterdir() if p.name.endswith(".tmp")]
 
 

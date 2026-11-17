@@ -258,7 +258,8 @@ def write_cache(filename: str, lines: list, n_aligned: int, task_id: str, audio_
     _c(out.parent).mkdir(parents=True, exist_ok=True)
     if _c(out).is_file():
         bak = out.with_suffix(f'.json.bak-pregen-{os.getpid()}')
-        _c(bak).atomic_write_bytes(_c(out).read_bytes(max_bytes=64 * 1024 * 1024))
+        _c(bak).atomic_write_bytes(_c(out).read_bytes(max_bytes=64 * 1024 * 1024),
+                                   mode=None)   # main wrote the backup in place: keep its mode
     payload = {'source': 'suno', 'offset': 0, 'lines': lines,
                'filename': filename,
                'saved': _now_iso(),

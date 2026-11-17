@@ -6,13 +6,18 @@ Two reviews in a row found routes that check a path and then open it BY NAME ins
 directory the tenant agent (or the terminal sandbox) can write: a symlink swapped in
 between the check and the open turns the route into "read/write any file the server
 can". Fixing the list each time missed the class. This test enumerates the class from
-the code itself (tests/agent_io_scan.py: an AST taint walk of routes/, services/,
-server.py and app.py) and fails on ANY sink — send_file, send_from_directory, open,
+the code itself (tests/agent_io_scan.py: an AST taint walk of everything the server runs
+in-process: routes/, services/, server.py, app.py, plugins/, tts_providers/, providers/)
+and fails on ANY sink — send_file, send_from_directory, open,
 os.open, Path.open/read_*/write_*/chmod/rename/replace, os.replace/rename/chmod,
-shutil copy/move/rmtree, FileStorage/Image .save(path) — that is reached by a path
+shutil copy/move/rmtree, FileStorage/Image .save(path), unlink/remove/rmdir/link/symlink,
+zipfile/tarfile/gzip/bz2/lzma/codecs/wave/PIL/sqlite3/shelve openers, <module>.open(path),
+TarFile.extractall(path), resolved through import aliases — that is reached by a path
 derived from uploads, canvas-pages (+ _data, stories, styles, singalong), music,
 generated_music, transcripts, captures, the workspace mounts, the code workspace or
-/tmp, unless it is listed in ALLOWLIST with a one-line reason.
+/tmp — or whose head is request-supplied (the request body, query, a URL parameter) —
+unless it is listed in ALLOWLIST with a one-line reason. A call the scanner cannot resolve
+(a dynamic callee, a sink passed as a value) fails closed the same way.
 
 A new route that opens an agent-writable path by name fails this test until it uses
 services.safe_open (Anchored / open_beneath / send_file_beneath / atomic_write_beneath,
@@ -21,12 +26,14 @@ all no-follow and beneath a root anchored at the mount point) or is justified he
 
 import ast
 import sys
+
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from agent_io_scan import Scanner, spawn_sites, unclassified  # noqa: E402
+from agent_io_scan import SCAN, Scanner, spawn_sites, unclassified  # noqa: E402
 
 # 'file::function::sink' -> why it is safe without services/safe_open.
 ALLOWLIST = {
@@ -51,6 +58,24 @@ ALLOWLIST = {
     'services/plugins.py::load_plugins::shutil.copy2':
         'copies a plugin-shipped profile into /app/runtime/profiles (the server\'s own mount, '
         'not agent-writable); src is in the plugin dir',
+    # ── review 3 of PR #597 (wider engine: plugins/, providers, aliases, request paths,
+    #    unlink/remove/link, archive/db openers, Anchored laundering, dynamic calls) ──
+    'plugins/booking/routes/booking.py::_root_fd::os.open':
+        'opens the uploads MOUNT POINT itself as a directory fd (only on an image without '
+        'services/safe_open); every file below it is then opened no-follow relative to that fd. '
+        'The mount point\'s own path is not agent-replaceable (same as safe_open.open_root)',
+    # ── review 4 of PR #597: the tenant-mounted wan-video-studio plugin, now in the repo ──
+    'plugins/wan-video-studio/routes/wan_video.py::_uploads_fd::os.open':
+        'opens the uploads MOUNT POINT itself as a directory fd (O_DIRECTORY|O_NOFOLLOW); '
+        '.wan-requests and every file in it are then opened no-follow relative to that fd, '
+        'modes set by fchmod on the fds. Same as booking::_root_fd / safe_open.open_root',
+    'routes/canvas.py::openclaw_ui_proxy::<dynamic-call>':
+        'getattr(requests, request.method.lower())(url, params=request.args, ...): an HTTP verb '
+        'on the requests module (GET/POST/... to the internal openclaw UI), no file I/O; the '
+        'request values are query params/body, never a path',
+    'tts_providers/supertonic_tts.py::<module>::open':
+        'inside `if __name__ == "__main__":` — a manual CLI self-test writing /tmp/'
+        'supertonic_test_output.wav; never runs in the server process (module is imported)',
 }
 
 # Roots that are NOT mount points: a safe_open call anchored at one of these would follow
@@ -84,7 +109,7 @@ def test_allowlist_has_no_stale_entries():
 
 def test_safe_open_is_anchored_at_mount_points_not_derived_dirs():
     bad = []
-    for item in ('routes', 'services', 'server.py', 'app.py'):
+    for item in SCAN:
         p = ROOT / item
         for f in ([p] if p.is_file() else sorted(p.rglob('*.py'))):
             tree = ast.parse(f.read_text(encoding='utf-8'))
@@ -121,6 +146,190 @@ def test_scanner_flags_a_known_bad_route():
         found = {(rel, q, s) for rel, q, s, _ in Scanner(d).findings()}
         assert ('routes/bad.py', 'serve', 'send_file') in found
         assert not any(q == 'fine' for _, q, _ in found)
+
+
+def _scan_tree(tmp_path, files):
+    for rel, src in files.items():
+        f = tmp_path / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(src)
+    return {(rel, q, s) for rel, q, s, _ in Scanner(tmp_path).findings()}
+
+
+def test_scanner_flags_the_review3_b2_pattern(tmp_path):
+    """Negative control (review 3, B2): the pre-fix /api/conversation sidecar write, a
+    request-supplied path checked by `'uploads' in parts` and then written by name."""
+    found = _scan_tree(tmp_path, {'routes/conv.py': (
+        'from pathlib import Path\n'
+        'from flask import request\n'
+        'def conversation():\n'
+        '    data = request.get_json() or {}\n'
+        '    image_path = data.get("image_path") or None\n'
+        '    if image_path:\n'
+        '        _img_file = Path(image_path).resolve()\n'
+        '        if "uploads" not in _img_file.parts:\n'
+        '            raise ValueError("x")\n'
+        '        _intel_path = _img_file.parent / ".image-intel" / (_img_file.name + ".json")\n'
+        '        _intel_path.parent.mkdir(exist_ok=True)\n'
+        '        _intel_path.write_text("{}")\n'
+        '        return _img_file.read_bytes()\n')})
+    assert ('routes/conv.py', 'conversation', '.write_text') in found
+    assert ('routes/conv.py', 'conversation', '.read_bytes') in found
+
+
+def test_scanner_flags_the_review3_b3_pattern_in_plugins(tmp_path):
+    """Negative control (review 3, B3): the pre-fix booking plugin's predictable temp, in
+    plugins/ (which the guard did not scan before)."""
+    found = _scan_tree(tmp_path, {'plugins/booking/routes/booking.py': (
+        'from services.paths import UPLOADS_DIR\n'
+        'CONFIG_PATH = UPLOADS_DIR / "booking-config.json"\n'
+        'def _save_config(data):\n'
+        '    tmp = CONFIG_PATH.with_suffix(".json.tmp")\n'
+        '    tmp.write_text(data)\n'
+        '    tmp.replace(CONFIG_PATH)\n')})
+    assert ('plugins/booking/routes/booking.py', '_save_config', '.write_text') in found
+
+
+def test_scanner_flags_the_review4_wan_video_plugin(tmp_path):
+    """Negative control (review 4, R4-B2): the tenant-mounted wan-video-studio module as
+    live tenants run it today (byte copy, sha256 6f65d714...) is flagged in plugins/."""
+    orig = (Path(__file__).resolve().parent / 'review4_fixtures'
+            / 'tenant_wan_video_6f65d714.tenant-copy.txt').read_text()
+    found = _scan_tree(tmp_path, {'plugins/wan-video-studio/routes/wan_video.py': orig})
+    rel = 'plugins/wan-video-studio/routes/wan_video.py'
+    assert (rel, '_ensure_requests_dir', 'os.chmod') in found
+    assert (rel, 'queue_generation', '.write_text') in found
+    assert (rel, 'get_result', '.read_text') in found
+
+
+# ── tenant-loadable plugin code (review 4 of PR #597, R4-B2) ─────────────────────────
+# OVU imports /app/plugins/<id>/<routes[].module> in-process; /app/plugins is a PER-TENANT
+# mount (/mnt/clients/<t>/openvoiceui/plugins), not the image. The guard only sees what is
+# in this repo, so every plugin route module a tenant can load must be HERE (and is then
+# scanned via SCAN's plugins/), or be named below as a known, not-yet-scanned module.
+# Sources: the route modules declared by this repo's plugins/*/plugin.json, plus the
+# modules review 4 measured on live tenants that no repo manifest declares.
+KNOWN_TENANT_PLUGIN_MODULES_WITHOUT_REPO_MANIFEST = {
+    'desktop-native/routes.py', 'ovui-core/routes.py', 'housecall-pro/routes/housecall_pro.py',
+    'client-history-admin/routes/client_history_admin.py',
+}
+# Known tenant-loaded modules whose code is NOT in this repo yet, so the guard has never
+# scanned them. Follow-up (review 4, R4-B2 part 3): bring each into plugins/ (then remove
+# it here; test_unscanned_plugin_list_is_not_stale enforces that) or gate rollouts on a
+# host-side scan of /mnt/clients/*/openvoiceui/plugins.
+UNSCANNED_TENANT_PLUGIN_MODULES = {
+    'bhb-animated-characters/routes/bighead.py':
+        'catalog stub only (plugin.json + README); review 4: .write_text x3 in create_agent, '
+        'request id unvalidated, reaches only within the cell (LOW)',
+    'hermes-agent/routes/hermes.py': 'catalog stub only; review 4 scan: no finding',
+    'seo-platform/routes/seo.py': 'catalog stub only; review 4 scan: no finding',
+    'twenty-crm/routes/crm.py': 'catalog stub only; review 4 scan: no finding',
+    'desktop-native/routes.py': 'not in the repo; review 4 scan: no finding',
+    'ovui-core/routes.py': 'not in the repo (3 tenant variants); review 4 scan: no finding',
+    'housecall-pro/routes/housecall_pro.py': 'not in the repo; review 4 scan: no finding',
+    'client-history-admin/routes/client_history_admin.py': 'not in the repo; review 4 scan: no finding',
+}
+
+
+def _repo_manifest_route_modules(root):
+    import json
+    out = set()
+    for pj in sorted((root / 'plugins').glob('*/plugin.json')):
+        for r in json.loads(pj.read_text()).get('routes', []):
+            if r.get('module'):
+                out.add(f'{pj.parent.name}/{r["module"]}')
+    return out
+
+
+def _scanned_plugin_modules(root):
+    return {rel[len('plugins/'):] for rel in Scanner(root).modules if rel.startswith('plugins/')}
+
+
+def _unscanned_plugin_modules(root):
+    known = _repo_manifest_route_modules(root) | KNOWN_TENANT_PLUGIN_MODULES_WITHOUT_REPO_MANIFEST
+    return sorted(known - _scanned_plugin_modules(root) - set(UNSCANNED_TENANT_PLUGIN_MODULES))
+
+
+def test_every_known_tenant_plugin_module_is_scanned():
+    scanned = _scanned_plugin_modules(ROOT)
+    # the two plugins rolled to tenants by sha-gated scripts (booking, wan-video-studio)
+    assert {'booking/routes/booking.py', 'wan-video-studio/routes/wan_video.py'} <= scanned
+    unscanned = _unscanned_plugin_modules(ROOT)
+    assert not unscanned, (
+        'tenant-loadable plugin route module(s) the I/O guard never scans (their code is not '
+        'in this repo). Bring the module into plugins/<id>/ or list it in '
+        f'UNSCANNED_TENANT_PLUGIN_MODULES with a reason: {unscanned}')
+
+
+def test_unscanned_plugin_list_is_not_stale():
+    stale = sorted(set(UNSCANNED_TENANT_PLUGIN_MODULES) & _scanned_plugin_modules(ROOT))
+    assert not stale, f'now in the repo and scanned (remove from UNSCANNED_TENANT_PLUGIN_MODULES): {stale}'
+
+
+def test_plugin_scope_check_fires_on_an_unscanned_module(tmp_path):
+    """Negative control: a manifest whose route module is not in the tree (what a catalog
+    stub for a tenant plugin looks like) is reported; once the code is in, it is not."""
+    import json
+    (tmp_path / 'plugins' / 'newplug').mkdir(parents=True)
+    (tmp_path / 'plugins' / 'newplug' / 'plugin.json').write_text(
+        json.dumps({'routes': [{'module': 'routes/new.py', 'blueprint': 'bp'}]}))
+    assert 'newplug/routes/new.py' in _unscanned_plugin_modules(tmp_path)
+    (tmp_path / 'plugins' / 'newplug' / 'routes').mkdir()
+    (tmp_path / 'plugins' / 'newplug' / 'routes' / 'new.py').write_text('x = 1\n')
+    assert 'newplug/routes/new.py' not in _unscanned_plugin_modules(tmp_path)
+    # the out-of-repo tenant modules are reported unless listed as known-unscanned
+    assert set(_unscanned_plugin_modules(tmp_path)) == (
+        KNOWN_TENANT_PLUGIN_MODULES_WITHOUT_REPO_MANIFEST - set(UNSCANNED_TENANT_PLUGIN_MODULES))
+
+
+def test_request_value_joined_under_a_private_root_is_not_flagged(tmp_path):
+    """Precision of the request label: only a request-supplied path HEAD is the caller's
+    choice; a request value joined under a fixed server-private root is judged by the root."""
+    found = _scan_tree(tmp_path, {'routes/p.py': (
+        'from pathlib import Path\n'
+        'from flask import request\n'
+        'PROFILES = Path("/app/runtime/profiles")\n'
+        'def ok():\n'
+        '    return (PROFILES / request.args["n"]).read_text()\n'
+        'def bad():\n'
+        '    return Path(request.args["p"]).read_text()\n'
+        '@bp.route("/x/<path:name>")\n'
+        'def url_param(name):\n'
+        '    return open(name).read()\n')})
+    assert ('routes/p.py', 'bad', '.read_text') in found
+    assert ('routes/p.py', 'url_param', 'open') in found
+    assert not any(q == 'ok' for _, q, _ in found)
+
+
+def test_unresolvable_calls_fail_closed(tmp_path):
+    found = _scan_tree(tmp_path, {'routes/d.py': (
+        'from services.paths import UPLOADS_DIR\n'
+        'HANDLERS = {}\n'
+        'def table(k, n):\n'
+        '    return HANDLERS[k](UPLOADS_DIR / n)\n'
+        'def dyn(o, name, n):\n'
+        '    return getattr(o, name)(UPLOADS_DIR / n)\n'
+        'def as_value(names):\n'
+        '    return list(map(open, [UPLOADS_DIR / n for n in names]))\n'
+        'def fine(n):\n'
+        '    return len(str(n))\n')})
+    assert ('routes/d.py', 'table', '<dynamic-call>') in found
+    assert ('routes/d.py', 'dyn', '<dynamic-call>') in found
+    assert ('routes/d.py', 'as_value', '<sink-as-value:open>') in found
+    assert not any(q == 'fine' for _, q, _ in found)
+
+
+def test_anchored_refuses_to_be_a_path(tmp_path):
+    """Anchored.__fspath__ raises: open(a)/Path(a)/os.fspath(a) cannot silently open by name."""
+    import os
+    import pytest
+    from services.safe_open import Anchored
+    (tmp_path / 'f').write_text('x')
+    a = Anchored(tmp_path, 'f')
+    for consumer in (open, os.fspath, Path):
+        with pytest.raises(TypeError):
+            consumer(a)
+    assert a.read_text() == 'x' and str(a).endswith('/f')
 
 
 # ── process spawns (review 2 addendum: the T class) ───────────────────────────
@@ -182,6 +391,19 @@ SPAWN_ALLOWLIST = {
         'no fleet tenant has it); fixed docker compose argv for this tenant',
     'routes/vision.py::_call_vision_via_claude::subprocess.run':
         'no caller (dead code kept for reference, see its docstring; grep shows no call site)',
+    # tts_providers/ joined the scope in review 3 of PR #597
+    'tts_providers/qwen3_gpu_provider.py::_measure_duration::subprocess.run':
+        '(a) agent (any TTS request with the qwen3-gpu provider): fixed ffprobe argv on a '
+        'voice-clone file path (server-side voice-clones dir, not agent-writable); no shell; '
+        'env=minimal_env()',
+    'tts_providers/qwen3_gpu_provider.py::_transcode_for_wire::subprocess.run':
+        '(a) same: fixed ffmpeg resample argv, src/dst in the voice-clones dir; env=minimal_env()',
+    'tts_providers/qwen3_gpu_provider.py::_measure_loudness::subprocess.run':
+        '(a) same: fixed ffmpeg loudnorm argv over stdin bytes (pipe:0), clamped float params '
+        'from constants; env=minimal_env()',
+    'tts_providers/qwen3_provider.py::Qwen3Provider._ffmpeg_speed::subprocess.run':
+        '(a) agent (TTS with qwen3): fixed ffmpeg atempo argv over stdin bytes; speed is a float '
+        'from the active profile (not a string the caller splices); env=minimal_env()',
 }
 
 
@@ -200,7 +422,7 @@ def test_every_process_spawn_is_classified():
 
 def test_vision_claude_helper_really_has_no_caller():
     hits = []
-    for item in ('routes', 'services', 'server.py', 'app.py'):
+    for item in SCAN:
         p = ROOT / item
         for f in ([p] if p.is_file() else sorted(p.rglob('*.py'))):
             for n in ast.walk(ast.parse(f.read_text())):
@@ -219,6 +441,9 @@ def test_agent_reachable_spawns_scrub_env():
         'routes/registry.py': ('_get_git_sha',),
         'services/host_broker.py': ('queue_vision_task_legacy',),
         'services/update_manager.py': ('_git',),
+        'tts_providers/qwen3_gpu_provider.py': ('_measure_duration', '_transcode_for_wire',
+                                                '_measure_loudness'),
+        'tts_providers/qwen3_provider.py': ('_ffmpeg_speed',),
     }
     bad = []
     for rel, funcs in need.items():

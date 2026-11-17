@@ -66,8 +66,8 @@ def _set_active(active: bool):
         if active:
             UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
             Anchored(UPLOADS_DIR, _MARKER).write_text(_tenant())  # no-follow (uploads/ is agent-writable)
-        elif _MARKER.exists():
-            _MARKER.unlink()
+        else:
+            Anchored(UPLOADS_DIR, _MARKER).unlink(missing_ok=True)   # no-follow
     except Exception as e:
         logger.debug("browse marker update failed: %s", e)
 

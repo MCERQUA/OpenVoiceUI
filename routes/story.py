@@ -229,18 +229,40 @@ def generate_scene():
     scene_id = f'scene_{scene_index:03d}'
     # Every write goes through ONE directory fd, opened no-follow at each
     # component beneath canvas-pages (agent-writable): stories/ or stories/<id>
-    # being (or later becoming) a symlink can never redirect a write. No more
-    # chmod 0777: the server owns these files and serves them itself, so 0755
-    # dirs / 0644 files are all any reader needs (review of PR #597, L4).
+    # being (or later becoming) a symlink can never redirect a write.
+    # The dirs stay 0777 (review 3 of PR #597, host ruling): the tenant agent
+    # (uid 1000, no group shared with the server) must still be able to add,
+    # rename and remove files in a server-created story dir. The old hole was
+    # chmod() BY NAME following a planted symlink, not the mode; the fchmod
+    # below acts on the no-follow fds, so it can only ever touch these dirs.
     try:
         story_dfd = safe_open_dir_beneath(CANVAS_PAGES_DIR, f'stories/{story_id}',
-                                          create=True, dir_mode=0o755)
+                                          create=True, dir_mode=0o777)
     except (OSError, UnsafePath):
         return jsonify({'error': 'invalid story_id'}), 400
+    _fchmod_shared_dir(story_dfd)
+    try:
+        _stories_dfd = safe_open_dir_beneath(CANVAS_PAGES_DIR, 'stories')
+    except (OSError, UnsafePath):
+        _stories_dfd = None
+    if _stories_dfd is not None:
+        try:
+            _fchmod_shared_dir(_stories_dfd)
+        finally:
+            os.close(_stories_dfd)
     try:
         return _generate_scene_assets(story_dfd, story_id, scene_id, scene_data)
     finally:
         os.close(story_dfd)
+
+
+def _fchmod_shared_dir(dfd):
+    """0777 on a directory fd opened no-follow (agent and server share it); best effort,
+    as the old chmod was: a dir another uid owns keeps its mode."""
+    try:
+        os.fchmod(dfd, 0o777)
+    except OSError:
+        pass
 
 
 def _generate_scene_assets(story_dfd, story_id, scene_id, scene_data):

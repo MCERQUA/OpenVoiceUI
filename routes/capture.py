@@ -492,7 +492,7 @@ def upload_photo(album_id):
         # If we converted to .jpg and the original was not .jpg, remove the original
         if clean_path != media_path:
             try:
-                media_path.unlink()
+                _cap(media_path).unlink()   # no-follow walk (captures/ is agent-writable)
             except OSError:
                 pass
             media_path = clean_path
@@ -645,7 +645,7 @@ def annotate_photo(album_id, photo_id):
         return jsonify({'error': 'Failed to process annotation image'}), 500
     finally:
         try:
-            save_path.unlink()
+            _cap(save_path).unlink()   # no-follow walk (captures/ is agent-writable)
         except OSError:
             pass
 

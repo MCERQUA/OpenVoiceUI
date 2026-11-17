@@ -682,9 +682,12 @@ def load_plugins(app):
                 for candidate in workspace_candidates:
                     if candidate.is_dir():
                         # Test if writable
-                        test_file = candidate / ".plugin-write-test"
+                        # no-follow probe: the workspace is agent-writable, a planted
+                        # `.plugin-write-test` symlink must not be touched through
+                        from services.safe_open import Anchored as _Anch
+                        test_file = _Anch(candidate, ".plugin-write-test")
                         try:
-                            test_file.touch()
+                            test_file.write_bytes(b"")
                             test_file.unlink()
                             workspace_dir = candidate
                             break

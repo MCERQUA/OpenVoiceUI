@@ -65,3 +65,40 @@ class _Recheck5Alias:
 
 
 sys.meta_path.append(_Recheck5Alias())
+
+
+# Review 3 of PR #597: the reviewer's probe files are kept byte-identical (cmp-checked).
+# One probe locates the PRE-FIX line `_intel_path.write_text(` in routes/conversation.py by
+# text and asserts the guard flags it; the B2 fix removed that line, so on a fixed tree the
+# lookup raises StopIteration. It is marked xfail ONLY for that exception AND ONLY while the
+# FIXED line is present (review 4 of PR #597): if the fix is reverted or renamed, the
+# marker is not applied and the probe runs as a plain test, so a missing fix FAILS instead
+# of xfailing. If the by-name line comes back and the guard misses it, the probe fails
+# with its own AssertionError either way.
+# The guard's coverage of the pattern is asserted by
+# tests/test_agent_writable_io_guard.py::test_scanner_flags_the_review3_b2_pattern.
+_PREFIX_LINE_PROBES = {
+    'test_zz_review3_conversation_image_intel.py::test_guard_does_not_see_the_sidecar_write',
+}
+_B2_FIXED_LINE = "_img_file.sibling('.image-intel')"
+
+
+def _b2_fix_present():
+    try:
+        with open(os.path.join(PROJECT_ROOT, 'routes', 'conversation.py'), encoding='utf-8') as f:
+            return _B2_FIXED_LINE in f.read()
+    except OSError:
+        return False
+
+
+def pytest_collection_modifyitems(config, items):
+    fixed = None
+    for item in items:
+        if f'{item.path.name}::{item.name}' in _PREFIX_LINE_PROBES:
+            if fixed is None:
+                fixed = _b2_fix_present()
+            if fixed:
+                item.add_marker(pytest.mark.xfail(
+                    raises=StopIteration, strict=True,
+                    reason='probe looks up the pre-fix vulnerable line by text; the B2 fix '
+                           f'removed it (fixed line {_B2_FIXED_LINE!r} is present)'))

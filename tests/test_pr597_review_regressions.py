@@ -400,6 +400,9 @@ def test_story_dir_swapped_mid_generation_cannot_redirect_writes(monkeypatch, tm
     app.test_client().post("/api/story/generate-scene", json={"story_id": "s1", "choice_text": "go"})
     assert not any(victim.iterdir()), "a story asset was written through the swapped symlink"
     assert stat.S_IMODE(victim.stat().st_mode) == 0o700
+    # Review 3 (host ruling): story dirs are 0777 again so the agent (uid 1000, no shared
+    # group) can keep editing them; the fchmod went through the no-follow fds, so the
+    # swapped-in symlink's target kept its mode (asserted above).
     moved = pages / "stories" / "s1-moved"
-    assert stat.S_IMODE(moved.stat().st_mode) & 0o022 == 0, "story dir is group/world-writable"
-    assert stat.S_IMODE((pages / "stories").stat().st_mode) & 0o022 == 0
+    assert stat.S_IMODE(moved.stat().st_mode) == 0o777
+    assert stat.S_IMODE((pages / "stories").stat().st_mode) == 0o777
