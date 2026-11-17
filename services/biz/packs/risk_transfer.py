@@ -35,7 +35,7 @@ from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_URL_PREFIX, SURFACE_KEY
 
 PACK = 'risk-transfer'
-RULE_VERSION = 'crt-rules-1.8.0'
+RULE_VERSION = 'crt-rules-1.9.0'
 DISCLAIMER = ('Evidence check against the requirement set you approved. '
               'Not a coverage opinion or legal advice.')
 LABELS = {
@@ -225,27 +225,77 @@ def _squash(s) -> str:
     return _o_is_zero(re.sub(r'[^A-Z0-9]', '', _fold_chars(s)))
 
 
+# Rules 1.9.0 (L, gate-4 re-check #9): the ASCII look-alike map. In the staff pages' sans-serif font the letters I and L
+# (l), and the marks | and !, read as the digit 1; the letter O reads as 0. The near-ISO test reads the field AS
+# WRITTEN through this map (after the fold above: case, NFKC, other scripts, Unicode digits) and counts the edit
+# distance (substitutions, insertions and deletions) to CG 20 xx. Nothing is squashed first: a look-alike is always a
+# position, never dropped. Only a gap (a character that is neither A-Z nor 0-9 once the map has read it) is passed at
+# no cost; dropping a character that can never match CG 20 xx can only bring a stretch closer, never further, so the
+# test stays fail-closed. The same map decides the set-side 422 form_lookalike (needs_fold below). The watcher keeps
+# its own copy (RL9 in tools/biz/crt-verdict-watch.py); a test runs both over a look-alike generator.
+LOOKALIKE_DIGITS = {'I': '1', 'L': '1', '|': '1', '!': '1', 'O': '0'}
+
+
+def lookalike_reading(s) -> str:
+    """The field as written (folded, nothing dropped), each look-alike read as its digit: 'CG 20 |O' -> 'CG 20 10'."""
+    return ''.join(LOOKALIKE_DIGITS.get(c, c) for c in _fold_chars(s))
+
+
+def iso_distance(t) -> int:
+    """Fewest single-character edits (substitute, insert, delete) that make some stretch of t read CG 20 xx (xx: any
+    two digits). t is read character by character as written; a gap (not A-Z, not 0-9) costs nothing to pass."""
+    want = ('C', 'G', '2', '0', None, None)           # None: any digit
+    col = list(range(len(want) + 1))                  # col[i]: cheapest way to have read want[:i], ending here
+    best = col[-1]
+    for c in t:
+        if not ('A' <= c <= 'Z' or c in _DIGITS):
+            continue
+        nxt = [0]                                     # the number may start anywhere in the field
+        for i, w in enumerate(want, start=1):
+            hit = (c in _DIGITS) if w is None else (c == w)
+            nxt.append(min(col[i - 1] + (0 if hit else 1), col[i] + 1, nxt[i - 1] + 1))
+        col = nxt
+        best = min(best, col[-1])
+    return best
+
+
+def _lookalike_changes_reading(raw) -> bool:
+    """Rules 1.9.0 (L): reading the look-alikes as digits gives the field an ISO number, an edition, or a closeness to
+    CG 20 xx (within one character) that it does not have as written."""
+    plain = _fold_chars(raw)
+    if not any(c in LOOKALIKE_DIGITS for c in plain):
+        return False
+    mapped = lookalike_reading(raw)
+    d = iso_distance(mapped)
+    if d <= 1 and d < iso_distance(plain):
+        return True
+    if iso_numbers_in(mapped) - iso_numbers_in(raw) or (is_iso_form(mapped) and not is_iso_form(raw)):
+        return True
+    for read in (lambda x: form_parts(x)[1], lambda x: edition_parts(x)[1]):   # an edition it did not have
+        got = read(mapped)
+        if got is not None and got != read(raw):
+            return True
+    return False
+
+
 def needs_fold(s) -> bool:
-    """Rules 1.8.0 (H6): the value is not plain ASCII, or a letter O stands inside a number. Stored, it reads Can't tell."""
+    """Rules 1.8.0 (H6): the value is not plain ASCII, or a letter O stands inside a number. Rules 1.9.0 (L): or it is
+    plain ASCII whose look-alikes (I / L / | / ! for 1, O for 0) change what it reads as (see above). A requirement set
+    refuses it (422); stored, it reads Can't tell, and it is never a manuscript."""
     if s is None:
         return False
     raw = str(s)
     if not raw.isascii():
         return True
     k = re.sub(r'[^A-Z0-9]', '', _fold_chars(raw))
-    return _o_is_zero(k) != k
+    return _o_is_zero(k) != k or _lookalike_changes_reading(raw)
 
 
 def near_iso_number(s) -> bool:
-    """Rules 1.8.0 (H6): the field holds a CG 20 xx number, or one character away from one, anywhere in it (after the
-    fold). Such a number is never invited, or read, as a manuscript."""
-    k = _squash(s)
-    for i in range(len(k) - 5):
-        w = k[i:i + 6]
-        if (w[0] != 'C') + (w[1] != 'G') + (w[2] != '2') + (w[3] != '0') + (not w[4].isdigit()) + \
-                (not w[5].isdigit()) <= 1:
-            return True
-    return False
+    """Rules 1.8.0 (H6), read per 1.9.0 (L): the field, as written and read through the look-alike map, is within one
+    edit (substitution, insertion or deletion) of a CG 20 xx number anywhere in it. Such a number is never invited, or
+    read, as a manuscript."""
+    return iso_distance(lookalike_reading(s)) <= 1
 
 
 def form_parts(s):
@@ -552,8 +602,9 @@ def _plain_or_refuse(v, iid=None):
     if not v.isascii():
         raise _err(422, 'form_not_ascii', 'Form numbers and editions are written in plain letters and digits (ASCII): '
                                           f'{v!a} carries other characters (rules 1.8.0)', item=iid, value=v[:40])
-    raise _err(422, 'form_lookalike', f'{v!r} has the letter O inside a number; write the digit 0 (rules 1.8.0)',
-               item=iid, value=v[:40])
+    raise _err(422, 'form_lookalike', f'{v!r} has a letter or mark that reads as a digit (I, L, |, ! as 1; O as 0) '
+                                      'and reads as another number that way; write the digits as printed '
+                                      '(rules 1.8.0 / 1.9.0)', item=iid, value=v[:40])
 
 
 def validate_form_functions(ff):
@@ -640,6 +691,10 @@ def floor_violations(set_data) -> list:
             out.append(f"item {it.get('id')}: its edition field holds a form number ({it.get('edition')})")
         if item_edition(it)[1]:
             out.append(f"item {it.get('id')}: {item_edition(it)[1]}")
+        elif item_edition(it)[0] and item_edition(it)[0][1] < 2004:
+            # rules 1.9.0 (P): a stored set (written around the API) that requires a pre-2004 edition, in the edition
+            # field or in the form list, reads Can't tell
+            out.append(f"item {it.get('id')}: it requires a pre-2004 edition ({edition_text(item_edition(it)[0])})")
         for f in forms:
             fk = form_key(f)
             clash = iso_floor_clash(f, fn)              # rules 1.7.0 (C): however the number is written
@@ -713,7 +768,8 @@ def validate_items(items, trade_category=None) -> list:
                 raise _err(422, 'edition_conflict', 'This item names two different editions (' + item_edition(it)[1]
                            + '). Write the edition once: in edition, or after the number in forms (rules 1.8.0)',
                            item=iid)
-            if yr is not None and yr < 2004:
+            applied = item_edition(it)[0]               # rules 1.9.0 (P): the edition the verdict applies, the
+            if applied is not None and applied[1] < 2004:  # form list's included (H5), not only the edition field
                 raise _err(422, 'pre_2004_edition_refused', 'Pre-2004 ISO forms are not issuable by most '
                                                             'carriers (guide p.18, p.41). Use 2004 or later.', item=iid)
             forms = it.get('forms')
@@ -1434,8 +1490,8 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                 elif needs_fold(e_form):
                     ec('UNCONFIRMED:crt_endorsement.form')
                     notes.append(f"{iid}: form {e_form!a} is written with characters that only look like letters or "
-                                 f'digits (it reads as {fk}); staff re-enter the number in plain letters and digits '
-                                 'as printed. It is never read as a manuscript')
+                                 f'digits (it reads as {fk if iso else form_key(lookalike_reading(e_form))}); staff re-enter the '
+                                 'number in plain letters and digits as printed. It is never read as a manuscript')
                 elif e['data'].get('manuscript') is not True or fk in form_fn or iso or near:
                     accepted = {form_key(f) for f in it.get('forms') or []}
                     if fk not in accepted:
@@ -1448,8 +1504,9 @@ def evaluate_inputs(inputs: dict, today: date) -> dict:
                                              'it is an ISO form, read as that form (never as a manuscript); list '
                                              'it in the requirement set only if your licensed staff accept it for '
                                              'this coverage' if iso else
-                                             'it is one character away from an ISO number (CG 20 xx), so it '
-                                             'is never read as a manuscript; staff check the number as printed'
+                                             'it is one character away from an ISO number (CG 20 xx), reading '
+                                             'I, L, |, ! as 1 and O as 0, so it is never read as a manuscript; '
+                                             'staff check the number as printed'
                                              if near else
                                              'list the equivalent in the requirement set or confirm it as a '
                                              'manuscript form'))
