@@ -286,6 +286,16 @@ def test_c_never_completed_ops_however_written(h, form, manuscript):
     assert not any('confirm it as a manuscript' in n for n in ev['notes']), ev['notes']
 
 
+def test_c_a_floor_number_outside_cg_20_written_inside_text_keeps_its_category():
+    """1.7.0 C for the built-in floor numbers that are not CG 20 xx (CG 24 04, CG 25 03): written inside other text
+    they keep their ISO category (the exact look-alike reading of 1.10.x only reads CG 20 xx, so this is
+    iso_numbers_in's own job; guard added in rules 1.10.1 for mutant c-no-iso-in)."""
+    from services.biz.packs import risk_transfer as rt
+    assert rt.iso_numbers_in('ACME / CG 24 04 WOS') == {'CG2404'}
+    assert rt.iso_floor_clash('ACME / CG 24 04 WOS', 'ai_ongoing') == 'ISO waiver_of_subrogation'
+    assert rt.iso_floor_clash('PROJECT CG 25 03 AGG', 'ai_completed') == 'ISO project_aggregate'
+
+
 @pytest.mark.parametrize('form', ['CG 20 33 04 13', 'ISO CG 20 38', 'CG 20 99 04 13'])
 def test_c_an_iso_number_with_its_edition_is_never_invited_as_manuscript(h, form):
     w = world(h, endorsements=_completed(form=form), party_name=f'C Invite {form} Inc')
