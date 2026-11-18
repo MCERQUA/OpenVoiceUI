@@ -104,6 +104,7 @@
  "biz.file_upload": "biz-state",
  "biz.get_record": "biz-read",
  "biz.health": "biz-read",
+ "biz.hub_summary": "biz-read",
  "biz.list_records": "biz-read",
  "biz.packs_enable": "biz-state",
  "biz.packs_list": "biz-read",
