@@ -387,6 +387,11 @@ def create_app(config_override: dict = None):
             # Business backend: a presented but WRONG agent key is refused (403), never
             # quietly retried as a Clerk session. routes/biz.py checks the same again.
             if path.startswith('/api/biz/') and request.headers.get('X-Agent-Key') is not None:
+                # A dev-sandbox key (BIZ_SANDBOXES, dev server only) reaches /api/biz/ and nothing
+                # else; routes/biz.py binds it to that sandbox's own database.
+                from services.biz.sandbox import for_key as _biz_sandbox_for_key
+                if _biz_sandbox_for_key(request.headers.get('X-Agent-Key')):
+                    return
                 return jsonify({'error': 'This agent key is not valid for this business',
                                 'code': 'agent_key_invalid'}), 403
 

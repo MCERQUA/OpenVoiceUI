@@ -29,6 +29,7 @@ from pathlib import Path
 
 from services.biz import BIZ_API, BIZ_ENGINE_VERSION
 from services.biz import field_gate
+from services.biz.pages import PageRegistryMixin
 from services.biz.migrations import discover, script
 from services.biz.schema import (COLLECTION_RE, FIELD_RE, ID_RE, Registry, SchemaError,
                                  mask_secret)
@@ -42,7 +43,7 @@ PREFIX_RE = re.compile(r'^[A-Za-z0-9-]{0,12}$')
 SOURCE_CHANNELS = {'sms', 'voice', 'email', 'photo', 'web', 'manual', 'import'}
 AGENT_CHANNELS = {'sms', 'voice', 'email', 'photo', 'web'}
 MAX_RECORD_BYTES = 256 * 1024
-TABLES = ('records', 'activity', 'counters', 'field_proposals')
+TABLES = ('records', 'activity', 'counters', 'field_proposals', 'app_pages')
 META_FIELDS = {'id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'version'}
 _EMPTY = (None, '', [], {})
 
@@ -90,7 +91,7 @@ class _Pool(SQLitePool):
         return conn
 
 
-class BizStore:
+class BizStore(PageRegistryMixin):
     def __init__(self, db_dir: Path, tenant: str, *, core_dir=None, library_path=None):
         if not TENANT_RE.match(tenant or ''):
             raise _err(503, 'biz_tenant_invalid', 'invalid tenant id')
@@ -422,11 +423,8 @@ class BizStore:
         # field is validated against the regex AND the schema, so it is safe to inline
         return f"json_extract(data, '$.{field}')"
 
-    def list(self, collection, *, where=None, sort=None, limit=50, cursor=None, include=None, archived=False):
-        spec = self.registry.require(collection)
-        if spec.get('read_through'):
-            raise _err(501, 'read_through_not_built',
-                       f'{collection} is served from the platform lead system (read-through, a later phase)')
+    def _where_sql(self, spec, collection, where, archived):
+        """WHERE clauses for list/aggregate. Fields are checked against the schema before inlining."""
         clauses, params = ['collection = ?'], [collection]
         if not archived:
             clauses.append('archived_at IS NULL')
@@ -453,6 +451,17 @@ class BizStore:
                     params.append(cond)
             else:
                 raise _err(400, 'bad_query', 'A where value must be text, a number, true/false, null or {op: value}')
+        return clauses, params
+
+    def list(self, collection, *, where=None, sort=None, limit=50, cursor=None, include=None, archived=False,
+             flagged=False):
+        spec = self.registry.require(collection)
+        if spec.get('read_through'):
+            raise _err(501, 'read_through_not_built',
+                       f'{collection} is served from the platform lead system (read-through, a later phase)')
+        clauses, params = self._where_sql(spec, collection, where, archived)
+        if flagged:     # the "needs check" queue: agent-written values a person has not confirmed yet
+            clauses.append("json_array_length(COALESCE(source, '{}'), '$.flags') > 0")
         order = '-updated_at' if not sort else sort
         desc = order.startswith('-')
         order_expr = self._field_expr(spec, order.lstrip('-'))
@@ -483,6 +492,76 @@ class BizStore:
                     if inc:
                         rec['included'] = inc
         return {'records': records, 'next_cursor': str(offset + limit) if more else None}
+
+    # ── aggregates: counts and sums computed by the server, never from a page of rows ──
+    AGG_NUMERIC = ('number', 'integer', 'money')
+
+    def aggregate(self, collection, *, where=None, sum_fields=None, group_by=None, archived=False, flagged=False):
+        """{count, sum: {field: total}, groups: [{key, count, sum}], flagged_only}.
+
+        Counts every matching record (not one page). sum_fields must be numeric fields;
+        group_by any scalar field (at most 200 groups, largest first).
+        """
+        spec = self.registry.require(collection)
+        if spec.get('read_through'):
+            raise _err(501, 'read_through_not_built', f'{collection} is read-through (a later phase)')
+        clauses, params = self._where_sql(spec, collection, where, archived)
+        if flagged:
+            clauses.append("json_array_length(COALESCE(source, '{}'), '$.flags') > 0")
+        fields = spec.get('fields') or {}
+        sum_fields = list(dict.fromkeys(sum_fields or []))
+        if len(sum_fields) > 10:
+            raise _err(400, 'bad_query', 'sum takes at most 10 fields')
+        sums = []
+        for f in sum_fields:
+            expr = self._field_expr(spec, f)
+            if (fields.get(f) or {}).get('type') not in self.AGG_NUMERIC:
+                raise _err(400, 'bad_query', 'sum needs a number or money field', field=f[:60])
+            sums.append((f, expr))
+        sel = ', '.join(['COUNT(*) AS n'] + [f'TOTAL({e}) AS s{i}' for i, (_, e) in enumerate(sums)])
+        where_sql = ' AND '.join(clauses)
+        out = {'collection': collection, 'flagged_only': bool(flagged)}
+        with self._read() as conn:
+            row = conn.execute(f'SELECT {sel} FROM records WHERE {where_sql}', params).fetchone()
+            out['count'] = row['n']
+            out['sum'] = {f: row[f's{i}'] for i, (f, _) in enumerate(sums)}
+            if group_by:
+                gexpr = self._field_expr(spec, group_by)
+                if (fields.get(group_by) or {}).get('type') in ('list', 'object'):
+                    raise _err(400, 'bad_query', 'group_by needs a single-value field', field=group_by[:60])
+                rows = conn.execute(f'SELECT {gexpr} AS k, {sel} FROM records WHERE {where_sql} '
+                                    f'GROUP BY k ORDER BY n DESC, k LIMIT 201', params).fetchall()
+                out['groups'] = [{'key': r['k'], 'count': r['n'],
+                                  'sum': {f: r[f's{i}'] for i, (f, _) in enumerate(sums)}} for r in rows[:200]]
+                out['groups_truncated'] = len(rows) > 200
+        return out
+
+    # ── "needs check": a person confirms or clears agent-flagged values ─────
+    def confirm_flags(self, collection, rid, fields, *, by, note=None):
+        """Remove names from source.flags after a person checked them. Owner action; logged."""
+        self._writable()
+        self._spec_for_write(collection)
+        if not isinstance(fields, list) or not fields or not all(isinstance(f, str) for f in fields) or len(fields) > 50:
+            raise _err(422, 'bad_request', '"fields" must be a list of the flagged field names you checked')
+        if note is not None and (not isinstance(note, str) or len(note) > 500):
+            raise _err(422, 'bad_request', '"note" must be text up to 500 characters')
+        self.get(collection, rid)
+        with self._tx() as conn:
+            row = conn.execute('SELECT * FROM records WHERE id = ? AND collection = ?', (rid, collection)).fetchone()
+            source = json.loads(row['source']) if row['source'] else {}
+            flags = list(source.get('flags') or [])
+            unknown = [f for f in fields if f not in flags]
+            if unknown:
+                raise _err(409, 'not_flagged', 'These fields are not flagged on this record (reload it)',
+                           fields=unknown[:20], flagged=flags)
+            source['flags'] = [f for f in flags if f not in fields]
+            now = utcnow()
+            conn.execute('UPDATE records SET source = ?, version = version + 1, updated_at = ?, updated_by = ? '
+                         'WHERE id = ?', (json.dumps(source), now, by, rid))
+            self._activity(conn, collection=collection, record_id=rid, type_='flags_confirmed', by=by,
+                           diff={'confirmed': fields, 'remaining': source['flags'], 'note': note})
+            row = conn.execute('SELECT * FROM records WHERE id = ?', (rid,)).fetchone()
+        return self._row_to_record(row)
 
     def timeline(self, collection, rid):
         self.get(collection, rid)
@@ -605,7 +684,15 @@ class BizStore:
             'engine_too_old': self.engine_too_old,
             'library_version': self.registry.library.get('library_version'),
             'collections': self.collection_counts(), 'last_backup': self.last_backup,
+            'shell': BIZ_API, 'registered_pages': self._registered_count(),
         }
+
+    def _registered_count(self):
+        try:
+            with self._read() as conn:
+                return conn.execute('SELECT COUNT(*) FROM app_pages WHERE archived_at IS NULL').fetchone()[0]
+        except sqlite3.OperationalError:      # an older schema (read-only mode): no registry yet
+            return None
 
     def export(self):
         with self._read() as conn:
@@ -615,6 +702,7 @@ class BizStore:
         return {'tenant': self.tenant, 'exported_at': utcnow(), 'engine': BIZ_ENGINE_VERSION,
                 'schema': self.schema_version, 'records': [self._row_to_record(r) for r in rows],
                 'counters': counters, 'activity_count': n_activity, 'proposals': self.proposals(),
+                'pages': self.pages_list(archived=True) if self._registered_count() is not None else [],
                 'schema_overlay': {n: s for n, s in self.registry.collections().items() if s.get('layer') == 'custom'}}
 
     def backup_to(self, dest: Path) -> dict:

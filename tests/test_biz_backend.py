@@ -585,3 +585,14 @@ def test_card_scan_still_catches_real_cards_next_to_ids():
         assert not contains_card_number({'contact_id': rid, 'notes': f'ref {rid}'})
     assert contains_card_number({'notes': f'{CARD_SHAPED_IDS[0]} paid with 4111 1111 1111 1111'})
     assert contains_card_number({'notes': 'CC4111111111111111'})
+
+
+def test_every_core_field_is_writable():
+    """A core schema field named like a reserved record key can never be written (found 2026-11-17:
+    contact.source and lead.source were declared but every write was refused as 'reserved name')."""
+    from services.biz.schema import RESERVED_FIELDS, CORE_DIR
+    bad = []
+    for f in sorted(CORE_DIR.glob('*.json')):
+        spec = json.loads(f.read_text())
+        bad += [f'{f.stem}.{k}' for k in (spec.get('fields') or {}) if k in RESERVED_FIELDS or k.startswith('_')]
+    assert bad == []

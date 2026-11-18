@@ -1180,6 +1180,14 @@ def canvas_pages_proxy(path):
                     content = _inject + content
                 # Inject nav/speak helpers + auth bridge before </body>
                 _body_inject = _nav_helpers + _auth_bridge
+                # Company-system menu shell (JamBot client backend, phase 2): only for pages the
+                # business registered (/api/biz/v1/registry/pages, shell != off). Injected here so
+                # the page file never changes; returns b'' for every other page and on any error.
+                try:
+                    from routes.biz import shell_injection
+                    _body_inject += shell_injection(path, content)
+                except Exception:
+                    logger.warning('[canvas] biz shell injection unavailable', exc_info=True)
                 if b'</body>' in content:
                     content = content.replace(b'</body>', _body_inject + b'</body>', 1)
                 else:
