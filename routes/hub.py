@@ -110,7 +110,9 @@ def _tenant_label() -> str:
 
 
 def _no_store(resp):
-    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    # no-transform: Cloudflare must not rewrite the Hub (it injects its analytics beacon into HTML otherwise, which the
+    # CSP blocks: a console error on every page view, and a script on the page that this image did not ship).
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, no-transform'
     resp.headers['X-Robots-Tag'] = 'noindex, nofollow'
     return resp
 

@@ -84,7 +84,7 @@ def test_owner_session_gets_live_page(client, monkeypatch):
     assert '/hub/_ovu/hub-auth.js' in body
     assert '"tenant": "tenant-a"' in body
     assert body.index('jambot-hub-boot') < body.index('<title>')      # boot block runs before the app loads
-    assert 'no-store' in r.headers['Cache-Control']
+    assert 'no-store' in r.headers['Cache-Control'] and 'no-transform' in r.headers['Cache-Control']
 
 
 def test_no_session_page_goes_to_sign_in_and_back(client, monkeypatch):
