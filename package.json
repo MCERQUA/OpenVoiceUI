@@ -74,6 +74,7 @@
     "default-styles/*.json",
     "default-schemas/",
     "jb/",
+    "hub/",
     "canvas-shared/",
     "skills/",
     "install-skills.js",
