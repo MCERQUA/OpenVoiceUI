@@ -72,6 +72,8 @@
     "default-pages/",
     "default-faces/",
     "default-styles/*.json",
+    "default-schemas/",
+    "jb/",
     "canvas-shared/",
     "skills/",
     "install-skills.js",

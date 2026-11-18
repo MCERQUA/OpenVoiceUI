@@ -229,6 +229,8 @@ def create_app(config_override: dict = None):
             '/checkpoints/',  # Pinokio snapshot endpoint — called from /registry/checkin page JS
             '/openclaw-ui/',  # OpenClaw Control UI SPA + assets — proxied to internal gateway
             '/share/capture/', # Camera Capture share portal — token-gated public access for clients
+            '/jb/',        # JamBot client-backend page SDK (/jb/v1/jb.js): a fixed JS asset served from
+                           # the image (routes/biz.py). The data behind it (/api/biz/) is NOT public.
             '/u/',         # Signed one-time upload links (routes/intake.py) — the TOKEN is the
                            # gate, not Clerk; GET renders the form, POST accepts the upload. Never
                            # add '/api/intake/mint' here — minting stays behind require_auth below
@@ -382,6 +384,11 @@ def create_app(config_override: dict = None):
             # from inside the Docker network.
             if not _is_admin_path and _agent_api_key and request.headers.get('X-Agent-Key') == _agent_api_key:
                 return
+            # Business backend: a presented but WRONG agent key is refused (403), never
+            # quietly retried as a Clerk session. routes/biz.py checks the same again.
+            if path.startswith('/api/biz/') and request.headers.get('X-Agent-Key') is not None:
+                return jsonify({'error': 'This agent key is not valid for this business',
+                                'code': 'agent_key_invalid'}), 403
 
             from services.auth import get_token_from_request, verify_clerk_token
             token = get_token_from_request()

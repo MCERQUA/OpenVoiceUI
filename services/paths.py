@@ -48,3 +48,8 @@ STATIC_DIR = APP_ROOT / "static"
 DEFAULT_PAGES_DIR = APP_ROOT / "default-pages"
 # Shared JS modules for canvas pages, seeded into <canvas-pages>/_shared/ on startup
 CANVAS_SHARED_DIR = APP_ROOT / "canvas-shared"
+
+# JamBot client backend (services/biz): core collection schemas + the shared
+# field library ship in the image; the page SDK is served at /jb/v1/jb.js.
+BIZ_SCHEMAS_DIR = APP_ROOT / "default-schemas"
+JB_SDK_DIR = APP_ROOT / "jb"

@@ -1,0 +1,45 @@
+{
+  "collection": "person",
+  "label": "Person",
+  "label_plural": "Team",
+  "title_field": "name",
+  "required": [
+    "name"
+  ],
+  "fields": {
+    "name": {
+      "type": "string",
+      "label": "Name"
+    },
+    "role": {
+      "type": "string",
+      "label": "Role"
+    },
+    "phone": {
+      "type": "phone",
+      "label": "Phone"
+    },
+    "email": {
+      "type": "email",
+      "label": "Email"
+    },
+    "skills": {
+      "type": "list",
+      "label": "Skills",
+      "items": "string"
+    },
+    "schedule": {
+      "type": "object",
+      "label": "Schedule"
+    },
+    "active": {
+      "type": "boolean",
+      "label": "Active"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "A team or crew member."
+}

@@ -1,0 +1,63 @@
+{
+  "collection": "cost_entry",
+  "label": "Cost",
+  "label_plural": "Costs",
+  "title_field": "description",
+  "required": [
+    "kind",
+    "amount"
+  ],
+  "fields": {
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "kind": {
+      "type": "enum",
+      "label": "Kind",
+      "values": [
+        "material",
+        "labor",
+        "fuel",
+        "equipment",
+        "sub",
+        "other"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "label": "Description"
+    },
+    "amount": {
+      "type": "money",
+      "label": "Amount"
+    },
+    "qty": {
+      "type": "number",
+      "label": "Quantity"
+    },
+    "unit": {
+      "type": "string",
+      "label": "Unit"
+    },
+    "date": {
+      "type": "date",
+      "label": "Date"
+    },
+    "vendor": {
+      "type": "string",
+      "label": "Vendor"
+    },
+    "receipt_doc_id": {
+      "type": "ref",
+      "label": "Receipt",
+      "ref": "document"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "Job costing: what a job cost to do."
+}

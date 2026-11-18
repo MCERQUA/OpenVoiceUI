@@ -1,0 +1,55 @@
+{
+  "collection": "lead",
+  "label": "Lead",
+  "label_plural": "Leads",
+  "title_field": "description",
+  "required": [],
+  "fields": {
+    "received_at": {
+      "type": "datetime",
+      "label": "Received"
+    },
+    "source": {
+      "type": "string",
+      "label": "Source / site"
+    },
+    "service": {
+      "type": "string",
+      "label": "Service"
+    },
+    "name": {
+      "type": "string",
+      "label": "Name"
+    },
+    "phone": {
+      "type": "phone",
+      "label": "Phone"
+    },
+    "email": {
+      "type": "email",
+      "label": "Email"
+    },
+    "description": {
+      "type": "text",
+      "label": "Request"
+    },
+    "status": {
+      "type": "enum",
+      "label": "Status",
+      "values": [
+        "new",
+        "contacted",
+        "quoted",
+        "won",
+        "lost",
+        "spam"
+      ]
+    },
+    "job_number": {
+      "type": "string",
+      "label": "Job number"
+    }
+  },
+  "read_through": "platform-leads",
+  "description": "Inbound request. Served as a read-through to the platform lead system, never copied (design 4.3)."
+}

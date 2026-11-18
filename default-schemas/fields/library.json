@@ -1,0 +1,1710 @@
+{
+  "library_version": 1,
+  "_about": "Shared field library: platform-level DEFINITIONS only (no data). Ships with the engine; tenants adopt fields (POST /api/biz/v1/schema/adopt) and never write here. New definitions arrive only through a release, after services/biz/promote.py vets tenant candidates. A unit, min or max is set only where a source states it; null means not sourced.",
+  "sources": {
+    "foam-log": "A spray-foam contractor's daily foam log (JamBot pilot tenant)",
+    "foam-estimate": "A spray-foam contractor's estimate and job-cost tools (pilot tenant)",
+    "blowin": "Blow-in insulation calculator, measure, crew and inventory tools (pilot tenant)",
+    "fiberglass-inv": "A fiberglass batt/roll retail inventory tracker (pilot tenant)",
+    "rebuild-model": "A pilot tenant's data-model rebuild spec (field-level audit of its original apps)",
+    "material-tracker": "A commercial insulation contractor's field material tracker (pilot tenant)",
+    "sprayfoam-brain": "JamBot spray-foam niche brain, domain-facts (brains/spray-foam-insulation)",
+    "requested-20261116": "Requested by the platform owner 2026-11-16; no field source found yet, so unit and range stay null"
+  },
+  "fields": {
+    "bi_access_location": {
+      "label": "Access location",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Where the access point is located.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_access_type": {
+      "label": "Access type",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "attic hatch",
+        "pull-down stairs",
+        "walk-up access",
+        "exterior access",
+        "other"
+      ],
+      "trade": "blow-in",
+      "description": "How the attic is accessed.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_area_sqft": {
+      "label": "Attic area",
+      "type": "number",
+      "unit": "sqft",
+      "min": 1,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Area to be insulated.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_attic_details": {
+      "label": "Special attic details",
+      "type": "text",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Free-text on clearance, obstructions and conditions.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_baffles": {
+      "label": "Baffles",
+      "type": "integer",
+      "unit": null,
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Count of attic baffles needed or installed.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_baffles_installed": {
+      "label": "Baffles installed",
+      "type": "boolean",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Whether baffles were installed (crew report).",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_bags_estimated": {
+      "label": "Bags needed (estimate)",
+      "type": "integer",
+      "unit": "bags",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Estimated bags = ceil(area/1000 x bags_per_1000 x waste factor).",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_bags_per_1000": {
+      "label": "Bags per 1,000 sqft",
+      "type": "number",
+      "unit": "bags/1000sqft",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Coverage rate for the target R-value; sqft per bag = 1000 / bags per 1000.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "bi_bags_remaining": {
+      "label": "Bags remaining",
+      "type": "integer",
+      "unit": "bags",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Derived stock after the job.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_bags_used": {
+      "label": "Bags used",
+      "type": "integer",
+      "unit": "bags",
+      "min": 0,
+      "max": 500,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Bags installed on the job; remaining stock is derived.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_blowing_rate": {
+      "label": "Blowing rate",
+      "type": "number",
+      "unit": "bags/hr",
+      "min": 1,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Production rate used to estimate labor hours = bags / rate.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_can_coverage_sqft": {
+      "label": "Can foam coverage",
+      "type": "number",
+      "unit": "sqft",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Area sealed with can foam.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_cans": {
+      "label": "Foam cans",
+      "type": "number",
+      "unit": null,
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Count of can-foam cans for sealing; rounds in half-can steps per rebuild-model.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_days_needed": {
+      "label": "Days needed",
+      "type": "number",
+      "unit": "days",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Estimated crew days = max(1, sqft / sqft-per-day limit, bags / bags-per-day limit).",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "bi_depth_in": {
+      "label": "Install depth",
+      "type": "number",
+      "unit": "in",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Installed depth in inches required for the target R-value, from the product coverage table.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "bi_ladder_needed": {
+      "label": "Ladder needed",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "6 ft",
+        "8 ft",
+        "extension"
+      ],
+      "trade": "blow-in",
+      "description": "Ladder size needed for the job.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_material_type": {
+      "label": "Blow-in material type (cellulose/fiberglass)",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Blow-in insulation material type. Blow-in sources track only a brand-specific blown product by R-value; no generic cellulose/fiberglass field.",
+      "source": {
+        "id": "requested-20261116",
+        "ref": null
+      }
+    },
+    "bi_pipe_wrap": {
+      "label": "Pipe wrap needed",
+      "type": "boolean",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Whether pipes need insulating wrap.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_pipe_wrap_ft": {
+      "label": "Pipe wrap length",
+      "type": "number",
+      "unit": "ft",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Linear feet of pipe wrap.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_r_value_target": {
+      "label": "R-value target",
+      "type": "integer",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Target R-value; selects depth and coverage from the product coverage table (R-11 to R-60 steps).",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "bi_return_visit": {
+      "label": "Return visit needed",
+      "type": "boolean",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "blow-in",
+      "description": "Flag that the crew must come back.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "fg_brand": {
+      "label": "Brand",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Manufacturer brand of the product.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_in_stock": {
+      "label": "In stock at store",
+      "type": "boolean",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Retail observation: whether the store lists the product in stock.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_last_seen": {
+      "label": "Observation date",
+      "type": "datetime",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "When the store observation was last made.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_length": {
+      "label": "Length",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Nominal batt/roll length (stored as text).",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "fg_material": {
+      "label": "Insulation material",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "fiberglass",
+        "mineral wool"
+      ],
+      "trade": "fiberglass",
+      "description": "Material of the batt/roll product.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_net_sqft": {
+      "label": "Net area",
+      "type": "number",
+      "unit": "sqft",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Net area to insulate before waste.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_price_per_sqft": {
+      "label": "Price per sqft",
+      "type": "number",
+      "unit": "$/sqft",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Derived: price per package / sqft per package; lowest wins when comparing stores.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_price_unit": {
+      "label": "Price unit",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Retail observation: unit the price applies to (per roll, per bag).",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_r_value": {
+      "label": "R-value",
+      "type": "integer",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "R-value of a batt/roll product.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_regular_price": {
+      "label": "Regular (non-sale) price",
+      "type": "number",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Regular price alongside observed price.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "fg_retailer": {
+      "label": "Retailer / store",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Retail store observed for stock and price.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_sku": {
+      "label": "SKU",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Retail SKU.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_sqft_per_package": {
+      "label": "Square feet per package",
+      "type": "number",
+      "unit": "sqft",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Coverage in one bag/roll; packages = ceil(net sqft x (1+waste/100) / sqft per package).",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_stock_quantity": {
+      "label": "Stock quantity at store",
+      "type": "integer",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Retail observation: units in stock.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_thickness": {
+      "label": "Thickness",
+      "type": "number",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Nominal thickness of a batt/roll. Not a stored field; thickness is implied by R-value.",
+      "source": {
+        "id": "requested-20261116",
+        "ref": null
+      }
+    },
+    "fg_unit_cost": {
+      "label": "Price per package",
+      "type": "number",
+      "unit": "$",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Retail price of one package; cost = packages x price.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_waste_pct": {
+      "label": "Waste",
+      "type": "number",
+      "unit": "%",
+      "min": 0,
+      "max": 50,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Waste percent applied to net area.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "fg_width": {
+      "label": "Width",
+      "type": "number",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "fiberglass",
+      "description": "Nominal batt/roll width.",
+      "source": {
+        "id": "fiberglass-inv",
+        "ref": null
+      }
+    },
+    "gen_adjustment_reason": {
+      "label": "Inventory adjustment reason",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "delivery",
+        "damage",
+        "transfer",
+        "correction",
+        "physical_count"
+      ],
+      "trade": "general",
+      "description": "Reason for a stock adjustment.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "gen_contract_price": {
+      "label": "Contract price",
+      "type": "number",
+      "unit": "$",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Price charged to the customer.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_cost_line_amount": {
+      "label": "Line item amount",
+      "type": "number",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Amount on a document line item.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_cost_line_kind": {
+      "label": "Cost line kind",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "material",
+        "labor",
+        "travel",
+        "equipment",
+        "other"
+      ],
+      "trade": "general",
+      "description": "Category of a job cost line.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "gen_cost_line_qty": {
+      "label": "Line item quantity",
+      "type": "number",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Quantity on a document line item.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_cost_line_rate": {
+      "label": "Line item rate",
+      "type": "number",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Rate on a document line item.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_cost_line_unit": {
+      "label": "Line item unit",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Unit of a document line item.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_crew_count": {
+      "label": "Crew count",
+      "type": "integer",
+      "unit": null,
+      "min": 1,
+      "max": 20,
+      "values": null,
+      "trade": "general",
+      "description": "Number of crew members on the job (stepper limits 1-20).",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "gen_customer_name": {
+      "label": "Customer name",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Customer on the job.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "gen_equipment_cost": {
+      "label": "Equipment rental",
+      "type": "number",
+      "unit": "$",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Equipment rental cost.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_fuel_cost": {
+      "label": "Fuel / diesel cost",
+      "type": "number",
+      "unit": "$",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Fuel appears as a job cost line in tracked job-cost documents; no dedicated field in the sources.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_hours_per_person": {
+      "label": "Hours worked per person",
+      "type": "number",
+      "unit": "hours",
+      "min": 0.25,
+      "max": 24,
+      "values": null,
+      "trade": "general",
+      "description": "Hours each crew member worked.",
+      "source": {
+        "id": "blowin",
+        "ref": null
+      }
+    },
+    "gen_inventory_action": {
+      "label": "Inventory action",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "received",
+        "used on job",
+        "transferred",
+        "inventory adjustment"
+      ],
+      "trade": "general",
+      "description": "Type of stock movement.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_job_address": {
+      "label": "Job address",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Street address of the job site.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "gen_job_number": {
+      "label": "Job number",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Identifier for the job/work reference, shared across estimate, log and cost records.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "gen_labor_cost": {
+      "label": "Labor cost",
+      "type": "number",
+      "unit": "$",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Labor cost; sources support a lead rate and a separate crew rate.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "gen_labor_hours": {
+      "label": "Labor hours",
+      "type": "number",
+      "unit": "hours",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Total labor hours for the job; for crews = crew count x hours per person.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_labor_rate": {
+      "label": "Labor rate",
+      "type": "number",
+      "unit": "$/hr",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Hourly labor rate; labor cost = hours x rate.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_material_category": {
+      "label": "Material category",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "spray foam",
+        "blow-in / fiberglass",
+        "flash & batt",
+        "accessories",
+        "other"
+      ],
+      "trade": "general",
+      "description": "Inventory category.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_material_qty": {
+      "label": "Material quantity",
+      "type": "number",
+      "unit": null,
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Stock quantity of an inventory item.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_material_unit": {
+      "label": "Material unit",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "bags",
+        "rolls",
+        "kits",
+        "each",
+        "gal",
+        "boxes",
+        "ft"
+      ],
+      "trade": "general",
+      "description": "Unit of an inventory item.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_mileage_miles": {
+      "label": "Mileage",
+      "type": "number",
+      "unit": "mi",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Total travel miles = miles per day x days needed.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "gen_mileage_rate": {
+      "label": "Mileage rate",
+      "type": "number",
+      "unit": "$/mi",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Per-mile rate; travel cost = miles x rate.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "gen_min_stock": {
+      "label": "Minimum stock",
+      "type": "number",
+      "unit": null,
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Low-stock threshold.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_misc_cost": {
+      "label": "Miscellaneous cost",
+      "type": "number",
+      "unit": "$",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Other costs.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_notes": {
+      "label": "Notes",
+      "type": "text",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Free-text notes.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "gen_overhead_pct": {
+      "label": "Overhead percent",
+      "type": "number",
+      "unit": "%",
+      "min": 0,
+      "max": 80,
+      "values": null,
+      "trade": "general",
+      "description": "Overhead as percent of contract price; contract = base / (1 - overhead% - profit%).",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_overhead_per_day": {
+      "label": "Overhead per day",
+      "type": "number",
+      "unit": "$/day",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Overhead as a flat daily amount (alternate to percent; the source flags the two forms conflict).",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "gen_permit_number": {
+      "label": "Permit number",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Permit identifier for the job. Not found in any source.",
+      "source": {
+        "id": "requested-20261116",
+        "ref": null
+      }
+    },
+    "gen_profit_pct": {
+      "label": "Profit margin target",
+      "type": "number",
+      "unit": "%",
+      "min": 0,
+      "max": 90,
+      "values": null,
+      "trade": "general",
+      "description": "Target profit as percent of contract price.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_project_name": {
+      "label": "Project name",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Name of the job/project.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "gen_sets_logged": {
+      "label": "Sets logged",
+      "type": "number",
+      "unit": "sets",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Material log of sets used per job entry.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_storage_location": {
+      "label": "Storage location",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Where stock is kept.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_supplier": {
+      "label": "Supplier",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Supplier of received material.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_travel_cost": {
+      "label": "Travel cost",
+      "type": "number",
+      "unit": "$",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Flat travel cost for the job.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_unit_cost": {
+      "label": "Unit cost",
+      "type": "number",
+      "unit": "$",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Cost per unit; line total = qty x unit cost.",
+      "source": {
+        "id": "material-tracker",
+        "ref": null
+      }
+    },
+    "gen_waste_cost": {
+      "label": "Waste / scrap cost",
+      "type": "number",
+      "unit": "$",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Dollar cost of waste or scrap.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_waste_pct": {
+      "label": "Waste percent",
+      "type": "number",
+      "unit": "%",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Percent added to material quantity for waste.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "gen_work_order_number": {
+      "label": "Work order number",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "general",
+      "description": "Work order identifier. Sources only have a job number.",
+      "source": {
+        "id": "requested-20261116",
+        "ref": null
+      }
+    },
+    "sf_a_batch_number": {
+      "label": "A-side drum lot/batch number",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Lot or batch identifier printed on the A-side drum.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_a_side_pressure": {
+      "label": "A-side pressure",
+      "type": "number",
+      "unit": "psi",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Dynamic pressure on the A side during spraying. No per-side field in sources; brain only gives a system range (~1,000-1,500 psi), not a field.",
+      "source": {
+        "id": "sprayfoam-brain",
+        "ref": "brains/spray-foam-insulation/domain-facts/what-is-professional-spray-foam.md:21"
+      }
+    },
+    "sf_a_side_temperature": {
+      "label": "A-side temperature",
+      "type": "number",
+      "unit": "°F",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Heater setpoint/actual for the A side. Sources only give a combined component temperature, not per side.",
+      "source": {
+        "id": "sprayfoam-brain",
+        "ref": "brains/spray-foam-insulation/domain-facts/chemistry-and-cure.md:11"
+      }
+    },
+    "sf_ab_ratio": {
+      "label": "A/B mix ratio",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "A-side to B-side volumetric mix ratio; off-ratio mixing is a primary foam-defect cause.",
+      "source": {
+        "id": "sprayfoam-brain",
+        "ref": "brains/spray-foam-insulation/domain-facts/what-is-professional-spray-foam.md:21"
+      }
+    },
+    "sf_ambient_temperature": {
+      "label": "Ambient temperature",
+      "type": "number",
+      "unit": "°F",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Air temperature at the job. Brain: most manufacturers spec ambient/substrate roughly 60-80 F (advisory window, not an input limit).",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_areas_sprayed": {
+      "label": "Areas sprayed",
+      "type": "list",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Multi-select of building areas sprayed in the entry.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      },
+      "items": "string"
+    },
+    "sf_b_batch_number": {
+      "label": "B-side drum lot/batch number",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Lot or batch identifier printed on the B-side drum.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_b_side_pressure": {
+      "label": "B-side pressure",
+      "type": "number",
+      "unit": "psi",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Dynamic pressure on the B side during spraying. No per-side field in sources.",
+      "source": {
+        "id": "sprayfoam-brain",
+        "ref": "brains/spray-foam-insulation/domain-facts/what-is-professional-spray-foam.md:21"
+      }
+    },
+    "sf_b_side_temperature": {
+      "label": "B-side temperature",
+      "type": "number",
+      "unit": "°F",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Heater setpoint/actual for the B side. Sources only give a combined component temperature, not per side.",
+      "source": {
+        "id": "sprayfoam-brain",
+        "ref": "brains/spray-foam-insulation/domain-facts/chemistry-and-cure.md:11"
+      }
+    },
+    "sf_board_feet": {
+      "label": "Board feet",
+      "type": "number",
+      "unit": "bf",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Board feet per area = square feet x thickness in inches (no divide-by-12 per the source ruling); total = sum over areas.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "sf_cost_per_set": {
+      "label": "Cost per set",
+      "type": "number",
+      "unit": "$/set",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Material cost of one set; material cost = sets x cost per set.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "sf_crew_members": {
+      "label": "Crew members",
+      "type": "list",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Multi-select list of crew members present on the entry.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      },
+      "items": "string"
+    },
+    "sf_drum_temperature": {
+      "label": "Drum temperature",
+      "type": "number",
+      "unit": "°F",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Temperature of the chemical drums at spray time.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_end_time": {
+      "label": "End time",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Time spraying ended.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_estimated_strokes": {
+      "label": "Estimated strokes",
+      "type": "integer",
+      "unit": "strokes",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Estimated pump strokes = round(estimated sets x strokes per set).",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "sf_exact_sets": {
+      "label": "Estimated sets (exact)",
+      "type": "number",
+      "unit": "sets",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Estimated sets = adjusted board feet / yield per set; adjusted board feet = total board feet x (1 + waste/100).",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "sf_foam_type": {
+      "label": "Foam type (open vs closed cell)",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "open",
+        "closed"
+      ],
+      "trade": "spray-foam",
+      "description": "Cell structure of the foam sprayed. Brain defines open-cell and closed-cell as the two categories.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "sf_hose_temperature": {
+      "label": "Hose temperature",
+      "type": "number",
+      "unit": "°F",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Heated hose temperature. Brain mentions heated hoses and ~115-130 F component temperature but no distinct hose field.",
+      "source": {
+        "id": "sprayfoam-brain",
+        "ref": "brains/spray-foam-insulation/domain-facts/application-process.md:17"
+      }
+    },
+    "sf_humidity": {
+      "label": "Relative humidity",
+      "type": "number",
+      "unit": "%",
+      "min": 0,
+      "max": 100,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Relative humidity at the job.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_job_status": {
+      "label": "Foam job status",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "needs_estimate",
+        "accepted",
+        "started",
+        "completed"
+      ],
+      "trade": "spray-foam",
+      "description": "Lifecycle state of a spray foam job (invoiced is a UI-only filter in the source).",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "sf_pass_thickness_in": {
+      "label": "Pass (lift) thickness",
+      "type": "number",
+      "unit": "in",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Thickness applied in one pass; closed-cell is limited per pass to avoid exotherm damage, with cooldown between passes. Limit is product-specific so no hard max is set.",
+      "source": {
+        "id": "sprayfoam-brain",
+        "ref": "brains/spray-foam-insulation/domain-facts/chemistry-and-cure.md:23"
+      }
+    },
+    "sf_product_name": {
+      "label": "Product name",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Spray foam product/system used on the entry.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_r_value_target": {
+      "label": "R-value target",
+      "type": "number",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Target R-value for a spray foam area. Spray foam sources store thickness, not R target; brain gives per-inch R ranges only.",
+      "source": {
+        "id": "sprayfoam-brain",
+        "ref": "brains/spray-foam-insulation/domain-facts/r-values-and-thickness.md:3"
+      }
+    },
+    "sf_sets_to_load": {
+      "label": "Sets to load",
+      "type": "integer",
+      "unit": "sets",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Whole sets to bring to the job = ceil(estimated sets).",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "sf_sets_used": {
+      "label": "Sets used",
+      "type": "number",
+      "unit": "sets",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Derived, not entered: sets_used = stroke_count / strokes_per_set (rebuild-model: derived, not stored).",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_sprayed_area_sqft": {
+      "label": "Sprayed area",
+      "type": "number",
+      "unit": "sqft",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Square footage of an area to be or that was sprayed; sqft = ceil(length x height) when auto-filled.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "sf_start_time": {
+      "label": "Start time",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Time spraying started.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_stroke_count": {
+      "label": "Machine stroke count",
+      "type": "integer",
+      "unit": "strokes",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Pump stroke counter reading for the entry.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_strokes_per_set": {
+      "label": "Strokes per set",
+      "type": "integer",
+      "unit": "strokes",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Pump strokes that make up one set (a tenant-configured constant per rig/product).",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_substrate": {
+      "label": "Substrate",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "wood",
+        "concrete/masonry",
+        "metal",
+        "other"
+      ],
+      "trade": "spray-foam",
+      "description": "Surface the foam is sprayed onto; may change planned yield per set.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    },
+    "sf_substrate_temperature": {
+      "label": "Substrate temperature",
+      "type": "number",
+      "unit": "°F",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Temperature of the surface being sprayed. Brain: commonly must be above ~50 F product minimum (advisory, product-specific).",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_technician": {
+      "label": "Sprayer / technician",
+      "type": "string",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Person who operated the spray rig for the entry.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_total_thickness_in": {
+      "label": "Total thickness",
+      "type": "number",
+      "unit": "in",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Total foam thickness for an area, in inches.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "sf_waste_allowance_pct": {
+      "label": "Waste allowance",
+      "type": "number",
+      "unit": "%",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Percent added to total board feet before computing sets.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "sf_weather_condition": {
+      "label": "Weather condition",
+      "type": "enum",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "values": [
+        "clear",
+        "partly cloudy",
+        "cloudy",
+        "fog",
+        "drizzle",
+        "rain",
+        "snow",
+        "thunderstorm",
+        "windy",
+        "other"
+      ],
+      "trade": "spray-foam",
+      "description": "Sky/precipitation condition during spraying.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_wind_speed": {
+      "label": "Wind speed",
+      "type": "number",
+      "unit": "mph",
+      "min": 0,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Wind speed at the job.",
+      "source": {
+        "id": "foam-log",
+        "ref": null
+      }
+    },
+    "sf_yield_per_set": {
+      "label": "Planned yield per set",
+      "type": "number",
+      "unit": "bf/set",
+      "min": 1,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Board feet one set is expected to yield; may differ by substrate.",
+      "source": {
+        "id": "foam-estimate",
+        "ref": null
+      }
+    },
+    "sf_yield_percent": {
+      "label": "Yield percent",
+      "type": "number",
+      "unit": "%",
+      "min": null,
+      "max": null,
+      "values": null,
+      "trade": "spray-foam",
+      "description": "Actual yield vs estimated board feet: sets used x yield per set / estimated board feet x 100.",
+      "source": {
+        "id": "rebuild-model",
+        "ref": null
+      }
+    }
+  }
+}

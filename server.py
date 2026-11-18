@@ -304,6 +304,11 @@ app.register_blueprint(services_bp)
 from routes.maps import maps_bp
 app.register_blueprint(maps_bp)
 
+# JamBot client backend — /api/biz/v1 (per-tenant business.db) + the /jb/v1/jb.js page SDK
+from routes.biz import biz_bp, jb_sdk_bp
+app.register_blueprint(biz_bp)
+app.register_blueprint(jb_sdk_bp)
+
 # Camera Capture — flagship photo/album system (CompanyCam competitor)
 from routes.capture import capture_bp
 app.register_blueprint(capture_bp, url_prefix='/api/capture')

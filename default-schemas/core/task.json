@@ -1,0 +1,51 @@
+{
+  "collection": "task",
+  "label": "Task",
+  "label_plural": "Tasks",
+  "title_field": "title",
+  "required": [
+    "title"
+  ],
+  "fields": {
+    "title": {
+      "type": "string",
+      "label": "Title"
+    },
+    "due": {
+      "type": "datetime",
+      "label": "Due"
+    },
+    "assignee": {
+      "type": "string",
+      "label": "Assignee (owner / agent / crew name)"
+    },
+    "status": {
+      "type": "enum",
+      "label": "Status",
+      "values": [
+        "open",
+        "done",
+        "cancelled"
+      ]
+    },
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "contact_id": {
+      "type": "ref",
+      "label": "Contact",
+      "ref": "contact"
+    },
+    "promise_id": {
+      "type": "string",
+      "label": "Promise id"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "A follow-up. A due date becomes a promise request; the backend never schedules."
+}

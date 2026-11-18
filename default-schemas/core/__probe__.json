@@ -1,0 +1,19 @@
+{
+  "collection": "__probe__",
+  "label": "Isolation probe",
+  "label_plural": "Isolation probe",
+  "title_field": "note",
+  "required": [],
+  "fields": {
+    "note": {
+      "type": "string",
+      "label": "Note"
+    },
+    "run_id": {
+      "type": "string",
+      "label": "Run id"
+    }
+  },
+  "system": true,
+  "description": "Reserved for the isolation probe (design 8). Never business data."
+}

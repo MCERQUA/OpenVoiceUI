@@ -1,0 +1,52 @@
+{
+  "collection": "product",
+  "label": "Product",
+  "label_plural": "Products",
+  "title_field": "name",
+  "required": [
+    "name"
+  ],
+  "fields": {
+    "name": {
+      "type": "string",
+      "label": "Name"
+    },
+    "category": {
+      "type": "string",
+      "label": "Category"
+    },
+    "r_value": {
+      "type": "number",
+      "label": "R-value"
+    },
+    "size": {
+      "type": "string",
+      "label": "Size / width"
+    },
+    "unit": {
+      "type": "string",
+      "label": "Unit"
+    },
+    "unit_cost": {
+      "type": "money",
+      "label": "Unit cost"
+    },
+    "supplier": {
+      "type": "string",
+      "label": "Supplier / store"
+    },
+    "sku": {
+      "type": "string",
+      "label": "SKU"
+    },
+    "active": {
+      "type": "boolean",
+      "label": "Active"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "The material catalog."
+}

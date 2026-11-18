@@ -1,0 +1,50 @@
+{
+  "collection": "payment",
+  "label": "Payment",
+  "label_plural": "Payments",
+  "title_field": "amount",
+  "required": [
+    "amount"
+  ],
+  "fields": {
+    "invoice_id": {
+      "type": "ref",
+      "label": "Invoice",
+      "ref": "invoice"
+    },
+    "job_id": {
+      "type": "ref",
+      "label": "Job",
+      "ref": "job"
+    },
+    "amount": {
+      "type": "money",
+      "label": "Amount"
+    },
+    "paid_at": {
+      "type": "datetime",
+      "label": "Paid"
+    },
+    "method": {
+      "type": "enum",
+      "label": "Method",
+      "values": [
+        "cash",
+        "check",
+        "card",
+        "ach",
+        "financing",
+        "other"
+      ]
+    },
+    "reference": {
+      "type": "string",
+      "label": "Reference (check no., processor id)"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "Money received. Card and bank numbers are refused at write time."
+}

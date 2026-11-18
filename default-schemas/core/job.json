@@ -1,0 +1,82 @@
+{
+  "collection": "job",
+  "label": "Job",
+  "label_plural": "Jobs",
+  "title_field": "title",
+  "required": [
+    "title"
+  ],
+  "fields": {
+    "job_number": {
+      "type": "string",
+      "label": "Job number"
+    },
+    "contact_id": {
+      "type": "ref",
+      "label": "Customer",
+      "ref": "contact"
+    },
+    "title": {
+      "type": "string",
+      "label": "Job"
+    },
+    "address": {
+      "type": "string",
+      "label": "Address"
+    },
+    "service_type": {
+      "type": "string",
+      "label": "Service"
+    },
+    "status": {
+      "type": "enum",
+      "label": "Status",
+      "values": [
+        "lead",
+        "quoted",
+        "scheduled",
+        "in_progress",
+        "completed",
+        "invoiced",
+        "paid",
+        "cancelled",
+        "on_hold"
+      ]
+    },
+    "scheduled_at": {
+      "type": "datetime",
+      "label": "Scheduled"
+    },
+    "started_at": {
+      "type": "datetime",
+      "label": "Started"
+    },
+    "completed_at": {
+      "type": "datetime",
+      "label": "Completed"
+    },
+    "worked_dates": {
+      "type": "list",
+      "label": "Worked dates",
+      "items": "date"
+    },
+    "crew": {
+      "type": "list",
+      "label": "Crew",
+      "items": "string"
+    },
+    "work_order_no": {
+      "type": "string",
+      "label": "Work order number"
+    },
+    "invoice_no": {
+      "type": "string",
+      "label": "Invoice number"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  },
+  "description": "The spine: one piece of work, keyed by job number."
+}
