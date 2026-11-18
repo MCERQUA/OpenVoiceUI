@@ -205,7 +205,7 @@ def test_summary_on_a_seeded_db(client, owner, platform):
     assert (m['invoices_overdue'], m['invoices_overdue_value']) == (1, 500.0)
     assert (m['payments'], m['payments_30d'], m['payments_30d_value']) == (2, 1, 800.0)
     assert s['money']['verdict'] == 'warn' and 'past due' in s['money']['reason']
-    assert s['team']['counts'] == {'people': 2, 'active': 1} and s['team']['verdict'] == 'ok'
+    assert s['team']['counts'] == {'people': 2, 'active': 0, 'active_unknown': 1} and s['team']['verdict'] == 'ok'
     assert s['inventory']['counts']['products'] == 1 and s['inventory']['counts']['stock_moves_30d'] == 1 and s['inventory']['verdict'] == 'ok'
     # read-through: the platform's numbers, asked for THIS tenant only
     assert s['leads']['counts'] == {'total': 9, 'new': 2, 'contacted': 3, 'quoted': 1, 'won': 1, 'lost': 1, 'spam': 1}
@@ -219,6 +219,28 @@ def test_summary_on_a_seeded_db(client, owner, platform):
     text = r.get_data(as_text=True)
     for leak in ('Customer Secret Name', '555-0199', 'Lead Person Secret', '555-0100', 'Crew One'):
         assert leak not in text
+
+
+def test_unknown_active_is_never_counted_as_active(client, owner):
+    # 3 products with NO `active` field + 1 explicitly inactive -> 0 active, 3 unknown (never counted as measured)
+    for n in ('A', 'B', 'C'):
+        _c(client, 'product', {'name': n})
+    _c(client, 'product', {'name': 'D', 'active': False})
+    _c(client, 'person', {'name': 'P1'})
+    _c(client, 'person', {'name': 'P2', 'active': True})
+    s = client.get(f'{B}/hub/summary').get_json()['sections']
+    c = s['inventory']['counts']
+    assert (c['products'], c['products_active'], c['products_unknown']) == (4, 0, 3)
+    assert '0 active' in s['inventory']['reason'] and '3 not set' in s['inventory']['reason']
+    t = s['team']['counts']
+    assert (t['people'], t['active'], t['active_unknown']) == (2, 1, 1)
+
+
+def test_active_true_is_counted(client, owner):
+    _c(client, 'product', {'name': 'On', 'active': True})
+    _c(client, 'product', {'name': 'Unset'})
+    c = client.get(f'{B}/hub/summary').get_json()['sections']['inventory']['counts']
+    assert (c['products_active'], c['products_unknown']) == (1, 1)
 
 
 def test_badly_overdue_invoice_is_bad(client, owner):
