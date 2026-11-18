@@ -20,6 +20,7 @@ Auth (in addition to app.py require_auth):
          the staff surface (the verdict counts only staff-surface person-writes).
 
 GET    /api/biz/v1/health
+GET    /api/biz/v1/hub/summary             the JamBot Hub overview: per-section counts + verdicts (read-only)
 GET    /api/biz/v1/schema                  merged registry (core + library adoptions + tenant overlay)
 GET    /api/biz/v1/schema/<collection>
 POST   /api/biz/v1/schema/custom           additive only; new fields filed as library candidates
@@ -81,6 +82,7 @@ from pathlib import Path
 from flask import Blueprint, Response, current_app, g, jsonify, redirect, request, send_file
 
 from services.biz import sandbox as _sandbox
+from services.biz import hub as _hub
 from services.biz.pages import FILE_RE, RECORD_PARAM, build_theme, check_file, page_for_record, shell_model
 from services.biz.schema import SchemaError
 from services.biz.store import FILE_ID_RE, FILE_MAX_BYTES, BizStore, resolve_location
@@ -692,6 +694,16 @@ def health():
     if g.biz_sandbox:
         out['sandbox'] = g.biz_sandbox
     return jsonify(out)
+
+
+@biz_bp.get(f'{API}/hub/summary')
+def hub_summary():
+    """The JamBot Hub's one-call overview: per section counts, last activity and a verdict.
+
+    Tenant = this store's (env + meta.tenant); a dev sandbox key gets its sandbox, and its
+    read-through sections say they are not shown. Contract: services/biz/hub.py docstring.
+    """
+    return jsonify(_hub.summary(g.biz_store, sandbox=g.biz_sandbox))
 
 
 @biz_bp.get(f'{API}/schema')

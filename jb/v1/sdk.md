@@ -103,6 +103,32 @@ Core collections: `company` (one record), `contact`, `lead` (read-through, a lat
 (append-only: correct with a reversing entry), `document`, `event`, `task`, `person`.
 Custom fields are named `x_<name>`, custom collections `c_<name>`.
 
+### 3.1 The Hub overview: `jb.hub.summary()`
+
+One read-only call for a dashboard home: every section of the business with its counts, the last time
+anything happened there and a verdict the tile colours by. Counted by the server; no rows come back.
+
+```js
+const hub = await jb.hub.summary();          // GET /api/biz/v1/hub/summary
+// hub.overall  -> { verdict, reason, unknown_sections: ['site', ...] }
+// hub.order    -> ['customers','jobs','money','team','inventory','leads','seo','site']
+// hub.sections.jobs ->
+//   { label: 'Jobs', verdict: 'warn', reason: '1 scheduled job is past its date', state: 'live',
+//     source: 'business', counts: { jobs: 5, open: 3, scheduled: 2, in_progress: 1, done: 2, late: 1,
+//     needs_check: 0 }, last_activity: '2026-11-18T15:02:11.120Z' }
+```
+
+| field | meaning |
+|---|---|
+| `verdict` | `ok` · `warn` (needs attention) · `bad` (money or customers at risk) · `unknown` (not measured: show "unknown", **never 0**) |
+| `state` | `live` (measured) · `empty` (nothing recorded yet) · `unreachable` (the source did not answer) · `not_built` (no measurement exists yet) · `sandbox` (not shown in a dev sandbox) |
+| `source` | `business` (this business's own records) or `platform` (leads / SEO / site, read through the platform service for this business only) |
+| `counts` | numbers and money totals for the section (see the response contract); absent keys mean not measured |
+| `last_activity` | newest change in the section (ISO UTC), or `null` |
+
+The business is decided by the server (the page's own sign-in, or the agent's key). The call takes no
+parameters; a `?tenant=` is refused (400) like everywhere else in `/api/biz/v1`.
+
 ## 4. The company system: register the page, get the menu
 
 When a page is a business tool (quotes, invoices, jobs, schedule, costs, materials, customers, crew,
