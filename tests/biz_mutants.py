@@ -1278,8 +1278,8 @@ _REBASE_1_10_2 = {
                             "                                             (f'it is near {str(reads_as)[:0]} through characters that '")],
     'watch-h8-near-off': [(WA, "bool(_iso_in(ed.get('form'))) or _near_iso(ed.get('form')) or \\\n",
                            "bool(_iso_in(ed.get('form'))) or \\\n")],
-    'watch-d11-clash-written-only': [(WA, "{r for r, _ in _exact_all(s)} | _floor_exact(s):      # RD11 / RD12",
-                                      "_floor_exact(s):      # RD11 / RD12")],
+    'watch-d11-clash-written-only': [(WA, " | {r for r, _ in _exact_all(s)} | _floor_exact(s):      # RD11 / RD12",
+                                      ":      # RD11 / RD12")],
 }
 MUTANTS = [(n, _REBASE_1_10_2.get(n, e), t) for n, e, t in MUTANTS]
 T_P12 = 'tests/test_claimcheck12_probes.py::'
