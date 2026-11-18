@@ -112,6 +112,14 @@
     staffBase: SURFACE ? SURFACE.base : null,
 
     health: function () { return call('GET', '/health'); },
+    /**
+     * The JamBot Hub overview in one call (read-only): for each section (customers, jobs, money, team,
+     * inventory, leads, seo, site) -> { label, verdict: 'ok'|'warn'|'bad'|'unknown', reason, state, counts,
+     * last_activity }, plus overall. 'unknown' means not measured: show it as unknown, never as zero.
+     */
+    hub: {
+      summary: function () { return call('GET', '/hub/summary'); }
+    },
     schema: function (collection) { return call('GET', '/schema' + (collection ? '/' + enc(collection) : '')); },
     library: function (trade) { return call('GET', '/fields/library' + qs({ trade: trade })); },
 

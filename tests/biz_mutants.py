@@ -1319,6 +1319,23 @@ MUTANTS += [
      [T_C12 + 'test_m2f_a_stored_one_breaks_the_floor_in_both_copies']),
 ]
 
+# ── JamBot Hub summary (services/biz/hub.py, GET /api/biz/v1/hub/summary) ──
+HUB = 'services/biz/hub.py'
+T_H = 'tests/test_biz_hub.py::'
+MUTANTS += [
+    # a dev sandbox must never show the dev server's real leads / SEO
+    ('hub-sandbox-reads-platform', [(HUB, "    if sandbox:\n        why = 'Not shown in a dev sandbox", "    if False:\n        why = 'Not shown in a dev sandbox")],
+     [T_H + 'test_sandbox_summary_never_reads_the_dev_tenants_platform_data']),
+    # an unreachable read-through is unknown, never a made-up number
+    ('hub-unreachable-is-a-number', [(HUB, "        return _unknown('leads', f'Leads unknown: {e.why}')",
+                                      "        return section('leads', verdict='ok', state='live', source='platform', counts={'total': 0}, reason='0 leads')")],
+     [T_H + 'test_unreachable_read_through_is_unknown', T_H + 'test_refusing_read_through_is_unknown']),
+    # a request that names a tenant is refused before the summary runs
+    ('hub-tenant-param-allowed', [(RB, "    if 'tenant' in request.args or request.headers.get('X-Tenant')",
+                                   "    if False")],
+     [T_H + 'test_a_tenant_parameter_never_changes_whose_data']),
+]
+
 
 def _copy(name):
     dest = os.path.join(SCRATCH, name)
