@@ -223,11 +223,16 @@ export async function get(key, params = {}) {
    -------------------------------------------------------------------------- */
 export function metric({ value, display, state, label, note, delta, source, link, icon }) {
   const known = value !== null && value !== undefined && state !== 'unknown';
+  // A delta (e.g. "+18%") is comparison copy, not fetched data — callers that haven't actually
+  // computed it from two real readings were writing it as hardcoded demo flavour. In live mode
+  // that renders next to a REAL value as an invented trend, so it is dropped unless the caller
+  // marks delta.computed === true (host-measured 2026-11-18, found on 9 call sites across views).
+  const showDelta = known && delta && (MODE !== 'live' || delta.computed === true);
   return {
     value: known ? value : null,
     display: known ? (display ?? String(value)) : '—',
     state: known ? (state || 'ok') : 'unknown',
-    label, icon, delta: known ? delta : null, link,
+    label, icon, delta: showDelta ? delta : null, link,
     note: known ? note : (note || 'No data source connected yet'),
     source
   };
@@ -243,7 +248,11 @@ export function unknownMetric(label, res, extra = {}) {
 }
 
 export function badges() {
-  return { yourTurn: 25, approvals: 3, newLeads: 12 };   // fixture; live = counts from the feeds
+  // Live mode must never show fixture numbers on the nav rail (host-measured 2026-11-18: the
+  // rail showed these fake counts even on a signed-in tenant render). Real per-feed badge counts
+  // are not wired yet — honest unknown is {}, not a fabricated number, until they are.
+  if (MODE === 'live') return {};
+  return { yourTurn: 25, approvals: 3, newLeads: 12 };   // fixture only
 }
 
 export function clearCache() { cache.clear(); domainP = null; }

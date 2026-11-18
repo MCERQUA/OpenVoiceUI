@@ -407,7 +407,12 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
 .tabbar{display:none}
 
 @media (max-width:1024px){
-  .grid--sidebar{grid-template-columns:1fr}
+  /* minmax(0,1fr), not bare 1fr: a bare 1fr track's implicit minimum is "auto" (its content's
+     min-content width), so a wide child (e.g. .approval__body's min-width:250px) still forces
+     the single column wider than the viewport. minmax(0,1fr) lets the track shrink to 0 and
+     defers wrapping to the content itself (host-measured 2026-11-18: Home rendered 444px wide
+     at a 390px viewport). */
+  .grid--sidebar{grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:860px){
   .rail{transform:translateX(-100%);box-shadow:0 20px 50px rgba(19,20,22,.22)}

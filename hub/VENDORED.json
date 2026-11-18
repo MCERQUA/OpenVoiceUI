@@ -1,16 +1,16 @@
 {
- "commit": "0e8ee3e99aaeb196391e966964dfb435bfa062ee",
+ "commit": "83f613517e3e9f3f28c882b113bdbbcf416e7e38",
  "file_count": 24,
  "fixtures_dropped": true,
  "repo": "MCERQUA/jamdash",
  "sha256": {
-  "assets/css/app.css": "efa88eb76891d696dda8fc863440e9dd3515f32599901a6578319867f6a9057e",
+  "assets/css/app.css": "67f2f4fc67fc8fbc79542e85e468ba31435cb8c40777440cfaa750bc8b7690db",
   "assets/js/adapters.js": "261df0b01e71e119689721dc24863b4a8e2173a7d21fcadff22eae1ebbb2372d",
-  "assets/js/api.js": "1f21b72ec5b45c066240c8a528bf11ca5d8401bed9cc9aa4070428ecd1088dc5",
+  "assets/js/api.js": "7cdfe3c31e6fe33278af6bc17ed28d6c460b9b629ec07f02c23a9b3f9c0bba82",
   "assets/js/app.js": "32f5ad565f16cc2f019b68765846032599f1a7e5722dbbaeda27dd67c8c3fb36",
   "assets/js/nav.js": "5fa8e0dd78266a90230c85f5d0f2117b81a1e52a364dec1253063e4d396be9d8",
   "assets/js/ui.js": "01778511138379e065b97d08830d02f384128701f5788c586bcf0cc2c03172bb",
-  "assets/js/views/account.js": "1466d7299af97d6d87a44d6a79e266dcd69b987dea439e85e45a377cfa8f2410",
+  "assets/js/views/account.js": "d0393a29fb4b0e271efcb180b4da29b83b29f71f6ce916c3ca3896ea14d53afd",
   "assets/js/views/ads.js": "64642c2b0befa80807def62a14b9733262bb7c9575f1c0290233f78e58a39362",
   "assets/js/views/ask.js": "0c40a8f5f73b3c106327a64024af45aef7cd54630b7e5260ca4445905297e824",
   "assets/js/views/brand.js": "299a6ecfbef90319cfb9bfd4218129ee39570c0987d0dacae3c22a0817a3dfaf",
@@ -18,7 +18,7 @@
   "assets/js/views/customers.js": "719d8e4db012b73ac784fd5f10ea0091f1abca1a612fe1329f2efc3d14374696",
   "assets/js/views/finances.js": "df125aa264881a4099f1cecbf280a6c9d587fe17adc052b441c30722f19b1e3f",
   "assets/js/views/found.js": "89353db983676f917c6b7a26d29b81f655f510ef56f8713f3d52d8b98da09d9c",
-  "assets/js/views/home.js": "5fbfbd01cbbe79b9739d7428a589284edbe45aed0296958c4419fc855b2894af",
+  "assets/js/views/home.js": "4287630838a09e13127be34ba1dcb0ed506bc0ff168eb77b7af1c2fe80cda087",
   "assets/js/views/index.js": "21c7ed37478226679007d3d69690cdbfb2b15fea6d984d33bd6c3b81023c31f8",
   "assets/js/views/inventory.js": "64a3d7fe4498b9331b0847476f5656853e107e221dba22337e247fb681bf4b8d",
   "assets/js/views/payments.js": "5eb77dcf9ca079b7df20c3343fda1be0183f32d4f63ac2cc94d66b244527d11e",
@@ -29,5 +29,5 @@
   "assets/js/views/website.js": "3ec793a8dd9c427b0972c8d86c23650d9377f05adf98146a4b153f4a747117f5",
   "index.html": "d37a230c658400263d61b2ba0f66ebd723eddb08b46c4b73f3e32bddc3fbacf5"
  },
- "vendored_at": "2026-11-18T16:37:05Z"
+ "vendored_at": "2026-11-18T16:52:34Z"
 }

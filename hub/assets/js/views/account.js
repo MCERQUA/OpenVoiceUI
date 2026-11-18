@@ -98,13 +98,19 @@ export async function autonomy() {
   ]) })}`;
 }
 
-export async function team() {
+export async function team({ api } = {}) {
+  // Live mode must never show the fixture staff list on a real business's host
+  // (host-measured 2026-11-18: a signed-in render still showed "Alex Demo"/"Sam Office").
+  // No real staff-login directory is wired yet, so the honest state is empty, not fabricated.
+  const live = api?.MODE === 'live';
   return `
   ${pageHead({ eyebrow: 'Account', title: 'Team',
     sub: 'Give your staff their own login. Everyone sees what they need and nothing they should not.',
     actions: [{ label: 'Invite someone', kind: 'primary', icon: 'person_add' }] })}
   ${note('Roles are not switched on yet — right now every login sees everything. Ask us before adding staff.', 'warn')}
-  ${block({ flush: true, body: table({
+  ${block({ flush: true, body: live
+    ? notConnected('Staff directory', 'No staff logins are on file yet. Invite someone to see them here.')
+    : table({
     cols: [
       { label: 'Person', key: 'name', strong: true },
       { label: 'Email', key: 'email', mute: true },

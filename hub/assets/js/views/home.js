@@ -50,7 +50,10 @@ export default async function home({ api }) {
   return `
   ${pageHead({
     eyebrow: todayStr,
-    title: 'Good morning, Alex',
+    // Live mode must never show the fixture name on a real business's host (host-measured
+    // 2026-11-18). No real signed-in-owner-name source is wired into this app yet, so the
+    // honest greeting drops the name rather than inventing one.
+    title: api.MODE === 'live' ? 'Good morning' : 'Good morning, Alex',
     sub: 'Your system worked overnight. Here is what changed, and the few things only you can do.',
     actions: [
       { label: 'Ask your agent', kind: 'primary', icon: 'auto_awesome', href: '#/ask' },
