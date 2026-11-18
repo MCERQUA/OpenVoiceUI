@@ -812,6 +812,13 @@ def _classify(app, rule):
 
 def _full_app(monkeypatch, tmp):
     monkeypatch.setenv('BIZ_DB_DIR', str(tmp))
+    # server.py runs load_plugins() at import, which mkdirs the hard-coded PLUGIN_DIR (/app/plugins). That exists only
+    # in the OVU image / a worktree mounted at /app; on a CI runner it is PermissionError at import. Point it at an empty
+    # tmp dir: plugin routes are excluded from this table anyway (plugin_* / booking.*), so the result is unchanged.
+    import services.plugins as _plugins
+    _pdir = tmp.parent / 'plugins'
+    _pdir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(_plugins, 'PLUGIN_DIR', _pdir)
     import server
     return server.app
 
