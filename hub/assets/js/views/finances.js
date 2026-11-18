@@ -5,7 +5,7 @@
    Account > Billing, which is JamBot's own subscription billing OF the
    client, not the client's own books. */
 
-import { pageHead, tiles, block, notConnected } from '../ui.js';
+import { pageHead, tiles, block, notConnected, empty, icon } from '../ui.js';
 
 export async function overview({ api }) {
   return `
@@ -29,12 +29,24 @@ export async function pnl() {
     'Once your accounting or POS system is connected, your revenue, cost of goods and profit will appear here broken down by month.') })}`;
 }
 
-export async function invoices() {
+export async function invoices({ api } = {}) {
+  // Live mode: there is only ONE real invoice collection (/api/biz/v1/invoice), and
+  // Payments > Invoices already reads it — this page must not contradict that by claiming
+  // invoicing "isn't connected yet" (host-measured 2026-11-18: a client would see both pages
+  // in the same Hub disagree about whether the same feature exists). Point here instead of
+  // duplicating the fetch.
+  const live = api?.MODE === 'live';
   return `
   ${pageHead({ eyebrow: 'Finances', title: 'Invoices',
     sub: 'Send invoices, track who has paid, and chase who hasn’t.',
-    actions: [{ label: 'New invoice', kind: 'primary', icon: 'add' }] })}
-  ${block({ body: notConnected('Invoicing',
+    actions: live ? [] : [{ label: 'New invoice', kind: 'primary', icon: 'add' }] })}
+  ${block({ body: live
+    ? `${empty({ icon: 'receipt_long', title: 'Your invoices live under Payments',
+          note: 'Send, track and get paid from Payments › Invoices — this page will move there.' })}
+       <div style="text-align:center;padding-bottom:4px">
+         <a href="#/payments/invoices" class="btn btn--primary">${icon('open_in_new')}Open Payments › Invoices</a>
+       </div>`
+    : notConnected('Invoicing',
     'This is your own invoicing of your customers — separate from your JamBot subscription, which lives under Account › Billing. Once switched on, you’ll be able to send, track and get paid right here.') })}`;
 }
 

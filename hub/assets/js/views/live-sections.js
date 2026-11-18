@@ -13,6 +13,8 @@ import { pageHead, tiles, block, table, rows, pill, filterbar, note, esc, grid, 
          notConnected, empty, liveBody } from '../ui.js';
 import { sectionTile, money } from './home-live.js';
 
+/** active flag: true / false / null (not recorded) -> its own pill; null is never shown as 'Active'. */
+const activePill = a => (a === true ? pill('Active', 'ok') : a === false ? pill('Not active', 'neutral') : pill('Not set', 'unknown'));
 const nothing = (what, note) => empty({ icon: 'inbox', title: 'Nothing here yet', note: note || `No ${what} recorded yet.` });
 
 /* ============================== CUSTOMERS ============================== */
@@ -325,7 +327,7 @@ export const inventory = {
     ${block({ title: 'Products', icon: 'inventory_2', flush: true, action: { label: 'All products', href: '#/inventory/products' },
       body: liveBody(res, d => d.products.length ? rows(d.products.slice(0, 6).map(p => ({
         icon: 'inventory_2', title: p.name, meta: [p.category, p.unit].filter(x => x !== '—').join(' · '),
-        side: pill(p.active ? 'Active' : 'Not active', p.active ? 'ok' : 'neutral') })))
+        side: activePill(p.active) })))
         : nothing('products', 'Products you or your agent add will appear here.'), { what: 'your products' }) })}`;
   },
   async products({ api }) {
@@ -339,7 +341,7 @@ export const inventory = {
         { label: 'Unit', key: 'unit', mute: true },
         { label: 'Supplier', key: 'supplier', mute: true },
         { label: 'Unit cost', num: true, get: r => (r.unit_cost === null ? '—' : money(r.unit_cost)) },
-        { label: 'Status', html: true, get: r => pill(r.active ? 'Active' : 'Not active', r.active ? 'ok' : 'neutral') }
+        { label: 'Status', html: true, get: r => activePill(r.active) }
       ], rows: d.products,
       empty: { icon: 'inventory_2', title: 'Nothing here yet', note: 'Products you or your agent add will appear here.' }
     }), { what: 'your products' }) })}`;

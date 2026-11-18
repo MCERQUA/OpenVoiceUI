@@ -13,7 +13,10 @@ export async function overview({ api }) {
     sub: 'Everything that makes you look and sound like you — in one place, so every post, page and advert matches.',
     actions: [{ label: 'Upload an asset', kind: 'primary', icon: 'upload' }] })}
   ${block({ title: 'Brand completeness', icon: 'health_and_safety', body: !res.ok && api.isLive
-    ? notConnected('Your brand kit', res.note || 'Your brand kit is not shown on this page yet.') : `
+    // res.note is an INTERNAL engineering note ("4 fragmented stores; needs a unifier") meant
+    // for this codebase, not the client — it was leaking straight to the screen (host-measured
+    // 2026-11-18). Always use a fixed client-facing sentence here instead.
+    ? notConnected('Your brand kit', 'Your brand kit is not connected yet.') : `
     ${progress(b.completeness ?? 0, 'Your kit is nearly there', `${b.completeness ?? 0}% complete`)}
     <div class="grid grid--3" style="margin-top:18px">
       ${(b.checklist || []).map(c => `<div class="row" style="padding:12px;border:0;

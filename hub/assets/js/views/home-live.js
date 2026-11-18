@@ -11,7 +11,9 @@ const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','
 const MONTH_NAMES = ['January','February','March','April','May','June','July',
   'August','September','October','November','December'];
 
-export const money = n => `$${Number(n).toLocaleString('en-CA', { maximumFractionDigits: 0 })}`;
+/** a dollar figure; null / non-finite (unknown) -> '—', never "$NaN" or a confident "$0". */
+export const money = n => (n === null || n === undefined || n === '' || !Number.isFinite(Number(n))
+  ? '—' : `$${Number(n).toLocaleString('en-CA', { maximumFractionDigits: 0 })}`);
 const greeting = d => (d.getHours() < 12 ? 'Good morning' : d.getHours() < 18 ? 'Good afternoon' : 'Good evening');
 
 /** one hub section -> a tile. empty -> calm "Nothing here yet"; unknown -> grey with the reason. */

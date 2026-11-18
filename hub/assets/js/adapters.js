@@ -256,6 +256,15 @@ function leadsList(raw, ctx = {}) {
    notes for the ones most likely to need a follow-up pass once real data is visible. */
 const bizRecords = (key, raw) => needArray(key, raw, 'records');
 const bizData = rec => (rec && rec.data) || {};
+/** money/number field -> a finite number, else null (unknown). Never NaN, never Infinity, and never a
+    confident 0 for '', true/false, an object or text like "n/a" (Number('') is 0, Number('x') is NaN). */
+const finiteNum = v => {
+  if (v === null || v === undefined || v === '' || typeof v === 'boolean' || typeof v === 'object') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+/** a served boolean flag -> true/false; absent or null -> null (unknown, never a default). */
+const flagOrNull = v => (v === undefined || v === null ? null : !!v);
 /** first present, non-empty value among candidate data-field names; else null (never invented). */
 const firstOf = (obj, candidates) => {
   for (const k of candidates) { const v = obj[k]; if (v !== undefined && v !== null && v !== '') return v; }
@@ -395,7 +404,7 @@ function paymentsInvoices(raw, ctx = {}) {
         number: firstOf(rd, ['number', 'invoice_number']) || '—',
         to: includedName(r) || legacyName || firstOf(rd, ['customer_name']) || '—',
         for: firstOf(rd, ['notes', 'description', 'memo']) || '—',
-        amount: Number(amount),
+        amount: finiteNum(amount),   // non-finite -> null: shown as '—', never "$NaN"
         due, status,
         paid: status === 'paid' ? (firstOf(rd, ['payment_method', 'paid_via']) || '—') : null
       };
@@ -412,7 +421,7 @@ function paymentsRecent(raw) {
       const amount = firstOf(pd, ['amount']);
       if (amount === null) throw new ShapeError(K, 'data.amount');
       return {
-        amount: Number(amount),
+        amount: finiteNum(amount),   // non-finite -> null: shown as '—', never "$NaN"
         method: firstOf(pd, ['method']) || 'Payment',
         reference: firstOf(pd, ['reference']) || '',
         when: when(firstOf(pd, ['paid_at']) || p.created_at)
@@ -430,7 +439,7 @@ function teamRoster(raw) {
     roster: recs.map(p => {
       const pd = bizData(p);
       const name = firstOf(pd, ['name']) || '—';
-      const active = pd.active === undefined || pd.active === null ? null : !!pd.active;
+      const active = flagOrNull(pd.active);
       return {
         id: p.id,
         name,
@@ -449,8 +458,11 @@ function teamRoster(raw) {
 /* ---------- the hub summary (GET /api/biz/v1/hub/summary, OVU services/biz/hub.py) ---------- */
 const HUB_SECTIONS = ['customers', 'jobs', 'money', 'team', 'inventory', 'leads', 'seo', 'site'];
 const VERDICTS = new Set(['ok', 'warn', 'bad', 'unknown']);
+const STATES = new Set(['live', 'empty', 'unreachable', 'not_built', 'sandbox']);   // HUB-SUMMARY-CONTRACT v1
 /** Validates the envelope and every section it promises; a section missing its verdict is a
-    ShapeError (the whole Home then says "can't read right now"), never a guessed tile. */
+    ShapeError (the whole Home then says "can't read right now"), never a guessed tile.
+    A section with no state (or one the contract does not name) is NOT treated as measured:
+    state 'unknown' and verdict 'unknown', so it renders grey ("Can't tell"), never as a live tile. */
 function hubSummary(raw) {
   const K = 'hub.summary';
   const sections = need(K, raw, 'sections');
@@ -459,11 +471,13 @@ function hubSummary(raw) {
   for (const name of order) {
     const sct = sections[name];
     if (!sct || typeof sct !== 'object') throw new ShapeError(K, `sections.${name}`);
-    const verdict = need(K, sct, 'verdict');
-    if (!VERDICTS.has(verdict)) throw new ShapeError(K, `sections.${name}.verdict`);
+    const served = need(K, sct, 'verdict');
+    if (!VERDICTS.has(served)) throw new ShapeError(K, `sections.${name}.verdict`);
+    const state = STATES.has(sct.state) ? sct.state : 'unknown';
+    const verdict = state === 'unknown' ? 'unknown' : served;
     out[name] = {
-      label: sct.label || cap(name), verdict, state: sct.state || 'live',
-      reason: sct.reason || '', counts: (sct.counts && typeof sct.counts === 'object') ? sct.counts : {},
+      label: sct.label || cap(name), verdict, state,
+      reason: sct.reason || (state === 'unknown' ? 'Not confirmed as measured' : ''), counts: (sct.counts && typeof sct.counts === 'object') ? sct.counts : {},
       last_activity: sct.last_activity || null, domains: Array.isArray(sct.domains) ? sct.domains : []
     };
   }
@@ -526,8 +540,8 @@ function inventoryProducts(raw) {
         name: firstOf(d, ['name']) || '—', category: firstOf(d, ['category']) || '—',
         sku: firstOf(d, ['sku']) || '—', unit: firstOf(d, ['unit', 'size']) || '—',
         supplier: firstOf(d, ['supplier']) || '—',
-        unit_cost: cost === null || isNaN(Number(cost)) ? null : Number(cost),
-        active: d.active === undefined || d.active === null ? true : !!d.active
+        unit_cost: finiteNum(cost),
+        active: flagOrNull(d.active)   // absent -> null (unknown), same as team.roster; never a guessed 'Active'
       };
     })
   };

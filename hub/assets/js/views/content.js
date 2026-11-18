@@ -4,7 +4,7 @@
    labelled honestly rather than faked into looking connected. */
 
 import { pageHead, tiles, block, table, rows, pill, filterbar, note, btn,
-         approval, calendar as calGrid, mediaCard, notConnected, esc, grid, icon } from '../ui.js';
+         approval, calendar as calGrid, mediaCard, notConnected, esc, grid, icon, liveBody } from '../ui.js';
 
 export async function overview({ api }) {
   const [soc, med] = await Promise.all([api.get('social.pending'), api.get('media.state')]);
@@ -61,17 +61,26 @@ export async function calendar({ api }) {
 }
 
 export async function approvals({ api }) {
+  // liveBody distinguishes "fetched fine, queue is genuinely empty" (render below) from
+  // "the fetch failed/unknown" (shows "Can't show this right now" with the reason) — a failed
+  // social.pending read must never render as "you're all caught up" (host-measured 2026-11-18:
+  // content.js was claiming done when the truth was unknown, the exact thing this honesty
+  // discipline exists to prevent).
   const res = await api.get('social.pending');
   const q = res.data?.queue || [];
   return `
   ${pageHead({ eyebrow: 'Content', title: 'Waiting for you',
     sub: 'Nothing here goes out until you say so. Approve, ask for changes, or leave it — nothing expires.' })}
-  ${filterbar([{ label: 'All', count: q.length }, { label: 'Social' },
+  ${filterbar([{ label: 'All', count: res.ok ? q.length : undefined }, { label: 'Social' },
                { label: 'Articles' }, { label: 'Images' }, { label: 'Video' }])}
-  ${q.length ? q.map(a => block({ flush: true, body: approval(a) })).join('')
-    : block({ body: `<div class="empty">${icon('done_all')}
-        <div class="empty__title">You're all caught up</div>
-        <div class="empty__note">Anything new will show up here and reach you by text.</div></div>` })}`;
+  ${liveBody(res, data => {
+    const items = data?.queue || [];
+    return items.length
+      ? items.map(a => block({ flush: true, body: approval(a) })).join('')
+      : `<div class="empty">${icon('done_all')}
+          <div class="empty__title">You're all caught up</div>
+          <div class="empty__note">Anything new will show up here and reach you by text.</div></div>`;
+  }, { what: 'your approvals queue', icon: 'pending_actions' })}`;
 }
 
 export async function social({ api }) {

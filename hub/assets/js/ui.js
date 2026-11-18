@@ -202,7 +202,9 @@ export const grid = (html, kind = '2') => `<div class="grid grid--${kind}">${htm
    never a confident zero for something that was not measured. */
 export function liveBody(res, render, { what = 'this', icon: ic } = {}) {
   if (res && res.ok) return render(res.data);
-  if (res && res.kind === 'not_connected') return notConnected(cap1(what), res.note);
+  // res.note is an api.js SOURCES engineering note (e.g. "OneUp key absent"), never client copy:
+  // a not-connected source gets notConnected()'s client-facing default sentence instead.
+  if (res && res.kind === 'not_connected') return notConnected(cap1(what));
   return empty({
     icon: ic || 'cloud_off',
     title: `Can't show ${what} right now`,
