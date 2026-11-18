@@ -3,7 +3,7 @@
    chips, palette with copy-hex, type specimens, voice as sound-like/avoid. */
 
 import { pageHead, tiles, block, rows, pill, btn, note, swatch, progress,
-         filterbar, mediaCard, esc, grid, icon } from '../ui.js';
+         filterbar, mediaCard, esc, grid, icon, notConnected } from '../ui.js';
 
 export async function overview({ api }) {
   const res = await api.get('brand.kit');
@@ -12,7 +12,8 @@ export async function overview({ api }) {
   ${pageHead({ eyebrow: 'Brand', title: 'Your brand',
     sub: 'Everything that makes you look and sound like you — in one place, so every post, page and advert matches.',
     actions: [{ label: 'Upload an asset', kind: 'primary', icon: 'upload' }] })}
-  ${block({ title: 'Brand completeness', icon: 'health_and_safety', body: `
+  ${block({ title: 'Brand completeness', icon: 'health_and_safety', body: !res.ok && api.isLive
+    ? notConnected('Your brand kit', res.note || 'Your brand kit is not shown on this page yet.') : `
     ${progress(b.completeness ?? 0, 'Your kit is nearly there', `${b.completeness ?? 0}% complete`)}
     <div class="grid grid--3" style="margin-top:18px">
       ${(b.checklist || []).map(c => `<div class="row" style="padding:12px;border:0;

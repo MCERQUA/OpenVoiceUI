@@ -89,6 +89,15 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
   e.preventDefault();
+  if (api.isLive) {
+    // live Hub: nothing here writes yet, so a button must not pretend it did
+    b.title = 'Not available here yet — ask your agent';
+    if (!b.dataset.liveNote) {
+      b.dataset.liveNote = '1';
+      b.insertAdjacentHTML('afterend', `<span class="muted" style="font-size:12.5px;margin-left:8px">Not available here yet — ask your agent</span>`);
+    }
+    return;
+  }
   if (b.dataset.act === 'add-appt') {
     // small icon-only button — swap the icon, no label text fits in it
     b.innerHTML = icon('check');
@@ -105,9 +114,35 @@ document.addEventListener('click', e => {
 
 window.addEventListener('hashchange', route);
 
+/* live shell: the business's own name (company record) in the rail, workspace chip and avatar.
+   Unknown name -> the address label, never the demo business. */
+async function liveShell() {
+  const prof = await api.get('business.profile');
+  const name = prof.ok && prof.data.name ? prof.data.name : null;
+  const label = name || api.tenant();
+  $('#railTenant').textContent = label;
+  const sel = $('#tenantSel');
+  if (sel) { sel.innerHTML = `<option>${esc(label)}</option>`; sel.disabled = true; }
+  const av = document.querySelector('.avatar');
+  if (av) av.textContent = (prof.ok && prof.data.initials) || label.slice(0, 2).toUpperCase();
+  document.title = `${label} — JamBot Hub`;
+}
+
 (async function boot() {
-  badges = api.badges();
-  $('#railTenant').textContent = api.MODE === 'live' ? `${api.tenant()} workspace` : 'demo workspace';
+  if (api.isLive) {
+    document.documentElement.dataset.mode = 'live';
+    $('#railTenant').textContent = api.tenant();
+    const sel = $('#tenantSel'); if (sel) { sel.innerHTML = `<option>${esc(api.tenant())}</option>`; sel.disabled = true; }
+    const av = document.querySelector('.avatar'); if (av) av.textContent = '';
+    const dot = document.querySelector('.iconbtn__dot'); if (dot) dot.remove();   // no unread feed behind it yet
+  } else {
+    $('#railTenant').textContent = 'demo workspace';
+  }
   if (!location.hash) location.hash = '#/home';
+  // badges: fixture returns the demo counts at once; live only shows a count a real feed measured
+  const bp = api.badges().then(b => { badges = b; });
+  if (api.isLive) { liveShell().catch(() => {}); }
+  else await bp;
   await route();
+  if (api.isLive) { await bp.catch(() => {}); const r = resolve(location.hash); renderRail(r.section, r.path); }
 })();

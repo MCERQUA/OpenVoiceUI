@@ -5,12 +5,14 @@
 
 import { pageHead, tiles, block, rows, approval, pill, btn, note,
          progress, icon, esc, calendar as calGrid } from '../ui.js';
+import { liveHome } from './home-live.js';
 
 const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July',
   'August','September','October','November','December'];
 
 export default async function home({ api }) {
+  if (api.isLive) return liveHome({ api });
   const [course, leads, seo] = await Promise.all([
     api.get('course.next'), api.get('leads.stats'), api.get('seo.snapshots')
   ]);

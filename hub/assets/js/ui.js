@@ -195,3 +195,22 @@ export const swatch = s => `<div class="swatch">
   <div class="swatch__hex">${esc(s.hex)}</div></div></div>`;
 
 export const grid = (html, kind = '2') => `<div class="grid grid--${kind}">${html}</div>`;
+
+/* ---------- live states (tenant /hub/) ----------
+   One rule for every live block: real data renders; a source with nothing behind it says
+   "isn't connected yet"; a source that failed says it can't be shown and why. Never fixture data,
+   never a confident zero for something that was not measured. */
+export function liveBody(res, render, { what = 'this', icon: ic } = {}) {
+  if (res && res.ok) return render(res.data);
+  if (res && res.kind === 'not_connected') return notConnected(cap1(what), res.note);
+  return empty({
+    icon: ic || 'cloud_off',
+    title: `Can't show ${what} right now`,
+    note: res && res.error ? `Reason: ${res.error}. Nothing is lost — try again in a minute.`
+                           : 'Nothing is lost — try again in a minute.'
+  });
+}
+const cap1 = s => String(s).charAt(0).toUpperCase() + String(s).slice(1);
+
+/** verdict (ok|warn|bad|unknown) -> tile state; empty sections read as a calm "nothing yet". */
+export const verdictState = v => (v === 'ok' || v === 'warn' || v === 'bad') ? v : 'unknown';

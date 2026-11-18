@@ -567,3 +567,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:now
   .tchat__scroll{min-height:300px;max-height:46vh}
   .tmsg__bub{max-width:88%}
 }
+
+/* live Hub: a section with nothing recorded yet is calm and neutral, not an alarm and not a zero */
+.tile.is-empty .tile__value{font-size:20px;font-weight:700;color:var(--outline);padding:6px 0 4px}
+.tile.is-empty .tile__icon{opacity:.75}

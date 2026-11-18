@@ -46,7 +46,7 @@ export async function rankings({ api }) {
   return `
   ${pageHead({ eyebrow: 'Get found', title: 'Where you rank', sub:
     'Every search term you appear for, and what position you hold. Position 1–3 is where nearly all the clicks go.' })}
-  ${filterbar([{ label: 'All terms' }, { label: 'Top 3', count: 8 }, { label: 'Page 1', count: 22 },
+  ${api.isLive ? '' : filterbar([{ label: 'All terms' }, { label: 'Top 3', count: 8 }, { label: 'Page 1', count: 22 },
                { label: 'Improving', count: 14 }, { label: 'Slipping', count: 3 }])}
   ${block({ flush: true, body: table({
     cols: [
@@ -95,7 +95,7 @@ export async function ai({ api }) {
       state: 'ok', icon: 'quiz', label: 'Questions we track' }),
     api.metric({ value: res.data?.ai?.share, display: `${res.data?.ai?.share ?? ''}%`,
       state: 'warn', icon: 'donut_small', label: 'Share of answers',
-      note: 'Against 6 local competitors' })
+      note: api.isLive ? undefined : 'Against 6 local competitors' })
   ])}
   ${block({ title: 'Questions people ask', icon: 'help', flush: true, body: table({
     cols: [

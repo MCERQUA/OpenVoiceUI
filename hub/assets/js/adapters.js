@@ -272,79 +272,107 @@ function dueLabel(due, now) {
   return `Overdue ${-days} day${days === -1 ? '' : 's'}`;
 }
 
-/** crm.pipeline: raws = [contact list, job list] (both from /api/biz/v1). Kanban stages come
-    from each job's stage/status field; contacts_list.jobs is a real count of jobs that name
-    that contact (contact_id/customer_id/contact.id — whichever the job record carries).
-    UNBACKED: per-stage/pipeline dollar value and "needs a follow-up" staleness — no confirmed
-    money field on job/contact and no staleness tracking exists in this collection set yet. */
+/* Real field names (OVU default-schemas/core/*.json, read 2026-11-18 from the backend source):
+     contact: name phone email address city state zip type company_name lead_source tags notes
+     job:     job_number contact_id(ref) title address service_type status scheduled_at completed_at crew
+              status enum: lead quoted scheduled in_progress completed invoiced paid cancelled on_hold
+     invoice: number job_id contact_id(ref) amount issued_on due_on status payment_link notes
+              status enum: draft sent partial paid void overdue
+     payment: invoice_id job_id amount paid_at method reference notes
+     person:  name role phone email skills schedule active notes
+   `?include=contact` puts the referenced record at rec.included.<ref field> (e.g. included.contact_id).
+   Older guessed names stay as fallbacks after the real one, so nothing that worked stops working. */
+const includedName = (rec, field = 'contact_id') => {
+  const inc = rec && rec.included && rec.included[field];
+  return inc && inc.data ? firstOf(inc.data, ['name', 'company_name']) : null;
+};
+const JOB_STAGE_LABEL = {
+  lead: 'New enquiry', quoted: 'Quoted', scheduled: 'Scheduled', in_progress: 'In progress',
+  on_hold: 'On hold', completed: 'Completed', invoiced: 'Invoiced', paid: 'Paid', cancelled: 'Cancelled'
+};
+const JOB_STAGE_ORDER = ['lead', 'quoted', 'scheduled', 'in_progress', 'on_hold', 'completed', 'invoiced', 'paid', 'cancelled'];
+const JOB_OPEN = new Set(['lead', 'quoted', 'scheduled', 'in_progress', 'on_hold']);
+const stageLabel = raw => JOB_STAGE_LABEL[raw] || (raw ? cap(String(raw).replace(/_/g, ' ')) : 'No stage set');
+/** an /aggregate answer {count} -> integer, else null (unknown, never a page-length guess) */
+const aggCount = a => (a && Number.isInteger(a.count) ? a.count : null);
+
+/** crm.pipeline: raws = [contact list, job list, contact aggregate?, job aggregate?] (all /api/biz/v1).
+    Counts come from the server-side aggregate when present (a list page can undercount); the list
+    length is used only when the aggregate was not fetched. Kanban stages = job status buckets in the
+    schema's own order. UNBACKED: pipeline dollar value (lives on estimates, shown from the hub
+    summary on the live Customers page) and follow-up staleness (nothing tracks it yet). */
 function crmPipeline(raws) {
   const K = 'crm.pipeline';
-  const [contactsRaw, jobsRaw] = Array.isArray(raws) ? raws : [raws, { records: [] }];
+  const arr = Array.isArray(raws) ? raws : [raws, { records: [] }];
+  const [contactsRaw, jobsRaw, contactAgg, jobAgg] = arr;
   const contacts = bizRecords(K, contactsRaw);
-  const jobs = bizRecords(K, jobsRaw);
+  const jobs = bizRecords(K, jobsRaw || { records: [] });
 
   const contactIdOf = j => {
     const jd = bizData(j);
-    // Prefer the server-resolved include=contact join (jd.contact.id) over the raw foreign key:
-    // the raw contact_id value is not guaranteed to be in the same format as the contact record's
-    // own id (host-measured 2026-11-18 — matching on the raw value alone produced jobs:0 for
-    // every contact despite real contact_id values on all jobs).
-    return (jd.contact && (jd.contact.id || (typeof jd.contact === 'string' ? jd.contact : null))) ||
-      firstOf(jd, ['contact_id', 'customer_id']);
+    return firstOf(jd, ['contact_id', 'customer_id']) ||
+      (jd.contact && (jd.contact.id || (typeof jd.contact === 'string' ? jd.contact : null)));
   };
   const jobsPerContact = new Map();
   for (const j of jobs) { const cid = contactIdOf(j); if (cid) jobsPerContact.set(cid, (jobsPerContact.get(cid) || 0) + 1); }
 
-  const stageBuckets = new Map();
+  const byStatus = new Map();
   for (const j of jobs) {
-    const raw = firstOf(bizData(j), ['status', 'stage']);   // 'status' is the confirmed real field (host-measured 2026-11-18); 'stage' kept as a harmless fallback
-    const label = raw ? cap(String(raw).replace(/_/g, ' ')) : 'Unspecified';
-    stageBuckets.set(label, (stageBuckets.get(label) || 0) + 1);
+    const raw = String(firstOf(bizData(j), ['status', 'stage']) || '');
+    byStatus.set(raw, (byStatus.get(raw) || 0) + 1);
   }
+  const ordered = [...byStatus.keys()].sort((a, b) => {
+    const ia = JOB_STAGE_ORDER.indexOf(a), ib = JOB_STAGE_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const contactsN = aggCount(contactAgg) ?? (contactsRaw && contactsRaw.next_cursor ? null : contacts.length);
+  const jobsN = aggCount(jobAgg) ?? (jobsRaw && jobsRaw.next_cursor ? null : jobs.length);
 
   return {
-    contacts: contacts.length,
-    deals: jobs.length,
-    value: null, value_display: '—',   // UNBACKED: no confirmed money field on job/contact
+    contacts: contactsN,
+    deals: jobsN,
+    open_jobs: jobs.length && !(jobsRaw && jobsRaw.next_cursor)
+      ? jobs.filter(j => JOB_OPEN.has(String(firstOf(bizData(j), ['status', 'stage']) || ''))).length : null,
+    value: null, value_display: '—',   // UNBACKED here: money lives on estimates (hub summary)
     stale: [],                          // UNBACKED: no follow-up/staleness tracking on contact/job
     contacts_list: contacts.map(c => ({
       name: firstOf(bizData(c), ['name']) || '—',
-      company: firstOf(bizData(c), ['company']) || '—',
+      company: firstOf(bizData(c), ['company_name', 'company']) || '—',
       phone: firstOf(bizData(c), ['phone']) || '—',
       last: c.updated_at ? when(c.updated_at) : '—',
       jobs: jobsPerContact.get(c.id) || 0
     })),
-    stages: [...stageBuckets.entries()].map(([label, count]) => ({ label, count, value: '', tracked: true }))
+    stages: ordered.map(raw => ({ label: stageLabel(raw), count: byStatus.get(raw), value: '', tracked: true }))
   };
 }
 
-/** jobs.list: raw = job list. customer name prefers an included contact (?include=contact),
-    else a plain customer_name field. UNBACKED per row where the field truly isn't present:
-    quoted amount (no confirmed estimate/amount field on job itself — that lives on estimate/
-    line_item, not fetched here) renders null (blank cell), never a fabricated 0. */
+/** jobs.list: raw = job list (?include=contact). Customer name comes from the included contact.
+    Quoted amount is not a job field (it lives on estimate/line_item) -> null (blank), never 0. */
 function jobsList(raw) {
   const K = 'jobs.list';
   const recs = bizRecords(K, raw);
   return {
     jobs: recs.map(j => {
       const jd = bizData(j);
-      const contactName = jd.contact && jd.contact.data && firstOf(jd.contact.data, ['name']);
+      const legacyName = jd.contact && jd.contact.data && firstOf(jd.contact.data, ['name']);
+      const status = firstOf(jd, ['status', 'stage']);
       return {
-        id: firstOf(jd, ['job_number', 'number']) || j.id,
-        customer: contactName || firstOf(jd, ['customer_name']) || '—',
+        id: firstOf(jd, ['job_number', 'number']) || '—',
+        title: firstOf(jd, ['title', 'service_type']) || '—',
+        customer: includedName(j) || legacyName || firstOf(jd, ['customer_name']) || '—',
         site: firstOf(jd, ['address', 'site']) || '—',
+        when: firstOf(jd, ['scheduled_at']) ? dateLabel(jd.scheduled_at) : '—',
         quoted: firstOf(jd, ['quoted_amount', 'estimate_total', 'amount']),
-        status: cap((firstOf(jd, ['status', 'stage']) || '').replace(/_/g, ' '))
+        status: status ? stageLabel(String(status)) : '—'
       };
     })
   };
 }
 
-/** payments.invoices: raw = invoice list. amount and status are treated as STRUCTURAL to an
-    invoice (ShapeError, not a guess, when neither is present) — unlike the defensive fields
-    above, a confident "$0" or an invented status here is exactly the wrong-number risk the
-    no-invented-number rule exists for. due/paid are derived from due_date vs now and from
-    status, never fabricated. */
+/** payments.invoices: raw = invoice list (?include=contact). amount and status are STRUCTURAL to an
+    invoice (ShapeError when absent, never a guessed $0 or status). Overdue is derived from due_on vs
+    now for unpaid statuses; void/draft are shown as such. */
+const INV_UNPAID = new Set(['sent', 'partial', 'overdue']);
 function paymentsInvoices(raw, ctx = {}) {
   const K = 'payments.invoices';
   const now = ctx.now || new Date();
@@ -352,21 +380,21 @@ function paymentsInvoices(raw, ctx = {}) {
   return {
     invoices: recs.map(r => {
       const rd = bizData(r);
-      const amount = firstOf(rd, ['total', 'amount', 'total_amount']);
-      if (amount === null) throw new ShapeError(K, 'data.total|amount|total_amount');
+      const amount = firstOf(rd, ['amount', 'total', 'total_amount']);
+      if (amount === null) throw new ShapeError(K, 'data.amount');
       const rawStatus = String(firstOf(rd, ['status']) || '').toLowerCase();
       if (!rawStatus) throw new ShapeError(K, 'data.status');
-      const dueDate = firstOf(rd, ['due_date', 'due_at']);
-      const overdue = rawStatus !== 'paid' && dueDate && new Date(dueDate) < now;
+      const dueDate = firstOf(rd, ['due_on', 'due_date', 'due_at']);
+      const overdue = INV_UNPAID.has(rawStatus) && dueDate && new Date(dueDate) < now;
       const status = overdue ? 'overdue' : rawStatus;
-      const contactName = rd.contact && rd.contact.data && firstOf(rd.contact.data, ['name']);
+      const legacyName = rd.contact && rd.contact.data && firstOf(rd.contact.data, ['name']);
       const due = status === 'paid'
         ? `Paid ${dateLabel(firstOf(rd, ['paid_at']) || r.updated_at || r.created_at)}`
         : (dueDate ? dueLabel(dueDate, now) : '—');
       return {
-        number: firstOf(rd, ['invoice_number', 'number']) || r.id,
-        to: contactName || firstOf(rd, ['customer_name']) || '—',
-        for: firstOf(rd, ['description', 'memo']) || '—',
+        number: firstOf(rd, ['number', 'invoice_number']) || '—',
+        to: includedName(r) || legacyName || firstOf(rd, ['customer_name']) || '—',
+        for: firstOf(rd, ['notes', 'description', 'memo']) || '—',
         amount: Number(amount),
         due, status,
         paid: status === 'paid' ? (firstOf(rd, ['payment_method', 'paid_via']) || '—') : null
@@ -375,13 +403,26 @@ function paymentsInvoices(raw, ctx = {}) {
   };
 }
 
-/** team.roster: raw = person list. `threads`/`files` are included empty (not undefined) because
-    the fixture-shaped view model for this key shares those keys with team.threads/team.files
-    (team.js overview() reads data.files and data.threads off THIS key too) — both stay
-    UNBACKED/live:null (no messaging or file-store collection exists), so they must still be
-    present as {}/[] or the view throws on an undefined spread/index. `unread` is UNBACKED
-    (no messaging system) and deliberately null, not 0 — falsy either way in the view's
-    `p.unread ? ... : ''` check, but null never reads as a confident "zero unread". */
+/** payments.recent: raw = payment list (newest first). method/amount/paid_at are payment fields. */
+function paymentsRecent(raw) {
+  const K = 'payments.recent';
+  return {
+    recent: bizRecords(K, raw).map(p => {
+      const pd = bizData(p);
+      const amount = firstOf(pd, ['amount']);
+      if (amount === null) throw new ShapeError(K, 'data.amount');
+      return {
+        amount: Number(amount),
+        method: firstOf(pd, ['method']) || 'Payment',
+        reference: firstOf(pd, ['reference']) || '',
+        when: when(firstOf(pd, ['paid_at']) || p.created_at)
+      };
+    })
+  };
+}
+
+/** team.roster: raw = person list. threads/files stay {} / [] (no messaging or file-store
+    collection exists); unread is null (unbacked), never a confident 0. status: active flag. */
 function teamRoster(raw) {
   const K = 'team.roster';
   const recs = bizRecords(K, raw);
@@ -389,17 +430,106 @@ function teamRoster(raw) {
     roster: recs.map(p => {
       const pd = bizData(p);
       const name = firstOf(pd, ['name']) || '—';
+      const active = pd.active === undefined || pd.active === null ? null : !!pd.active;
       return {
         id: p.id,
         name,
         role: firstOf(pd, ['role', 'title']) || '—',
         initials: initialsOf(name),
-        status: firstOf(pd, ['status']) || '—',
+        status: firstOf(pd, ['status']) || (active === null ? '—' : active ? 'Active' : 'Not active'),
+        phone: firstOf(pd, ['phone']) || null,
         unread: null
       };
     }),
     threads: {},
     files: []
+  };
+}
+
+/* ---------- the hub summary (GET /api/biz/v1/hub/summary, OVU services/biz/hub.py) ---------- */
+const HUB_SECTIONS = ['customers', 'jobs', 'money', 'team', 'inventory', 'leads', 'seo', 'site'];
+const VERDICTS = new Set(['ok', 'warn', 'bad', 'unknown']);
+/** Validates the envelope and every section it promises; a section missing its verdict is a
+    ShapeError (the whole Home then says "can't read right now"), never a guessed tile. */
+function hubSummary(raw) {
+  const K = 'hub.summary';
+  const sections = need(K, raw, 'sections');
+  const order = Array.isArray(raw.order) && raw.order.length ? raw.order : HUB_SECTIONS;
+  const out = {};
+  for (const name of order) {
+    const sct = sections[name];
+    if (!sct || typeof sct !== 'object') throw new ShapeError(K, `sections.${name}`);
+    const verdict = need(K, sct, 'verdict');
+    if (!VERDICTS.has(verdict)) throw new ShapeError(K, `sections.${name}.verdict`);
+    out[name] = {
+      label: sct.label || cap(name), verdict, state: sct.state || 'live',
+      reason: sct.reason || '', counts: (sct.counts && typeof sct.counts === 'object') ? sct.counts : {},
+      last_activity: sct.last_activity || null, domains: Array.isArray(sct.domains) ? sct.domains : []
+    };
+  }
+  const overall = raw.overall && typeof raw.overall === 'object' ? raw.overall : {};
+  return {
+    tenant: raw.tenant || null, sandbox: raw.sandbox || null, generated_at: raw.generated_at || null,
+    order, sections: out,
+    overall: { verdict: VERDICTS.has(overall.verdict) ? overall.verdict : 'unknown', reason: overall.reason || '' }
+  };
+}
+
+/** payments.summary (live) = the hub summary's money section. Server-side sums over every invoice
+    and payment. nextPayout/avgDaysToPay/sharePaidByCard: no backing collection -> null. */
+function paymentsSummary(raw) {
+  const K = 'payments.summary';
+  const hub = hubSummary(raw);
+  const m = hub.sections.money;
+  if (!m) throw new ShapeError(K, 'sections.money');
+  const c = m.counts || {};
+  const num = v => (typeof v === 'number' && isFinite(v) ? v : null);
+  const empty = m.state === 'empty';
+  return {
+    state: m.state, verdict: m.verdict, reason: m.reason, empty,
+    summary: {
+      collectedThisMonth: num(c.payments_30d_value), collectedCount: num(c.payments_30d),
+      pending: num(c.invoices_unpaid_value), pendingCount: num(c.invoices_unpaid),
+      overdue: num(c.invoices_overdue_value), overdueCount: num(c.invoices_overdue),
+      estimatesOpen: num(c.estimates_open), estimatesOpenValue: num(c.estimates_open_value),
+      nextPayout: null, avgDaysToPay: null, sharePaidByCard: null
+    },
+    recent: [], links: []
+  };
+}
+
+/** business.profile: raw = company list (limit 1). The business's own record, shown read-only on
+    the live Account page and used for the shell name. Absent fields stay null (shown as "Not set"). */
+function businessProfile(raw) {
+  const K = 'business.profile';
+  const rec = bizRecords(K, raw)[0];
+  const d = bizData(rec);
+  const name = firstOf(d, ['name', 'legal_name', 'trading_name', 'company_name']);
+  const list = v => (Array.isArray(v) ? v.filter(x => typeof x === 'string' && x.trim()) : (typeof v === 'string' && v.trim() ? [v] : []));
+  return {
+    name: name || null, initials: name ? initialsOf(name) : null,
+    phone: firstOf(d, ['phone']), email: firstOf(d, ['email']), address: firstOf(d, ['address']),
+    website: firstOf(d, ['website']), gbp_url: firstOf(d, ['gbp_url']), license_no: firstOf(d, ['license_no']),
+    timezone: firstOf(d, ['timezone']), services: list(d.services), service_area: list(d.service_area),
+    updated: rec && rec.updated_at ? when(rec.updated_at) : null
+  };
+}
+
+/** inventory.products: raw = product list. unit_cost is money when present, else null (blank). */
+function inventoryProducts(raw) {
+  const K = 'inventory.products';
+  return {
+    products: bizRecords(K, raw).map(r => {
+      const d = bizData(r);
+      const cost = firstOf(d, ['unit_cost']);
+      return {
+        name: firstOf(d, ['name']) || '—', category: firstOf(d, ['category']) || '—',
+        sku: firstOf(d, ['sku']) || '—', unit: firstOf(d, ['unit', 'size']) || '—',
+        supplier: firstOf(d, ['supplier']) || '—',
+        unit_cost: cost === null || isNaN(Number(cost)) ? null : Number(cost),
+        active: d.active === undefined || d.active === null ? true : !!d.active
+      };
+    })
   };
 }
 
@@ -415,7 +545,12 @@ export const ADAPTERS = {
   'crm.pipeline':       { fn: crmPipeline,      provides: ['contacts','deals','contacts_list','stages'], unbacked: ['value','value_display','stale'] },
   'jobs.list':          { fn: jobsList,         provides: ['jobs'], unbacked: [] },
   'payments.invoices':  { fn: paymentsInvoices, provides: ['invoices'], unbacked: [] },
-  'team.roster':        { fn: teamRoster,       provides: ['roster'], unbacked: ['threads','files'] }
+  'payments.summary':   { fn: paymentsSummary,  provides: ['summary'], unbacked: ['recent','links'] },
+  'payments.recent':    { fn: paymentsRecent,   provides: ['recent'], unbacked: [] },
+  'team.roster':        { fn: teamRoster,       provides: ['roster'], unbacked: ['threads','files'] },
+  'hub.summary':        { fn: hubSummary,       provides: ['sections','order','overall'], unbacked: [] },
+  'business.profile':   { fn: businessProfile,  provides: ['name','initials','phone','email','address','website','gbp_url','license_no','timezone','services','service_area','updated'], unbacked: [] },
+  'inventory.products': { fn: inventoryProducts, provides: ['products'], unbacked: [] }
 };
 
 /** normalize(key, raw|raws, ctx) -> view model. Throws ShapeError / Error('no adapter'). */

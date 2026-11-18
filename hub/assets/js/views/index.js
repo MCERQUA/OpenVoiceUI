@@ -102,3 +102,16 @@ export const VIEWS = {
   'payments.links':    payments.links,
   'payments.payouts':  payments.payouts
 };
+
+/* LIVE MODE (a tenant's own /hub/): Customers, Payments and Team swap to the live-sections
+   renderers, which read /api/biz/v1 and never show fixture data. Same routes, same menu. */
+import { isLive } from '../api.js';
+import * as live from './live-sections.js';
+if (isLive) {
+  for (const [section, impl] of Object.entries({ customers: live.customers, payments: live.payments, team: live.team, account: live.account, ask: live.ask, inventory: live.inventory, website: live.website, content: live.content })) {
+    for (const [page, fn] of Object.entries(impl)) {
+      const key = `${section}.${page}`;
+      if (key in VIEWS) VIEWS[key] = fn;
+    }
+  }
+}

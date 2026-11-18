@@ -37,7 +37,7 @@ export async function pages({ api }) {
   ${pageHead({ eyebrow: 'Website', title: 'Pages',
     sub: 'Every page on your site and how it is doing in search.' })}
   ${filterbar([{ label: 'All pages' }, { label: 'Services' }, { label: 'Locations' },
-               { label: 'Blog' }, { label: 'Needs work', count: 2 }])}
+               { label: 'Blog' }, { label: 'Needs work', count: api.isLive ? undefined : 2 }])}
   ${block({ flush: true, body: table({
     cols: [
       { label: 'Page', key: 'title', strong: true },
