@@ -377,6 +377,10 @@ def create_app(config_override: dict = None):
             # handled inside canvas_bp — let them through here
             if path.startswith('/pages/') or path.startswith('/canvas-proxy') or path.startswith('/website-dev'):
                 return
+            # The JamBot Hub (routes/hub.py) gates itself with the SAME grants (this business's Clerk users or its
+            # own agent key) and sends a page navigation to /?redirect=/hub/ so sign-in comes back to the Hub.
+            if path == '/hub' or path.startswith('/hub/'):
+                return
 
             # Admin-only surfaces are NEVER reachable with the internal agent key.
             # The agent key authorizes Docker-network service calls (canvas,
