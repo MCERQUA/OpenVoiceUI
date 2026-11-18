@@ -312,6 +312,8 @@ app.register_blueprint(maps_bp)
 from routes.biz import biz_bp, jb_sdk_bp
 app.register_blueprint(biz_bp)
 app.register_blueprint(jb_sdk_bp)
+from routes.hub import hub_bp
+app.register_blueprint(hub_bp)
 
 # Camera Capture — flagship photo/album system (CompanyCam competitor)
 from routes.capture import capture_bp
