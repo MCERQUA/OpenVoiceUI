@@ -212,21 +212,26 @@ def _money(conn, now):
 
 def _team(conn, now):
     n, last = _live(conn, 'person')
-    active = _count_where(conn, 'person', "COALESCE(json_extract(data, '$.active'), 1) != 0")
-    counts = {'people': n, 'active': active}
+    # unknown is never counted as measured: only active === true is active; a missing/null field is `active_unknown`
+    active = _count_where(conn, 'person', "json_extract(data, '$.active') = 1")
+    unknown = _count_where(conn, 'person', "json_extract(data, '$.active') IS NULL")
+    counts = {'people': n, 'active': active, 'active_unknown': unknown}
     if not n:
         return section('team', verdict='unknown', state='empty', source='business',
                        reason='No team members recorded yet', counts=counts)
     return section('team', verdict='ok', state='live', source='business', counts=counts, last_activity=last,
-                   reason=f'{active} active team member{"s" if active != 1 else ""}')
+                   reason=f'{active} active team member{"s" if active != 1 else ""}'
+                          + (f', {unknown} not set' if unknown else ''))
 
 
 def _inventory(conn, now):
     n_prod, last_prod = _live(conn, 'product')
     n_mv, last_mv = _live(conn, 'stock_move')
-    active = _count_where(conn, 'product', "COALESCE(json_extract(data, '$.active'), 1) != 0")
+    # unknown is never counted as measured: only active === true is active; a missing/null field is `products_unknown`
+    active = _count_where(conn, 'product', "json_extract(data, '$.active') = 1")
+    unknown = _count_where(conn, 'product', "json_extract(data, '$.active') IS NULL")
     since30 = (now - timedelta(days=30)).date().isoformat()
-    counts = {'products': n_prod, 'products_active': active, 'stock_moves': n_mv,
+    counts = {'products': n_prod, 'products_active': active, 'products_unknown': unknown, 'stock_moves': n_mv,
               'stock_moves_30d': _count_where(conn, 'stock_move', "COALESCE(json_extract(data, '$.date'), "
                                                                   "substr(created_at, 1, 10)) >= ?", (since30,))}
     if not (n_prod or n_mv):
@@ -234,7 +239,8 @@ def _inventory(conn, now):
                        reason='No products or stock moves recorded yet', counts=counts)
     return section('inventory', verdict='ok', state='live', source='business', counts=counts,
                    last_activity=_newest(last_prod, last_mv),
-                   reason=f'{active} product{"s" if active != 1 else ""}, {counts["stock_moves_30d"]} stock '
+                   reason=f'{active} active product{"s" if active != 1 else ""}'
+                          + (f', {unknown} not set' if unknown else '') + f', {counts["stock_moves_30d"]} stock '
                           f'move{"s" if counts["stock_moves_30d"] != 1 else ""} in 30 days '
                           '(low-stock is not computed yet)')
 
