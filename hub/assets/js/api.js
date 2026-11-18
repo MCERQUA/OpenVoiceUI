@@ -294,11 +294,17 @@ export function metric({ value, display, state, label, note, delta, source, link
   };
 }
 
-/** Build an unknown metric straight from a failed/absent source. */
+/** Build an unknown metric straight from a failed/absent source.
+    A get() result's res.note is an internal SOURCES engineering note (e.g. "only 2 tenants have build
+    state"), never client copy: never show it, same reasoning as liveBody()'s not_connected branch
+    (danielle-desktop a81053c + host 96f9116). A hand-written { note: '...' } object (no `kind`, e.g.
+    'Analytics isn't connected yet' or a hub summary section's reason) is client copy and keeps its words. */
 export function unknownMetric(label, res, extra = {}) {
+  const fromSource = !!res && typeof res === 'object' && 'kind' in res;
   return metric({
     value: null, state: 'unknown', label,
-    note: res?.error ? `Can't read this right now: ${res.error}` : (res?.note || 'Not connected yet'),
+    note: res?.error ? `Can't read this right now: ${res.error}`
+      : (fromSource ? 'Not connected yet' : (res?.note || 'Not connected yet')),
     ...extra
   });
 }

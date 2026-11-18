@@ -131,8 +131,9 @@ export async function liveHome({ api }) {
       ${block({
         title: 'Your plan', icon: 'route',
         action: { label: 'Open', href: '#/plan' },
-        body: liveBody(course, d => `${progress(d.progress_pct ?? 0,
-                  `Step ${d.module_no ?? '–'} of 12`, `${d.progress_pct ?? 0}% complete`)}
+        body: liveBody(course, d => `${d.progress_pct == null
+                  ? empty({ icon: 'route', title: 'Progress not available yet' })
+                  : progress(d.progress_pct, `Step ${d.module_no ?? '–'} of 12`, `${d.progress_pct}% complete`)}
           <p style="margin:14px 0 0;font-size:14px;color:var(--on-surface-variant)">
             <strong style="color:var(--primary)">${esc(d.module_title || '')}</strong></p>`,
           { what: 'your plan' })

@@ -3,7 +3,7 @@
    unknown: Search Console and Analytics were never wired. */
 
 import { pageHead, tiles, block, table, rows, pill, filterbar, note,
-         notConnected, progress, esc, grid, btn } from '../ui.js';
+         notConnected, progress, esc, grid, btn, liveBody } from '../ui.js';
 
 const sub = 'When someone nearby searches for what you sell, we work on making you the answer.';
 
@@ -13,7 +13,7 @@ export async function overview({ api }) {
   return `
   ${pageHead({ eyebrow: 'Get found', title: 'Being found online', sub,
     actions: [{ label: 'Full report', icon: 'description', href: '#/found/reports' }] })}
-  ${tiles([
+  ${tiles(res.ok ? [
     api.metric({ value: s.top3_count, display: String(s.top3_count ?? ''), state: 'ok',
       icon: 'looks_3', label: 'Search terms in the top 3', delta: { dir: 'up', label: '+3' },
       link: { href: '#/found/rankings', label: 'See them' } }),
@@ -24,6 +24,11 @@ export async function overview({ api }) {
     api.metric({ value: s.backlinks_count, display: String(s.backlinks_count ?? ''), state: 'ok',
       icon: 'link', label: 'Sites linking to you', delta: { dir: 'up', label: '+12' },
       link: { href: '#/found/backlinks', label: 'Backlinks' } })
+  ] : [
+    api.unknownMetric('Search terms in the top 3', res, { icon: 'looks_3', link: { href: '#/found/rankings', label: 'See them' } }),
+    api.unknownMetric('On page one', res, { icon: 'trending_up' }),
+    api.unknownMetric('Terms you show up for', res, { icon: 'manage_search' }),
+    api.unknownMetric('Sites linking to you', res, { icon: 'link', link: { href: '#/found/backlinks', label: 'Backlinks' } })
   ])}
   ${grid(`
     ${block({ title: 'Biggest movers this month', icon: 'moving', flush: true,
@@ -38,7 +43,7 @@ export async function overview({ api }) {
       body: rows((res.data?.working || []).map(w => ({
         icon: w.icon, title: w.title, meta: w.meta, side: pill(w.status, 'info') })) ) })}
   `)}
-  ${note('These numbers come from real daily search-position tracking, refreshed every morning.')}`;
+  ${res.ok ? note('These numbers come from real daily search-position tracking, refreshed every morning.') : ''}`;
 }
 
 export async function rankings({ api }) {
@@ -48,7 +53,7 @@ export async function rankings({ api }) {
     'Every search term you appear for, and what position you hold. Position 1–3 is where nearly all the clicks go.' })}
   ${api.isLive ? '' : filterbar([{ label: 'All terms' }, { label: 'Top 3', count: 8 }, { label: 'Page 1', count: 22 },
                { label: 'Improving', count: 14 }, { label: 'Slipping', count: 3 }])}
-  ${block({ flush: true, body: table({
+  ${liveBody(res, data => block({ flush: true, body: table({
     cols: [
       { label: 'Search term', key: 'kw', strong: true },
       { label: 'Position', key: 'pos', num: true },
@@ -57,8 +62,8 @@ export async function rankings({ api }) {
       { label: 'Searches / mo', key: 'vol', num: true, mute: true },
       { label: 'Your page', key: 'page', mute: true }
     ],
-    rows: res.data?.keywords || []
-  }) })}`;
+    rows: data?.keywords || []
+  }) }), { what: 'your rankings', icon: 'trending_up' })}`;
 }
 
 export async function local({ api }) {
@@ -68,12 +73,18 @@ export async function local({ api }) {
   ${pageHead({ eyebrow: 'Get found', title: 'Your Google Business listing', sub:
     'The single biggest lever for a local business. This is what people see in Maps and the local results.' })}
   ${tiles([
-    api.metric({ value: g.rating, display: String(g.rating ?? ''), state: 'ok',
-      icon: 'star', label: 'Star rating' }),
-    api.metric({ value: g.reviews, display: String(g.reviews ?? ''), state: 'ok',
-      icon: 'reviews', label: 'Reviews', delta: { dir: 'up', label: '+4 this month' } }),
-    api.metric({ value: g.photos, display: String(g.photos ?? ''), state: 'warn',
-      icon: 'photo_library', label: 'Photos', note: 'More photos lifts map ranking' }),
+    ...(res.ok ? [
+      api.metric({ value: g.rating, display: String(g.rating ?? ''), state: 'ok',
+        icon: 'star', label: 'Star rating' }),
+      api.metric({ value: g.reviews, display: String(g.reviews ?? ''), state: 'ok',
+        icon: 'reviews', label: 'Reviews', delta: { dir: 'up', label: '+4 this month' } }),
+      api.metric({ value: g.photos, display: String(g.photos ?? ''), state: 'warn',
+        icon: 'photo_library', label: 'Photos', note: 'More photos lifts map ranking' })
+    ] : [
+      api.unknownMetric('Star rating', res, { icon: 'star' }),
+      api.unknownMetric('Reviews', res, { icon: 'reviews' }),
+      api.unknownMetric('Photos', res, { icon: 'photo_library' })
+    ]),
     api.unknownMetric('Calls from Maps', { note: 'Needs Google profile access' }, { icon: 'call' })
   ])}
   ${block({ title: 'Listing health', icon: 'fact_check', flush: true,
@@ -87,7 +98,7 @@ export async function ai({ api }) {
   return `
   ${pageHead({ eyebrow: 'Get found', title: 'Showing up in AI answers', sub:
     'More people ask ChatGPT and Google\'s AI for recommendations every month. We track whether you get named.' })}
-  ${tiles([
+  ${tiles(res.ok ? [
     api.metric({ value: res.data?.ai?.mentions, display: String(res.data?.ai?.mentions ?? ''),
       state: 'ok', icon: 'smart_toy', label: 'Times you were named',
       delta: { dir: 'up', label: '+5' } }),
@@ -96,6 +107,10 @@ export async function ai({ api }) {
     api.metric({ value: res.data?.ai?.share, display: `${res.data?.ai?.share ?? ''}%`,
       state: 'warn', icon: 'donut_small', label: 'Share of answers',
       note: api.isLive ? undefined : 'Against 6 local competitors' })
+  ] : [
+    api.unknownMetric('Times you were named', res, { icon: 'smart_toy' }),
+    api.unknownMetric('Questions we track', res, { icon: 'quiz' }),
+    api.unknownMetric('Share of answers', res, { icon: 'donut_small' })
   ])}
   ${block({ title: 'Questions people ask', icon: 'help', flush: true, body: table({
     cols: [
@@ -111,14 +126,14 @@ export async function backlinks({ api }) {
   return `
   ${pageHead({ eyebrow: 'Get found', title: 'Sites linking to you', sub:
     'Each link from a real local site is a vote of confidence that search engines count.' })}
-  ${block({ flush: true, body: table({
+  ${liveBody(res, data => block({ flush: true, body: table({
     cols: [
       { label: 'Site', key: 'site', strong: true },
       { label: 'What it is', key: 'kind', mute: true },
       { label: 'Strength', key: 'dr', num: true },
       { label: 'Added', key: 'when', mute: true }
-    ], rows: res.data?.backlinks || []
-  }) })}`;
+    ], rows: data?.backlinks || []
+  }) }), { what: 'your backlinks', icon: 'link' })}`;
 }
 
 export async function reports({ api }) {
@@ -127,8 +142,8 @@ export async function reports({ api }) {
   ${pageHead({ eyebrow: 'Get found', title: 'Reports', sub:
     'A plain-language summary of your online presence, produced monthly.',
     actions: [{ label: 'Newest report', kind: 'primary', icon: 'description' }] })}
-  ${block({ flush: true, body: rows((res.data?.reports || []).map(r => ({
+  ${liveBody(res, data => block({ flush: true, body: rows((data?.reports || []).map(r => ({
     icon: 'description', title: r.title, meta: `${r.date} · ${r.pages} pages`,
     side: `${pill(r.score, 'ok')}${btn({ label: 'Open', small: true })}`
-  }))) })}`;
+  }))) }), { what: 'your reports', icon: 'description' })}`;
 }
