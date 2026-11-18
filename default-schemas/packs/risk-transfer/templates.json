@@ -1,0 +1,697 @@
+{
+  "source": "Effective Contractual Risk Transfer in Construction 2026 (TrustLayer), md5 3bd05e161941017b5d8ef9888a3e9ed0. Values are the guide's; the wording here is ours.",
+  "status_on_create": "DRAFT",
+  "form_functions_note": "Form equivalences copied into every new requirement set (form_functions), approved and versioned with it, so CCA licensed staff add equivalences per set version (host ruling R4), shown in full on the approval page. A built-in safety floor no set can loosen (host ruling F, rules 1.5.0): a built-in ISO number keeps its ISO category (CG 20 10 / 20 33 / 20 38 ongoing operations only), CG 20 26 and CG 20 11 never count as completed operations, completed operations needs CG 20 37 or a form the set's table lists as completed operations, and no endorsement item has an empty form list. CG 20 38 is read as ongoing operations (the conservative reading: a wrong call reads MISSING, never a false Meets); the guide's p.32 and App. B call it completed operations. Confirm with CCA licensed staff at the gate-5 pilot; a different ruling changes the floor in code, never a set. CG 20 10 can never be mapped to completed operations (host ruling R3).",
+  "form_functions": {
+    "CG 20 10": "ai_ongoing",
+    "CG 20 33": "ai_ongoing",
+    "CG 20 38": "ai_ongoing",
+    "CG 20 37": "ai_completed",
+    "CG 20 01": "pnc",
+    "CG 25 03": "project_aggregate",
+    "CG 25 45": "completed_ops_aggregate",
+    "CG 24 04": "waiver_of_subrogation"
+  },
+  "templates": [
+    {
+      "key": "high_severity",
+      "name": "High-severity trades",
+      "trade_category": "high_severity",
+      "examples": "Structural steel, crane operators, heavy civil, excavation, shoring, rigging",
+      "guide_cites": [
+        "p.23",
+        "p.20"
+      ],
+      "items": [
+        {
+          "id": "gl_occ",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "each_occurrence",
+          "floor": 2000000,
+          "ceiling": 2000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.23: $2M per occurrence, or $1M/$2M with adequate umbrella",
+          "combined": {
+            "gl_occ_floor": 1000000,
+            "gl_occ_plus_umbrella_min": 7000000,
+            "note": "\"adequate umbrella\" is not a number in the guide; 7M = the $2M occurrence + the $5M umbrella floor. Staff set X before approving."
+          }
+        },
+        {
+          "id": "gl_agg",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "general_aggregate",
+          "floor": 2000000,
+          "ceiling": 2000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.23"
+        },
+        {
+          "id": "umb",
+          "kind": "limit",
+          "line": "umbrella",
+          "limit": "each_occurrence",
+          "floor": 5000000,
+          "ceiling": 10000000,
+          "min": 5000000,
+          "required": true,
+          "cite": "p.23: $5M-$10M"
+        },
+        {
+          "id": "gl_ai",
+          "kind": "ai",
+          "line": "gl",
+          "required": true,
+          "cite": "p.20, p.37 (certificate holder is not additional insured)"
+        },
+        {
+          "id": "ai_ongoing",
+          "kind": "endorsement",
+          "function": "ai_ongoing",
+          "line": "gl",
+          "forms": [
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.20, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "ai_completed",
+          "kind": "endorsement",
+          "function": "ai_completed",
+          "line": "gl",
+          "forms": [
+            "CG 20 37"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "pnc",
+          "kind": "endorsement",
+          "function": "pnc",
+          "line": "gl",
+          "forms": [
+            "CG 20 01"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44"
+        },
+        {
+          "id": "proj_agg",
+          "kind": "endorsement",
+          "function": "project_aggregate",
+          "line": "gl",
+          "forms": [
+            "CG 25 03"
+          ],
+          "edition": "04 13",
+          "required": false,
+          "cite": "p.23, p.11 (consider for large/long projects)",
+          "suggested_when": [
+            "large",
+            "complex"
+          ]
+        },
+        {
+          "id": "xcu",
+          "kind": "disallowed_exclusion",
+          "line": "gl",
+          "code": "xcu",
+          "required": true,
+          "cite": "p.20, p.47 (no XCU exclusion for excavation, demolition or blasting; categories are staff-chosen, never words in the trade)",
+          "trade_categories": [
+            "excavation",
+            "trenching",
+            "earthwork",
+            "grading",
+            "demolition",
+            "blasting",
+            "shoring",
+            "underground_utilities",
+            "pile_driving",
+            "tunneling",
+            "heavy_civil"
+          ],
+          "classes": [
+            "xcu",
+            "explosion",
+            "collapse",
+            "underground"
+          ]
+        },
+        {
+          "id": "auto_csl",
+          "kind": "limit",
+          "line": "auto",
+          "limit": "combined_single_limit",
+          "floor": 1000000,
+          "ceiling": 1000000,
+          "min": 1000000,
+          "required": true,
+          "cite": "p.23: $1M CSL; AI generally not needed on auto"
+        },
+        {
+          "id": "producer",
+          "kind": "producer",
+          "required": true,
+          "cite": "p.20 (producer contact complete)"
+        }
+      ]
+    },
+    {
+      "key": "envelope",
+      "name": "Envelope and water-intrusion trades",
+      "trade_category": "envelope",
+      "examples": "Roofing, waterproofing, windows, curtain wall, siding, exterior cladding",
+      "guide_cites": [
+        "p.23",
+        "p.24",
+        "p.11"
+      ],
+      "conflict_note": "p.17 puts roofing and envelope in HIGH severity ($2M GL occurrence / $2M aggregate + $5M-$10M umbrella). This template follows the p.23-24 matrix ($1M-$2M occurrence, $5M umbrella), which the guide calls a starting point. Choose knowingly.",
+      "items": [
+        {
+          "id": "gl_occ",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "each_occurrence",
+          "floor": 1000000,
+          "ceiling": 2000000,
+          "min": 1000000,
+          "required": true,
+          "cite": "p.23: $1M-$2M per occurrence"
+        },
+        {
+          "id": "gl_agg",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "general_aggregate",
+          "floor": 2000000,
+          "ceiling": 2000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.23"
+        },
+        {
+          "id": "umb",
+          "kind": "limit",
+          "line": "umbrella",
+          "limit": "each_occurrence",
+          "floor": 5000000,
+          "ceiling": 5000000,
+          "min": 5000000,
+          "required": true,
+          "cite": "p.23: $5M"
+        },
+        {
+          "id": "gl_ai",
+          "kind": "ai",
+          "line": "gl",
+          "required": true,
+          "cite": "p.20, p.37 (certificate holder is not additional insured)"
+        },
+        {
+          "id": "ai_ongoing",
+          "kind": "endorsement",
+          "function": "ai_ongoing",
+          "line": "gl",
+          "forms": [
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.20, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "ai_completed",
+          "kind": "endorsement",
+          "function": "ai_completed",
+          "line": "gl",
+          "forms": [
+            "CG 20 37"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "pnc",
+          "kind": "endorsement",
+          "function": "pnc",
+          "line": "gl",
+          "forms": [
+            "CG 20 01"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44"
+        },
+        {
+          "id": "co_agg",
+          "kind": "endorsement",
+          "function": "completed_ops_aggregate",
+          "line": "gl",
+          "forms": [
+            "CG 25 45"
+          ],
+          "edition": "04 13",
+          "required": false,
+          "cite": "p.11 (suggested)",
+          "suggested_when": [
+            "large",
+            "complex"
+          ]
+        },
+        {
+          "id": "water",
+          "kind": "disallowed_exclusion",
+          "line": "gl",
+          "code": "water",
+          "required": true,
+          "cite": "p.24 (inspect for water-intrusion exclusions or sub-limits)",
+          "classes": [
+            "water_intrusion",
+            "moisture",
+            "water_damage_sublimit"
+          ]
+        },
+        {
+          "id": "producer",
+          "kind": "producer",
+          "required": true,
+          "cite": "p.20 (producer contact complete)"
+        }
+      ]
+    },
+    {
+      "key": "mep",
+      "name": "MEP (mechanical, electrical, plumbing)",
+      "trade_category": "mep",
+      "examples": "HVAC, electrical, plumbing, fire protection",
+      "guide_cites": [
+        "p.24"
+      ],
+      "conflict_note": "p.17 puts MEP in HIGH severity ($2M/$2M + $5M-$10M umbrella). This template follows p.24 ($1M-$2M occurrence, $2M-$5M umbrella).",
+      "items": [
+        {
+          "id": "gl_occ",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "each_occurrence",
+          "floor": 1000000,
+          "ceiling": 2000000,
+          "min": 1000000,
+          "required": true,
+          "cite": "p.24: $1M-$2M per occurrence"
+        },
+        {
+          "id": "gl_agg",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "general_aggregate",
+          "floor": 2000000,
+          "ceiling": 2000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.24"
+        },
+        {
+          "id": "umb",
+          "kind": "limit",
+          "line": "umbrella",
+          "limit": "each_occurrence",
+          "floor": 2000000,
+          "ceiling": 5000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.24: $2M-$5M"
+        },
+        {
+          "id": "gl_ai",
+          "kind": "ai",
+          "line": "gl",
+          "required": true,
+          "cite": "p.20, p.37 (certificate holder is not additional insured)"
+        },
+        {
+          "id": "ai_ongoing",
+          "kind": "endorsement",
+          "function": "ai_ongoing",
+          "line": "gl",
+          "forms": [
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.20, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "ai_completed",
+          "kind": "endorsement",
+          "function": "ai_completed",
+          "line": "gl",
+          "forms": [
+            "CG 20 37"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "pnc",
+          "kind": "endorsement",
+          "function": "pnc",
+          "line": "gl",
+          "forms": [
+            "CG 20 01"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44"
+        },
+        {
+          "id": "proj_agg",
+          "kind": "endorsement",
+          "function": "project_aggregate",
+          "line": "gl",
+          "forms": [
+            "CG 25 03"
+          ],
+          "edition": "04 13",
+          "required": false,
+          "cite": "p.24 (large or complex projects)",
+          "suggested_when": [
+            "large",
+            "complex"
+          ]
+        },
+        {
+          "id": "producer",
+          "kind": "producer",
+          "required": true,
+          "cite": "p.20 (producer contact complete)"
+        }
+      ]
+    },
+    {
+      "key": "medium",
+      "name": "Medium-severity trades",
+      "trade_category": "medium",
+      "examples": "Concrete, framing, grading",
+      "guide_cites": [
+        "p.17",
+        "p.11",
+        "p.5"
+      ],
+      "single_source": "p.17 only (the p.23-25 matrix has no medium tier). AI endorsements from the general rule p.5.",
+      "items": [
+        {
+          "id": "gl_occ",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "each_occurrence",
+          "floor": 1000000,
+          "ceiling": 2000000,
+          "min": 1000000,
+          "required": true,
+          "cite": "p.17: $1M-$2M GL"
+        },
+        {
+          "id": "umb",
+          "kind": "limit",
+          "line": "umbrella",
+          "limit": "each_occurrence",
+          "floor": 2000000,
+          "ceiling": 5000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.17: $2M-$5M umbrella"
+        },
+        {
+          "id": "gl_ai",
+          "kind": "ai",
+          "line": "gl",
+          "required": true,
+          "cite": "p.20, p.37 (certificate holder is not additional insured)"
+        },
+        {
+          "id": "ai_ongoing",
+          "kind": "endorsement",
+          "function": "ai_ongoing",
+          "line": "gl",
+          "forms": [
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.20, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "ai_completed",
+          "kind": "endorsement",
+          "function": "ai_completed",
+          "line": "gl",
+          "forms": [
+            "CG 20 37"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "pnc",
+          "kind": "endorsement",
+          "function": "pnc",
+          "line": "gl",
+          "forms": [
+            "CG 20 01"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44"
+        },
+        {
+          "id": "co_agg",
+          "kind": "endorsement",
+          "function": "completed_ops_aggregate",
+          "line": "gl",
+          "forms": [
+            "CG 25 45"
+          ],
+          "edition": "04 13",
+          "required": false,
+          "cite": "p.11 (suggested on concrete)",
+          "suggested_when": [
+            "large",
+            "complex"
+          ]
+        },
+        {
+          "id": "producer",
+          "kind": "producer",
+          "required": true,
+          "cite": "p.20 (producer contact complete)"
+        }
+      ]
+    },
+    {
+      "key": "finish",
+      "name": "Finish and low-severity trades",
+      "trade_category": "finish",
+      "examples": "Painting, drywall, flooring, tile, landscaping, signage",
+      "guide_cites": [
+        "p.24",
+        "p.25",
+        "p.18"
+      ],
+      "items": [
+        {
+          "id": "gl_occ",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "each_occurrence",
+          "floor": 1000000,
+          "ceiling": 1000000,
+          "min": 1000000,
+          "required": true,
+          "cite": "p.24: $1M per occurrence"
+        },
+        {
+          "id": "gl_agg",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "general_aggregate",
+          "floor": 2000000,
+          "ceiling": 2000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.24: $2M aggregate"
+        },
+        {
+          "id": "umb",
+          "kind": "limit",
+          "line": "umbrella",
+          "limit": "each_occurrence",
+          "floor": 1000000,
+          "ceiling": 2000000,
+          "min": 1000000,
+          "required": true,
+          "cite": "p.24: $1M-$2M (p.18: do not over-demand)"
+        },
+        {
+          "id": "gl_ai",
+          "kind": "ai",
+          "line": "gl",
+          "required": true,
+          "cite": "p.20, p.37 (certificate holder is not additional insured)"
+        },
+        {
+          "id": "ai_ongoing",
+          "kind": "endorsement",
+          "function": "ai_ongoing",
+          "line": "gl",
+          "forms": [
+            "CG 20 10",
+            "CG 20 33",
+            "CG 20 38"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.20, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "ai_completed",
+          "kind": "endorsement",
+          "function": "ai_completed",
+          "line": "gl",
+          "forms": [
+            "CG 20 37"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44",
+          "names_parties": true
+        },
+        {
+          "id": "pnc",
+          "kind": "endorsement",
+          "function": "pnc",
+          "line": "gl",
+          "forms": [
+            "CG 20 01"
+          ],
+          "edition": "04 13",
+          "required": true,
+          "cite": "p.10, p.44"
+        },
+        {
+          "id": "producer",
+          "kind": "producer",
+          "required": true,
+          "cite": "p.20 (producer contact complete)"
+        }
+      ]
+    },
+    {
+      "key": "design_pro",
+      "name": "Design professionals (architects, engineers)",
+      "trade_category": "design_pro",
+      "examples": "Architects, engineers",
+      "guide_cites": [
+        "p.25",
+        "p.38"
+      ],
+      "items": [
+        {
+          "id": "pl_claim",
+          "kind": "limit",
+          "line": "pl",
+          "limit": "each_claim",
+          "floor": 2000000,
+          "ceiling": 5000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.25: PL $2M-$5M per claim"
+        },
+        {
+          "id": "pl_agg",
+          "kind": "limit",
+          "line": "pl",
+          "limit": "aggregate",
+          "floor": 2000000,
+          "ceiling": 5000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.25"
+        },
+        {
+          "id": "pl_tail",
+          "kind": "tail",
+          "line": "pl",
+          "required": true,
+          "cite": "p.25 (claims-made PL maintained with a tail)"
+        },
+        {
+          "id": "pl_holder",
+          "kind": "cert_holder",
+          "line": "pl",
+          "required": true,
+          "cite": "p.25: certificate holder on PL, not additional insured"
+        },
+        {
+          "id": "gl_occ",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "each_occurrence",
+          "floor": 1000000,
+          "ceiling": 1000000,
+          "min": 1000000,
+          "required": true,
+          "cite": "p.25: GL $1M/$2M"
+        },
+        {
+          "id": "gl_agg",
+          "kind": "limit",
+          "line": "gl",
+          "limit": "general_aggregate",
+          "floor": 2000000,
+          "ceiling": 2000000,
+          "min": 2000000,
+          "required": true,
+          "cite": "p.25"
+        },
+        {
+          "id": "producer",
+          "kind": "producer",
+          "required": true,
+          "cite": "p.20 (producer contact complete)"
+        }
+      ]
+    }
+  ]
+}

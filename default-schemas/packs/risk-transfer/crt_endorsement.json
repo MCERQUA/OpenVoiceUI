@@ -1,0 +1,76 @@
+{
+  "collection": "crt_endorsement",
+  "label": "Endorsement",
+  "label_plural": "Endorsements",
+  "title_field": "form",
+  "description": "An endorsement document on a policy. A certificate alone never meets an endorsement requirement.",
+  "required": [
+    "crt_account_id",
+    "crt_policy_id",
+    "function"
+  ],
+  "fields": {
+    "crt_account_id": {
+      "type": "ref",
+      "label": "Received for account",
+      "ref": "contact"
+    },
+    "crt_policy_id": {
+      "type": "ref",
+      "label": "Policy",
+      "ref": "crt_policy"
+    },
+    "function": {
+      "type": "enum",
+      "label": "Function",
+      "values": [
+        "ai_ongoing",
+        "ai_completed",
+        "pnc",
+        "project_aggregate",
+        "completed_ops_aggregate",
+        "waiver_of_subrogation"
+      ]
+    },
+    "form": {
+      "type": "string",
+      "label": "Form"
+    },
+    "edition": {
+      "type": "string",
+      "label": "Edition (MM YY)"
+    },
+    "scheduled_names": {
+      "type": "list",
+      "label": "Scheduled additional insureds",
+      "items": "string"
+    },
+    "scheduled_projects": {
+      "type": "list",
+      "label": "Scheduled projects",
+      "items": "string"
+    },
+    "blanket": {
+      "type": "boolean",
+      "label": "Blanket (by written contract)"
+    },
+    "manuscript": {
+      "type": "boolean",
+      "label": "Manuscript form"
+    },
+    "completed_ops_wording": {
+      "type": "boolean",
+      "label": "Manuscript: explicit completed-operations wording (staff confirm)",
+      "staff_only": true
+    },
+    "document_id": {
+      "type": "ref",
+      "label": "Endorsement document",
+      "ref": "document"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  }
+}

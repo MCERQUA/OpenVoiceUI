@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 _home = Path.home()
 MEMORY_DB = Path(os.getenv('CLAWDBOT_MEMORY_DB', str(_home / '.clawdbot/memory/main.sqlite')))
 SESSIONS_DIR = Path(os.getenv('CLAWDBOT_SESSIONS_DIR', str(_home / '.clawdbot/agents/main/sessions/')))
-VOICE_EVENTS = Path('/tmp/openvoiceui-events.jsonl')
+from services.events_file import EVENTS_PATH as _EVENTS_PATH  # server-private, not /tmp
+VOICE_EVENTS = Path(_EVENTS_PATH)
 
 # Ambient transcripts directory
 AMBIENT_DIR = Path(__file__).parent / "ambient_transcripts"
@@ -230,14 +231,16 @@ class MemoryClient:
         Returns:
             List of {content, role, time} dicts
         """
-        if not VOICE_EVENTS.exists():
+        from services.events_file import open_for_read
+        f = open_for_read(VOICE_EVENTS)  # only the server's own file, never a planted one
+        if f is None:
             return []
 
         results = []
         query_lower = query.lower()
 
         try:
-            with open(VOICE_EVENTS, 'r') as f:
+            with f:
                 for line in f:
                     try:
                         event = json.loads(line)

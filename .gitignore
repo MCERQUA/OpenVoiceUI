@@ -95,6 +95,9 @@ runtime/canvas-manifest.bak
 plugins/*/
 !plugins/example-gateway/
 !plugins/booking/
+# wan-video-studio: tenant-mounted plugin brought into the repo so the I/O guard scans it
+# (review 4 of PR #597, R4-B2); rolled to tenants by a separate sha-gated script.
+!plugins/wan-video-studio/
 !plugins/README.md
 !plugins/.gitkeep
 # Approved plugin catalog stubs (manifest + readme only)

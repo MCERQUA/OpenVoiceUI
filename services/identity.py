@@ -32,6 +32,18 @@ OFFICE_PEOPLE_DIR = os.getenv(
     'OFFICE_PEOPLE_DIR',
     '/app/runtime/workspace/Agent/office/people',
 )
+def _office_file(directory, name):
+    """An office file for a no-follow read. The office tree lives in the agent's own
+    workspace (agent-writable), so the walk starts at the workspace dir whose child
+    `Agent` is the mount point; a symlinked office/, people/ or *.md is refused
+    (it used to be followed straight into the prompt)."""
+    from services.safe_open import Anchored
+    d = os.path.normpath(str(directory))
+    i = d.find('/workspace/Agent')
+    root = d[:i + len('/workspace')] if i >= 0 else os.path.dirname(d)
+    return Anchored(root, os.path.join(d, name))
+
+
 OFFICE_MATTERS_DIR = os.getenv(
     'OFFICE_MATTERS_DIR',
     '/app/runtime/workspace/Agent/office/matters',
@@ -83,7 +95,7 @@ def _resolve_person_file(name: str, clerk_user_id: Optional[str] = None) -> Opti
     if clerk_user_id:
         for f in sorted(d.glob('*.md')):
             try:
-                head = f.read_text(errors='ignore')[:2048]
+                head = _office_file(d, f.name).read_text(errors='ignore', max_bytes=1024 * 1024)[:2048]
             except OSError:
                 continue
             # Scan the YAML frontmatter only: stop at its closing delimiter so a
@@ -112,7 +124,8 @@ def _load_office_briefing(name: str, clerk_user_id: Optional[str] = None) -> Opt
         if person_file is None:
             return None
 
-        text = person_file.read_text(errors='ignore')
+        text = _office_file(person_file.parent, person_file.name).read_text(
+            errors='ignore', max_bytes=1024 * 1024)
         # Pull last_seen + total_events from frontmatter
         last_seen = None
         total_events = None
@@ -163,7 +176,7 @@ def _load_office_briefing(name: str, clerk_user_id: Optional[str] = None) -> Opt
             scored = []
             for f in matters_dir.glob('*.md'):
                 try:
-                    mt = f.read_text(errors='ignore')
+                    mt = _office_file(matters_dir, f.name).read_text(errors='ignore', max_bytes=1024 * 1024)
                     title = re.search(r'^title:\s*(.+)$', mt, re.M)
                     status = re.search(r'^status:\s*(\w+)$', mt, re.M)
                     sev = re.search(r'^severity:\s*(\w+)$', mt, re.M)

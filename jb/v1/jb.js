@@ -39,6 +39,20 @@
       return m ? m[1] : null;
     } catch (e) { return null; }
   })();
+  // Host rulings H4 + R1: a PLATFORM staff page is served from the image on the business's separate STAFF
+  // ORIGIN (BIZ_STAFF_ORIGIN) and given a per-render token by the server. It goes with every call, so the
+  // server knows a staff change came from the platform's own page. A canvas page never has one (and the
+  // server honours it only on the staff origin), so where a pack needs it, its writes are refused.
+  var SURFACE = (function () {
+    var s = global.__JB_SURFACE__;
+    try { delete global.__JB_SURFACE__; } catch (e) { global.__JB_SURFACE__ = undefined; }
+    try {                                    // the boot script's text held the token: take it out of the DOM
+      var boot = global.document && global.document.getElementById('jb-surface-boot');
+      if (boot && boot.parentNode) boot.parentNode.removeChild(boot);
+    } catch (e) { /* no DOM (tests) */ }
+    return (s && typeof s.token === 'string') ? { token: s.token, sandbox: s.sandbox || null, base: s.base || null } : null;
+  })();
+  if (SURFACE && SURFACE.sandbox) SANDBOX = SURFACE.sandbox;
 
   function JbError(status, body) {
     body = body || {};
@@ -63,6 +77,7 @@
   function call(method, path, body, headers) {
     var opts = { method: method, headers: Object.assign({ 'Accept': 'application/json' }, headers || {}) };
     if (SANDBOX) opts.headers['X-Biz-Sandbox'] = SANDBOX;
+    if (SURFACE) opts.headers['X-JB-Staff-Surface'] = SURFACE.token;
     if (body !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
@@ -93,6 +108,8 @@
     contract: 'v1',
     JbError: JbError,
     sandbox: SANDBOX,
+    /** On a platform staff page: the base URL of the staff pages (link to them, never to /pages/). Else null. */
+    staffBase: SURFACE ? SURFACE.base : null,
 
     health: function () { return call('GET', '/health'); },
     schema: function (collection) { return call('GET', '/schema' + (collection ? '/' + enc(collection) : '')); },
@@ -220,6 +237,65 @@
       archive: function (id, opts) { return call('POST', '/registry/pages/' + enc(id) + '/archive', { source: (opts || {}).source }); },
       unarchive: function (id, opts) { return call('POST', '/registry/pages/' + enc(id) + '/unarchive', { source: (opts || {}).source }); }
     },
+    /**
+     * Packs: collections a business turns on (e.g. 'risk-transfer'). jb.pack('crt').get('book')
+     * calls the turned-on pack's own routes under /api/biz/v1/<prefix>/...
+     */
+    packs: {
+      list: function () { return call('GET', '/packs'); },
+      enable: function (name, opts) { return call('POST', '/packs/' + enc(name) + '/enable', { source: (opts || {}).source }); }
+    },
+    pack: function (prefix) {
+      if (!/^[a-z]{2,8}$/.test(String(prefix))) throw new JbError(400, { code: 'bad_pack', error: 'pack prefix is 2-8 letters' });
+      function p(path) {
+        path = String(path || '');
+        if (!/^[A-Za-z0-9_\-\/]*$/.test(path) || path.indexOf('..') !== -1) {
+          throw new JbError(400, { code: 'bad_path', error: 'pack paths are letters, digits, - _ and /' });
+        }
+        return '/' + prefix + (path ? '/' + path : '');
+      }
+      return {
+        get: function (path, params) { return call('GET', p(path) + qs(params || {})); },
+        post: function (path, body) { return call('POST', p(path), body || {}); }
+      };
+    },
+
+    /**
+     * The backend-private file store. upload(file, {source, name}) -> {id, url: 'biz-file:<id>', ...}.
+     * Files are never public: open(id) fetches the bytes with the person's session and returns a
+     * blob: URL for this page only (nothing is kept in the browser).
+     */
+    files: {
+      upload: function (file, opts) {
+        opts = opts || {};
+        var fd = new FormData();
+        fd.append('file', file, opts.name || (file && file.name) || 'file');
+        if (opts.source) fd.append('source', JSON.stringify(opts.source));
+        var headers = { 'Accept': 'application/json' };
+        if (SANDBOX) headers['X-Biz-Sandbox'] = SANDBOX;
+        if (SURFACE) headers['X-JB-Staff-Surface'] = SURFACE.token;
+        return doFetch(BASE + '/files', { method: 'POST', headers: headers, body: fd }).then(function (resp) {
+          return resp.text().then(function (text) {
+            var data = null;
+            try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text }; }
+            if (!resp.ok) throw new JbError(resp.status, data);
+            return data;
+          });
+        });
+      },
+      meta: function (id) { return call('GET', '/files/' + enc(id) + '/meta'); },
+      idOf: function (url) { var m = /^biz-file:([0-9a-f]{64})$/.exec(String(url || '')); return m ? m[1] : null; },
+      open: function (id) {
+        var headers = {};
+        if (SANDBOX) headers['X-Biz-Sandbox'] = SANDBOX;
+        if (SURFACE) headers['X-JB-Staff-Surface'] = SURFACE.token;
+        return doFetch(BASE + '/files/' + enc(id), { method: 'GET', headers: headers }).then(function (resp) {
+          if (!resp.ok) return resp.text().then(function (t) { var d = null; try { d = JSON.parse(t); } catch (e) { d = { error: t }; } throw new JbError(resp.status, d); });
+          return resp.blob().then(function (b) { return global.URL.createObjectURL(b); });
+        });
+      }
+    },
+
     /** The menu model the shell draws: {sections, tabs, more, company, theme, icons}. */
     shell: function (pageId) { return call('GET', '/registry/shell' + qs({ page: pageId })); },
 
@@ -261,6 +337,34 @@
       return function () { stopped = true; if (timer) clearTimeout(timer); };
     }
   };
+
+  // Gate-3b/5 (L1, rules 1.5.0): every platform staff page carries a visible "Sign out" control. It ends the
+  // httpOnly staff cookie on the staff origin (POST <staff base>signout, same-origin) and returns to sign-in.
+  jb.staffSignOut = function () {
+    if (!SURFACE || !SURFACE.base) return Promise.resolve(false);
+    return fetch(SURFACE.base + 'signout', { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Accept': 'application/json' } }).then(function () {
+      global.location.replace(SURFACE.base + 'signin');
+      return true;
+    });
+  };
+  if (SURFACE && SURFACE.base && global.document) {
+    var addSignOut = function () {
+      try {
+        if (global.document.getElementById('jb-staff-signout')) return;
+        var b = global.document.createElement('button');
+        b.id = 'jb-staff-signout';
+        b.type = 'button';
+        b.textContent = 'Sign out';
+        b.setAttribute('style', 'position:fixed;top:8px;right:8px;z-index:50;min-height:44px;padding:0 14px;' +
+          'border-radius:8px;border:1px solid #94a3b8;background:#fff;color:#0f172a;font:inherit;cursor:pointer');
+        b.addEventListener('click', function () { jb.staffSignOut(); });
+        global.document.body.appendChild(b);
+      } catch (e) { /* no DOM */ }
+    };
+    if (global.document.readyState === 'loading') global.document.addEventListener('DOMContentLoaded', addSignOut);
+    else addSignOut();
+  }
 
   global.jb = jb;
 })(typeof window !== 'undefined' ? window : this);

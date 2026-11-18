@@ -171,6 +171,18 @@ def verify_clerk_token(token: str) -> Optional[str]:
 
     Returns None if the token is missing, malformed, or invalid.
     """
+    claims = verify_clerk_claims(token)
+    return claims.get('sub') if claims else None
+
+
+def verify_clerk_claims(token: str) -> Optional[dict]:
+    """Verify a Clerk JWT exactly as verify_clerk_token does and return its whole payload, or None.
+
+    For a caller that must also read `azp` (the authorized party): Clerk sets it to the Origin header of
+    the browser request to its Frontend API that minted the token, and minting needs the httpOnly
+    `__client` cookie on the FAPI domain, which no page script can read. So `azp` says which ORIGIN's
+    page asked for this token (routes/biz.py binds the staff surface to its own origin with it).
+    """
     if not token:
         return None
 
@@ -204,7 +216,7 @@ def verify_clerk_token(token: str) -> Optional[str]:
             if _ALLOWED_USER_IDS and user_id not in _ALLOWED_USER_IDS:
                 logger.warning('Clerk auth: user_id=%s not in ALLOWED_USER_IDS — access denied', user_id)
                 return None
-            return user_id
+            return payload
         except jwt.ExpiredSignatureError:
             logger.info('Token expired')
             return None

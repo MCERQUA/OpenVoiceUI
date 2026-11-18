@@ -12,5 +12,5 @@ directory from the container env (BIZ_DB_DIR, else the dir of OVUI_DB_PATH).
 Nothing in a request can name a tenant or a path.
 """
 
-BIZ_ENGINE_VERSION = '1.1.0'
+BIZ_ENGINE_VERSION = '1.2.0'
 BIZ_API = 'v1'

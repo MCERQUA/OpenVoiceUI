@@ -1,0 +1,63 @@
+{
+  "collection": "crt_assignment",
+  "label": "Sub on project",
+  "label_plural": "Subs on projects",
+  "title_field": "trade_category",
+  "description": "One sub on one project, checked against one approved requirement set.",
+  "required": [
+    "crt_project_id",
+    "party_contact_id",
+    "requirement_set_id",
+    "requirement_set_version"
+  ],
+  "fields": {
+    "crt_project_id": {
+      "type": "ref",
+      "label": "Project",
+      "ref": "crt_project"
+    },
+    "party_contact_id": {
+      "type": "ref",
+      "label": "Sub",
+      "ref": "contact"
+    },
+    "trade_category": {
+      "type": "string",
+      "label": "Trade"
+    },
+    "requirement_set_id": {
+      "type": "ref",
+      "label": "Requirement set",
+      "ref": "crt_requirement_set",
+      "staff_only": true
+    },
+    "requirement_set_version": {
+      "type": "integer",
+      "label": "Requirement set version (pinned)",
+      "min": 1,
+      "staff_only": true
+    },
+    "contract_signed_at": {
+      "type": "date",
+      "label": "Subcontract signed"
+    },
+    "scope_changed_at": {
+      "type": "datetime",
+      "label": "Scope changed at"
+    },
+    "hold": {
+      "type": "boolean",
+      "label": "Hold (set by staff)",
+      "staff_only": true
+    },
+    "hold_reason": {
+      "type": "text",
+      "label": "Hold reason",
+      "staff_only": true
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  }
+}

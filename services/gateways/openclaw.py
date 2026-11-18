@@ -77,16 +77,45 @@ def _load_device_identity() -> dict:
     """
     # Prefer a persistent mounted volume path so identity survives container
     # recreates.  The uploads dir is always bind-mounted from the host.
-    uploads_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'runtime', 'uploads')
+    uploads_dir = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), '..', '..', 'runtime', 'uploads'))
     if os.path.isdir(uploads_dir):
-        identity_file = os.path.join(uploads_dir, '.device-identity.json')
-    else:
-        identity_file = os.path.join(
-            os.path.dirname(__file__), '..', '..', '.device-identity.json'
-        )
-    if os.path.exists(identity_file):
-        with open(identity_file) as f:
+        # uploads/ is agent-writable: read and create the identity no-follow, beneath the
+        # mount (review 3 of PR #597; a planted `.device-identity.json` symlink used to be
+        # read by name)
+        from services.safe_open import Anchored, open_beneath
+        _ident = Anchored(uploads_dir, '.device-identity.json')
+        if _ident.is_file():
+            return json.loads(_ident.read_text(max_bytes=1024 * 1024))
+        identity = _new_device_identity()
+        try:
+            fd = open_beneath(uploads_dir, '.device-identity.json',
+                              os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            with os.fdopen(fd, 'w') as f:
+                json.dump(identity, f)
+            logger.info(f"Generated new device identity: {identity['deviceId'][:16]}...")
+        except FileExistsError:
+            identity = json.loads(_ident.read_text(max_bytes=1024 * 1024))
+        return identity
+    # no uploads mount (self-hosted dev): the server's own app dir, nothing else writes it
+    app_identity_file = os.path.join(os.path.dirname(__file__), '..', '..', '.device-identity.json')
+    if os.path.exists(app_identity_file):
+        with open(app_identity_file) as f:
             return json.load(f)
+    identity = _new_device_identity()
+    # Use exclusive create (O_EXCL) to prevent race condition — if another thread
+    # wins and writes first, catch FileExistsError and return what they wrote.
+    try:
+        with open(app_identity_file, 'x') as f:
+            json.dump(identity, f)
+        logger.info(f"Generated new device identity: {identity['deviceId'][:16]}...")
+    except FileExistsError:
+        with open(app_identity_file) as f:
+            identity = json.load(f)
+    return identity
+
+
+def _new_device_identity() -> dict:
     private_key = Ed25519PrivateKey.generate()
     public_key = private_key.public_key()
     raw_pub = public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
@@ -95,17 +124,7 @@ def _load_device_identity() -> dict:
     priv_pem = private_key.private_bytes(
         Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
     ).decode()
-    identity = {"deviceId": device_id, "publicKeyPem": pub_pem, "privateKeyPem": priv_pem}
-    # Use exclusive create (O_EXCL) to prevent race condition — if another thread
-    # wins and writes first, catch FileExistsError and return what they wrote.
-    try:
-        with open(identity_file, 'x') as f:
-            json.dump(identity, f)
-        logger.info(f"Generated new device identity: {device_id[:16]}...")
-    except FileExistsError:
-        with open(identity_file) as f:
-            identity = json.load(f)
-    return identity
+    return {"deviceId": device_id, "publicKeyPem": pub_pem, "privateKeyPem": priv_pem}
 
 
 def _sign_device_connect(identity: dict, client_id: str, client_mode: str,

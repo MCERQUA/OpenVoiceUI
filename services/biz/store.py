@@ -16,10 +16,12 @@ field is an explicit `clear` list.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import threading
 import uuid
@@ -43,9 +45,22 @@ PREFIX_RE = re.compile(r'^[A-Za-z0-9-]{0,12}$')
 SOURCE_CHANNELS = {'sms', 'voice', 'email', 'photo', 'web', 'manual', 'import'}
 AGENT_CHANNELS = {'sms', 'voice', 'email', 'photo', 'web'}
 MAX_RECORD_BYTES = 256 * 1024
-TABLES = ('records', 'activity', 'counters', 'field_proposals', 'app_pages')
+TABLES = ('records', 'activity', 'counters', 'field_proposals', 'app_pages', 'files')
+# Backend-private file store (migration 0003): <db dir>/files/<sha256>, served only by
+# GET /api/biz/v1/files/<id>. Type is decided from the bytes, never from the client's claim.
+FILE_MAX_BYTES = 15 * 1024 * 1024
+FILE_ID_RE = re.compile(r'^[0-9a-f]{64}\Z')
+FILE_URL_PREFIX = 'biz-file:'
+FILE_TYPES = ((b'%PDF-', 'application/pdf', '.pdf'),
+              (b'\x89PNG\r\n\x1a\n', 'image/png', '.png'),
+              (b'\xff\xd8\xff', 'image/jpeg', '.jpg'))
 META_FIELDS = {'id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'version'}
 _EMPTY = (None, '', [], {})
+
+
+# Activity diff key: the fields of this write that a person made on the platform staff surface (R1 guard
+# redesign). Absent = not the staff surface (an agent, a canvas page, an older write).
+SURFACE_KEY = 'staff_surface'
 
 
 def utcnow() -> str:
@@ -92,7 +107,7 @@ class _Pool(SQLitePool):
 
 
 class BizStore(PageRegistryMixin):
-    def __init__(self, db_dir: Path, tenant: str, *, core_dir=None, library_path=None):
+    def __init__(self, db_dir: Path, tenant: str, *, core_dir=None, library_path=None, packs_dir=None):
         if not TENANT_RE.match(tenant or ''):
             raise _err(503, 'biz_tenant_invalid', 'invalid tenant id')
         self.tenant = tenant
@@ -100,11 +115,14 @@ class BizStore(PageRegistryMixin):
         self.db_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.db_dir / 'business.db'
         self.backup_dir = self.db_dir / 'backups'
+        self.files_dir = self.db_dir / 'files'
         kw = {}
         if core_dir is not None:
             kw['core_dir'] = core_dir
         if library_path is not None:
             kw['library_path'] = library_path
+        if packs_dir is not None:
+            kw['packs_dir'] = packs_dir
         self.registry = Registry(self.db_dir / 'schema' / 'custom', **kw)
         self.read_only = False
         self.mode_reason = None
@@ -120,6 +138,7 @@ class BizStore(PageRegistryMixin):
             self.pool.close()
             raise
         self._migrate()
+        self.registry.set_packs(self.packs_enabled())
 
     # ── plumbing ─────────────────────────────────────────────────────────
     @contextmanager
@@ -281,6 +300,74 @@ class BizStore(PageRegistryMixin):
                 raise _err(422, 'ref_not_found', 'A referenced record does not exist in this business',
                            field=field, collection=target)
 
+    @staticmethod
+    def _staff_guard(spec, collection, *, agent, op, keys=()):
+        """Refuse an agent write the schema reserves for a person (design amendment 2026-11-17).
+
+        A collection with "staff_only": true is written (created, edited, archived, unarchived)
+        only by a person's session. A field with "staff_only": true is set or cleared only by a
+        person, on any collection. The agent key gets 403, never a silent drop.
+        """
+        if not agent:
+            return
+        if spec.get('staff_only'):
+            raise _err(403, 'staff_only', f'Only a person (staff session) may {op} {collection} records; '
+                                          'an agent key cannot', collection=collection, op=op)
+        fields = spec.get('fields') or {}
+        hit = sorted(k for k in keys if (fields.get(k) or {}).get('staff_only'))
+        if hit:
+            raise _err(403, 'staff_only_field', 'Only a person (staff session) may set these fields; '
+                                                'an agent key cannot', collection=collection, fields=hit)
+
+    def _pack_hooks(self, op, collection, data, current, *, by, agent, via_pack):
+        """Run every enabled pack's check_write for this collection (contract: services/biz/packs)."""
+        from services.biz import packs as _packs
+        for pack in self.registry.pack_of(collection):
+            mod = _packs.hooks_for(pack)
+            fn = getattr(mod, 'check_write', None) if mod is not None else None
+            if fn is not None:
+                fn(self, op, collection, data, current, by=by, agent=agent, via_pack=via_pack)
+
+    # ── packs ────────────────────────────────────────────────────────────
+    def packs_enabled(self) -> list:
+        with self._read() as conn:
+            raw = self._meta(conn, 'packs')
+        try:
+            names = json.loads(raw) if raw else []
+        except ValueError:
+            names = []
+        return [n for n in names if isinstance(n, str)]
+
+    def pack_enabled(self, name: str) -> bool:
+        return name in self.registry.enabled_packs
+
+    def enable_pack(self, name, *, by, source=None, agent=False):
+        """Turn a shipped pack on for this business. Additive and permanent (never turned off)."""
+        self._writable()
+        source = self.check_source(source, agent=agent)
+        if not isinstance(name, str) or name not in self.registry.available_packs:
+            raise _err(404, 'unknown_pack', 'No such pack ships with this engine', pack=str(name)[:40])
+        with self._tx() as conn:
+            raw = self._meta(conn, 'packs')
+            names = json.loads(raw) if raw else []
+            already = name in names
+            if not already:
+                names.append(name)
+                conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('packs', ?)", (json.dumps(names),))
+                self._activity(conn, collection=None, record_id=None, type_='pack_enabled', by=by, source=source,
+                               diff={'pack': name, 'version': self.registry.available_packs[name].get('version')})
+        self.registry.set_packs(names)
+        return {'pack': name, 'enabled': True, 'already': already, 'enabled_packs': list(self.registry.enabled_packs)}
+
+    def note_activity(self, *, collection, record_id, type_, by, source=None, diff=None):
+        """Append one activity row (pack routes: e.g. a person marked a drafted chase as sent)."""
+        self._writable()
+        if not isinstance(type_, str) or not re.match(r'^[a-z][a-z0-9_]{0,40}$', type_):
+            raise _err(422, 'bad_request', 'activity type is lower-case letters, digits and _')
+        with self._tx() as conn:
+            self._activity(conn, collection=collection, record_id=record_id, type_=type_, by=by,
+                           source=source, diff=diff)
+
     def _activity(self, conn, *, collection, record_id, type_, by, source=None, diff=None):
         conn.execute(
             'INSERT INTO activity(tenant, at, collection, record_id, type, by, channel, ref, diff) '
@@ -289,12 +376,15 @@ class BizStore(PageRegistryMixin):
              (source or {}).get('channel'), (source or {}).get('ref'),
              json.dumps(diff) if diff is not None else None))
 
-    def create(self, collection, data, *, by, source=None, agent=False):
+    def create(self, collection, data, *, by, source=None, agent=False, via_pack=False, surface=False):
         self._writable()
         spec = self._spec_for_write(collection)
+        self._staff_guard(spec, collection, agent=agent, op='create',
+                          keys=data.keys() if isinstance(data, dict) else ())
         source = self.check_source(source, agent=agent)
         clean, refs = self.registry.validate(collection, data, partial=False, engine_too_old=self.engine_too_old)
         clean = {k: v for k, v in clean.items() if v is not None}
+        self._pack_hooks('create', collection, clean, None, by=by, agent=agent, via_pack=via_pack)
         blob = json.dumps(clean, separators=(',', ':'))
         if len(blob) > MAX_RECORD_BYTES:
             raise _err(413, 'record_too_large', 'Record is larger than 256 KB')
@@ -310,8 +400,13 @@ class BizStore(PageRegistryMixin):
                 'updated_at, updated_by, source) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)',
                 (rid, self.tenant, collection, blob, now, by, now, by,
                  json.dumps(source) if source else None))
+            diff = {'set': self._masked(collection, clean)}
+            if surface and not agent:
+                # per-field provenance, stamped here and nowhere else: these fields were written by a person
+                # on the platform staff surface (its own origin, R1). A client never sends this.
+                diff[SURFACE_KEY] = sorted(clean)
             self._activity(conn, collection=collection, record_id=rid, type_='created', by=by, source=source,
-                           diff={'set': self._masked(collection, clean)})
+                           diff=diff)
             row = conn.execute('SELECT * FROM records WHERE id = ?', (rid,)).fetchone()
         return self._row_to_record(row)
 
@@ -325,9 +420,13 @@ class BizStore(PageRegistryMixin):
             raise _err(404, 'not_found', 'No such record')
         return self._row_to_record(row)
 
-    def update(self, collection, rid, patch, *, expected_version, by, source=None, agent=False, clear=None):
+    def update(self, collection, rid, patch, *, expected_version, by, source=None, agent=False, clear=None,
+               via_pack=False, surface=False):
         self._writable()
         spec = self._spec_for_write(collection)
+        self._staff_guard(spec, collection, agent=agent, op='edit',
+                          keys=list((patch or {}).keys() if isinstance(patch, dict) else ())
+                          + [c for c in (clear or []) if isinstance(c, str)])
         if spec.get('append_only'):
             raise _err(409, 'append_only', f'{collection} is an append-only ledger: add a correcting entry '
                                            '(reverses_id) instead of editing')
@@ -348,6 +447,18 @@ class BizStore(PageRegistryMixin):
         current = self.get(collection, rid)
         if current['archived_at']:
             raise _err(409, 'archived', 'This record is archived; unarchive it first')
+        if self.registry.pack_of(collection):
+            after = dict(current['data'])
+            for k, v in clean.items():
+                if v in _EMPTY and after.get(k) not in _EMPTY:
+                    continue
+                if v is None:
+                    after.pop(k, None)
+                else:
+                    after[k] = v
+            for c in clear:
+                after.pop(c, None)
+            self._pack_hooks('edit', collection, after, current, by=by, agent=agent, via_pack=via_pack)
         with self._tx() as conn:
             row = conn.execute('SELECT * FROM records WHERE id = ? AND collection = ?', (rid, collection)).fetchone()
             if row is None:
@@ -390,19 +501,26 @@ class BizStore(PageRegistryMixin):
                 raise _err(409, 'version_conflict', 'Someone else saved this record first. Reload to see their changes.')
             secrets = self.registry.secret_fields(collection)
             diff = {k: ([mask_secret(a), mask_secret(b)] if k in secrets else [a, b]) for k, (a, b) in changes.items()}
+            diff = {'changed': diff, 'preserved': preserved} if preserved else {'changed': diff}
+            if surface and not agent:
+                diff[SURFACE_KEY] = sorted(changes)
             self._activity(conn, collection=collection, record_id=rid, type_='updated', by=by, source=source,
-                           diff={'changed': diff, 'preserved': preserved} if preserved else {'changed': diff})
+                           diff=diff)
             row = conn.execute('SELECT * FROM records WHERE id = ?', (rid,)).fetchone()
         rec = self._row_to_record(row)
         if preserved:
             rec['preserved'] = preserved
         return rec
 
-    def set_archived(self, collection, rid, archived: bool, *, by, source=None, agent=False):
+    def set_archived(self, collection, rid, archived: bool, *, by, source=None, agent=False, surface=False):
         self._writable()
-        self._spec_for_write(collection)
+        spec = self._spec_for_write(collection)
+        self._staff_guard(spec, collection, agent=agent, op='archive' if archived else 'unarchive')
         source = self.check_source(source, agent=agent)
-        self.get(collection, rid)
+        current = self.get(collection, rid)
+        if self.registry.pack_of(collection) and bool(current['archived_at']) != archived:
+            self._pack_hooks('archive' if archived else 'unarchive', collection, current['data'], current,
+                             by=by, agent=agent, via_pack=False)
         with self._tx() as conn:
             row = conn.execute('SELECT * FROM records WHERE id = ? AND collection = ?', (rid, collection)).fetchone()
             if bool(row['archived_at']) == archived:
@@ -410,8 +528,11 @@ class BizStore(PageRegistryMixin):
             now = utcnow()
             conn.execute('UPDATE records SET archived_at = ?, version = version + 1, updated_at = ?, '
                          'updated_by = ? WHERE id = ?', (now if archived else None, now, by, rid))
+            # host ruling P (rules 1.5.0): archiving and unarchiving are provenance events -- who did it (by) and
+            # where: stamped here, server-side only, when a person did it on the platform staff surface
             self._activity(conn, collection=collection, record_id=rid,
-                           type_='archived' if archived else 'unarchived', by=by, source=source)
+                           type_='archived' if archived else 'unarchived', by=by, source=source,
+                           diff={SURFACE_KEY: ['archived_at']} if surface and not agent else {'off_surface': True})
             row = conn.execute('SELECT * FROM records WHERE id = ?', (rid,)).fetchone()
         return self._row_to_record(row)
 
@@ -669,6 +790,132 @@ class BizStore(PageRegistryMixin):
                  'definition': json.loads(r['definition']), 'gate': json.loads(r['gate']) if r['gate'] else None,
                  'status': r['status']} for r in rows]
 
+    # ── backend-private file store ───────────────────────────────────────
+    @staticmethod
+    def sniff_type(blob: bytes):
+        for magic, ctype, ext in FILE_TYPES:
+            if blob.startswith(magic):
+                return ctype, ext
+        return None, None
+
+    def put_file(self, blob, *, name=None, by, source=None, agent=False):
+        """Store bytes by content hash. Returns the file's metadata (+ existed). Idempotent."""
+        self._writable()
+        source = self.check_source(source, agent=agent)
+        if not isinstance(blob, (bytes, bytearray)) or not blob:
+            raise _err(422, 'file_empty', 'Send the file as multipart form field "file"')
+        if len(blob) > FILE_MAX_BYTES:
+            raise _err(413, 'file_too_large', f'A stored file is at most {FILE_MAX_BYTES // (1024 * 1024)} MB')
+        ctype, _ = self.sniff_type(bytes(blob[:16]))
+        if ctype is None:
+            raise _err(415, 'file_type_refused', 'Only PDF, PNG and JPEG files are stored (checked from the bytes)')
+        if name is not None:
+            if not isinstance(name, str):
+                raise _err(422, 'bad_request', 'name must be text')
+            name = re.split(r'[\\/]', name)[-1].strip()[:200] or None
+        fid = hashlib.sha256(blob).hexdigest()
+        self.files_dir.mkdir(parents=True, exist_ok=True)
+        dest = self.files_dir / fid
+        if not dest.is_file() or self._sha_of(dest) != fid:
+            tmp = self.files_dir / f'.{fid}.partial'
+            with open(tmp, 'wb') as fh:
+                fh.write(blob)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.chmod(tmp, 0o640)
+            os.replace(tmp, dest)
+        with self._tx() as conn:
+            row = conn.execute('SELECT * FROM files WHERE id = ?', (fid,)).fetchone()
+            existed = row is not None
+            if not existed:
+                conn.execute('INSERT INTO files(id, tenant, content_type, size, name, created_at, created_by, source) '
+                             'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                             (fid, self.tenant, ctype, len(blob), name, utcnow(), by,
+                              json.dumps(source) if source else None))
+                self._activity(conn, collection=None, record_id=None, type_='file_stored', by=by, source=source,
+                               diff={'file': fid, 'size': len(blob), 'content_type': ctype})
+                row = conn.execute('SELECT * FROM files WHERE id = ?', (fid,)).fetchone()
+        out = self._file_row(row)
+        out['existed'] = existed
+        return out
+
+    @staticmethod
+    def _file_row(r):
+        return {'id': r['id'], 'sha256': r['id'], 'url': FILE_URL_PREFIX + r['id'],
+                'content_type': r['content_type'], 'size': r['size'], 'name': r['name'],
+                'created_at': r['created_at'], 'created_by': r['created_by']}
+
+    @staticmethod
+    def _sha_of(path: Path) -> str:
+        h = hashlib.sha256()
+        with open(path, 'rb') as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b''):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def file_meta(self, fid):
+        if not isinstance(fid, str) or not FILE_ID_RE.match(fid):
+            raise _err(404, 'not_found', 'No such file')
+        with self._read() as conn:
+            row = conn.execute('SELECT * FROM files WHERE id = ?', (fid,)).fetchone()
+        if row is None:
+            raise _err(404, 'not_found', 'No such file')
+        return self._file_row(row)
+
+    def file_verified(self, fid) -> bool:
+        """True when the file is indexed AND its bytes on disk still hash to its id."""
+        try:
+            self.file_meta(fid)
+        except SchemaError:
+            return False
+        path = self.files_dir / fid
+        return path.is_file() and self._sha_of(path) == fid
+
+    def file_open(self, fid):
+        """(metadata, path) for a stored file whose bytes still match its hash; else refused."""
+        meta = self.file_meta(fid)
+        path = self.files_dir / fid
+        if not path.is_file() or self._sha_of(path) != fid:
+            logger.error('biz: stored file %s is missing or does not match its hash', fid[:12])
+            raise _err(500, 'file_corrupt', 'The stored file is missing or does not match its hash')
+        return meta, path
+
+    def backup_files(self) -> dict:
+        """Mirror the file store into backups/files/ (copy what is missing, verify each copy's hash).
+
+        Never deletes. Same disk as the store: an off-box copy is a separate, platform job.
+        """
+        mirror = self.backup_dir / 'files'
+        with self._read() as conn:
+            ids = [r[0] for r in conn.execute('SELECT id FROM files').fetchall()]
+        copied, bad = 0, []
+        for fid in ids:
+            src, dst = self.files_dir / fid, mirror / fid
+            if dst.is_file() and dst.stat().st_size == (src.stat().st_size if src.is_file() else -1):
+                continue
+            if not src.is_file():
+                bad.append(fid[:12])
+                continue
+            mirror.mkdir(parents=True, exist_ok=True)
+            tmp = mirror / f'.{fid}.partial'
+            shutil.copy2(src, tmp)
+            if self._sha_of(tmp) != fid:
+                bad.append(fid[:12])
+                continue
+            os.replace(tmp, dst)
+            copied += 1
+        present = sum(1 for fid in ids if (mirror / fid).is_file())
+        return {'indexed': len(ids), 'mirrored': present, 'copied_now': copied, 'problems': bad,
+                'verified': not bad and present == len(ids)}
+
+    def files_list(self):
+        try:
+            with self._read() as conn:
+                rows = conn.execute('SELECT * FROM files ORDER BY created_at').fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [self._file_row(r) for r in rows]
+
     # ── health, export, backup ───────────────────────────────────────────
     def collection_counts(self):
         with self._read() as conn:
@@ -685,7 +932,15 @@ class BizStore(PageRegistryMixin):
             'library_version': self.registry.library.get('library_version'),
             'collections': self.collection_counts(), 'last_backup': self.last_backup,
             'shell': BIZ_API, 'registered_pages': self._registered_count(),
+            'packs': list(self.registry.enabled_packs), 'files': self._files_count(),
         }
+
+    def _files_count(self):
+        try:
+            with self._read() as conn:
+                return conn.execute('SELECT COUNT(*) FROM files').fetchone()[0]
+        except sqlite3.OperationalError:
+            return None
 
     def _registered_count(self):
         try:
@@ -703,6 +958,7 @@ class BizStore(PageRegistryMixin):
                 'schema': self.schema_version, 'records': [self._row_to_record(r) for r in rows],
                 'counters': counters, 'activity_count': n_activity, 'proposals': self.proposals(),
                 'pages': self.pages_list(archived=True) if self._registered_count() is not None else [],
+                'files': self.files_list(),
                 'schema_overlay': {n: s for n, s in self.registry.collections().items() if s.get('layer') == 'custom'}}
 
     def backup_to(self, dest: Path) -> dict:
@@ -743,6 +999,11 @@ class BizStore(PageRegistryMixin):
             self.last_backup = {'day': day, 'verified': False, 'error': type(exc).__name__}
             return self.last_backup
         result['day'] = day
+        try:
+            result['files'] = self.backup_files()
+        except Exception as exc:
+            logger.exception('biz: file store backup failed')
+            result['files'] = {'verified': False, 'error': type(exc).__name__}
         self.last_backup = result
         if not result['verified']:
             logger.error('biz: daily backup did NOT verify: %s', result)

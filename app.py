@@ -93,6 +93,14 @@ def create_app(config_override: dict = None):
     )
     app.limiter = limiter
 
+    # ── Staff origin (routes/biz.py, gate-4 R1) ─────────────────────────────────
+    # BIZ_STAFF_ORIGIN names a SEPARATE origin for the business backend's platform staff pages. On that Host
+    # this gate runs FIRST: it serves only the staff pages, their JSON API and /jb/v1/jb.js, authenticated only
+    # by the staff origin's own httpOnly cookie, and refuses everything else (canvas pages, /openclaw-ui/,
+    # uploads, websockets). Unset (every tenant today): it does nothing.
+    from routes.biz import staff_host_gate as _staff_host_gate
+    app.before_request(_staff_host_gate)
+
     # ── WebSocket Origin guard ────────────────────────────────────────────────
     # A WebSocket upgrade is a GET, so require_auth's CSRF guard (state-changing
     # methods only) never sees it, while the browser still attaches the
@@ -154,6 +162,9 @@ def create_app(config_override: dict = None):
         '/api/services/',   # Service Catalog + per-service health (WO-1.2) — reads
                             # gateway/LLM/TTS/STT descriptors + vault cred status;
                             # admin-only, never public.
+        '/api/version/update',  # self-update: git pull + may spawn a CLI coding agent as the
+                                # server (PR #597 review 2: a process the agent key could
+                                # trigger). Hosted tenants update by fleet roll; admin only.
     )
 
     if not _auth_enabled:
@@ -324,6 +335,8 @@ def create_app(config_override: dict = None):
             """
             if not _clerk_key:
                 return  # No Clerk configured — open access (single-user / self-hosted)
+            if g.get('staff_host_ok'):
+                return  # the staff origin: routes/biz.py staff_host_gate authenticated it by its own cookie
 
             path = request.path
 
@@ -508,5 +521,9 @@ def create_app(config_override: dict = None):
                 response.headers.pop(h, None)
         return response
     app.after_request_funcs.setdefault(None, []).insert(0, _strip_cdn_blocking_headers)
+    # The staff origin's response headers run LAST of all (after flask_cors and the security headers above):
+    # no CORS grant, never framed or sniffed, no COOP / Service-Worker-Allowed / foreign cookie from upstream.
+    from routes.biz import staff_host_headers as _staff_host_headers
+    app.after_request_funcs.setdefault(None, []).insert(0, _staff_host_headers)
 
     return app, sock

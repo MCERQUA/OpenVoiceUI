@@ -1,0 +1,56 @@
+{
+  "collection": "crt_waiver",
+  "label": "Accepted variance",
+  "label_plural": "Accepted variances",
+  "title_field": "variance_code",
+  "staff_only": true,
+  "description": "The contractor's written acceptance of one variance, recorded by staff. CCA records it; it never accepts on the contractor's behalf.",
+  "required": [
+    "crt_assignment_id",
+    "variance_code",
+    "accepted_by_contractor",
+    "acceptance_document_id",
+    "expires"
+  ],
+  "fields": {
+    "crt_assignment_id": {
+      "type": "ref",
+      "label": "Sub on project",
+      "ref": "crt_assignment"
+    },
+    "variance_code": {
+      "type": "string",
+      "label": "Variance code"
+    },
+    "accepted_by_contractor": {
+      "type": "string",
+      "label": "Accepted by (contractor)"
+    },
+    "acceptance_document_id": {
+      "type": "ref",
+      "label": "Contractor's written OK",
+      "ref": "document"
+    },
+    "recorded_by": {
+      "type": "string",
+      "label": "Recorded by"
+    },
+    "reason": {
+      "type": "text",
+      "label": "Reason"
+    },
+    "compensating_control": {
+      "type": "text",
+      "label": "Compensating control"
+    },
+    "expires": {
+      "type": "date",
+      "label": "Expires"
+    },
+    "bound_evidence": {
+      "type": "list",
+      "items": "object",
+      "label": "The paper the contractor accepted (function, document, file hash; set by the server)"
+    }
+  }
+}

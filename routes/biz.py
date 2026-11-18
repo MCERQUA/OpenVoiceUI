@@ -11,6 +11,13 @@ Auth (in addition to app.py require_auth):
   agent  this tenant's X-Agent-Key (AGENT_API_KEY)          by = agent:<tenant>
          agent writes must carry source = {channel, ref, confidence, words}
   A presented but wrong X-Agent-Key is 403, never a fall-through.
+  staff surface (host rulings H4 + R1, rules 1.4.0): a SEPARATE origin, BIZ_STAFF_ORIGIN
+         (https://crt-staff-<tenant>.jam-bot.com), that serves only the platform staff pages, their API and
+         jb.js. Signed in there with a Clerk JWT whose azp IS that origin -> httpOnly __Host-jb_staff cookie;
+         every write there also carries the page's token (X-JB-Staff-Surface). Where the risk-transfer pack
+         is on, crt_* and /crt/... are written only there (403 staff_surface_required elsewhere); contact,
+         document and company stay writable anywhere, and each write is stamped with whether it came from
+         the staff surface (the verdict counts only staff-surface person-writes).
 
 GET    /api/biz/v1/health
 GET    /api/biz/v1/schema                  merged registry (core + library adoptions + tenant overlay)
@@ -28,6 +35,12 @@ POST   /api/biz/v1/<collection>/<id>/archive | /unarchive
 POST   /api/biz/v1/counters/<name>/next    {prefix, pad} (used on first call only)
 GET    /api/biz/v1/events?since=<id>       change feed (poll)
 GET    /api/biz/v1/export                  whole tenant as JSON (owner only)
+POST   /api/biz/v1/files                   multipart "file" (+ "source" JSON, "name"): backend-private store
+GET    /api/biz/v1/files/<id>              the bytes, as an attachment (a person's session only)
+GET    /api/biz/v1/files/<id>/meta         {id, sha256, url: biz-file:<id>, content_type, size, name}
+GET    /api/biz/v1/packs                   the packs this engine ships + the ones this business turned on
+POST   /api/biz/v1/packs/<name>/enable     turn a pack on (additive, permanent; agent writes need a source)
+       /api/biz/v1/<prefix>/...            a turned-on pack's own routes (contract: services/biz/packs)
 
 Company system (phase 2, design section 9):
 GET    /api/biz/v1/registry/pages          ?archived=1   the pages of this company system
@@ -50,24 +63,29 @@ GET    /jb/v1/jb.js  /jb/v1/shell.js  /jb/v1/shell.css  /jb/v1/sdk.md (also /jb/
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import html as _html
 import json
 import logging
 import os
-import shutil
+import re
+import secrets
+import stat as _stat
 import threading
 import time
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Blueprint, current_app, g, jsonify, redirect, request, send_file
+from flask import Blueprint, Response, current_app, g, jsonify, redirect, request, send_file
 
 from services.biz import sandbox as _sandbox
 from services.biz.pages import FILE_RE, RECORD_PARAM, build_theme, check_file, page_for_record, shell_model
 from services.biz.schema import SchemaError
-from services.biz.store import BizStore, resolve_location
+from services.biz.store import FILE_ID_RE, FILE_MAX_BYTES, BizStore, resolve_location
 from services.paths import JB_SDK_DIR
+from services.safe_open import Anchored, UnsafePath, lstat_beneath, scandir_beneath
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +151,17 @@ def _pages_dir(sandbox: str | None) -> Path:
     return base if sandbox is None else base / 'sandbox' / sandbox
 
 
+def _page_rel(sandbox: str | None, name: str = '') -> str:
+    """A page path RELATIVE to the canvas-pages mount (the anchor for every no-follow open below)."""
+    parts = ([] if sandbox is None else ['sandbox', sandbox]) + ([name] if name else [])
+    return '/'.join(parts)
+
+
+def _page_is_file(sandbox: str | None, name: str) -> bool:
+    """A regular file, never a symlink followed (the agent writes this tree: PR #597 safe_open)."""
+    return Anchored(_canvas_dir(), _page_rel(sandbox, name)).is_file()
+
+
 def _fail(status, code, message, **extra):
     return jsonify({'error': message, 'code': code, **extra}), status
 
@@ -140,6 +169,378 @@ def _fail(status, code, message, **extra):
 @biz_bp.errorhandler(SchemaError)
 def _schema_error(exc: SchemaError):
     return jsonify(exc.to_dict()), exc.status
+
+
+# ── the platform staff surface: its OWN origin (host rulings H4 + R1, 2026-11-17) ──────────────
+# A page the tenant's agent can write (canvas-pages) runs in the staff browser on the tenant origin, and OVU's
+# canvas auth bridge hands that page the staff member's live Clerk JWT (gate-4 re-check #4, R1). So nothing a
+# canvas-origin script holds may person-write where the risk-transfer verdict reads person-writes:
+#   * The staff surface is a SEPARATE origin (BIZ_STAFF_ORIGIN, e.g. https://crt-staff-<tenant>.jam-bot.com).
+#     On that Host this app serves ONLY the platform staff pages (from the image), their JSON API and
+#     /jb/v1/jb.js -- never a canvas page, /openclaw-ui/, /uploads/ or anything the agent can influence.
+#   * Signing in there: a Clerk session JWT whose `azp` (authorized party) IS the staff origin. Clerk sets
+#     `azp` from the Origin header of the browser request to its Frontend API that minted the token, and
+#     minting needs the httpOnly `__client` cookie on the FAPI domain; so neither a canvas page (its tokens
+#     carry azp = the canvas origin) nor the agent (no `__client` cookie) can obtain one. A canvas-origin JWT
+#     is refused, whatever headers come with it. The exchange sets `__Host-jb_staff`: httpOnly, Secure,
+#     SameSite=Strict, host-only, signed with this tenant's persisted secret (never per-worker random).
+#   * Every write on the staff origin also carries the per-render page token (X-JB-Staff-Surface), which no
+#     same-site page can read (cross-origin) or send without a CORS preflight that this origin never grants.
+#   * crt_* records and /crt/... actions are written ONLY from the staff origin (403 elsewhere). contact,
+#     document and company stay writable from any staff page (other apps need them); each write records
+#     server-side whether it came from the staff surface, and the verdict counts only staff-surface writes.
+STAFF_SURFACE_HEADER = 'X-JB-Staff-Surface'
+STAFF_SURFACE_TTL_S = 8 * 3600
+STAFF_COOKIE = '__Host-jb_staff'
+SURFACE_PACK = 'risk-transfer'
+_SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS')
+_STAFF_PAGE_PREFIX = API + '/crt/staff/'
+_STAFF_OPEN_PATHS = (_STAFF_PAGE_PREFIX + 'signin', _STAFF_PAGE_PREFIX + 'session', _STAFF_PAGE_PREFIX + 'signout')
+_STAFF_STATIC = ('/jb/v1/jb.js',)
+_secret_lock = threading.Lock()
+_secrets: dict = {}
+
+
+def staff_origin() -> str | None:
+    """The configured staff origin ('https://crt-staff-<tenant>.jam-bot.com'), or None (no staff surface)."""
+    raw = (os.getenv('BIZ_STAFF_ORIGIN') or '').strip().rstrip('/')
+    if not raw:
+        return None
+    u = urlparse(raw)
+    if u.scheme not in ('https', 'http') or not u.netloc or u.path or u.query:
+        logger.error('biz: BIZ_STAFF_ORIGIN %r is not an origin; the staff surface is off', raw[:80])
+        return None
+    return f'{u.scheme}://{u.netloc.lower()}'
+
+
+def is_staff_host() -> bool:
+    so = staff_origin()
+    return bool(so) and (request.host or '').lower() == urlparse(so).netloc
+
+
+def _surface_secret() -> bytes:
+    """One secret per tenant, shared by every worker and kept across restarts: <tenant db dir>/staff-surface.key
+    (mode 0600). The agent's container does not mount the db dir. Never per-process random (LOW ruling)."""
+    _tenant, db_dir = resolve_location(hosted=_hosted())
+    path = Path(db_dir) / 'staff-surface.key'
+    key = str(path)
+    with _secret_lock:
+        got = _secrets.get(key)
+        if got:
+            return got
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            data = path.read_bytes()
+        else:
+            data = secrets.token_bytes(32)
+            with os.fdopen(fd, 'wb') as fh:
+                fh.write(data)
+        if len(data) != 32:
+            raise SchemaError(503, 'staff_surface_unavailable', 'The staff-surface key is unreadable; staff writes '
+                                                                'are off until it is restored')
+        _secrets[key] = data
+        return data
+
+
+def _mac(*parts) -> str:
+    return hmac.new(_surface_secret(), '|'.join(str(p) for p in parts).encode(), hashlib.sha256).hexdigest()
+
+
+def mint_staff_surface(by: str, sandbox: str | None) -> str:
+    exp = int(time.time()) + STAFF_SURFACE_TTL_S
+    rnd = secrets.token_hex(12)
+    return f'v2.{exp}.{rnd}.{_mac("page", "v2", staff_origin(), by, sandbox or "", exp, rnd)}'
+
+
+def staff_surface_token_ok(token, by, sandbox) -> bool:
+    """Minted for THIS staff user, THIS sandbox and THIS staff origin, and unexpired."""
+    try:
+        v, exp, rnd, mac = str(token).split('.')
+        exp = int(exp)
+    except (ValueError, TypeError):
+        return False
+    if v != 'v2' or not re.fullmatch(r'[0-9a-f]{24}', rnd) or not re.fullmatch(r'[0-9a-f]{64}', mac):
+        return False
+    if exp < time.time():
+        return False
+    return hmac.compare_digest(mac, _mac('page', 'v2', staff_origin(), by, sandbox or '', exp, rnd))
+
+
+def mint_staff_session(by: str) -> str:
+    exp = int(time.time()) + STAFF_SURFACE_TTL_S
+    rnd = secrets.token_hex(12)
+    who = by.encode().hex()
+    return f's2.{exp}.{rnd}.{who}.{_mac("session", "s2", staff_origin(), by, exp, rnd)}'
+
+
+def staff_session_by(cookie) -> str | None:
+    """Who the `__Host-jb_staff` cookie names, if this tenant's secret signed it for THIS origin and unexpired."""
+    try:
+        v, exp, rnd, who, mac = str(cookie or '').split('.')
+        exp = int(exp)
+        by = bytes.fromhex(who).decode()
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+    if v != 's2' or not re.fullmatch(r'[0-9a-f]{24}', rnd) or not re.fullmatch(r'[0-9a-f]{64}', mac):
+        return None
+    if exp < time.time():
+        return None
+    if not hmac.compare_digest(mac, _mac('session', 's2', staff_origin(), by, exp, rnd)):
+        return None
+    return by if by.startswith(('clerk:', 'local:')) else None
+
+
+def _site_refusal():
+    """A write on the staff origin comes from the staff origin's own page: never another site's, never opaque."""
+    site = request.headers.get('Sec-Fetch-Site')
+    if site is not None and site != 'same-origin':
+        return 'Staff changes come only from the staff origin\'s own pages (Sec-Fetch-Site)'
+    origin = request.headers.get('Origin')
+    if origin == 'null':
+        return 'Staff changes come only from the staff origin\'s own pages (opaque origin)'
+    if origin and origin.rstrip('/').lower() != staff_origin():
+        return 'Staff changes come only from the staff origin\'s own pages (Origin)'
+    return None
+
+
+def _surface_guarded(store) -> bool:
+    """A write to the risk-transfer pack's own records or actions (crt_*, /crt/...) in a business with that pack
+    on. contact / document / company are NOT refused (review H1): their provenance is recorded instead."""
+    rel = request.path[len(API):].lstrip('/')
+    first = rel.split('/', 1)[0]
+    if not (first == 'crt' or first.startswith('crt_')):
+        return False
+    try:
+        return store.pack_enabled(SURFACE_PACK)
+    except Exception:
+        return True                     # cannot tell: refuse (fail closed)
+
+
+def platform_page_names() -> set:
+    """Page file names a pack ships in the image: the platform serves these, an agent never writes them."""
+    from services.biz.schema import PACKS_DIR
+    return {p.name for p in Path(PACKS_DIR).glob('*/pages/*.html')}
+
+
+def _staff_headers(resp, csp):
+    resp.headers['Content-Security-Policy'] = csp
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    resp.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    g.staff_csp = True
+    return resp
+
+
+def staff_surface_page(pages_dir: Path, page: str):
+    if not FILE_RE.match(page or '') or not (Path(pages_dir) / page).is_file():
+        raise SchemaError(404, 'not_found', 'No such staff page')
+    so = staff_origin()
+    if not is_staff_host() or not getattr(g, 'biz_staff_session', False):
+        # The tenant origin never serves a staff page (it is where agent-written pages run). A person's
+        # navigation is sent to the staff origin, where they sign in; nothing is minted here.
+        if so and request.method == 'GET':
+            q = request.query_string.decode('latin-1')
+            return redirect(so + request.path + (('?' + q) if q else ''), code=302)
+        raise SchemaError(403, 'staff_origin_unconfigured',
+                          'This business has no staff origin (BIZ_STAFF_ORIGIN); staff pages are off')
+    if request.headers.get('Sec-Fetch-Mode') != 'navigate' or request.headers.get('Sec-Fetch-Dest') != 'document':
+        raise SchemaError(403, 'staff_surface_navigation_only',
+                          'Staff pages open only as a top-level page in the browser; they are never fetched, '
+                          'framed or embedded by another page')
+    token = mint_staff_surface(g.biz_by, g.biz_sandbox)
+    nonce = secrets.token_urlsafe(18)
+    html = (Path(pages_dir) / page).read_text(encoding='utf-8')
+    html = re.sub(r'<script(?=[\s>])', f'<script nonce="{nonce}"', html)
+    boot = json.dumps({'token': token, 'sandbox': g.biz_sandbox, 'base': f'{API}/crt/staff/'}).replace('</', '<\\/')
+    at = html.find('<script')
+    tag = f'<script nonce="{nonce}" id="jb-surface-boot">window.__JB_SURFACE__ = {boot};</script>\n'
+    html = html[:at] + tag + html[at:] if at >= 0 else html + tag
+    return _staff_headers(Response(html, mimetype='text/html'), (
+        "default-src 'none'; "
+        f"script-src 'nonce-{nonce}'; "
+        "style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+        "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"))
+
+
+def _clerk_fapi() -> str | None:
+    from services import auth
+    dom = (getattr(auth, '_CLERK_FRONTEND_DOMAIN', '') or '').strip()
+    return dom if re.fullmatch(r'[a-z0-9.-]+', dom or '') else None
+
+
+def _safe_next(raw) -> str:
+    raw = str(raw or '')
+    path, _, query = raw.partition('?')
+    if path.startswith(_STAFF_PAGE_PREFIX) and FILE_RE.match(path[len(_STAFF_PAGE_PREFIX):]) and \
+            re.fullmatch(r'[A-Za-z0-9_.=&%-]*', query):
+        return raw
+    return _STAFF_PAGE_PREFIX + 'cca-crt-book.html'
+
+
+def staff_signin_page():
+    """GET <staff origin>/api/biz/v1/crt/staff/signin?next=<staff page>: Clerk sign-in ON the staff origin, then
+    the session token Clerk mints here (azp = the staff origin) is exchanged for the httpOnly staff cookie."""
+    nonce = secrets.token_urlsafe(18)
+    fapi = _clerk_fapi()
+    pk = (os.getenv('CLERK_PUBLISHABLE_KEY') or os.getenv('VITE_CLERK_PUBLISHABLE_KEY', '')).strip()
+    boot = json.dumps({'next': _safe_next(request.args.get('next')), 'pk': pk, 'fapi': fapi,
+                       'session': _STAFF_PAGE_PREFIX + 'session'}).replace('</', '<\\/')
+    page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Staff sign-in</title>
+<style>body{{font:16px system-ui,sans-serif;margin:0;padding:24px;background:#f8fafc;color:#0f172a}}
+main{{max-width:420px;margin:0 auto}}p{{line-height:1.5}}</style></head><body><main>
+<h1>Staff sign-in</h1><p id="msg">Checking your sign-in&hellip;</p><div id="signin"></div></main>
+<script nonce="{nonce}">
+(function () {{
+  var B = {boot};
+  var msg = document.getElementById('msg');
+  function say(t) {{ msg.textContent = t; }}
+  function exchange(token) {{
+    return fetch(B.session, {{method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: {{'Content-Type': 'application/json', 'X-JB-Staff-Signin': '1'}},
+      body: JSON.stringify({{token: token}})}}).then(function (r) {{
+        if (!r.ok) return r.json().then(function (b) {{ throw new Error(b.error || ('sign-in refused (' + r.status + ')')); }});
+        location.replace(B.next);
+      }});
+  }}
+  if (!B.pk || !B.fapi) {{
+    exchange('').catch(function (e) {{ say(e.message); }});
+    return;
+  }}
+  var s = document.createElement('script');
+  s.src = 'https://' + B.fapi + '/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+  s.crossOrigin = 'anonymous';
+  s.nonce = '{nonce}';
+  s.setAttribute('data-clerk-publishable-key', B.pk);
+  s.onload = function () {{
+    window.Clerk.load().then(function () {{
+      if (!window.Clerk.session) {{
+        say('Sign in to open the staff pages.');
+        window.Clerk.mountSignIn(document.getElementById('signin'), {{forceRedirectUrl: location.href}});
+        return;
+      }}
+      return window.Clerk.session.getToken().then(exchange);
+    }}).catch(function (e) {{ say('Sign-in failed: ' + e.message); }});
+  }};
+  s.onerror = function () {{ say('Could not load sign-in.'); }};
+  document.head.appendChild(s);
+}})();
+</script></body></html>"""
+    src = f'https://{fapi}' if fapi else ''
+    return _staff_headers(Response(page, mimetype='text/html'), (
+        "default-src 'none'; "
+        f"script-src 'nonce-{nonce}' {src}; "
+        f"connect-src 'self' {src}; frame-src " + (f"{src} https://challenges.cloudflare.com; " if src else "'none'; ") +
+        f"img-src 'self' data: https://img.clerk.com {src}; style-src 'unsafe-inline'; font-src 'self' data:; "
+        f"worker-src 'self' blob:; form-action 'self' {src}; base-uri 'none'; frame-ancestors 'none'"))
+
+
+def staff_session_exchange():
+    """POST <staff origin>/api/biz/v1/crt/staff/session {token}: a Clerk session JWT minted FOR THE STAFF ORIGIN
+    (azp == BIZ_STAFF_ORIGIN) becomes the httpOnly staff cookie. A JWT a canvas page got (azp = the tenant
+    origin), a JWT without azp, or any request not from the staff origin's own page is refused (R1)."""
+    so = staff_origin()
+    if not so or not is_staff_host():
+        return _fail(404, 'not_found', 'Not found')
+    why = _site_refusal()
+    if why or request.headers.get('X-JB-Staff-Signin') != '1':
+        return _fail(403, 'staff_signin_refused', why or 'Sign in from the staff sign-in page')
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    if current_app.config.get('CLERK_AUTH_ENABLED'):
+        from services import auth
+        claims = auth.verify_clerk_claims(str(body.get('token') or '')) if body.get('token') else None
+        if not claims or not claims.get('sub'):
+            return _fail(401, 'auth_required', 'Sign in again')
+        if claims.get('azp') != so:
+            logger.warning('biz: staff sign-in refused: azp %r is not the staff origin', str(claims.get('azp'))[:80])
+            return _fail(403, 'staff_origin_token_refused',
+                         'This session token was not issued to the staff origin (azp); a token from another '
+                         'page of this business never signs in to the staff pages (R1)')
+        by = f'clerk:{claims["sub"]}'
+    elif _hosted():
+        return _fail(401, 'auth_required', 'Unauthorized')
+    else:
+        by = 'local:owner'                    # single-user local install: no Clerk, everything is the owner
+    resp = jsonify({'ok': True, 'by': by})
+    resp.status_code = 200
+    resp.set_cookie(STAFF_COOKIE, mint_staff_session(by), max_age=STAFF_SURFACE_TTL_S, path='/',
+                    secure=True, httponly=True, samesite='Strict')
+    return resp
+
+
+def staff_signout():
+    if not is_staff_host():
+        return _fail(404, 'not_found', 'Not found')
+    if _site_refusal():
+        return _fail(403, 'staff_signin_refused', _site_refusal())
+    resp = jsonify({'ok': True})
+    resp.delete_cookie(STAFF_COOKIE, path='/', secure=True, httponly=True, samesite='Strict')
+    return resp
+
+
+def staff_host_gate():
+    """App-level before_request (registered first by app.create_app): on the staff origin, serve only the
+    staff surface, authenticated only by the staff cookie. Elsewhere: nothing to do."""
+    g.staff_host = False
+    if not is_staff_host():
+        return None
+    g.staff_host = True
+    path = request.path
+    if request.method == 'OPTIONS':                       # no CORS preflight is ever granted here
+        return _fail(403, 'not_on_staff_origin', 'Not served on the staff origin')
+    if request.headers.get('X-Agent-Key') is not None:
+        return _fail(403, 'staff_only', 'The staff origin serves people only; an agent key is never accepted')
+    if path in _STAFF_STATIC and request.method in ('GET', 'HEAD'):
+        g.staff_host_ok = True
+        return None
+    if path == _STAFF_PAGE_PREFIX + 'signin' and request.method == 'GET':
+        return staff_signin_page()
+    if path == _STAFF_PAGE_PREFIX + 'session' and request.method == 'POST':
+        return staff_session_exchange()
+    if path == _STAFF_PAGE_PREFIX + 'signout' and request.method == 'POST':
+        return staff_signout()
+    if not path.startswith(API + '/') or path.startswith(API + '/dev/'):
+        return _fail(404, 'not_on_staff_origin', 'Only the platform staff pages are served on the staff origin')
+    by = staff_session_by(request.cookies.get(STAFF_COOKIE))
+    if not by:
+        if request.method == 'GET' and path.startswith(_STAFF_PAGE_PREFIX):
+            q = request.query_string.decode('latin-1')
+            from urllib.parse import quote
+            return redirect(_STAFF_PAGE_PREFIX + 'signin?next=' + quote(path + (('?' + q) if q else ''), safe=''),
+                            code=302)
+        return _fail(401, 'staff_session_required', 'Sign in on the staff pages again')
+    g.staff_host_ok = True
+    g.biz_staff_by = by
+    return None
+
+
+def staff_host_headers(resp):
+    """App-level after_request, run LAST: whatever the staff origin returns is never framed, sniffed, shared
+    cross-origin (no CORS grant), cached, or a carrier of COOP / Service-Worker-Allowed / foreign cookies."""
+    if not getattr(g, 'staff_host', False):
+        return resp
+    for h in list(resp.headers.keys()):
+        if h.lower().startswith('access-control-') or h.lower() in ('service-worker-allowed',):
+            resp.headers.pop(h, None)
+    cookies = [c for c in resp.headers.getlist('Set-Cookie') if c.startswith(STAFF_COOKIE + '=')]
+    resp.headers.pop('Set-Cookie', None)
+    for c in cookies:
+        resp.headers.add('Set-Cookie', c)
+    if not getattr(g, 'staff_csp', False):
+        resp.headers['Content-Security-Policy'] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; " \
+                                                  "form-action 'none'"
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    resp.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
 
 
 @biz_bp.after_request
@@ -158,12 +559,17 @@ def _authenticate():
     if 'tenant' in request.args or request.headers.get('X-Tenant') or request.headers.get('X-Jambot-Tenant'):
         return _fail(400, 'tenant_param_refused',
                      'The business backend serves only this container\'s tenant; it never takes a tenant parameter')
-    if request.content_length and request.content_length > MAX_BODY_BYTES:
-        return _fail(413, 'body_too_large', 'Request body is larger than 1 MB')
+    is_upload = request.method == 'POST' and request.path == API + '/files'
+    cap = FILE_MAX_BYTES + 64 * 1024 if is_upload else MAX_BODY_BYTES
+    if request.content_length and request.content_length > cap:
+        return _fail(413, 'body_too_large', 'Request body is larger than '
+                     + ('the file store limit' if is_upload else '1 MB'))
 
     presented = request.headers.get('X-Agent-Key')
     expected = os.getenv('AGENT_API_KEY', '').strip()
     asked_sandbox = (request.headers.get('X-Biz-Sandbox') or '').strip() or None
+    if asked_sandbox is None and request.method == 'GET' and request.path.startswith(API + '/crt/staff/'):
+        asked_sandbox = (request.args.get('sandbox') or '').strip() or None   # a navigation sends no headers
     sandboxes = _sandbox.configured()
     g.biz_sandbox = None
     if presented is not None:
@@ -182,6 +588,11 @@ def _authenticate():
         else:
             logger.warning('biz: wrong X-Agent-Key refused (path=%s)', request.path)
             return _fail(403, 'agent_key_invalid', 'This agent key is not valid for this business')
+    elif getattr(g, 'biz_staff_by', None) and getattr(g, 'staff_host', False):
+        g.biz_role = 'owner'          # the staff origin: authenticated only by its own httpOnly cookie (R1)
+        g.biz_by = g.biz_staff_by
+    elif getattr(g, 'staff_host', False):
+        return _fail(401, 'staff_session_required', 'Sign in on the staff pages again')
     elif current_app.config.get('CLERK_AUTH_ENABLED'):
         uid = getattr(g, 'clerk_user_id', None)
         if not uid:
@@ -214,8 +625,39 @@ def _authenticate():
     if g.biz_role == 'agent':
         g.biz_by = f'agent:{store.tenant}'
     g.biz_store = store
+    g.biz_surface = False
+    g.biz_staff_session = False
+    if g.biz_role == 'owner':
+        token = request.headers.get(STAFF_SURFACE_HEADER)
+        on_staff = bool(getattr(g, 'staff_host', False) and getattr(g, 'biz_staff_by', None))
+        if not on_staff:
+            if token is not None:
+                logger.warning('biz: staff-surface token presented off the staff origin (path=%s)', request.path)
+                return _fail(403, 'staff_surface_invalid', 'Staff-page tokens are honoured only on the staff '
+                                                           'origin (R1)')
+        else:
+            g.biz_staff_session = True
+            why = _site_refusal() if request.method not in _SAFE_METHODS else None
+            if token is not None and not staff_surface_token_ok(token, g.biz_by, g.biz_sandbox):
+                why = 'This staff-page token is not valid for this session; reload the staff page'
+            if why:
+                logger.warning('biz: staff-surface write refused (path=%s): %s', request.path, why)
+                return _fail(403, 'staff_surface_invalid', why)
+            if request.method in _SAFE_METHODS or token is not None:
+                g.biz_surface = True
+            else:
+                return _fail(403, 'staff_surface_required', 'A staff change carries its page token; reload the '
+                                                            'staff page')
+        if request.method not in _SAFE_METHODS and not g.biz_surface and _surface_guarded(store):
+            return _fail(403, 'staff_surface_required',
+                         'This business runs the risk-transfer pack: staff change its records only on the staff '
+                         f'origin ({staff_origin() or "BIZ_STAFF_ORIGIN unset"}), never from a canvas page (R1)')
     store.maybe_daily_backup()
-    if request.method in ('POST', 'PATCH', 'PUT'):
+    if is_upload:
+        if 'tenant' in request.form:
+            return _fail(400, 'tenant_param_refused',
+                         'The business backend serves only this container\'s tenant; never send a tenant')
+    elif request.method in ('POST', 'PATCH', 'PUT'):
         body = request.get_json(silent=True)
         if request.content_length and body is None:
             return _fail(400, 'bad_json', 'Body must be JSON')
@@ -236,6 +678,11 @@ def _agent() -> bool:
 
 def _w() -> dict:
     return {'by': g.biz_by, 'agent': _agent()}
+
+
+def _ws() -> dict:
+    """_w() plus whether this record write came from the platform staff surface (stamped per field)."""
+    return {**_w(), 'surface': bool(getattr(g, 'biz_surface', False))}
 
 
 # ── health + schema + library ───────────────────────────────────────────────
@@ -308,13 +755,123 @@ def export():
     return jsonify(g.biz_store.export())
 
 
+# ── backend-private file store (design amendment 2026-11-17) ──────────────
+@biz_bp.post(f'{API}/files')
+def file_upload():
+    up = request.files.get('file')
+    if up is None:
+        raise SchemaError(422, 'file_empty', 'Send the file as multipart form field "file"')
+    raw_source = request.form.get('source')
+    source = None
+    if raw_source:
+        try:
+            source = json.loads(raw_source)
+        except ValueError:
+            raise SchemaError(422, 'bad_source', '"source" must be JSON text')
+    blob = up.read(FILE_MAX_BYTES + 1)
+    meta = g.biz_store.put_file(blob, name=request.form.get('name') or up.filename, source=source, **_w())
+    return jsonify(meta), 200 if meta['existed'] else 201
+
+
+def _owner_file(fid):
+    if _agent():
+        raise SchemaError(403, 'owner_only', 'Stored files are opened by a person\'s session only')
+    if not FILE_ID_RE.match(fid or ''):
+        raise SchemaError(404, 'not_found', 'No such file')
+
+
+@biz_bp.get(f'{API}/files/<fid>')
+def file_get(fid):
+    _owner_file(fid)
+    meta, path = g.biz_store.file_open(fid)
+    ext = {'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg'}.get(meta['content_type'], '')
+    resp = send_file(path, mimetype=meta['content_type'], as_attachment=True,
+                     download_name=fid[:16] + ext, max_age=0, conditional=False, etag=False)
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox"
+    return resp
+
+
+@biz_bp.get(f'{API}/files/<fid>/meta')
+def file_get_meta(fid):
+    if not FILE_ID_RE.match(fid or ''):
+        raise SchemaError(404, 'not_found', 'No such file')
+    return jsonify(g.biz_store.file_meta(fid))
+
+
+# ── packs (design section 6; contract in services/biz/packs/__init__.py) ──────
+@biz_bp.get(f'{API}/packs')
+def packs_list():
+    reg = g.biz_store.registry
+    return jsonify({'enabled': list(reg.enabled_packs), 'routes_loaded': list(PACK_ROUTES), 'available': [
+        {'name': p['name'], 'prefix': p['prefix'], 'version': p['version'], 'label': p['label'],
+         'description': p['description'], 'collections': sorted(p['collections']),
+         'extends': sorted(p['extends'])} for p in reg.available_packs.values()]})
+
+
+@biz_bp.post(f'{API}/packs/<name>/enable')
+def packs_enable(name):
+    return jsonify(g.biz_store.enable_pack(name, source=_body().get('source'), **_w()))
+
+
+class PackContext:
+    """What a pack's routes may use (and nothing else): the caller's store, role and body."""
+    api = API
+    SchemaError = SchemaError
+
+    @staticmethod
+    def store():
+        return g.biz_store
+
+    @staticmethod
+    def is_agent() -> bool:
+        return _agent()
+
+    @staticmethod
+    def by() -> str:
+        return g.biz_by
+
+    @staticmethod
+    def body() -> dict:
+        return _body()
+
+    @staticmethod
+    def require_pack(name):
+        if not g.biz_store.pack_enabled(name):
+            raise SchemaError(404, 'pack_not_enabled', f'The {name} pack is not turned on for this business')
+
+    @staticmethod
+    def require_person(what='do this'):
+        if _agent():
+            raise SchemaError(403, 'staff_only', f'Only a person (staff session) may {what}; an agent key cannot')
+
+    @staticmethod
+    def surface() -> bool:
+        """This request came from the platform staff surface (staff origin, cookie + page token)."""
+        return bool(getattr(g, 'biz_surface', False)) and not _agent()
+
+    @staticmethod
+    def require_staff_surface():
+        if _agent() or not getattr(g, 'biz_surface', False):
+            raise SchemaError(403, 'staff_surface_required', 'Only the platform staff pages make this change '
+                                                             '(host ruling H4)')
+
+    @staticmethod
+    def staff_surface_page(pages_dir, page):
+        return staff_surface_page(pages_dir, page)
+
+    @staticmethod
+    def core_names():
+        from services.biz.schema import CORE_DIR, _load_json_dir
+        return _load_json_dir(CORE_DIR).keys()
+
+
 # ── company system: page registry + shell model ───────────────────────────
 @biz_bp.get(f'{API}/registry/pages')
 def registry_list():
     pages = g.biz_store.pages_list(archived=request.args.get('archived') == '1')
-    pdir = _pages_dir(g.biz_sandbox)
     for p in pages:
-        p['exists'] = (pdir / p['file']).is_file()
+        p['exists'] = _page_is_file(g.biz_sandbox, p['file'])
     return jsonify({'pages': pages, 'count': len(pages)})
 
 
@@ -330,7 +887,7 @@ def registry_register():
 @biz_bp.get(f'{API}/registry/pages/<pid>')
 def registry_get(pid):
     page = g.biz_store.page_get(pid)
-    page['exists'] = (_pages_dir(g.biz_sandbox) / page['file']).is_file()
+    page['exists'] = _page_is_file(g.biz_sandbox, page['file'])
     return jsonify(page)
 
 
@@ -373,10 +930,10 @@ def registry_shell():
     page_id = request.args.get('page')
     if page_id is not None and not FILE_RE.match(page_id + '.html'):
         page_id = None
-    pdir = _pages_dir(g.biz_sandbox)
+    sandbox = g.biz_sandbox
     brand = store.company_brand()
     model = shell_model(store.pages_list(), company=brand, theme=build_theme(_style_tokens(page_id), brand),
-                        page_exists=lambda f: (pdir / f).is_file())
+                        page_exists=lambda f: _page_is_file(sandbox, f))
     model['base'] = _page_url('')
     model['page'] = page_id
     if g.biz_sandbox:
@@ -425,9 +982,12 @@ def _sandbox_only():
 def dev_pages_list():
     if not g.biz_sandbox:
         raise SchemaError(404, 'not_a_sandbox', 'This is not a dev sandbox')
-    pdir = _pages_dir(g.biz_sandbox)
     registered = {p['file'] for p in g.biz_store.pages_list()}
-    files = sorted(f.name for f in pdir.glob('*.html')) if pdir.is_dir() else []
+    try:                                    # no-follow listing (the agent writes this tree): regular files only
+        entries = scandir_beneath(_canvas_dir(), _page_rel(g.biz_sandbox))
+    except (OSError, UnsafePath):
+        entries = []
+    files = sorted(n for n, st in entries if n.endswith('.html') and _stat.S_ISREG(st.st_mode))
     return jsonify({'sandbox': g.biz_sandbox, 'pages': [
         {'file': f, 'url': _page_url(f), 'registered': f in registered} for f in files]})
 
@@ -436,26 +996,41 @@ def dev_pages_list():
 def dev_page_put(file_name):
     _sandbox_only()
     check_file(file_name)
+    if file_name in platform_page_names():
+        raise SchemaError(409, 'platform_page_reserved',
+                          'This page name belongs to a platform staff page, served from the image at '
+                          f'{API}/crt/staff/<page>; publish your own view under another name (host ruling H4)',
+                          file=file_name)
     body = _body()
     page_html = body.get('html')
     if not isinstance(page_html, str) or '<' not in page_html:
         raise SchemaError(422, 'validation_failed', 'html must be the page\'s full HTML text', field='html')
     g.biz_store.check_source(body.get('source'), agent=True)
-    pdir = _pages_dir(g.biz_sandbox)
-    pdir.mkdir(parents=True, exist_ok=True)
-    dest = pdir / file_name
-    kept = None
-    if dest.is_file():
-        hist = pdir / '.history'
-        hist.mkdir(exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-        kept = hist / f'{file_name}.{stamp}'
-        shutil.copy2(dest, kept)          # the previous version is kept, never removed
-    tmp = dest.with_name('.' + file_name + '.partial')
-    tmp.write_text(page_html, encoding='utf-8')
-    os.replace(tmp, dest)
+    # PR #597 class (gate-4 re-check #7, D1): the sandbox's canvas folder is agent-writable, so every open here is
+    # no-follow and beneath the canvas-pages mount (services/safe_open.py). A symlink (or anything not a regular file)
+    # at the page's name is refused, never followed: the history copy can never carry another file's bytes
+    # (staff-surface.key included) into the agent's folder, and the write never lands outside it.
+    root = _canvas_dir()
+    rel = _page_rel(g.biz_sandbox, file_name)
+    try:
+        st = lstat_beneath(root, rel)
+        if st is not None and not _stat.S_ISREG(st.st_mode):
+            raise SchemaError(409, 'page_not_a_regular_file', 'Something other than a plain page file sits at this '
+                                                              'name (a link or a folder); remove it and publish again',
+                              file=file_name)
+        kept = None
+        if st is not None:
+            old = Anchored(root, rel).read_bytes()
+            stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+            kept = f'{file_name}.{stamp}'
+            Anchored(root, _page_rel(g.biz_sandbox, f'.history/{kept}')).atomic_write_bytes(
+                old, create_dirs=True)          # the previous version is kept, never removed
+        Anchored(root, rel).atomic_write_text(page_html, create_dirs=True)
+    except UnsafePath:
+        raise SchemaError(409, 'page_not_a_regular_file', 'This page path crosses a link or a non-plain folder; '
+                                                          'publishing refuses to follow it', file=file_name)
     return jsonify({'file': file_name, 'url': _page_url(file_name), 'bytes': len(page_html.encode('utf-8')),
-                    'previous_kept_as': kept.name if kept else None,
+                    'previous_kept_as': kept,
                     'next': 'Register it: POST /api/biz/v1/registry/pages {file, label, section, ...}'}), 200
 
 
@@ -464,11 +1039,15 @@ def dev_page_get(file_name):
     if not g.biz_sandbox:
         raise SchemaError(404, 'not_a_sandbox', 'This is not a dev sandbox')
     check_file(file_name)
-    path = _pages_dir(g.biz_sandbox) / file_name
-    if not path.is_file():
+    path = Anchored(_canvas_dir(), _page_rel(g.biz_sandbox, file_name))     # no-follow (PR #597 class, D1)
+    try:
+        page_html = path.read_text(encoding='utf-8') if path.is_file() else None
+    except (OSError, UnsafePath, UnicodeDecodeError):
+        page_html = None
+    if page_html is None:
         raise SchemaError(404, 'not_found', 'No such page in this sandbox')
     page = g.biz_store.page_for_serve(file_name)
-    return jsonify({'file': file_name, 'url': _page_url(file_name), 'html': path.read_text(encoding='utf-8'),
+    return jsonify({'file': file_name, 'url': _page_url(file_name), 'html': page_html,
                     'registered': page is not None,
                     'shell_injection': _shell_tags(page, g.biz_sandbox).decode('utf-8') if page else None})
 
@@ -524,7 +1103,7 @@ def list_records(collection):
 @biz_bp.post(f'{API}/<collection>')
 def create_record(collection):
     body = _body()
-    rec = g.biz_store.create(collection, body.get('data'), source=body.get('source'), **_w())
+    rec = g.biz_store.create(collection, body.get('data'), source=body.get('source'), **_ws())
     return jsonify(rec), 201
 
 
@@ -548,7 +1127,7 @@ def _if_match():
 def patch_record(collection, rid):
     body = _body()
     rec = g.biz_store.update(collection, rid, body.get('data'), expected_version=_if_match(),
-                             clear=body.get('clear'), source=body.get('source'), **_w())
+                             clear=body.get('clear'), source=body.get('source'), **_ws())
     return jsonify(rec)
 
 
@@ -559,12 +1138,12 @@ def record_timeline(collection, rid):
 
 @biz_bp.post(f'{API}/<collection>/<rid>/archive')
 def archive_record(collection, rid):
-    return jsonify(g.biz_store.set_archived(collection, rid, True, source=_body().get('source'), **_w()))
+    return jsonify(g.biz_store.set_archived(collection, rid, True, source=_body().get('source'), **_ws()))
 
 
 @biz_bp.post(f'{API}/<collection>/<rid>/unarchive')
 def unarchive_record(collection, rid):
-    return jsonify(g.biz_store.set_archived(collection, rid, False, source=_body().get('source'), **_w()))
+    return jsonify(g.biz_store.set_archived(collection, rid, False, source=_body().get('source'), **_ws()))
 
 
 # ── the SDK, the menu shell and the SDK doc: fixed files, served from the image ──
@@ -638,3 +1217,17 @@ def shell_injection(rel_path: str, content: bytes) -> bytes:
     except Exception:
         logger.warning('biz: shell injection skipped for %s', rel_path, exc_info=True)
         return b''
+
+
+# ── pack routes: added once at import, before the blueprint is registered ──
+def _register_pack_routes():
+    from services.biz import packs as _packs
+    from services.biz.schema import PACKS_DIR
+    try:
+        return _packs.register_routes(biz_bp, API, PackContext, PACKS_DIR)
+    except Exception:
+        logger.exception('biz: pack routes not registered')
+        return []
+
+
+PACK_ROUTES = _register_pack_routes()

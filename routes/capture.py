@@ -35,6 +35,7 @@ from flask import Blueprint, jsonify, request, send_file
 from PIL import Image, ImageOps
 
 from services.paths import RUNTIME_DIR
+from services.safe_open import Anchored, UnsafePath  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 capture_bp = Blueprint('capture', __name__)
@@ -52,6 +53,11 @@ INDEX_PATH = CAPTURES_DIR / "index.json"
 ALLOWED_PHOTO_EXTS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp', '.gif', '.mp4', '.mov'}
 ALLOWED_VIDEO_EXTS = {'.mp4', '.mov'}
 ALLOWED_ANNOTATION_EXTS = {'.png', '.jpg', '.jpeg', '.webp'}
+
+def _cap(path) -> Anchored:
+    """A path under captures/, for a no-follow walk from the captures MOUNT point."""
+    return Anchored(CAPTURES_DIR, path)
+
 
 THUMB_SIZE = 400
 THUMB_QUALITY = 85
@@ -80,8 +86,8 @@ def _locked_json(path, default=None):
     If the file does not exist yet *default* is used as the initial value
     and the file is created.  The directory is ensured automatically.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(path, 'a+')          # create if missing
+    # captures/ is agent-writable on some tenants: no-follow walk, creating parents
+    fd = _cap(path).open('a+', create_dirs=True)          # create if missing
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         fd.seek(0)
@@ -99,15 +105,14 @@ def _locked_json(path, default=None):
 def _read_json_safe(path, default=None):
     """Read a JSON file without locking (read-only paths like receipts)."""
     try:
-        return json.loads(path.read_text(encoding='utf-8'))
-    except (FileNotFoundError, json.JSONDecodeError):
+        return json.loads(_cap(path).read_text(max_bytes=16 * 1024 * 1024))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return default
 
 
 def _write_json_safe(path, data):
     """Write a JSON file atomically-ish (for small one-off writes like receipts)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, default=str, ensure_ascii=False), encoding='utf-8')
+    _cap(path).write_text(json.dumps(data, indent=2, default=str, ensure_ascii=False), create_dirs=True)
 
 
 # ---------------------------------------------------------------------------
@@ -133,27 +138,29 @@ def _new_share_token():
 def _strip_exif_keep_orientation(src_path: Path, dst_path: Path) -> None:
     """Strip all EXIF except orientation, re-save as JPEG."""
     try:
-        img = ImageOps.exif_transpose(Image.open(src_path))
-        # Convert to RGB if needed (handles RGBA, P modes)
-        if img.mode not in ('RGB', 'L'):
-            img = img.convert('RGB')
-        img.save(dst_path, 'JPEG', quality=92)
+        with _cap(src_path).open('rb') as _src:
+            img = ImageOps.exif_transpose(Image.open(_src))
+            # Convert to RGB if needed (handles RGBA, P modes)
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            with _cap(dst_path).open('wb') as _dst:
+                img.save(_dst, 'JPEG', quality=92)
     except Exception as exc:
         logger.warning("EXIF strip failed for %s: %s -- copying raw", src_path, exc)
-        # Fail-soft: copy the original bytes through
-        import shutil
-        shutil.copy2(src_path, dst_path)
+        # Fail-soft: copy the original bytes through (no-follow on both ends)
+        _cap(dst_path).write_bytes(_cap(src_path).read_bytes())
 
 
 def _make_thumbnail(src_path: Path, dst_path: Path) -> None:
     """Generate a 400px thumbnail on longest side, JPEG quality 85."""
     try:
-        img = ImageOps.exif_transpose(Image.open(src_path))
-        if img.mode not in ('RGB', 'L'):
-            img = img.convert('RGB')
-        img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.LANCZOS)
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(dst_path, 'JPEG', quality=THUMB_QUALITY)
+        with _cap(src_path).open('rb') as _src:
+            img = ImageOps.exif_transpose(Image.open(_src))
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            img.thumbnail((THUMB_SIZE, THUMB_SIZE), Image.LANCZOS)
+            with _cap(dst_path).open('wb', create_dirs=True) as _dst:
+                img.save(_dst, 'JPEG', quality=THUMB_QUALITY)
     except Exception as exc:
         logger.warning("Thumbnail generation failed for %s: %s", src_path, exc)
 
@@ -474,8 +481,9 @@ def upload_photo(album_id):
     album_dir = ALBUMS_SUBDIR / album_id
     media_path = album_dir / 'media' / f"{photo_id}{ext}"
 
-    # Save the uploaded file
-    file.save(str(media_path))
+    # Save the uploaded file (no-follow: the album dirs are agent-writable on some tenants)
+    with _cap(media_path).open('wb', create_dirs=True) as _out:
+        file.save(_out)
 
     # Strip EXIF and generate thumbnail for photos
     if not is_video:
@@ -484,7 +492,7 @@ def upload_photo(album_id):
         # If we converted to .jpg and the original was not .jpg, remove the original
         if clean_path != media_path:
             try:
-                media_path.unlink()
+                _cap(media_path).unlink()   # no-follow walk (captures/ is agent-writable)
             except OSError:
                 pass
             media_path = clean_path
@@ -519,18 +527,20 @@ def upload_photo(album_id):
 @capture_bp.route('/albums/<album_id>/media/<photo_id>', methods=['GET'])
 def serve_media(album_id, photo_id):
     """Serve a photo or video file. Includes Accept-Ranges for video seeking."""
-    album_dir = ALBUMS_SUBDIR / album_id
-    if not album_dir.exists():
+    # no-follow listing + one no-follow open (there was no containment check at
+    # all: a symlinked media file was served; review 2 of PR #597, H-C)
+    try:
+        media_dir = _cap(ALBUMS_SUBDIR / album_id / 'media')
+        candidates = media_dir.iterdir() if media_dir.is_dir() else None
+    except (OSError, UnsafePath):
+        candidates = None
+    if candidates is None:
         return jsonify({'error': 'Album not found'}), 404
-
-    media_dir = album_dir / 'media'
-    # Search for any file matching the photo_id prefix
     match = None
-    if media_dir.exists():
-        for candidate in media_dir.iterdir():
-            if candidate.stem == photo_id and not candidate.name.startswith('.'):
-                match = candidate
-                break
+    for candidate in candidates:
+        if candidate.stem == photo_id and not candidate.name.startswith('.') and candidate.is_file():
+            match = candidate
+            break
 
     if match is None:
         return jsonify({'error': 'Media not found'}), 404
@@ -546,7 +556,9 @@ def serve_media(album_id, photo_id):
     elif suffix in ('.webp',):
         mime_type = 'image/webp'
 
-    resp = send_file(str(match), mimetype=mime_type)
+    resp = match.send(mimetype=mime_type)
+    if resp is None:
+        return jsonify({'error': 'Media not found'}), 404
     resp.headers['Accept-Ranges'] = 'bytes'
     return resp
 
@@ -554,11 +566,12 @@ def serve_media(album_id, photo_id):
 @capture_bp.route('/albums/<album_id>/thumb/<photo_id>', methods=['GET'])
 def serve_thumb(album_id, photo_id):
     """Serve a 400px thumbnail."""
-    thumb_path = ALBUMS_SUBDIR / album_id / 'thumbs' / f"{photo_id}.jpg"
-    if not thumb_path.exists():
+    try:
+        resp = _cap(ALBUMS_SUBDIR / album_id / 'thumbs' / f"{photo_id}.jpg").send(mimetype='image/jpeg')
+    except UnsafePath:
+        resp = None
+    if resp is None:
         return jsonify({'error': 'Thumbnail not found'}), 404
-
-    resp = send_file(str(thumb_path), mimetype='image/jpeg')
     resp.headers['Cache-Control'] = 'private, max-age=86400'
     return resp
 
@@ -617,19 +630,22 @@ def annotate_photo(album_id, photo_id):
     album_dir = ALBUMS_SUBDIR / album_id
     annotated_path = album_dir / 'media' / f"{photo_id}.annotated.jpg"
     save_path = album_dir / 'media' / f"_annotation_tmp_{photo_id}.png"
-    file.save(str(save_path))
+    with _cap(save_path).open('wb') as _out:
+        file.save(_out)
 
     try:
-        img = Image.open(save_path)
-        if img.mode not in ('RGB', 'L'):
-            img = img.convert('RGB')
-        img.save(annotated_path, 'JPEG', quality=90)
+        with _cap(save_path).open('rb') as _src:
+            img = Image.open(_src)
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            with _cap(annotated_path).open('wb') as _dst:
+                img.save(_dst, 'JPEG', quality=90)
     except Exception as exc:
         logger.error("Failed to process annotation image: %s", exc)
         return jsonify({'error': 'Failed to process annotation image'}), 500
     finally:
         try:
-            save_path.unlink()
+            _cap(save_path).unlink()   # no-follow walk (captures/ is agent-writable)
         except OSError:
             pass
 
@@ -710,7 +726,7 @@ def _describe_with_vision(image_path: Path) -> dict:
     ext = image_path.suffix.lower()
     mime = 'image/jpeg' if ext in ('.jpg', '.jpeg') else 'image/png'
 
-    with open(image_path, 'rb') as f:
+    with _cap(image_path).open('rb') as f:  # no-follow
         b64_data = base64.b64encode(f.read()).decode('utf-8')
     data_url = f"data:{mime};base64,{b64_data}"
 

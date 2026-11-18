@@ -51,6 +51,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
+from services.safe_proc import minimal_env  # spawned tools get no server secrets
+
 from .base_provider import (
     CLONE_ERROR_CODES, CloneCapableTTSProvider, CloneError, CloneInfo,
     CloneRequest, CloneResult, soft_retire_clone_dir,
@@ -200,7 +202,7 @@ def _measure_duration(path: Path) -> Optional[float]:
         out = subprocess.run(
             [exe, '-v', 'error', '-show_entries', 'format=duration',
              '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
-            capture_output=True, text=True, timeout=20, check=False,
+            capture_output=True, text=True, timeout=20, check=False, env=minimal_env(),
         )
         return float(out.stdout.strip())
     except (ValueError, OSError, subprocess.SubprocessError):
@@ -220,7 +222,7 @@ def _transcode_for_wire(src: Path) -> Optional[Path]:
         subprocess.run(
             [exe, '-nostdin', '-v', 'error', '-y', '-i', str(src),
              '-ac', '1', '-ar', '24000', '-c:a', 'flac', str(dst)],
-            capture_output=True, timeout=60, check=True,
+            capture_output=True, timeout=60, check=True, env=minimal_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -296,7 +298,8 @@ def _measure_loudness(wav: bytes) -> Optional[Tuple[float, float]]:
             [exe, '-hide_banner', '-nostats', '-f', 'wav', '-i', 'pipe:0',
              '-af', f'loudnorm=I={_LOUDNORM_I}:TP={_LOUDNORM_TP}:LRA=11:print_format=json',
              '-f', 'null', '-'],
-            input=wav, capture_output=True, timeout=_LOUDNORM_TIMEOUT_S, check=False)
+            input=wav, capture_output=True, timeout=_LOUDNORM_TIMEOUT_S, check=False,
+            env=minimal_env())
     except (OSError, subprocess.SubprocessError):
         return None
     err = out.stderr.decode('utf-8', 'replace')

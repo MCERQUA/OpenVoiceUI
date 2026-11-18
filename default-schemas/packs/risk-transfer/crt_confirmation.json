@@ -1,0 +1,66 @@
+{
+  "collection": "crt_confirmation",
+  "label": "Staff confirmation",
+  "label_plural": "Staff confirmations",
+  "title_field": "record_collection",
+  "staff_only": true,
+  "append_only": true,
+  "description": "A person checked these fields of one record version against one stored document. Created only by POST /api/biz/v1/crt/confirm.",
+  "required": [
+    "record_collection",
+    "record_id",
+    "record_version",
+    "fields"
+  ],
+  "fields": {
+    "record_collection": {
+      "type": "string",
+      "label": "Record type"
+    },
+    "record_id": {
+      "type": "string",
+      "label": "Record"
+    },
+    "record_version": {
+      "type": "integer",
+      "label": "Record version",
+      "min": 1
+    },
+    "fields": {
+      "type": "list",
+      "label": "Fields checked",
+      "items": "string"
+    },
+    "source_document_id": {
+      "type": "ref",
+      "label": "Source document",
+      "ref": "document"
+    },
+    "source_sha256": {
+      "type": "string",
+      "label": "Source file hash",
+      "format": "sha256"
+    },
+    "confirmed_by": {
+      "type": "string",
+      "label": "Confirmed by"
+    },
+    "note": {
+      "type": "text",
+      "label": "Note"
+    },
+    "on_staff_surface": {
+      "type": "boolean",
+      "label": "Made on the staff surface (set by the server)"
+    },
+    "approved_diff_sha256": {
+      "type": "string",
+      "label": "Approved diff (sha256)",
+      "format": "sha256"
+    },
+    "approved_against": {
+      "type": "object",
+      "label": "Approved against (the version in use it was compared with; set by the server)"
+    }
+  }
+}

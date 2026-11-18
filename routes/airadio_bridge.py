@@ -38,6 +38,7 @@ from pathlib import Path
 import requests as http_requests
 from flask import Blueprint, jsonify, request
 
+from services.safe_open import UnsafePath, read_beneath
 from services.paths import (
     GENERATED_MUSIC_DIR,
     KNOWN_FACES_DIR,
@@ -443,54 +444,66 @@ def _resolve_local_song(filename: str, playlist: str):
     return fallback if fallback else (None, None)
 
 
-def _resolve_image_path(raw_path: str):
-    """
-    Map a user-supplied image path (URL-style like `/uploads/foo.png` or a
-    bare filename) to an absolute Path inside one of the whitelisted dirs.
+def _image_base_and_rel(raw_path):
+    """LEXICALLY map a caller-supplied image path to (whitelisted base dir, relative name).
 
-    Returns Path on success, None on rejection. Strict — no `..`, no absolute
-    paths outside the whitelist.
+    Accepts URL-style `/uploads/foo.png` (one level, as before), a bare filename
+    (uploads/ by convention), or an absolute path written under a whitelisted
+    dir. Nothing is resolved here: the open (_read_whitelisted_image) walks the
+    relative name with no-follow fds, so a symlink planted or swapped in by the
+    agent (uploads/ is mounted read-write in its container) is refused instead of
+    followed. Returns None for anything else.
     """
     if not raw_path or not isinstance(raw_path, str):
         return None
-
-    # Reject anything containing `..` outright before anything else.
-    if ".." in raw_path:
+    if ".." in raw_path or "\\" in raw_path or "\x00" in raw_path:
         return None
-
-    # Reject absolute paths that aren't already inside a whitelisted dir.
-    candidate = None
     if raw_path.startswith("/"):
-        # First, try matching a known URL prefix.
         for prefix, base in _URL_PREFIX_MAP.items():
             if raw_path.startswith(prefix):
                 relative = raw_path[len(prefix):]
-                if "/" in relative or "\\" in relative:
-                    # No nested subdirs allowed (matches existing /uploads style).
-                    return None
-                candidate = (base / relative).resolve()
-                break
-        if candidate is None:
-            # An absolute path that doesn't begin with one of our prefixes is
-            # never accepted — that would let the agent reach into the host FS.
-            return None
-    else:
-        # Bare filename — assume uploads/ by convention.
-        if "/" in raw_path or "\\" in raw_path:
-            return None
-        candidate = (UPLOADS_DIR / raw_path).resolve()
+                if not relative or "/" in relative:
+                    return None  # no nested subdirs (matches existing /uploads style)
+                return base, relative
+        norm = os.path.normpath(raw_path)
+        for allowed in _IMAGE_WHITELIST_DIRS:
+            base = str(allowed)
+            if norm.startswith(base + "/"):
+                return allowed, norm[len(base) + 1:]
+        return None  # an absolute path outside the whitelist is never accepted
+    if "/" in raw_path:
+        return None
+    return UPLOADS_DIR, raw_path
 
-    if not candidate.is_file():
+
+_IMAGE_MAX_BYTES = 25 * 1024 * 1024
+
+
+def _read_whitelisted_image(raw_path, exts=None):
+    """(bytes, filename) of an image inside a whitelisted dir, or None.
+
+    Opened ONCE, no-follow at every component, fstat-checked as a regular file
+    and read from that fd: there is no window between check and read for a
+    symlink swap (review of PR #597, H1)."""
+    mapped = _image_base_and_rel(raw_path)
+    if mapped is None:
+        return None
+    base, rel = mapped
+    name = rel.rsplit("/", 1)[-1]
+    if exts is not None and Path(name).suffix.lower() not in exts:
+        return None
+    try:
+        return read_beneath(base, rel, max_bytes=_IMAGE_MAX_BYTES), name
+    except (OSError, UnsafePath):
         return None
 
-    # Final containment check against the whitelist.
-    for allowed in _IMAGE_WHITELIST_DIRS:
-        try:
-            candidate.relative_to(allowed)
-            return candidate
-        except ValueError:
-            continue
-    return None
+
+def _resolve_image_path(raw_path: str):
+    """Compatibility shim: the whitelisted base/rel as a Path, NOT for opening.
+
+    Opening must go through _read_whitelisted_image (no-follow, one open)."""
+    mapped = _image_base_and_rel(raw_path)
+    return None if mapped is None else mapped[0] / mapped[1]
 
 
 # Keys AI-Radio's push-song `meta` schema actually accepts (see
@@ -503,52 +516,63 @@ _AIRADIO_META_KEYS = (
 )
 
 
-def _encode_cover_data_url(cover_path: str) -> str | None:
-    """Read a local image file and return a `data:` URL, or None if unreadable.
+def _encode_cover_data_url(cover) -> str | None:
+    """`data:` URL for cover = (bytes, filename) already read from a pinned fd.
 
     AI-Radio's push-song decodes a `meta.cover` data URL into a song_cover
     image. Used so an agent can attach artwork in the same call that uploads
-    the audio."""
-    try:
-        p = Path(cover_path)
-        if not p.is_file():
-            return None
-        raw = p.read_bytes()
-        if not raw:
-            return None
-        mime, _ = mimetypes.guess_type(str(p))
-        if not mime or not mime.startswith("image/"):
-            mime = "image/png"
-        return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
-    except OSError as exc:
-        logger.warning("AI-Radio cover read failed for %s: %s", cover_path, exc)
+    the audio. Takes BYTES, never a path: re-opening a checked path by name was
+    the H1 race."""
+    if not cover:
         return None
+    raw, name = cover
+    if not raw:
+        return None
+    mime, _ = mimetypes.guess_type(name)
+    if not mime or not mime.startswith("image/"):
+        mime = "image/png"
+    return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
 
 
 _COVER_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+_COVER_PATH_EXTS = _COVER_EXTS + (".gif",)
 
 
-def _find_sibling_cover(song_path: Path) -> str | None:
-    """Return artwork that lives next to the song, or None.
+def _resolve_cover_path(raw_path):
+    """Read a caller-supplied push-song `cover_path` confined to the image dirs.
+
+    The bytes are base64'd and sent to AI-Radio, so an unconfined path was a
+    read-any-file primitive for anyone holding the agent key. Accepts what
+    set-image accepts plus an absolute path under a whitelisted dir; the file
+    must be an image by extension. Returns (bytes, filename) or None."""
+    return _read_whitelisted_image(raw_path, exts=_COVER_PATH_EXTS)
+
+
+def _read_song(local_path: Path) -> bytes:
+    """Song bytes, opened no-follow inside its own (trusted) music dir."""
+    return read_beneath(local_path.parent, local_path.name)
+
+
+def _find_sibling_cover(song_path: Path):
+    """(bytes, filename) of artwork that lives next to the song, or None.
 
     Looks for `<stem>.<img>` beside the audio file, then a `covers/<stem>.<img>`
     subdir. This is what makes covers AUTOMATIC: save artwork as `<song>.png`
     alongside `<song>.mp3` and every push attaches it with no explicit
-    cover_path and no change to the voice-tag."""
-    for ext in _COVER_EXTS:
-        cand = song_path.with_suffix(ext)
-        if cand.is_file():
-            return str(cand)
-    covers_dir = song_path.parent / "covers"
-    if covers_dir.is_dir():
-        for ext in _COVER_EXTS:
-            cand = covers_dir / (song_path.stem + ext)
-            if cand.is_file():
-                return str(cand)
+    cover_path and no change to the voice-tag. The music dirs are agent-writable,
+    so a sibling is opened no-follow too (a `<song>.png -> /proc/self/environ`
+    symlink used to be attached as the cover)."""
+    base = song_path.parent
+    for rel in [song_path.stem + ext for ext in _COVER_EXTS] + \
+               ["covers/" + song_path.stem + ext for ext in _COVER_EXTS]:
+        try:
+            return read_beneath(base, rel, max_bytes=_IMAGE_MAX_BYTES), rel.rsplit("/", 1)[-1]
+        except (OSError, UnsafePath):
+            continue
     return None
 
 
-def _build_song_meta(fields: dict, audio_bytes: bytes, cover_path: str | None) -> dict:
+def _build_song_meta(fields: dict, audio_bytes: bytes, cover=None) -> dict:
     """Translate the bridge's flat field dict into AI-Radio's `meta` JSON shape.
 
     AI-Radio's /api/agent/push-song expects multipart `audio` (File) + `meta`
@@ -570,15 +594,15 @@ def _build_song_meta(fields: dict, audio_bytes: bytes, cover_path: str | None) -
     if not meta.get("sunoId") and not meta.get("sourceHash"):
         meta["sourceHash"] = hashlib.sha256(audio_bytes).hexdigest()
 
-    if cover_path and not meta.get("cover"):
-        cov = _encode_cover_data_url(cover_path)
+    if cover and not meta.get("cover"):
+        cov = _encode_cover_data_url(cover)
         if cov:
             meta["cover"] = cov
 
     return meta
 
 
-def _stream_song(local_path: Path, fields: dict, cover_path: str | None = None):
+def _stream_song(local_path: Path, fields: dict, cover=None):
     """
     POST a song file to AI-Radio's /api/agent/push-song as multipart/form-data.
 
@@ -588,14 +612,14 @@ def _stream_song(local_path: Path, fields: dict, cover_path: str | None = None):
     server validates, so every caller (push-song, push-playlist) hits it
     correctly. AI-Radio dedupes via sunoId/sourceHash.
     """
-    raw = local_path.read_bytes()
+    raw = _read_song(local_path)
     mime, _ = mimetypes.guess_type(str(local_path))
     if not mime:
         mime = "audio/mpeg"
     # No explicit cover? Auto-attach artwork sitting next to the song.
-    if not cover_path:
-        cover_path = _find_sibling_cover(local_path)
-    meta = _build_song_meta(fields, raw, cover_path)
+    if not cover:
+        cover = _find_sibling_cover(local_path)
+    meta = _build_song_meta(fields, raw, cover)
     files = {"audio": (local_path.name, raw, mime)}
     return _airadio_call(
         "POST",
@@ -605,23 +629,24 @@ def _stream_song(local_path: Path, fields: dict, cover_path: str | None = None):
     )
 
 
-def _stream_image(local_path: Path, fields: dict):
-    """POST an image file to AI-Radio's /api/agent/set-image.
+def _stream_image(image, fields: dict):
+    """POST image = (bytes, filename) to AI-Radio's /api/agent/set-image.
 
     The server expects multipart `image` (the File) + `meta` (a JSON string of
     `{target, targetId?}`) — NOT `file` + flat fields. `fields` already carries
-    the right keys, so we just JSON-encode it under `meta`."""
-    mime, _ = mimetypes.guess_type(str(local_path))
+    the right keys, so we just JSON-encode it under `meta`. Bytes, not a path:
+    they were read from the one no-follow open."""
+    raw, name = image
+    mime, _ = mimetypes.guess_type(name)
     if not mime:
         mime = "application/octet-stream"
-    with open(local_path, "rb") as fh:
-        files = {"image": (local_path.name, fh, mime)}
-        return _airadio_call(
-            "POST",
-            "/api/agent/set-image",
-            files=files,
-            data={"meta": json.dumps(fields or {})},
-        )
+    files = {"image": (name, raw, mime)}
+    return _airadio_call(
+        "POST",
+        "/api/agent/set-image",
+        files=files,
+        data={"meta": json.dumps(fields or {})},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -646,6 +671,20 @@ def push_song():
     playlist = body.get("playlist", "library")
     title = body.get("title")
     cover_path = body.get("cover_path")
+    if cover_path:
+        safe_cover = _resolve_cover_path(cover_path)
+        if safe_cover is None:
+            return jsonify({
+                "ok": False,
+                "error": {
+                    "code": "VALIDATION_FAILED",
+                    "message": "cover_path must be an image inside uploads/ "
+                               "(e.g. /uploads/cover.png or cover.png)",
+                },
+            }), 400
+        cover = safe_cover
+    else:
+        cover = None
 
     local_path, meta = _resolve_local_song(filename, playlist)
     if local_path is None:
@@ -682,7 +721,13 @@ def push_song():
             fields[dst_key] = str(meta[src_key])
 
     print(f"📻 push-song: {local_path.name} → AI-Radio (playlist={playlist})")
-    result = _stream_song(local_path, fields, cover_path=cover_path)
+    try:
+        result = _stream_song(local_path, fields, cover=cover)
+    except (OSError, UnsafePath):
+        return jsonify({
+            "ok": False,
+            "error": {"code": "NOT_FOUND", "message": f"Song '{filename}' could not be read"},
+        }), 404
     if not result["ok"]:
         return _bridge_response(result)
 
@@ -792,7 +837,11 @@ def push_playlist():
         ):
             if song_meta and song_meta.get(src_key) is not None:
                 fields[dst_key] = str(song_meta[src_key])
-        song_result = _stream_song(local_path, fields)
+        try:
+            song_result = _stream_song(local_path, fields)
+        except (OSError, UnsafePath):
+            failed.append({"filename": fname, "error": "NOT_FOUND"})
+            continue
         if song_result["ok"]:
             sd = song_result.get("data") or {}
             pushed.append({
@@ -842,8 +891,8 @@ def set_image():
             },
         }), 400
 
-    local_path = _resolve_image_path(raw_path)
-    if local_path is None:
+    image = _read_whitelisted_image(raw_path)
+    if image is None:
         return jsonify({
             "ok": False,
             "error": {
@@ -869,8 +918,8 @@ def set_image():
     if target_id:
         fields["targetId"] = str(target_id)
 
-    print(f"📻 set-image: target={target} id={target_id or '-'} file={local_path.name}")
-    result = _stream_image(local_path, fields)
+    print(f"📻 set-image: target={target} id={target_id or '-'} file={image[1]}")
+    result = _stream_image(image, fields)
     return _bridge_response(result)
 
 

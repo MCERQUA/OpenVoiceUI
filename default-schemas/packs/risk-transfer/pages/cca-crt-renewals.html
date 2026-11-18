@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Renewals Board</title>
+<style>
+:root{--brand:#3b82f6;--brand-ink:#fff;--bg:#f6f8fb;--surface:#fff;--border:#dde3ea;--text:#16202c;--muted:#5b6876;
+--ok:#15803d;--ok-bg:#dcfce7;--warn:#a16207;--warn-bg:#fef9c3;--bad:#b91c1c;--bad-bg:#fee2e2;--info:#1d4ed8;--info-bg:#dbeafe;--grey-bg:#eef1f4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:1.35rem;margin:4px 0 2px} h2{font-size:1.05rem;margin:22px 0 8px}
+.sub{color:var(--muted);margin:0 0 14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin:0 0 12px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{display:inline-block;border-radius:999px;padding:3px 10px;font-size:.8rem;font-weight:600;white-space:nowrap}
+.s-meets,.s-OK{background:var(--ok-bg);color:var(--ok)} .s-meets_accepted{background:var(--warn-bg);color:var(--warn)} .s-expiring_30,.s-expiring_15,.s-SUGGESTED{background:var(--warn-bg);color:var(--warn)}
+.s-variance,.s-missing,.s-expired,.s-bad{background:var(--bad-bg);color:var(--bad)} .s-cant_tell,.s-UNCONFIRMED{background:var(--info-bg);color:var(--info)}
+.s-NA,.s-muted{background:var(--grey-bg);color:var(--muted)}
+button,.btn{min-height:44px;border-radius:8px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);
+padding:0 14px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+button.ghost,.btn.ghost{background:transparent;color:var(--brand)} button:disabled{opacity:.5;cursor:default}
+input,select,textarea{min-height:44px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;width:100%;background:#fff;color:var(--text)}
+label{display:block;font-size:.85rem;color:var(--muted);margin:8px 0 4px}
+table{width:100%;border-collapse:collapse;background:var(--surface)} th,td{text-align:left;padding:8px;border-bottom:1px solid var(--border);vertical-align:top;font-size:.9rem}
+th{color:var(--muted);font-weight:600} .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+.banner{border-radius:8px;padding:10px 12px;margin:0 0 12px;display:none} .banner.err{display:block;background:var(--bad-bg);color:var(--bad)}
+.banner.ok{display:block;background:var(--ok-bg);color:var(--ok)}
+.disclaimer{color:var(--muted);font-size:.82rem;margin-top:24px;border-top:1px solid var(--border);padding-top:10px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:.9rem} .kv dt{color:var(--muted)} .kv dd{margin:0}
+.muted{color:var(--muted)} .big{font-size:1.6rem;font-weight:700} a{color:var(--brand)}
+@media (max-width:600px){.hide-sm{display:none} main{padding:12px}}
+</style>
+</head>
+<body>
+<main>
+<div id="banner" class="banner" role="status"></div>
+
+<h1>Renewals</h1>
+<p class="sub">Policies on file that expire soon. Chase texts are drafts: copy one, send it yourself, then mark it sent.</p>
+<div class="grid" id="cols"></div>
+<p class="disclaimer">Evidence check against the requirement set you approved. Not a coverage opinion or legal advice.
+Readings count only after staff confirm them against the stored document. Nothing on this page sends, holds or pays anything by itself.</p>
+</main>
+<script src="/jb/v1/jb.js"></script>
+<script>
+(function () {
+  'use strict';
+  var Q = new URLSearchParams(location.search);
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'text') n.textContent = attrs[k];
+      else if (k === 'on') Object.keys(attrs.on).forEach(function (e) { n.addEventListener(e, attrs.on[e]); });
+      else if (attrs[k] !== null && attrs[k] !== undefined && attrs[k] !== false) n.setAttribute(k, attrs[k]);
+    });
+    [].concat(kids || []).forEach(function (c) { if (c !== null && c !== undefined) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return n;
+  }
+  var LABEL = {meets: 'Meets requirements (documents reviewed)',
+    meets_accepted: 'Meets requirements except contractor-accepted variances (documents reviewed)',
+    expiring_30: 'Meets requirements (documents reviewed), expiring within 30 days',
+    expiring_15: 'Meets requirements (documents reviewed), expiring within 15 days', cant_tell: "Can't tell (needs staff check)", missing: 'Missing documents',
+    variance: 'Variance', expired: 'Expired'};
+  function chip(state, text) {
+    var cls = state === 'N/A' ? 'NA' : String(state || 'muted').split(':')[0];
+    if (/^(NOT_AI|LIMIT_LOW|WRONG|EXCLUSION|PRODUCER|PL_NO|COMPLETED|SCOPE|BLANKET|MISSING|EXPIRED)/.test(cls)) cls = 'bad';
+    return el('span', {'class': 'chip s-' + cls, text: text || LABEL[state] || state});
+  }
+  function money(n) { return typeof n === 'number' ? '$' + n.toLocaleString('en-US') : '-'; }
+  function say(msg, ok) { var b = document.getElementById('banner'); b.textContent = msg; b.className = 'banner ' + (ok ? 'ok' : 'err'); }
+  function fail(e) { say((e && (e.message || e.code)) || 'Something went wrong'); if (window.console) console.error(e); }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
+  function name(c) { var d = (c && c.data) || {}; return d.company_name || d.name || '(no name)'; }
+  function link(file, params, text) {
+    var q = new URLSearchParams(params);
+    if (jb.staffBase) {                   // a platform staff page links to the other staff pages (host ruling H4)
+      if (jb.sandbox) q.set('sandbox', jb.sandbox);
+      return el('a', {href: jb.staffBase + file + '?' + q.toString(), text: text});
+    }
+    var base = jb.sandbox ? '/pages/sandbox/' + jb.sandbox + '/' : '/pages/';
+    return el('a', {href: base + file + '?' + q.toString(), text: text});
+  }
+  function field(lbl, input) { return el('div', {}, [el('label', {text: lbl}), input]); }
+  var api = jb.pack('crt');
+  var U = {el: el, chip: chip, money: money, say: say, fail: fail, clear: clear, name: name, link: link, field: field, Q: Q, api: api, LABEL: LABEL};
+  try { if (jb.brand) jb.brand().then(function (b) { if (b && b.colors && b.colors.primary) document.documentElement.style.setProperty('--brand', b.colors.primary); }).catch(function () {}); } catch (e) {}
+  (function (U) {
+  var el = U.el;
+  function load() {
+    return U.api.get('renewals').then(function (r) {
+      var box = U.clear(document.getElementById('cols'));
+      [['T-30', 'Within 30 days'], ['T-15', 'Within 15 days'], ['T-0', 'Expired']].forEach(function (c) {
+        var col = el('div', {}, [el('h2', {text: c[1] + ' (' + r.columns[c[0]].length + ')'})]);
+        r.columns[c[0]].forEach(function (it) {
+          var ta = el('textarea', {rows: '4', readonly: 'readonly'}); ta.value = it.draft;
+          col.appendChild(el('div', {'class': 'card'}, [el('strong', {text: it.party_name || 'Sub'}),
+            el('div', {'class': 'muted', text: (it.line || '').toUpperCase() + ' - ' + (it.project_name || '') + ' - ' + it.expiration}),
+            el('div', {'class': 'muted', text: 'Producer: ' + [it.producer.producer_name, it.producer.producer_phone, it.producer.producer_email].filter(Boolean).join(', ')}),
+            ta, el('p', {'class': 'row'}, [
+              el('button', {type: 'button', 'class': 'ghost', text: 'Copy', on: {click: function () {
+                (navigator.clipboard ? navigator.clipboard.writeText(it.draft) : Promise.reject(new Error('Copy not available'))).then(function () { U.say('Copied', true); }).catch(U.fail); }}}),
+              el('button', {type: 'button', text: 'Marked sent', on: {click: function () {
+                U.api.post('assignment/' + it.assignment_id + '/chase-sent', {stage: c[0], policy_id: it.policy_id}).then(function () { U.say('Logged as sent', true); }).catch(U.fail); }}})])]));
+        });
+        box.appendChild(col);
+      });
+    }).catch(U.fail);
+  }
+  load();
+})(U);
+})();
+</script>
+</body>
+</html>

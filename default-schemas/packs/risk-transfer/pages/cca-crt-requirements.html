@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Requirement Sets</title>
+<style>
+:root{--brand:#3b82f6;--brand-ink:#fff;--bg:#f6f8fb;--surface:#fff;--border:#dde3ea;--text:#16202c;--muted:#5b6876;
+--ok:#15803d;--ok-bg:#dcfce7;--warn:#a16207;--warn-bg:#fef9c3;--bad:#b91c1c;--bad-bg:#fee2e2;--info:#1d4ed8;--info-bg:#dbeafe;--grey-bg:#eef1f4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:1.35rem;margin:4px 0 2px} h2{font-size:1.05rem;margin:22px 0 8px}
+.sub{color:var(--muted);margin:0 0 14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin:0 0 12px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{display:inline-block;border-radius:999px;padding:3px 10px;font-size:.8rem;font-weight:600;white-space:nowrap}
+.s-meets,.s-OK{background:var(--ok-bg);color:var(--ok)} .s-meets_accepted{background:var(--warn-bg);color:var(--warn)} .s-expiring_30,.s-expiring_15,.s-SUGGESTED{background:var(--warn-bg);color:var(--warn)}
+.s-variance,.s-missing,.s-expired,.s-bad{background:var(--bad-bg);color:var(--bad)} .s-cant_tell,.s-UNCONFIRMED{background:var(--info-bg);color:var(--info)}
+.s-NA,.s-muted{background:var(--grey-bg);color:var(--muted)}
+button,.btn{min-height:44px;border-radius:8px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);
+padding:0 14px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+button.ghost,.btn.ghost{background:transparent;color:var(--brand)} button:disabled{opacity:.5;cursor:default}
+input,select,textarea{min-height:44px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;width:100%;background:#fff;color:var(--text)}
+label{display:block;font-size:.85rem;color:var(--muted);margin:8px 0 4px}
+table{width:100%;border-collapse:collapse;background:var(--surface)} th,td{text-align:left;padding:8px;border-bottom:1px solid var(--border);vertical-align:top;font-size:.9rem}
+th{color:var(--muted);font-weight:600} .scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+.banner{border-radius:8px;padding:10px 12px;margin:0 0 12px;display:none} .banner.err{display:block;background:var(--bad-bg);color:var(--bad)}
+.banner.ok{display:block;background:var(--ok-bg);color:var(--ok)}
+.disclaimer{color:var(--muted);font-size:.82rem;margin-top:24px;border-top:1px solid var(--border);padding-top:10px}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:.9rem} .kv dt{color:var(--muted)} .kv dd{margin:0}
+.muted{color:var(--muted)} .big{font-size:1.6rem;font-weight:700} a{color:var(--brand)}
+@media (max-width:600px){.hide-sm{display:none} main{padding:12px}}
+</style>
+</head>
+<body>
+<main>
+<div id="banner" class="banner" role="status"></div>
+
+<h1>Requirement sets</h1>
+<p class="sub">Templates from the by-trade matrix (guide p.23-25). Every set starts as a DRAFT and is used only after a person on staff approves it.</p>
+<div id="sets"></div>
+<h2>Start from a template</h2>
+<div id="tpls" class="grid"></div>
+<p class="disclaimer">Evidence check against the requirement set you approved. Not a coverage opinion or legal advice.
+Readings count only after staff confirm them against the stored document. Nothing on this page sends, holds or pays anything by itself.</p>
+</main>
+<script src="/jb/v1/jb.js"></script>
+<script>
+(function () {
+  'use strict';
+  var Q = new URLSearchParams(location.search);
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === 'text') n.textContent = attrs[k];
+      else if (k === 'on') Object.keys(attrs.on).forEach(function (e) { n.addEventListener(e, attrs.on[e]); });
+      else if (attrs[k] !== null && attrs[k] !== undefined && attrs[k] !== false) n.setAttribute(k, attrs[k]);
+    });
+    [].concat(kids || []).forEach(function (c) { if (c !== null && c !== undefined) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return n;
+  }
+  var LABEL = {meets: 'Meets requirements (documents reviewed)',
+    meets_accepted: 'Meets requirements except contractor-accepted variances (documents reviewed)',
+    expiring_30: 'Meets requirements (documents reviewed), expiring within 30 days',
+    expiring_15: 'Meets requirements (documents reviewed), expiring within 15 days', cant_tell: "Can't tell (needs staff check)", missing: 'Missing documents',
+    variance: 'Variance', expired: 'Expired'};
+  function chip(state, text) {
+    var cls = state === 'N/A' ? 'NA' : String(state || 'muted').split(':')[0];
+    if (/^(NOT_AI|LIMIT_LOW|WRONG|EXCLUSION|PRODUCER|PL_NO|COMPLETED|SCOPE|BLANKET|MISSING|EXPIRED)/.test(cls)) cls = 'bad';
+    return el('span', {'class': 'chip s-' + cls, text: text || LABEL[state] || state});
+  }
+  function money(n) { return typeof n === 'number' ? '$' + n.toLocaleString('en-US') : '-'; }
+  function say(msg, ok) { var b = document.getElementById('banner'); b.textContent = msg; b.className = 'banner ' + (ok ? 'ok' : 'err'); }
+  function fail(e) { say((e && (e.message || e.code)) || 'Something went wrong'); if (window.console) console.error(e); }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); return n; }
+  function name(c) { var d = (c && c.data) || {}; return d.company_name || d.name || '(no name)'; }
+  function link(file, params, text) {
+    var q = new URLSearchParams(params);
+    if (jb.staffBase) {                   // a platform staff page links to the other staff pages (host ruling H4)
+      if (jb.sandbox) q.set('sandbox', jb.sandbox);
+      return el('a', {href: jb.staffBase + file + '?' + q.toString(), text: text});
+    }
+    var base = jb.sandbox ? '/pages/sandbox/' + jb.sandbox + '/' : '/pages/';
+    return el('a', {href: base + file + '?' + q.toString(), text: text});
+  }
+  function field(lbl, input) { return el('div', {}, [el('label', {text: lbl}), input]); }
+  var api = jb.pack('crt');
+  var U = {el: el, chip: chip, money: money, say: say, fail: fail, clear: clear, name: name, link: link, field: field, Q: Q, api: api, LABEL: LABEL};
+  try { if (jb.brand) jb.brand().then(function (b) { if (b && b.colors && b.colors.primary) document.documentElement.style.setProperty('--brand', b.colors.primary); }).catch(function () {}); } catch (e) {}
+  (function (U) {
+  var el = U.el;
+  function itemText(it) {
+    if (it.kind === 'limit') return (it.line || '').toUpperCase() + ' ' + it.limit.replace(/_/g, ' ') + ' at least ' + U.money(it.min) +
+      (it.ceiling && it.ceiling !== it.floor ? ' (guide range ' + U.money(it.floor) + ' to ' + U.money(it.ceiling) + ')' : '') +
+      (it.combined ? '; or GL ' + U.money(it.combined.gl_occ_floor) + '+ with GL + umbrella at least ' + U.money(it.combined.gl_occ_plus_umbrella_min) : '');
+    // rules 1.8.0 (H5): the edition is the one the verdict applies (the diff's edition_applied: from the edition field or
+    // the form list), said in words, so an edition moved between the two never reads the same as a dropped one
+    if (it.kind === 'endorsement') return (it.required === false ? 'Suggested: ' : '') + (it.forms || []).join('/') + ' (' + it.function.replace(/_/g, ' ') + ')' +
+      ', edition: ' + (it.edition_applied !== undefined && it.edition_applied !== null ? it.edition_applied : (it.edition ? it.edition + ' (as written)' : 'any edition')) +
+      (it.names_parties ? ', naming you and this project' : '');
+    if (it.kind === 'ai') return (it.line || '').toUpperCase() + ' additional insured box checked';
+    if (it.kind === 'cert_holder') return (it.line || '').toUpperCase() + ': certificate holder only (not additional insured)';
+    if (it.kind === 'tail') return (it.line || '').toUpperCase() + ': tail in place if claims-made';
+    if (it.kind === 'disallowed_exclusion') return 'No ' + it.code + ' exclusion' + (it.classes ? ': ' + it.classes.join(', ') : '') + (it.trade_categories ? ' (for ' + it.trade_categories.join(', ').replace(/_/g, ' ') + ')' : '') + (it.when_trade ? ' (old word rule: revise this set)' : '');
+    if (it.kind === 'producer') return 'Producer contact complete';
+    return it.kind;
+  }
+  function val(v) {
+    if (v === undefined || v === null) return '-';
+    if (Array.isArray(v)) return v.length ? v.join(', ') : '(empty)';
+    if (typeof v === 'object') return Object.keys(v).map(function (k) { return k + ': ' + val(v[k]); }).join('; ');
+    return String(v);
+  }
+  function renderDiff(box, d) {
+    U.clear(box);
+    var a = d.against || {};
+    // host ruling D (rules 1.6.0): the base is fixed by the server. "The version in use" only ever names an APPROVED set.
+    var head = a.kind === 'set' && a.approved === true ? 'the approved version in use: ' + (a.name || 'set') + ' v' + (a.set_version || '?') :
+      a.kind === 'template' ? 'the ' + (a.name || a.template_key) + ' template (no approved version of this set yet)' : 'nothing (a new set: every item is new)';
+    box.appendChild(el('h2', {text: 'Changes to review against ' + head}));
+    if (a.kind === 'set' && a.approved !== true) {
+      box.appendChild(el('p', {}, [U.chip('bad', 'Not approved'), ' The comparison base is not an approved set. Do not approve.']));
+    }
+    if (d.unapproved_between && d.unapproved_between.length) {
+      box.appendChild(el('p', {}, [U.chip('expiring_30', 'Built on drafts'), ' This draft builds on ' + d.unapproved_between.length +
+        ' unapproved draft(s) (' + d.unapproved_between.map(function (x) { return 'v' + (x.set_version || '?'); }).join(', ') +
+        '). Every change below is measured against the approved version, not those drafts.']));
+    }
+    if (d.floor_violations && d.floor_violations.length) {
+      box.appendChild(el('p', {}, [U.chip('bad', 'Below the safety floor'), ' ' + d.floor_violations.join('; ') + '. This set cannot be approved.']));
+    }
+    ['name', 'trade_category', 'notes'].forEach(function (k) {
+      var v = d[k] || {};
+      if (v.was !== v.now) box.appendChild(el('p', {}, [U.chip('bad', 'Changed'), ' set ' + k.replace(/_/g, ' ') + ': ' + val(v.was) + ' -> ' + val(v.now)]));
+    });
+    // host ruling M (rules 1.6.0): every key of every item, then and now; a changed key is marked, never a bare chip
+    // rules 1.7.0 (A): `required` is shown as the verdict reads it: only false is "suggested"; null / 0 / "" / missing
+    // read as required, never as a bare "-" (the required applied row says the same, from the server)
+    function shown(key, v, present) {
+      if (key !== 'required') return val(v);
+      if (v === false) return 'false (suggested)';
+      if (v === true) return 'true';
+      if (!present) return '-';
+      return v === undefined || v === null ? 'required (default)' : 'required (' + val(v) + ' reads as required)';
+    }
+    d.items.forEach(function (it) {
+      var rows = (it.rows || []).map(function (r) {
+        return el('tr', {}, [el('td', {text: r.key.replace(/_/g, ' ')}), el('td', {text: shown(r.key, r.was, !!it.was)}), el('td', {text: shown(r.key, r.now, !!it.now)}),
+          el('td', {}, r.changed ? U.chip('bad', it.change === 'changed' ? 'changed' : it.change) : U.chip('NA', 'same'))]);
+      });
+      box.appendChild(el('div', {'class': 'card'}, [el('h3', {}, [it.id + ' ', it.change === 'same' ? U.chip('NA', 'same') : U.chip('bad', it.change)]),
+        el('div', {'class': 'scroll'}, el('table', {}, [el('thead', {}, el('tr', {}, ['Key', 'Was', 'Now', ''].map(function (h) { return el('th', {text: h}); }))),
+          el('tbody', {}, rows)]))]));
+    });
+    var t = d.form_functions || {};
+    var keys = Object.keys(Object.assign({}, t.was || {}, t.now || {})).sort();
+    box.appendChild(el('h2', {text: 'Form equivalences (which form counts as which coverage)'}));
+    box.appendChild(el('div', {'class': 'scroll'}, el('table', {}, [el('thead', {}, el('tr', {}, ['Form', 'Was', 'Now', ''].map(function (h) { return el('th', {text: h}); }))),
+      el('tbody', {}, keys.map(function (k) {
+        var was = (t.was || {})[k], now = (t.now || {})[k];
+        return el('tr', {}, [el('td', {text: k}), el('td', {text: val(was)}), el('td', {text: val(now)}),
+          el('td', {}, was === now ? U.chip('NA', 'same') : U.chip('bad', was === undefined ? 'added' : now === undefined ? 'removed' : 'changed'))]);
+      }))])));
+  }
+  function itemsList(items) {
+    return el('ul', {}, items.map(function (it) { return el('li', {}, [itemText(it), it.cite ? el('span', {'class': 'muted', text: ' - ' + it.cite}) : null]); }));
+  }
+  function load() {
+    return Promise.all([U.api.get('templates'), jb.list('crt_requirement_set', {limit: 500})]).then(function (r) {
+      var tb = U.clear(document.getElementById('tpls'));
+      r[0].templates.forEach(function (t) {
+        tb.appendChild(el('div', {'class': 'card'}, [el('h2', {text: t.name}), el('p', {'class': 'muted', text: t.examples}),
+          t.conflict_note ? el('p', {}, [U.chip('expiring_30', 'Guide conflict'), ' ' + t.conflict_note]) : null,
+          t.single_source ? el('p', {}, [U.chip('expiring_30', 'Single source'), ' ' + t.single_source]) : null,
+          itemsList(t.items),
+          el('button', {type: 'button', text: 'Make a DRAFT from this', on: {click: function () {
+            U.api.post('requirement-sets/from-template', {template_key: t.key}).then(function (res) {
+              U.say('DRAFT created' + (res.warnings.length ? ' (warnings: ' + res.warnings.map(function (w) { return w.warning; }).join(' ') + ')' : ''), true); load();
+            }).catch(U.fail); }}})]));
+      });
+      var sb = U.clear(document.getElementById('sets'));
+      if (!r[1].records.length) sb.appendChild(el('p', {'class': 'muted', text: 'No sets yet.'}));
+      r[1].records.forEach(function (s) {
+        var approved = s.data.status === 'APPROVED';
+        var diffBox = el('div', {'class': 'diff'});
+        // rules 1.8.0 (H5): the set's requirement list is rendered from the server's reading (the diff's item views,
+        // with edition_applied), never from the stored keys alone
+        var listBox = el('div', {}, el('p', {'class': 'muted', text: 'Reading the requirements as the verdict applies them...'}));
+        var approveBtn = approved ? null : el('button', {type: 'button', text: 'Approve these changes (staff)', disabled: 'disabled'});
+        sb.appendChild(el('div', {'class': 'card'}, [el('h2', {}, [s.data.name + ' (v' + (s.data.set_version || 1) + ') ', approved ? U.chip('meets', 'APPROVED') : U.chip('cant_tell', 'DRAFT')]),
+          s.data.notes ? el('p', {'class': 'muted', text: 'Notes (written by whoever drafted this set): ' + s.data.notes}) : null, listBox,
+          diffBox,
+          el('p', {'class': 'row'}, [approveBtn,
+            el('button', {type: 'button', 'class': 'ghost', text: 'Make a new version', on: {click: function () {
+              U.api.post('requirement-sets/' + s.id + '/revise', {}).then(function () { U.say('New DRAFT version made', true); load(); }).catch(U.fail); }}})])]));
+        // host ruling F: the approval shows the FULL change against the version it replaces (every item's form
+        // list, edition, trades and exclusion classes, and the whole form-equivalence table) before the button works
+        U.api.get('requirement-sets/' + s.id + '/diff').then(function (d) {
+          U.clear(listBox).appendChild(itemsList(d.items.filter(function (x) { return x.now; }).map(function (x) { return x.now; })));
+          renderDiff(diffBox, d);
+          if (approveBtn) {
+            if (d.floor_violations && d.floor_violations.length) return;
+            approveBtn.removeAttribute('disabled');
+            approveBtn.addEventListener('click', function () {
+              U.api.post('requirement-sets/' + s.id + '/approve', {diff_sha256: d.sha256}).then(function () { U.say('Approved', true); load(); }).catch(U.fail);
+            });
+          }
+        }).catch(U.fail);
+      });
+    }).catch(U.fail);
+  }
+  load();
+})(U);
+})();
+</script>
+</body>
+</html>

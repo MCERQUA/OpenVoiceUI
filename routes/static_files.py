@@ -34,6 +34,7 @@ static_files_bp = Blueprint('static_files', __name__)
 # ---------------------------------------------------------------------------
 
 from services.paths import APP_ROOT, SOUNDS_DIR, UPLOADS_DIR, KNOWN_FACES_DIR, STATIC_DIR
+from services.safe_open import Anchored, UnsafePath, send_file_beneath  # noqa: F401 (re-exported)
 
 BASE_DIR = APP_ROOT
 
@@ -54,10 +55,10 @@ def append_upload_index(record: dict) -> None:
     must never fail the upload itself."""
     try:
         import json as _json
-        with open(UPLOADS_INDEX, 'a', encoding='utf-8') as fh:
-            fh.write(_json.dumps(record, ensure_ascii=False) + '\n')
+        idx = Anchored(UPLOADS_DIR, UPLOADS_INDEX)   # no-follow: uploads/ is agent-writable
+        idx.append_text(_json.dumps(record, ensure_ascii=False) + '\n', mode=0o666)
         try:
-            UPLOADS_INDEX.chmod(0o666)  # host-side writers run as a different uid
+            idx.chmod(0o666)  # host-side writers run as a different uid
         except OSError:
             pass
     except Exception as exc:  # noqa: BLE001
@@ -195,7 +196,7 @@ def _read_text_preview(path: Path) -> tuple[str, bool]:
     """Read a text file for inline preview. Returns (sanitized_text, truncated).
     Never loads more than _MAX_PREVIEW_CHARS + 1 chars into memory, so large
     uploads don't spike RSS."""
-    with open(path, 'r', errors='replace') as fh:
+    with Anchored(UPLOADS_DIR, path).open('r', errors='replace') as fh:
         raw = fh.read(_MAX_PREVIEW_CHARS + 1)
     truncated = len(raw) > _MAX_PREVIEW_CHARS
     cleaned = _CTRL_RE.sub('', raw[:_MAX_PREVIEW_CHARS])
@@ -278,7 +279,7 @@ def _call_skill_runner(path: Path, original_name: str) -> str | None:
     """
     try:
         import requests
-        with open(path, 'rb') as fh:
+        with Anchored(UPLOADS_DIR, path).open('rb') as fh:
             resp = requests.post(
                 'http://skill-runner:8900/extract',
                 files={'file': (original_name, fh)},
@@ -372,7 +373,8 @@ def upload_file():
     safe_name = f"{stem_safe}__{uuid.uuid4().hex[:8]}{ext}"
     dest = UPLOADS_DIR / safe_name
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    f.save(str(dest))
+    with Anchored(UPLOADS_DIR, safe_name).open('wb') as _out:   # no-follow create
+        f.save(_out)
 
     # --- HEIC/HEIF → JPG auto-conversion ---
     # Browsers can't display HEIC natively. Convert on ingest so the file is
@@ -384,9 +386,10 @@ def upload_file():
             import pillow_heif
             from PIL import Image as _Image
             pillow_heif.register_heif_opener()
-            with _Image.open(str(dest)) as _img:
-                _img.convert('RGB').save(str(jpg_dest), 'JPEG', quality=90)
-            dest.rename(dest.parent / (dest.stem + '.heic.original'))
+            with Anchored(UPLOADS_DIR, dest).open('rb') as _src, _Image.open(_src) as _img, \
+                    Anchored(UPLOADS_DIR, jpg_name).open('wb') as _out:
+                _img.convert('RGB').save(_out, 'JPEG', quality=90)
+            Anchored(UPLOADS_DIR, dest).rename(dest.stem + '.heic.original')
             dest = jpg_dest
             safe_name = jpg_name
             ext = '.jpg'
@@ -545,9 +548,17 @@ _CHUNK_CTRL_RE = re.compile(r'[\x00-\x1f\x7f]')
 
 
 def _chunk_dir() -> Path:
-    d = UPLOADS_DIR / '.chunks'
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    # uploads/ is agent-writable: create/verify .chunks with a no-follow walk (a
+    # `.chunks -> /elsewhere` symlink is refused), and do every staging-file
+    # operation below through Anchored / a pinned dir fd.
+    Anchored(UPLOADS_DIR, '.chunks').mkdir(parents=True, exist_ok=True)
+    return UPLOADS_DIR / '.chunks'
+
+
+def _chunk_dirfd() -> int:
+    from services.safe_open import open_dir_beneath
+    _chunk_dir()
+    return open_dir_beneath(UPLOADS_DIR, '.chunks')
 
 
 def _chunk_key() -> bytes:
@@ -555,15 +566,20 @@ def _chunk_key() -> bytes:
     worker between create and write waits for the bytes instead of minting a second key."""
     import secrets
     import time
-    p = _chunk_dir() / '.grant.key'
+    # Server-private state, NOT in agent-readable uploads/ (it used to live in
+    # uploads/.chunks/, where the agent could read it and forge upload grants).
+    from services.private_dir import private_path
+    p = private_path('upload-grant.key')
     for _ in range(50):
         try:
-            raw = p.read_bytes().strip()
+            _kfd = os.open(str(p), os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            with os.fdopen(_kfd, 'rb') as _kf:
+                raw = _kf.read(4096).strip()
             if len(raw) >= 32:
                 return raw
         except FileNotFoundError:
             try:
-                fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             except FileExistsError:
                 continue
             with os.fdopen(fd, 'wb') as fh:
@@ -660,7 +676,7 @@ def _chunk_reservations(chunk_dir: Path) -> tuple[int, int]:
         except FileNotFoundError:
             continue  # nothing on disk and nothing can be added (slices never create it)
         try:
-            meta = json.loads(meta_p.read_text(encoding='utf-8'))
+            meta = json.loads(Anchored(UPLOADS_DIR, meta_p).read_text(max_bytes=65536))
             size, exp = int(meta.get('size', 0)), int(meta.get('exp', 0))
         except (OSError, ValueError, TypeError):
             size, exp = 0, 0
@@ -684,7 +700,7 @@ def _chunk_done_marker(chunk_dir: Path, upload_id: str) -> Path:
 
 def _chunk_stored_result(done_marker: Path):
     try:
-        return json.loads(done_marker.read_text(encoding='utf-8'))
+        return json.loads(Anchored(UPLOADS_DIR, done_marker).read_text(max_bytes=65536))
     except (OSError, ValueError):
         return None
 
@@ -724,7 +740,7 @@ def upload_file_chunk_start():
 
     chunk_dir = _chunk_dir()
     # One start at a time per container, so two concurrent starts cannot both fit under the cap.
-    with open(chunk_dir / '.reserve.lock', 'a') as lk:
+    with Anchored(UPLOADS_DIR, chunk_dir / '.reserve.lock').open('a') as lk:
         fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
         try:
             reserved, pending = _chunk_reservations(chunk_dir)
@@ -741,10 +757,16 @@ def upload_file_chunk_start():
             exp = int(time.time()) + _CHUNK_UPLOAD_TTL_S
             meta = {'id': uid, 'size': size, 'name': original_name, 'ext': ext, 'exp': exp,
                     'tenant': _chunk_tenant(), 'started': int(time.time())}
-            fd = os.open(str(chunk_dir / f'{uid}.meta.json'), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-            with os.fdopen(fd, 'w', encoding='utf-8') as fh:
-                fh.write(json.dumps(meta))
-            os.close(os.open(str(chunk_dir / f'{uid}.partial'), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+            _cdfd = _chunk_dirfd()
+            try:
+                fd = os.open(f'{uid}.meta.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o644, dir_fd=_cdfd)
+                with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+                    fh.write(json.dumps(meta))
+                os.close(os.open(f'{uid}.partial', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o644, dir_fd=_cdfd))
+            finally:
+                os.close(_cdfd)
         finally:
             fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
 
@@ -777,13 +799,11 @@ def _chunk_finish(chunk_dir: Path, uid: str, partial: Path, done_marker: Path, m
             'mime': mime,
             'type': 'image' if mime.startswith('image/') else 'file',
         }
-        tmp = chunk_dir / f'{uid}.done.json.tmp'
-        tmp.write_text(json.dumps(result), encoding='utf-8')
-        os.replace(tmp, done_marker)
+        Anchored(UPLOADS_DIR, done_marker).atomic_write_text(json.dumps(result))
     dest = UPLOADS_DIR / result['filename']
-    os.replace(partial, dest)
+    Anchored(UPLOADS_DIR, partial).rename(result['filename'])   # both parents pinned, no follow
     try:
-        dest.chmod(0o644)
+        Anchored(UPLOADS_DIR, result['filename']).chmod(0o644)
     except OSError:
         pass
     logger.info('upload: chunked upload complete %s (%d bytes) as %s',
@@ -831,7 +851,7 @@ def upload_file_chunk():
     if exp <= time.time():
         return jsonify({'error': 'This upload expired — start it again', 'code': 'start_required'}), 410
     try:
-        meta = json.loads((chunk_dir / f'{uid}.meta.json').read_text(encoding='utf-8'))
+        meta = json.loads(Anchored(UPLOADS_DIR, chunk_dir / f'{uid}.meta.json').read_text(max_bytes=65536))
     except (OSError, ValueError):
         meta = None
     if not meta or int(meta.get('size', -1)) != size:
@@ -867,14 +887,15 @@ def upload_file_chunk():
         return jsonify({'error': 'Not enough storage space for this file', 'received': offset}), 507
 
     try:
-        fd = os.open(str(partial), os.O_RDWR)   # never O_CREAT: only start creates a partial
-    except FileNotFoundError:
+        # never O_CREAT: only start creates a partial; no-follow (uploads/ is agent-writable)
+        fh_ctx = Anchored(UPLOADS_DIR, partial).open('rb+')
+    except (FileNotFoundError, UnsafePath):
         stored = _chunk_stored_result(done_marker)
         if stored is not None:
             return jsonify(stored)
         return jsonify({'error': 'This upload is no longer held — start it again', 'code': 'start_required'}), 410
 
-    with os.fdopen(fd, 'r+b') as fh:
+    with fh_ctx as fh:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
         try:
             # Another request may have finished the upload (renamed the partial into uploads/)
@@ -1085,11 +1106,7 @@ def _upload_shadow_record(filename, exists, states=None, reason=None, listing=Fa
             'grants': states or {},
             'enforce_action': _upload_enforce_action(listing),
         }
-        fd = os.open(str(UPLOADS_SHADOW_LOG), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o640)
-        try:
-            os.write(fd, (json.dumps(row) + '\n').encode('utf-8'))
-        finally:
-            os.close(fd)
+        Anchored(UPLOADS_DIR, UPLOADS_SHADOW_LOG).append_text(json.dumps(row) + '\n', mode=0o640)
     except Exception as e:  # measurement must never break serving
         logger.warning('[uploads-auth] shadow record failed: %s', e)
 
@@ -1195,7 +1212,9 @@ def serve_upload(filename):
         return denied
     if not upload_path.exists():
         return jsonify({"error": "File not found"}), 404
-    resp = send_file(upload_path)
+    resp = send_file_beneath(UPLOADS_DIR, filename)
+    if resp is None:
+        return jsonify({"error": "File not found"}), 404
     resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
     # F-5 (2026-07-15): neutralize STORED XSS. Uploads are user/agent-supplied; an
     # .html or .svg served with a rendering content-type executes in OUR origin and can

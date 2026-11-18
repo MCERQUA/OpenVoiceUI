@@ -1,0 +1,72 @@
+{
+  "collection": "crt_requirement_set",
+  "label": "Requirement set",
+  "label_plural": "Requirement sets",
+  "title_field": "name",
+  "description": "A by-trade set of insurance requirements. Lands as DRAFT; only staff approve it. Frozen once used: an edit makes a new version.",
+  "required": [
+    "name",
+    "trade_category",
+    "items"
+  ],
+  "fields": {
+    "name": {
+      "type": "string",
+      "label": "Name"
+    },
+    "trade_category": {
+      "type": "enum",
+      "label": "Trade category",
+      "values": [
+        "high_severity",
+        "envelope",
+        "mep",
+        "medium",
+        "finish",
+        "design_pro",
+        "custom"
+      ]
+    },
+    "template_key": {
+      "type": "string",
+      "label": "Template"
+    },
+    "items": {
+      "type": "list",
+      "label": "Requirement items",
+      "items": "object"
+    },
+    "form_functions": {
+      "type": "object",
+      "label": "Form equivalences (form number -> function; approved with the set)"
+    },
+    "guide_cites": {
+      "type": "list",
+      "label": "Guide citations",
+      "items": "string"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    },
+    "status": {
+      "type": "enum",
+      "label": "Status",
+      "values": [
+        "DRAFT",
+        "APPROVED"
+      ],
+      "staff_only": true
+    },
+    "set_version": {
+      "type": "integer",
+      "label": "Set version",
+      "min": 1
+    },
+    "supersedes": {
+      "type": "ref",
+      "label": "Replaces",
+      "ref": "crt_requirement_set"
+    }
+  }
+}

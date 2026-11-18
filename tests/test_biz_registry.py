@@ -470,7 +470,7 @@ def test_phase1_database_migrates_to_the_registry_with_a_verified_backup(tmp_pat
     rec = old.create('contact', {'name': 'Sample Customer'}, by='local:owner')
     assert old.schema_version == 1
     old.close()
-    monkeypatch.setattr(store_mod, 'discover', discover)
+    monkeypatch.setattr(store_mod, 'discover', lambda: discover()[:2])     # phase 2 = migrations 1-2
     new = store_mod.BizStore(tmp_path / 'db', 'tenant-a')
     try:
         assert new.schema_version == 2 and not new.read_only

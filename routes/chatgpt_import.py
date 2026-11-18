@@ -24,6 +24,7 @@ chatgpt_import_bp = Blueprint('chatgpt_import', __name__)
 # ---------------------------------------------------------------------------
 
 from services.paths import UPLOADS_DIR, WORKSPACE_DIR
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 # Imported conversations go to workspace/memory/chatgpt-import/
 # This makes them accessible to the OpenClaw agent for reference
@@ -59,7 +60,8 @@ def import_chatgpt():
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     zip_name = f"chatgpt-export-{uuid.uuid4().hex[:8]}.zip"
     zip_path = UPLOADS_DIR / zip_name
-    f.save(str(zip_path))
+    with Anchored(UPLOADS_DIR, zip_name).open('wb') as _out:   # no-follow (uploads/ is agent-writable)
+        f.save(_out)
 
     # Parse and write conversations
     IMPORT_DIR.mkdir(parents=True, exist_ok=True)

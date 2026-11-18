@@ -1,0 +1,83 @@
+{
+  "collection": "crt_project",
+  "label": "Project",
+  "label_plural": "Projects",
+  "title_field": "name",
+  "description": "One contractor job. Repose years are entered by a person, with the source.",
+  "required": [
+    "crt_account_id",
+    "name"
+  ],
+  "fields": {
+    "crt_account_id": {
+      "type": "ref",
+      "label": "Contractor account",
+      "ref": "contact"
+    },
+    "name": {
+      "type": "string",
+      "label": "Project name"
+    },
+    "address": {
+      "type": "string",
+      "label": "Address"
+    },
+    "state": {
+      "type": "string",
+      "label": "State"
+    },
+    "owner_name": {
+      "type": "string",
+      "label": "Owner"
+    },
+    "gc_name": {
+      "type": "string",
+      "label": "General contractor"
+    },
+    "contract_ref": {
+      "type": "string",
+      "label": "Contract reference"
+    },
+    "contract_requires_ai": {
+      "type": "boolean",
+      "label": "Contract requires additional insured"
+    },
+    "contract_ai_parties": {
+      "type": "list",
+      "label": "Parties the contract requires as additional insured",
+      "items": "string"
+    },
+    "contract_document_id": {
+      "type": "ref",
+      "label": "Contract excerpt",
+      "ref": "document"
+    },
+    "substantial_completion": {
+      "type": "date",
+      "label": "Substantial completion"
+    },
+    "repose_years": {
+      "type": "integer",
+      "label": "Statute of repose (years)",
+      "min": 1,
+      "max": 30
+    },
+    "repose_source": {
+      "type": "string",
+      "label": "Repose source (citation)"
+    },
+    "size_flag": {
+      "type": "enum",
+      "label": "Size",
+      "values": [
+        "small",
+        "large",
+        "complex"
+      ]
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  }
+}

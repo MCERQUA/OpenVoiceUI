@@ -6,9 +6,10 @@ a copy that differs from the shipped one is backed up to _shared/.backups/ and r
 Best-effort: a file that cannot be written is logged and skipped, never fatal to boot.
 """
 import logging
-import shutil
 import time
 from pathlib import Path
+
+from services.safe_open import Anchored
 
 logger = logging.getLogger(__name__)
 
@@ -18,20 +19,23 @@ def seed_canvas_shared(src_dir: Path, pages_dir: Path) -> list:
     written = []
     if not src_dir.is_dir():
         return written
-    dest_dir = pages_dir / '_shared'
+    Path(pages_dir).mkdir(parents=True, exist_ok=True)   # the mount itself (trusted path)
     for src in sorted(src_dir.iterdir()):
         if not src.is_file():
             continue
-        dest = dest_dir / src.name
+        # canvas-pages is agent-writable: every read/write below the pages_dir MOUNT
+        # is a no-follow walk (a symlink planted at _shared/<name> or .backups is
+        # refused instead of written through; PR #597 review 2)
+        dest = Anchored(pages_dir, f'_shared/{src.name}')
         try:
-            if dest.exists():
-                if dest.read_bytes() == src.read_bytes():
+            shipped = src.read_bytes()
+            if dest.is_file():
+                current = dest.read_bytes()
+                if current == shipped:
                     continue
-                backup_dir = dest_dir / '.backups'
-                backup_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(dest, backup_dir / f"{src.name}.{int(time.time())}")
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
+                Anchored(pages_dir, f'_shared/.backups/{src.name}.{int(time.time())}').write_bytes(
+                    current, create_dirs=True)
+            dest.write_bytes(shipped, create_dirs=True)
             written.append(src.name)
             logger.info("Seeded shared canvas module: _shared/%s", src.name)
         except (PermissionError, OSError) as exc:

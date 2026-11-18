@@ -26,6 +26,7 @@ import requests
 from flask import Blueprint, Response, jsonify, request
 
 from services.paths import DEFAULT_PAGES_DIR, UPLOADS_DIR
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,9 @@ def _set_active(active: bool):
     try:
         if active:
             UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-            _MARKER.write_text(_tenant(), encoding="utf-8")
-        elif _MARKER.exists():
-            _MARKER.unlink()
+            Anchored(UPLOADS_DIR, _MARKER).write_text(_tenant())  # no-follow (uploads/ is agent-writable)
+        else:
+            Anchored(UPLOADS_DIR, _MARKER).unlink(missing_ok=True)   # no-follow
     except Exception as e:
         logger.debug("browse marker update failed: %s", e)
 
@@ -227,14 +228,18 @@ def browse_download():
         fname = os.path.basename(fname)
         UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
         dest = UPLOADS_DIR / fname
-        with open(dest, "wb") as fh:
+        out = Anchored(UPLOADS_DIR, fname)   # no-follow: a planted symlink at fname is refused
+        with out.open("wb", perm=0o664) as fh:
             for chunk in r.iter_content(65536):
                 fh.write(chunk)
         try:
-            os.chmod(dest, 0o664)
+            out.chmod(0o664)
         except OSError:
             pass
         return jsonify({"saved": fname, "url": f"/uploads/{fname}"})
+    except OSError as e:   # incl. UnsafePath: a symlinked/unsafe target name
+        logger.error("browse download save refused: %s", e)
+        return jsonify({"error": "cannot save that file name"}), 400
     except requests.RequestException as e:
         logger.error("browse download failed: %s", e)
         return jsonify({"error": "browse service unavailable"}), 503

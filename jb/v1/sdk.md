@@ -199,3 +199,57 @@ the backend. A sandbox key is used exactly like an agent key (`X-Agent-Key`) and
 Pages in a sandbox use the same `jb.js` and read the sandbox's own data automatically. On a business's
 own server these calls do not exist (404), so nothing written for a sandbox needs changing later
 except the base URL and key.
+
+## Packs and the private file store (engine 1.2)
+
+A **pack** is a set of collections that ships with the engine (`default-schemas/packs/<name>/`) and a
+business turns on. It is never turned off; its collections and the fields it adds to core collections
+are named `<prefix>_...`.
+
+```js
+await jb.packs.list();                       // {available: [...], enabled: [...]}
+await jb.packs.enable('risk-transfer');      // a person, or an agent with a source
+const book = await jb.pack('crt').get('book');            // GET  /api/biz/v1/crt/book
+await jb.pack('crt').post('confirm', {...});              // POST /api/biz/v1/crt/confirm
+```
+
+Some collections and fields are **staff-only** (`"staff_only": true` in `jb.schema()`): only a person's
+session creates, edits, archives or unarchives them. An agent key gets `403 staff_only` /
+`403 staff_only_field`.
+
+**Files are never public.** Store them in the backend-private file store, not `/uploads`:
+
+```js
+const f = await jb.files.upload(fileInput.files[0], { source });  // {id, url: 'biz-file:<sha256>', ...}
+await jb.create('document', { title: 'COI', file_url: f.url });
+const blobUrl = await jb.files.open(jb.files.idOf(doc.data.file_url));  // a person's session only
+```
+
+### Platform staff pages (engine 1.4, host rulings H4 + R1)
+
+A pack whose verdict trusts what a *person* wrote (risk-transfer) ships its staff pages in the image and serves
+them on the business's **own staff origin**, `BIZ_STAFF_ORIGIN` (e.g. `https://crt-staff-<tenant>.jam-bot.com`),
+at `GET /api/biz/v1/crt/staff/<page>` (sandbox: `?sandbox=<name>`). The tenant origin never serves them (a
+navigation there is redirected to the staff origin): it is where canvas pages, which the agent can write, run,
+and OVU hands those pages the staff member's Clerk JWT.
+
+* **Signing in** happens on the staff origin (`/api/biz/v1/crt/staff/signin`): Clerk mints a session token
+  there whose `azp` is the staff origin, and `POST .../crt/staff/session` exchanges it for an httpOnly,
+  Secure, `SameSite=Strict`, host-only `__Host-jb_staff` cookie (8 h). A JWT with any other `azp` (every
+  token a canvas page can get) is `403 staff_origin_token_refused`. The staff origin accepts no bearer token,
+  no `__session` cookie and no agent key, and serves nothing but the staff pages, their JSON API and
+  `/jb/v1/jb.js` (`404 not_on_staff_origin`). It grants no CORS. An expired session sends a page to sign-in.
+* **Every write** there also carries the page's per-render token: `jb.js` sends it (`X-JB-Staff-Surface`),
+  drops it from `window` and removes its boot script node at load. No token: `403 staff_surface_required`;
+  a token from another user, another sandbox, another site (`Sec-Fetch-Site`, `Origin`) or a tampered or
+  expired one: `403 staff_surface_invalid`.
+* Where the pack is on, `crt_*` records and `/crt/...` actions are written **only** from the staff origin
+  (`403 staff_surface_required` anywhere else). `contact`, `document` and `company` stay writable from any
+  page; the backend stamps each write with whether it came from the staff surface, and the pack's verdict
+  counts a person's write only when it did (otherwise the field reads "Can't tell", like an agent's).
+* The staff page is minted only for `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document`, carries
+  `frame-ancestors 'none'`, `Cross-Origin-Opener-Policy: same-origin` and a nonce-only `script-src`.
+* A platform page name is reserved: the sandbox `PUT /dev/pages/<file>` and `POST /api/canvas/pages` refuse
+  it (`409 platform_page_reserved`), and `/pages/<that name>` is never served. The agent may keep its own read
+  view under another name. `jb.staffBase` is the staff pages' base URL on a platform page and `null`
+  elsewhere: link staff pages with it.

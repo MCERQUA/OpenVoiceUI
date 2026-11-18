@@ -1,0 +1,130 @@
+{
+  "collection": "crt_policy",
+  "label": "Policy",
+  "label_plural": "Policies",
+  "title_field": "policy_number",
+  "description": "One line of a sub's insurance, as read from a certificate received for one account. Values count only once staff confirm them.",
+  "required": [
+    "crt_account_id",
+    "party_contact_id",
+    "line"
+  ],
+  "fields": {
+    "crt_account_id": {
+      "type": "ref",
+      "label": "Received for account",
+      "ref": "contact"
+    },
+    "party_contact_id": {
+      "type": "ref",
+      "label": "Sub",
+      "ref": "contact"
+    },
+    "line": {
+      "type": "enum",
+      "label": "Line",
+      "values": [
+        "gl",
+        "auto",
+        "umbrella",
+        "wc",
+        "pl",
+        "liquor",
+        "other"
+      ]
+    },
+    "carrier": {
+      "type": "string",
+      "label": "Carrier"
+    },
+    "policy_number": {
+      "type": "string",
+      "label": "Policy number"
+    },
+    "effective": {
+      "type": "date",
+      "label": "Effective"
+    },
+    "expiration": {
+      "type": "date",
+      "label": "Expiration"
+    },
+    "occurrence_or_claims_made": {
+      "type": "enum",
+      "label": "Basis",
+      "values": [
+        "occurrence",
+        "claims_made"
+      ]
+    },
+    "limits": {
+      "type": "object",
+      "label": "Limits"
+    },
+    "named_insured": {
+      "type": "string",
+      "label": "Named insured"
+    },
+    "certificate_holder": {
+      "type": "string",
+      "label": "Certificate holder"
+    },
+    "addl_insd": {
+      "type": "boolean",
+      "label": "Additional insured box"
+    },
+    "subr_wvd": {
+      "type": "boolean",
+      "label": "Subrogation waived box"
+    },
+    "exclusions": {
+      "type": "list",
+      "label": "Exclusions",
+      "items": "string"
+    },
+    "tail": {
+      "type": "boolean",
+      "label": "Extended reporting (tail) in place"
+    },
+    "producer_name": {
+      "type": "string",
+      "label": "Producer"
+    },
+    "producer_contact": {
+      "type": "string",
+      "label": "Producer contact name"
+    },
+    "producer_phone": {
+      "type": "phone",
+      "label": "Producer phone"
+    },
+    "producer_email": {
+      "type": "email",
+      "label": "Producer email"
+    },
+    "producer_contact_id": {
+      "type": "ref",
+      "label": "Producer record",
+      "ref": "contact"
+    },
+    "producer_is_cca": {
+      "type": "boolean",
+      "label": "We are the producer (staff set this on the staff pages)",
+      "staff_only": true
+    },
+    "renewal_of": {
+      "type": "ref",
+      "label": "Renews",
+      "ref": "crt_policy"
+    },
+    "source_document_id": {
+      "type": "ref",
+      "label": "Certificate document",
+      "ref": "document"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  }
+}

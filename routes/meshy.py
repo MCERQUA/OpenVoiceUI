@@ -32,6 +32,7 @@ from pathlib import Path
 
 import requests as http
 from flask import Blueprint, jsonify, request
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 meshy_bp = Blueprint('meshy', __name__)
@@ -68,7 +69,7 @@ def _download_and_save(url: str, dest: Path) -> bool:
         r = http.get(url, timeout=60, stream=True)
         r.raise_for_status()
         CANVAS_DIR.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(r.content)
+        Anchored(CANVAS_DIR, dest).write_bytes(r.content)  # no-follow (canvas-pages is agent-writable)
         return True
     except Exception as exc:
         logger.warning('Meshy download failed %s: %s', url, exc)

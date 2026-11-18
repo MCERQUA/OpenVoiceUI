@@ -74,6 +74,7 @@ from flask import Blueprint, jsonify, request, Response
 
 from services.paths import RUNTIME_DIR, UPLOADS_DIR
 from routes.static_files import append_upload_index, _MAX_UPLOAD_BYTES
+from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
 
@@ -419,7 +420,8 @@ def intake_upload(token: str):
     dest = UPLOADS_DIR / stored_name
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        f.save(str(dest))  # streams to disk immediately — never held fully in memory
+        with Anchored(UPLOADS_DIR, stored_name).open('wb') as _out:  # no-follow
+            f.save(_out)  # streams to disk immediately — never held fully in memory
     except OSError as exc:
         logger.error('intake: save failed for token_suffix=%s: %s', token[-8:], exc)
         return _refuse(500, 'save_failed', 'Upload failed. Please try again.')

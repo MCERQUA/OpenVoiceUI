@@ -14,6 +14,8 @@ import json
 import logging
 import os
 import re
+import stat
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,9 +68,19 @@ _OPENCLAW_CONFIG_PATH = Path('/app/runtime/openclaw.json')
 # which maps to /mnt/clients/<user>/vault on the host
 _RUNTIME_VAULT_DIR = Path('/app/runtime/vault')
 
-# Fallback paths for local / dev mode
+# Fallback paths for local / dev mode. NEVER a shared dir: hosted tenant
+# containers have no /mnt/clients, and the old '/tmp/vault-clients' fallback was
+# writable by the terminal's sandbox user, which could pre-plant the compose env
+# file and its '.vault-tmp' name as a symlink so a credential save wrote the key
+# plus sandbox-chosen lines into /app/server.py (review 2 of PR #597, H-A). The
+# fallback is now a server-private 0700 dir; an override must be private too.
 if not _CLIENTS_DIR.exists():
-    _CLIENTS_DIR = Path(os.getenv('VAULT_CLIENTS_DIR', '/tmp/vault-clients'))
+    from services.private_dir import is_private_dir, private_subdir
+    _override = os.getenv('VAULT_CLIENTS_DIR', '').strip()
+    if _override and is_private_dir(_override):
+        _CLIENTS_DIR = Path(_override)
+    else:
+        _CLIENTS_DIR = private_subdir('vault-clients')
 if not _PLATFORM_CATALOG_PATH.exists():
     _alt_path = os.getenv('VAULT_CATALOG_PATH', '').strip()
     if _alt_path:
@@ -1066,10 +1078,27 @@ def _update_env_file(path: Path, updates: dict) -> bool:
         logger.warning(f"Parent dir missing for env file {path}")
         return False
 
+    # No symlink is ever followed here, for read or write (review 2 of PR #597,
+    # H-A): the file is opened O_NOFOLLOW, the temp name is random + O_EXCL.
     try:
-        existing_text = path.read_text() if path.is_file() else ''
+        try:
+            _rfd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        except FileNotFoundError:
+            existing_text = ''
+            _mode = 0o644
+        else:
+            try:
+                _st = os.fstat(_rfd)
+                _mode = stat.S_IMODE(_st.st_mode)
+                if not stat.S_ISREG(_st.st_mode):
+                    logger.error(f"Refusing env file {path}: not a regular file")
+                    return False
+                with os.fdopen(os.dup(_rfd), 'r') as _f:
+                    existing_text = _f.read()
+            finally:
+                os.close(_rfd)
     except (PermissionError, OSError) as exc:
-        logger.error(f"Cannot read env file {path}: {exc}")
+        logger.error(f"Cannot read env file {path} (or it is a symlink): {exc}")
         return False
 
     lines = existing_text.splitlines()
@@ -1113,18 +1142,23 @@ def _update_env_file(path: Path, updates: dict) -> bool:
     # Fall back to direct write if the parent dir isn't writable but the file
     # itself is — this is the case for /mnt/system/base/.platform-oauth.env
     # which is bind-mounted as a single file rw, with parent dir read-only.
-    tmp = path.with_suffix(path.suffix + '.vault-tmp')
+    tmp = None
     try:
-        tmp.write_text(new_text)
-        tmp.replace(path)
+        _tfd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f'.{path.name}.', suffix='.vault-tmp')
+        with os.fdopen(_tfd, 'w') as f:
+            os.fchmod(f.fileno(), _mode)  # keep the file's mode (host compose reads it)
+            f.write(new_text)
+        os.replace(tmp, path)
     except (PermissionError, OSError) as exc:
         # Parent dir not writable — try direct write to the existing file
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
         try:
-            tmp.unlink()
-        except Exception:
-            pass
-        try:
-            with open(path, 'w') as f:
+            _wfd = os.open(str(path), os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC)
+            with os.fdopen(_wfd, 'w') as f:
                 f.write(new_text)
                 f.flush()
                 os.fsync(f.fileno())

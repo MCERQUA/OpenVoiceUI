@@ -1,0 +1,39 @@
+{
+  "collection": "crt_account_party",
+  "label": "Account link",
+  "label_plural": "Account links",
+  "title_field": "status",
+  "description": "Links a sub (or producer) to one contractor account. Many-to-many: one sub, many accounts.",
+  "required": [
+    "crt_account_id",
+    "party_contact_id"
+  ],
+  "fields": {
+    "crt_account_id": {
+      "type": "ref",
+      "label": "Contractor account",
+      "ref": "contact"
+    },
+    "party_contact_id": {
+      "type": "ref",
+      "label": "Sub",
+      "ref": "contact"
+    },
+    "status": {
+      "type": "enum",
+      "label": "Status",
+      "values": [
+        "active",
+        "ended"
+      ]
+    },
+    "since": {
+      "type": "date",
+      "label": "Since"
+    },
+    "notes": {
+      "type": "text",
+      "label": "Notes"
+    }
+  }
+}
