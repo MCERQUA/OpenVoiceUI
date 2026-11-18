@@ -14,7 +14,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 min fit the suite before #595 (~1.5 min). #595 added ~600 CRT pack / probe tests: the full run is now
+    # 8.4 min on a fast runner and >10 min on a typical one (main 8001dfe and PR #600 were cancelled at 10:14
+    # with no failure). 30 leaves headroom without hiding a real hang for long.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
