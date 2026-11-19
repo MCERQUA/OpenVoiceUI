@@ -192,6 +192,17 @@ class TestTerminalErrorStillEndsTheTurn:
         assert done['response'] is None
         assert done['error'] == BUSY_503
 
+    def test_auth_error_with_a_transient_word_ends_the_turn_at_once(self):
+        # A terminal marker (403) outranks "temporarily unavailable": no hold,
+        # the original error ends the turn even if a start follows.
+        msg = '403 Forbidden: model temporarily unavailable in your region'
+        script = [_start(), _error(msg), 0.3, _start()] + _deltas(ANSWER) + [_end()]
+        events, _ = _run_turn(script)
+        done = _done(events)
+        assert done['response'] is None
+        assert done['error'] == msg
+        assert _spoken(events) == ''
+
     def test_error_after_partial_speech_ends_the_turn_at_once(self):
         # A retry restarts the text; holding after speech would repeat it.
         script = [_start()] + _deltas('Opening the') + [_error(BUSY_503), 0.3,
@@ -208,6 +219,8 @@ class TestRetryableClassifier:
         BUSY_503, '429 Too Many Requests', 'API rate limit reached',
         'The AI service is temporarily overloaded. Please try again in a moment.',
         'LLM request timed out.', '502 Bad Gateway', 'ECONNRESET',
+        'overloaded_error: 529 Overloaded', 'Gateway Timeout (504)',
+        'upstream load balancer returned 503',
     ])
     def test_transient(self, msg):
         assert gw.is_retryable_lifecycle_error({'error': msg}) is True
@@ -215,6 +228,16 @@ class TestRetryableClassifier:
     @pytest.mark.parametrize('msg', [
         '401 Incorrect API key provided', 'Context overflow: prompt too large',
         'billing: insufficient credits', '', None,
+        # terminal marker + transient word: the terminal marker wins
+        '403 Forbidden: model temporarily unavailable in your region',
+        '401 Unauthorized (upstream returned 503)',
+        '429 You exceeded your current quota, please check your plan and billing details',
+        'Request blocked by content policy (code 500)',
+        'Your account is temporarily suspended for policy violation',
+        'Authentication unavailable. The request to the managed identity endpoint timed out.',
+        'permission denied: service unavailable for this key',
+        # a 5xx-looking number that is not a status
+        'invalid_request_error: max_tokens must be <= 512',
     ])
     def test_terminal(self, msg):
         assert gw.is_retryable_lifecycle_error({'error': msg}) is False

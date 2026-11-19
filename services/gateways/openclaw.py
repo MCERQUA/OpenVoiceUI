@@ -229,9 +229,24 @@ def res_error_message(data: dict) -> str | None:
 # Every other error ends the turn at once, exactly as before.
 LIFECYCLE_ERROR_RETRY_GRACE_S = 15.0
 _RETRYABLE_ERROR_RE = _re.compile(
-    r'\b(?:429|5\d\d)\b|overload|rate.?limit|too many requests|'
+    r'\b(?:429|50\d|52\d)\b|overload|rate.?limit|too many requests|'
     r'temporar|unavailable|\bbusy\b|timed? ?out|timeout|'
     r'econnreset|econnrefused|socket hang up|network error|connection (?:reset|refused|closed)',
+    _re.IGNORECASE,
+)
+# A TERMINAL marker vetoes the hold even when a transient word also appears
+# ("403 Forbidden: model temporarily unavailable", "401 Unauthorized (upstream
+# 503)", "429 You exceeded your current quota", "blocked by content policy
+# (code 500)", "Authentication unavailable ... timed out"): auth, permission,
+# refusal/content policy, account, billing/quota and request-shape errors end
+# the turn at once, exactly as before the hold existed.
+_TERMINAL_ERROR_RE = _re.compile(
+    r'\b(?:400|401|402|403|404|413|422)\b|unauthori[sz]ed|forbidden|'
+    r'authenticat|\bauth\b|api.?key|credential|permission|access denied|'
+    r'refus|content.?(?:policy|filter|management)|safety|moderation|flagged|'
+    r'polic(?:y|ies)|violat|suspend|banned|'
+    r'billing|quota|insufficient|credits?\b|\bbalance\b|payment|'
+    r'context (?:overflow|length|window)|too large',
     _re.IGNORECASE,
 )
 
@@ -248,6 +263,8 @@ def is_retryable_lifecycle_error(data, spoken_text=''):
         return False
     err = data.get('error')
     if not isinstance(err, str) or not err.strip():
+        return False
+    if _TERMINAL_ERROR_RE.search(err):
         return False
     return bool(_RETRYABLE_ERROR_RE.search(err))
 
