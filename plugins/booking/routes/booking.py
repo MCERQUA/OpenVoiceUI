@@ -30,7 +30,8 @@ Endpoints registered:
   POST /api/booking/bookings                   — create a booking (proxy)
   POST /api/booking/bookings/<uid>/cancel      — cancel a booking (proxy)
   POST /api/booking/block                      — reserve/block slots for a day
-  POST /api/booking/webhook                    — signed Cal.diy webhook receiver
+  POST /api/booking/webhook                    — signed Cal.diy webhook receiver (no login;
+                                                 HMAC required, fails closed)
   GET  /api/booking/config                     — read saved config (key masked)
   POST /api/booking/config                     — save config server-side
 """
@@ -88,6 +89,17 @@ WEBHOOK_LOG_PATH = UPLOADS_DIR / "booking-events.jsonl"
 # scripts/booking-sms-notify-drain.sh globs
 # /mnt/clients/*/openvoiceui/uploads/.booking-notify-queue/*.json fleet-wide.
 NOTIFY_QUEUE_DIR = UPLOADS_DIR / ".booking-notify-queue"
+# The webhook signing secret lives in its OWN dotfile, never in booking-config.json:
+# routes/static_files.py serve_upload refuses every dotfile in every UPLOADS_AUTH_MODE,
+# while booking-config.json itself is reachable at /uploads/booking-config.json on a
+# tenant whose uploads mode is not "enforce" (measured 2026-11-19). A secret anyone can
+# download signs nothing. Written by the host provisioning script (or POST /config).
+WEBHOOK_SECRET_PATH = UPLOADS_DIR / ".booking-webhook-secret"
+# The webhook is the one booking route reachable without a login (see
+# _install_public_webhook_gate). Cal.com payloads are a few KB; refuse anything big
+# before hashing it.
+WEBHOOK_PATH = "/api/booking/webhook"
+WEBHOOK_MAX_BYTES = 256 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +251,13 @@ def _username() -> str:
 
 
 def _webhook_secret() -> str:
+    """Signing secret: the dotfile first (never served), then a legacy config value, then env."""
+    try:
+        raw = _read_text(WEBHOOK_SECRET_PATH.parent, WEBHOOK_SECRET_PATH.name)
+        if raw and raw.strip():
+            return raw.strip()
+    except (OSError, ValueError) as e:
+        logger.warning("booking: cannot read webhook secret file: %s", e)
     cfg = _load_config()
     return cfg.get("webhook_secret") or CAL_WEBHOOK_SECRET_ENV
 
@@ -552,47 +571,96 @@ def crm_record(event_type: str, payload: dict) -> None:
 _FANOUT_EVENTS = {"BOOKING_CREATED", "BOOKING_CANCELLED", "BOOKING_RESCHEDULED"}
 
 
-@booking_bp.route("/api/booking/webhook", methods=["POST"])
+@booking_bp.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
     """
     Receive a signed Cal.diy webhook, verify it, log it, and fan out to
     InkBox SMS + Twenty CRM for booking lifecycle events.
-    """
-    raw = request.get_data()  # raw bytes — required for HMAC over the exact body
-    signature = request.headers.get("x-cal-signature-256", "")
-    secret = _webhook_secret()
 
-    # If a secret is configured, signature MUST verify. If no secret is set yet
-    # (pre-deploy), we still accept + log but mark it unverified, so wiring can
-    # be tested before the secret is registered with Cal.diy.
-    verified = _verify_signature(raw, signature, secret) if secret else False
-    if secret and not verified:
-        logger.warning("booking webhook: signature verification FAILED")
-        return jsonify({"ok": False, "error": "invalid signature"}), 401
+    FAILS CLOSED (2026-11-19). This route is reachable without a login (Cal's
+    servers carry no Clerk session), so the HMAC is its only credential:
+      - no secret configured            -> 403, nothing logged, nothing sent
+      - missing or wrong signature      -> 401, nothing logged, nothing sent
+    Before this, a tenant with no secret accepted ANY body as verified=false and
+    still queued the owner SMS.
+    """
+    if (request.content_length or 0) > WEBHOOK_MAX_BYTES:
+        return jsonify({"ok": False, "error": "payload too large"}), 413
+    secret = _webhook_secret()
+    if not secret:
+        logger.warning("booking webhook: refused, no webhook secret configured")
+        return jsonify({"ok": False, "error": "webhook not configured",
+                        "code": "webhook_not_configured"}), 403
+    raw = request.get_data()  # raw bytes — required for HMAC over the exact body
+    if len(raw) > WEBHOOK_MAX_BYTES:
+        return jsonify({"ok": False, "error": "payload too large"}), 413
+    signature = request.headers.get("x-cal-signature-256", "")
+    if not _verify_signature(raw, signature, secret):
+        logger.warning("booking webhook: signature verification FAILED (%s)",
+                       "missing" if not signature else "mismatch")
+        return jsonify({"ok": False, "error": "invalid signature",
+                        "code": "invalid_signature"}), 401
 
     try:
         body = json.loads(raw.decode("utf-8")) if raw else {}
     except (ValueError, UnicodeDecodeError):
         return jsonify({"ok": False, "error": "invalid JSON body"}), 400
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "invalid JSON body"}), 400
 
     event_type = body.get("triggerEvent") or body.get("type") or "UNKNOWN"
+    payload = body.get("payload", body)
+    if not isinstance(payload, dict):
+        payload = {}
 
     record = {
         "received_at": datetime.now(timezone.utc).isoformat(),
         "event": event_type,
-        "verified": verified,
-        "payload": body.get("payload", body),
+        "verified": True,
+        "payload": payload,
     }
     _log_event(record)
 
     if event_type in _FANOUT_EVENTS:
         try:
-            notify_sms(event_type, record["payload"])
-            crm_record(event_type, record["payload"])
+            notify_sms(event_type, payload)
+            crm_record(event_type, payload)
         except Exception as e:  # noqa: BLE001 — never let a fan-out error 500 the webhook
             logger.error("booking webhook fan-out error: %s", e)
 
-    return jsonify({"ok": True, "event": event_type, "verified": verified})
+    return jsonify({"ok": True, "event": event_type, "verified": True})
+
+
+def _public_webhook_gate():
+    """Pre-auth dispatch for EXACTLY `POST /api/booking/webhook`; every other request
+    returns None and goes on to the app's normal Clerk gate."""
+    if request.method != "POST" or request.path != WEBHOOK_PATH:
+        return None
+    return webhook()
+
+
+@booking_bp.record_once
+def _install_public_webhook_gate(state):
+    """Make the webhook reachable by Cal's servers (no Clerk session) WITHOUT an image change.
+
+    app.py's require_auth answers 401 to any path not in its public lists, and a plugin
+    blueprint's own before_request hooks run after it. So the plugin places
+    _public_webhook_gate in the app's before_request chain IMMEDIATELY BEFORE require_auth:
+    the rate limiter, staff-origin gate and WebSocket guard ahead of it still run, the
+    exemption is one exact path + one method, and the handler's HMAC check is the
+    credential. If require_auth is not found (Clerk off = open local mode, or the
+    unconfigured fail-closed mode) nothing is installed and the route keeps whatever
+    protection the app gives it.
+    """
+    funcs = state.app.before_request_funcs.setdefault(None, [])
+    if any(getattr(f, "__name__", "") == "_public_webhook_gate" for f in funcs):
+        return
+    for i, f in enumerate(funcs):
+        if getattr(f, "__name__", "") == "require_auth":
+            funcs.insert(i, _public_webhook_gate)
+            logger.info("booking: %s exempted from the login gate (HMAC-verified)", WEBHOOK_PATH)
+            return
+    logger.info("booking: no require_auth gate found; %s left to the app's own auth", WEBHOOK_PATH)
 
 
 # ---------------------------------------------------------------------------
@@ -628,7 +696,20 @@ def save_config():
     """
     body = request.get_json(silent=True) or {}
     cfg = _load_config()
-    for key in ("api_url", "api_key", "username", "webhook_secret", "notify_phone", "notify_identity"):
+    # The signing secret goes to its own never-served dotfile, not booking-config.json.
+    if "webhook_secret" in body:
+        val = body["webhook_secret"]
+        try:
+            if val == "__CLEAR__":
+                _atomic_write_text(WEBHOOK_SECRET_PATH.parent, WEBHOOK_SECRET_PATH.name, "")
+                cfg.pop("webhook_secret", None)
+            elif isinstance(val, str) and val.strip():
+                _atomic_write_text(WEBHOOK_SECRET_PATH.parent, WEBHOOK_SECRET_PATH.name, val.strip())
+                cfg.pop("webhook_secret", None)
+        except OSError as e:
+            logger.error("booking: cannot save webhook secret: %s", e)
+            return jsonify({"ok": False, "error": str(e)}), 500
+    for key in ("api_url", "api_key", "username", "notify_phone", "notify_identity"):
         if key in body:
             val = body[key]
             if val == "__CLEAR__":
