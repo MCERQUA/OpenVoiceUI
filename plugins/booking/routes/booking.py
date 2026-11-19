@@ -470,13 +470,15 @@ def _booking_contact(payload: dict) -> list:
             v = v.get("value")
         return str(v).strip() if isinstance(v, (str, int)) and str(v).strip() else ""
 
-    phone = (str(att.get("phoneNumber") or "").strip() or _resp("attendeePhoneNumber")
-             or _resp("phone") or _resp("phoneNumber"))
-    email = str(att.get("email") or "").strip() or _resp("email")
-    address = ""
     loc = responses.get("location")
-    if isinstance(loc, dict) and loc.get("value") in ("attendeeInPerson", "inPerson", "attendeeAddress"):
-        address = str(loc.get("optionValue") or "").strip()
+    loc_kind = loc.get("value") if isinstance(loc, dict) else None
+    loc_opt = str(loc.get("optionValue") or "").strip() if isinstance(loc, dict) else ""
+    # location "phone" = "the organizer calls the attendee": optionValue is the CUSTOMER's number
+    # ("userPhone" is the organizer's own number and is not used).
+    phone = (str(att.get("phoneNumber") or "").strip() or _resp("attendeePhoneNumber")
+             or _resp("phone") or _resp("phoneNumber") or (loc_opt if loc_kind == "phone" else ""))
+    email = str(att.get("email") or "").strip() or _resp("email")
+    address = loc_opt if loc_kind in ("attendeeInPerson", "inPerson", "attendeeAddress") else ""
     address = address or _resp("address") or _resp("attendeeAddress")
     out = []
     for label, value in (("Phone", phone), ("Email", email), ("Address", address)):

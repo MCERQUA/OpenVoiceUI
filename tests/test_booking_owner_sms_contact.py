@@ -56,3 +56,26 @@ def test_missing_fields_are_left_out(monkeypatch, tmp_path):
     mod.notify_sms('BOOKING_CANCELLED', {'title': 'Attic estimate', 'attendees': [{'name': 'Zed Fakename'}]})
     body = _queued(qdir)
     assert body == "Zed Fakename cancelled 'Attic estimate'.", body
+
+
+def test_phone_call_location_gives_customer_phone(monkeypatch, tmp_path):
+    # Cal.com "attendee phone" location: the organizer calls the customer at location.optionValue.
+    mod, qdir = _load(monkeypatch, tmp_path)
+    mod.notify_sms('BOOKING_CREATED', {
+        'title': 'Attic estimate', 'startTime': '2026-12-01T15:00:00Z',
+        'attendees': [{'name': 'Zed Fakename'}],
+        'responses': {'location': {'value': 'phone', 'optionValue': '+15550100456'}},
+    })
+    body = _queued(qdir)
+    assert '\nPhone: +15550100456' in body, body
+    assert 'Address' not in body, body
+
+
+def test_organizer_phone_location_is_not_the_customer(monkeypatch, tmp_path):
+    mod, qdir = _load(monkeypatch, tmp_path)
+    mod.notify_sms('BOOKING_CREATED', {
+        'title': 'Attic estimate', 'attendees': [{'name': 'Zed Fakename'}],
+        'responses': {'location': {'value': 'userPhone', 'optionValue': '+15550100777'}},
+    })
+    body = _queued(qdir)
+    assert '+15550100777' not in body, body
