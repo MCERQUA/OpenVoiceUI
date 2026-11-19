@@ -14,7 +14,7 @@ lineage — REST API v2, Bearer auth, HMAC-signed webhooks).
 - **Backend API** (`routes/booking.py`, blueprint `booking_bp`, prefix `/api/booking`) —
   proxies the agent + canvas to Cal.diy so the API key stays server-side, plus a
   **signed webhook receiver** that fans booking events out to InkBox SMS + Twenty CRM.
-- **Server-side config** — settings stored at `RUNTIME_DIR/booking-config.json`
+- **Server-side config** — settings stored at `uploads/.booking-config.json` (a dotfile `/uploads/` never serves)
   (bind-mounted volume, survives container restarts). Never localStorage.
 
 ## Architecture
@@ -38,7 +38,8 @@ Resolved per-value as: **config file** (set via the wizard) → **env var** → 
 | API base URL | `CAL_API_URL` | `https://cal.jam-bot.com` | Shared instance |
 | API key | `CAL_API_KEY` | — | Per-tenant; usually set via the wizard, not env |
 | Username | `CAL_USERNAME` | — | The tenant's Cal.diy slug |
-| Webhook secret | `CAL_WEBHOOK_SECRET` | — | HMAC key for `x-cal-signature-256` verification |
+| (config file) | — | `uploads/.booking-config.json` | Dotfile: `/uploads/` never serves it. The legacy `uploads/booking-config.json` is read only when the dotfile is absent and is never written again |
+| Webhook secret | `CAL_WEBHOOK_SECRET` | — | HMAC key for `x-cal-signature-256` verification. Preferred home: `uploads/.booking-webhook-secret` (a dotfile, never served by `/uploads/`); NOT `booking-config.json` |
 | API version | `CAL_API_VERSION` | `2024-08-13` | Cal.com v2 version header |
 | Timeout (s) | `CAL_API_TIMEOUT` | `20` | |
 
@@ -61,14 +62,17 @@ For the **agent** to use booking, the plugin API is reachable in-container at
 
 ## Webhook Bridge
 
-`POST /api/booking/webhook`:
-1. Reads the raw body and the `x-cal-signature-256` header.
-2. If a webhook secret is configured, verifies `HMAC-SHA256(body, secret)` and
-   rejects mismatches with 401. (No secret yet → accepts + logs as `verified:false`
-   so wiring can be tested before deploy.)
-3. Appends the event to a per-tenant JSONL at `RUNTIME_DIR/booking-events.jsonl`.
-4. For `BOOKING_CREATED` / `BOOKING_CANCELLED` / `BOOKING_RESCHEDULED`, calls
-   `notify_sms()` and `crm_record()`.
+`POST /api/booking/webhook` is the ONE booking route reachable without a login (Cal's servers
+carry no Clerk session). The plugin installs that exemption itself, for exactly this path and
+method, immediately before the app's `require_auth` gate; every sibling path stays behind login.
+The HMAC is therefore the route's only credential, and it FAILS CLOSED:
+1. Body over 256 KB -> 413.
+2. No secret configured (dotfile, legacy `booking-config.json` value, or `CAL_WEBHOOK_SECRET`)
+   -> 403 `webhook_not_configured`. Nothing logged, nothing sent.
+3. Missing or wrong `x-cal-signature-256` (hex `HMAC-SHA256(raw body, secret)`) -> 401
+   `invalid_signature`. Nothing logged, nothing sent.
+4. Verified: appends the event to `uploads/.booking-events.jsonl`, and for `BOOKING_CREATED` /
+   `BOOKING_CANCELLED` / `BOOKING_RESCHEDULED` calls `notify_sms()` and `crm_record()`.
 
 `notify_sms()` and `crm_record()` are **stubs with TODO markers** — InkBox SMS and
 Twenty CRM wiring lands when the service is deployed. Customer-facing confirmations
