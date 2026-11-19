@@ -455,6 +455,38 @@ def _log_event(record: dict) -> None:
         logger.error("booking: cannot write event log: %s", e)
 
 
+def _booking_contact(payload: dict) -> list:
+    """[(label, value), ...] — the customer's phone, email and address from a Cal.com/Cal.diy
+    webhook payload, for the OWNER's booking notice. Reads the first attendee, then the booking
+    form `responses` (Cal.com puts a phone question in `attendeePhoneNumber` and an in-person
+    address in `location.optionValue`). Missing fields are simply left out."""
+    attendees = payload.get("attendees") or []
+    att = attendees[0] if attendees and isinstance(attendees[0], dict) else {}
+    responses = payload.get("responses") if isinstance(payload.get("responses"), dict) else {}
+
+    def _resp(key):
+        v = responses.get(key)
+        if isinstance(v, dict):
+            v = v.get("value")
+        return str(v).strip() if isinstance(v, (str, int)) and str(v).strip() else ""
+
+    loc = responses.get("location")
+    loc_kind = loc.get("value") if isinstance(loc, dict) else None
+    loc_opt = str(loc.get("optionValue") or "").strip() if isinstance(loc, dict) else ""
+    # location "phone" = "the organizer calls the attendee": optionValue is the CUSTOMER's number
+    # ("userPhone" is the organizer's own number and is not used).
+    phone = (str(att.get("phoneNumber") or "").strip() or _resp("attendeePhoneNumber")
+             or _resp("phone") or _resp("phoneNumber") or (loc_opt if loc_kind == "phone" else ""))
+    email = str(att.get("email") or "").strip() or _resp("email")
+    address = loc_opt if loc_kind in ("attendeeInPerson", "inPerson", "attendeeAddress") else ""
+    address = address or _resp("address") or _resp("attendeeAddress")
+    out = []
+    for label, value in (("Phone", phone), ("Email", email), ("Address", address)):
+        if value:
+            out.append((label, value))
+    return out
+
+
 def notify_sms(event_type: str, payload: dict) -> None:
     """
     Notify the CLIENT (business owner, not the customer) that their calendar
@@ -488,6 +520,9 @@ def notify_sms(event_type: str, payload: dict) -> None:
         "BOOKING_RESCHEDULED": "rescheduled",
     }.get(event_type, "updated")
     msg = f"{customer_name} {verb} '{title}'" + (f" — {start_time}" if start_time and verb != "cancelled" else "") + "."
+    # The owner gets the customer's contact details with the notice (never masked: the owner is the
+    # one who calls the customer back). Only fields the booking actually carries are added.
+    msg += "".join(f"\n{label}: {value}" for label, value in _booking_contact(payload))
 
     try:
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
