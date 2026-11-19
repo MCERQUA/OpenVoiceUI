@@ -208,6 +208,67 @@ def res_error_message(data: dict) -> str | None:
     return str(msg) if msg else 'request rejected by gateway'
 
 
+# ── Provisional lifecycle errors (openclaw retries the SAME runId) ──────────
+# A main-session `lifecycle` `phase: "error"` is per ATTEMPT, not per run.
+# openclaw's embedded runner emits it at the end of every failed attempt
+# (handleAgentEnd: `livenessState` is "blocked" for EVERY errored attempt, so
+# it does not say whether a retry follows) and then may retry the same runId:
+# overload backoff, profile rotation, idle-timeout retry, model fallback. A
+# retry re-emits `lifecycle` `phase: "start"` for that runId and streams the
+# answer. openclaw's own gateway therefore treats the error as provisional:
+# server-chat AGENT_LIFECYCLE_ERROR_RETRY_GRACE_MS = 15 s ("do not finalize a
+# run before fallback or retry reuses the same runId"); any later event for
+# the run cancels it, otherwise it emits `chat` state=error when the grace ends.
+# Measured 2026-11-19 05:29Z on tenant mike: provider 503 "card busy" ->
+# lifecycle error -> openclaw retried -> the right answer 5.4 s later, after
+# OVU had already ended the turn with a filler line.
+#
+# OVU waits only for errors that look TRANSIENT (busy/overload/rate limit/
+# 5xx/timeout/network) and only when the failed attempt spoke nothing (a
+# retry restarts the text, so waiting after partial speech would repeat it).
+# Every other error ends the turn at once, exactly as before.
+LIFECYCLE_ERROR_RETRY_GRACE_S = 15.0
+_RETRYABLE_ERROR_RE = _re.compile(
+    r'\b(?:429|50\d|52\d)\b|overload|rate.?limit|too many requests|'
+    r'temporar|unavailable|\bbusy\b|timed? ?out|timeout|'
+    r'econnreset|econnrefused|socket hang up|network error|connection (?:reset|refused|closed)',
+    _re.IGNORECASE,
+)
+# A TERMINAL marker vetoes the hold even when a transient word also appears
+# ("403 Forbidden: model temporarily unavailable", "401 Unauthorized (upstream
+# 503)", "429 You exceeded your current quota", "blocked by content policy
+# (code 500)", "Authentication unavailable ... timed out"): auth, permission,
+# refusal/content policy, account, billing/quota and request-shape errors end
+# the turn at once, exactly as before the hold existed.
+_TERMINAL_ERROR_RE = _re.compile(
+    r'\b(?:400|401|402|403|404|413|422)\b|unauthori[sz]ed|forbidden|'
+    r'authenticat|\bauth\b|api.?key|credential|permission|access denied|'
+    r'refus|content.?(?:policy|filter|management)|safety|moderation|flagged|'
+    r'polic(?:y|ies)|violat|suspend|banned|'
+    r'billing|quota|insufficient|credits?\b|\bbalance\b|payment|'
+    r'context (?:overflow|length|window)|too large',
+    _re.IGNORECASE,
+)
+
+
+def is_retryable_lifecycle_error(data, spoken_text=''):
+    """True when a main-session lifecycle `error` should be held open for an
+    openclaw retry of the same run instead of ending the turn.
+
+    `data` is the lifecycle event's `data` dict; `spoken_text` is the text
+    already streamed for this attempt (non-empty -> never hold)."""
+    if spoken_text:
+        return False
+    if not isinstance(data, dict):
+        return False
+    err = data.get('error')
+    if not isinstance(err, str) or not err.strip():
+        return False
+    if _TERMINAL_ERROR_RE.search(err):
+        return False
+    return bool(_RETRYABLE_ERROR_RE.search(err))
+
+
 def is_subagent_agent_event(payload, subagent_run_ids=()):
     """True when an `agent` event was produced by a SUB-AGENT run.
 
@@ -1474,11 +1535,32 @@ class GatewayConnection:
         # followups and nothing ever comes — so cap the silence and let the
         # route-level history-aware fallback answer instead.
         _FOLLOWUP_WAIT_S = 75
+        # Transient main-run lifecycle error held open for openclaw's retry
+        # of the same runId (see is_retryable_lifecycle_error). None = none.
+        pending_lifecycle_error = None
+        pending_lifecycle_error_at = 0.0
 
         while time.time() - start_time < timeout:
+            _poll_s = 5.0
+            if pending_lifecycle_error is not None:
+                _held = time.time() - pending_lifecycle_error_at
+                if _held >= LIFECYCLE_ERROR_RETRY_GRACE_S:
+                    logger.error(
+                        f"### LIFECYCLE ERROR (no retry within "
+                        f"{LIFECYCLE_ERROR_RETRY_GRACE_S:.0f}s): {pending_lifecycle_error}")
+                    event_queue.put({'type': 'text_done', 'response': None,
+                                     'actions': captured_actions,
+                                     'error': pending_lifecycle_error})
+                    return
+                _poll_s = max(0.05, min(5.0, LIFECYCLE_ERROR_RETRY_GRACE_S - _held))
             try:
-                data = await asyncio.wait_for(sub.event_queue.get(), timeout=5.0)
+                data = await asyncio.wait_for(sub.event_queue.get(), timeout=_poll_s)
             except asyncio.TimeoutError:
+                if pending_lifecycle_error is not None:
+                    # Keep the browser stream alive while openclaw retries.
+                    event_queue.put({'type': 'heartbeat',
+                                     'elapsed': int(time.time() - start_time)})
+                    continue
                 elapsed = int(time.time() - start_time)
                 # Demoted-wait expiry: our message was coalesced into a busy
                 # session's followup queue but no followup run reached us in
@@ -1578,6 +1660,9 @@ class GatewayConnection:
                     d = payload.get('data', {})
                     full_text = d.get('text', '')
                     delta_text = d.get('delta', '')
+                    if (delta_text or full_text) and pending_lifecycle_error is not None:
+                        logger.info("### RETRY TEXT after provisional lifecycle error — error cleared")
+                        pending_lifecycle_error = None
                     if delta_text and full_text:
                         prev_text_len = len(full_text)
                         collected_text = full_text
@@ -1672,6 +1757,13 @@ class GatewayConnection:
                     }
                     captured_actions.append(action)
 
+                    if (phase == 'start' and not is_subagent
+                            and pending_lifecycle_error is not None):
+                        logger.info(
+                            f"### RETRY START (runId={str(payload.get('runId', '?'))[:12]}) — "
+                            f"openclaw retried after: {pending_lifecycle_error}")
+                        pending_lifecycle_error = None
+
                     if phase == 'start' and is_subagent:
                         subagent_active = True
                         subagent_starts += 1
@@ -1739,7 +1831,20 @@ class GatewayConnection:
                             continue
 
                     if phase == 'error' and not is_subagent:
-                        error_msg = payload.get('data', {}).get('error', 'Unknown LLM error')
+                        _ldata = payload.get('data', {}) or {}
+                        error_msg = _ldata.get('error', 'Unknown LLM error')
+                        if (is_retryable_lifecycle_error(_ldata, collected_text)
+                                and (time.time() - start_time
+                                     + LIFECYCLE_ERROR_RETRY_GRACE_S) < timeout):
+                            pending_lifecycle_error = error_msg
+                            pending_lifecycle_error_at = time.time()
+                            logger.warning(
+                                f"### LIFECYCLE ERROR (provisional, liveness="
+                                f"{_ldata.get('livenessState', '?')}) — holding "
+                                f"{LIFECYCLE_ERROR_RETRY_GRACE_S:.0f}s for openclaw retry: {error_msg}")
+                            event_queue.put({'type': 'heartbeat',
+                                             'elapsed': int(time.time() - start_time)})
+                            continue
                         logger.error(f"### LIFECYCLE ERROR: {error_msg}")
                         event_queue.put({'type': 'text_done', 'response': None, 'actions': captured_actions,
                                          'error': error_msg})
@@ -1839,6 +1944,18 @@ class GatewayConnection:
                     if chat_sk and is_subagent_session_key(chat_sk):
                         logger.info(f"### Ignoring subagent chat.final (sk={chat_sk[:60]})")
                         continue
+
+                    # The run finished while a provisional lifecycle error was
+                    # held and no retry ever started: that error was terminal.
+                    # End the turn with it, as before the hold existed (never
+                    # speak a final's error-payload text, never treat it as an
+                    # empty/queued final and abort or re-send).
+                    if pending_lifecycle_error is not None and not collected_text:
+                        logger.error(f"### LIFECYCLE ERROR (terminal, run final): {pending_lifecycle_error}")
+                        event_queue.put({'type': 'text_done', 'response': None,
+                                         'actions': captured_actions,
+                                         'error': pending_lifecycle_error})
+                        return
 
                     # Detect gateway-injected stale replays from aborted runs.
                     usage = payload.get('usage', {})
