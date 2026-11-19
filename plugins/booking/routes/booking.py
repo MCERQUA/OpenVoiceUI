@@ -14,7 +14,8 @@ Architecture: docs/jambot/booking-system-cal-diy.md
   - The webhook receiver fans out BOOKING_* events to InkBox SMS + Twenty CRM.
 
 Config resolution order (per value):
-  1. Server-side config file (RUNTIME_DIR/booking-config.json) — set via the
+  1. Server-side config file (UPLOADS_DIR/.booking-config.json, legacy
+     UPLOADS_DIR/booking-config.json read when the dotfile is absent) — set via the
      setup wizard, survives container restarts (bind-mounted volume).
   2. Environment variable (CAL_API_KEY / CAL_API_URL / CAL_USERNAME).
   3. Hard default (CAL_API_URL only → https://cal.jam-bot.com).
@@ -80,8 +81,16 @@ CAL_API_VERSION = os.environ.get("CAL_API_VERSION", "2024-08-13")
 # a file written directly at RUNTIME_DIR root would silently live only in the
 # container's writable layer and be LOST on the next recreate. Caught and
 # fixed 2026-07-23 before this plugin was ever actually deployed to a tenant.)
-CONFIG_PATH = UPLOADS_DIR / "booking-config.json"
-WEBHOOK_LOG_PATH = UPLOADS_DIR / "booking-events.jsonl"
+#
+# 2026-11-19 (SEC-092): both are DOTFILES. routes/static_files.py serve_upload refuses every
+# dotfile in every UPLOADS_AUTH_MODE, while the old names were downloadable unauthenticated at
+# /uploads/booking-config.json (Cal API key + Cal login password) on every tenant whose uploads
+# mode was not "enforce". The legacy file is still READ when no dotfile exists yet (never
+# deleted, never written again); the first save or the host provisioning script creates the
+# dotfile. scripts/cal-provision-tenant.sh writes the dotfile for new tenants.
+CONFIG_PATH = UPLOADS_DIR / ".booking-config.json"
+LEGACY_CONFIG_PATH = UPLOADS_DIR / "booking-config.json"
+WEBHOOK_LOG_PATH = UPLOADS_DIR / ".booking-events.jsonl"
 # Outbound notify requests are dropped here for a host-side cron to drain and
 # send via InkBox — OVU containers do NOT have /mnt/agent-mesh mounted (only
 # openclaw does), so the usual broker-queue-under-agent-mesh pattern doesn't
@@ -219,13 +228,14 @@ def _append_text(root, rel, text) -> None:
 
 
 def _load_config() -> dict:
-    """Read the server-side config file. Returns {} if absent/unreadable."""
-    try:
-        raw = _read_text(CONFIG_PATH.parent, CONFIG_PATH.name)
-        if raw is not None:
-            return json.loads(raw)
-    except (OSError, ValueError) as e:
-        logger.warning("booking: cannot read config file: %s", e)
+    """Read the server-side config: the dotfile, else the legacy served-name file. {} if neither."""
+    for path in (CONFIG_PATH, LEGACY_CONFIG_PATH):
+        try:
+            raw = _read_text(path.parent, path.name)
+            if raw is not None:
+                return json.loads(raw)
+        except (OSError, ValueError) as e:
+            logger.warning("booking: cannot read config file %s: %s", path.name, e)
     return {}
 
 

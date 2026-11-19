@@ -7,6 +7,8 @@ body as verified=false and still queued the owner SMS. Now:
   - unsigned / wrongly signed body  -> refused, nothing logged, notify_sms never called
   - correctly signed body           -> accepted, logged, fanned out
   - the login exemption is exactly POST /api/booking/webhook; every sibling is still 401.
+  - config, secret and event log are dotfiles (never served by /uploads/); a legacy
+    booking-config.json is still read and the first save moves it to the dotfile.
 Fixture payloads are fake.
 """
 import hashlib
@@ -37,11 +39,12 @@ def _load(monkeypatch, tmp_path, secret=SECRET):
     spec.loader.exec_module(mod)
     uploads = tmp_path / 'uploads'
     uploads.mkdir()
-    (uploads / 'booking-config.json').write_text(json.dumps({'notify_phone': '+15550100999'}))
+    (uploads / '.booking-config.json').write_text(json.dumps({'notify_phone': '+15550100999'}))
     if secret:
         (uploads / '.booking-webhook-secret').write_text(secret + '\n')
-    monkeypatch.setattr(mod, 'CONFIG_PATH', uploads / 'booking-config.json')
-    monkeypatch.setattr(mod, 'WEBHOOK_LOG_PATH', uploads / 'booking-events.jsonl')
+    monkeypatch.setattr(mod, 'CONFIG_PATH', uploads / '.booking-config.json')
+    monkeypatch.setattr(mod, 'LEGACY_CONFIG_PATH', uploads / 'booking-config.json', raising=False)
+    monkeypatch.setattr(mod, 'WEBHOOK_LOG_PATH', uploads / '.booking-events.jsonl')
     monkeypatch.setattr(mod, 'NOTIFY_QUEUE_DIR', uploads / '.booking-notify-queue')
     monkeypatch.setattr(mod, 'WEBHOOK_SECRET_PATH', uploads / '.booking-webhook-secret', raising=False)
     monkeypatch.setattr(mod, 'CAL_WEBHOOK_SECRET_ENV', '')
@@ -78,7 +81,7 @@ def test_unsigned_post_is_refused_and_sends_no_sms(monkeypatch, tmp_path, authed
     assert r.status_code in (401, 403), r.status_code
     assert (r.get_json() or {}).get('code') == 'invalid_signature', r.get_json()
     assert sms == []
-    assert not (uploads / 'booking-events.jsonl').exists()
+    assert not (uploads / '.booking-events.jsonl').exists()
 
 
 def test_wrong_signature_is_refused(monkeypatch, tmp_path, authed_app):
@@ -87,7 +90,7 @@ def test_wrong_signature_is_refused(monkeypatch, tmp_path, authed_app):
     assert r.status_code == 401, r.status_code
     assert (r.get_json() or {}).get('code') == 'invalid_signature', r.get_json()
     assert sms == []
-    assert not (uploads / 'booking-events.jsonl').exists()
+    assert not (uploads / '.booking-events.jsonl').exists()
 
 
 def test_no_secret_configured_is_refused(monkeypatch, tmp_path, authed_app):
@@ -98,7 +101,7 @@ def test_no_secret_configured_is_refused(monkeypatch, tmp_path, authed_app):
         assert r.status_code == 403, (sig, r.status_code)
         assert (r.get_json() or {}).get('code') == 'webhook_not_configured', r.get_json()
     assert sms == []
-    assert not (uploads / 'booking-events.jsonl').exists()
+    assert not (uploads / '.booking-events.jsonl').exists()
 
 
 def test_correct_signature_is_accepted_and_logged(monkeypatch, tmp_path, authed_app):
@@ -106,7 +109,7 @@ def test_correct_signature_is_accepted_and_logged(monkeypatch, tmp_path, authed_
     r = _post(authed_app(mod), sig=_sign(BODY))
     assert r.status_code == 200, (r.status_code, r.get_data(as_text=True)[:300])
     assert r.get_json() == {'ok': True, 'event': 'BOOKING_CREATED', 'verified': True}
-    lines = (uploads / 'booking-events.jsonl').read_text().splitlines()
+    lines = (uploads / '.booking-events.jsonl').read_text().splitlines()
     assert len(lines) == 1
     rec = json.loads(lines[0])
     assert rec['event'] == 'BOOKING_CREATED' and rec['verified'] is True
@@ -137,14 +140,43 @@ def test_login_exemption_is_exactly_the_webhook_path(monkeypatch, tmp_path, auth
         assert (r.get_json() or {}).get('code') == 'auth_required', (method, path, r.get_json())
 
 
-def test_secret_is_never_written_into_booking_config(monkeypatch, tmp_path, authed_app):
-    # booking-config.json can be served from /uploads/; the secret must live in the dotfile.
-    mod, uploads, sms = _load(monkeypatch, tmp_path, secret=None)
-    app = mod.booking_bp
+def _bare_client(mod):
     from flask import Flask
     a = Flask(__name__)
-    a.register_blueprint(app)
-    r = a.test_client().post('/api/booking/config', json={'webhook_secret': SECRET})
+    a.register_blueprint(mod.booking_bp)
+    return a.test_client()
+
+
+def test_secret_is_never_written_into_booking_config(monkeypatch, tmp_path):
+    # the secret lives in its own dotfile, never in a config file
+    mod, uploads, sms = _load(monkeypatch, tmp_path, secret=None)
+    r = _bare_client(mod).post('/api/booking/config', json={'webhook_secret': SECRET})
     assert r.status_code == 200
-    assert 'webhook_secret' not in json.loads((uploads / 'booking-config.json').read_text())
+    assert 'webhook_secret' not in json.loads((uploads / '.booking-config.json').read_text())
     assert (uploads / '.booking-webhook-secret').read_text().strip() == SECRET
+
+
+def test_config_secret_and_event_log_are_dotfiles():
+    # routes/static_files.py serve_upload never serves a dotfile in any UPLOADS_AUTH_MODE; the old
+    # names (booking-config.json, booking-events.jsonl) were downloadable from /uploads/ (SEC-092).
+    spec = importlib.util.spec_from_file_location(
+        'booking_dotfiles', ROOT / 'plugins' / 'booking' / 'routes' / 'booking.py')
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for name in ('CONFIG_PATH', 'WEBHOOK_LOG_PATH', 'WEBHOOK_SECRET_PATH', 'NOTIFY_QUEUE_DIR'):
+        assert getattr(mod, name).name.startswith('.'), (name, getattr(mod, name))
+    src = (ROOT / 'routes' / 'static_files.py').read_text()
+    assert "any(part.startswith('.') for part in Path(filename).parts)" in src
+
+
+def test_legacy_config_is_read_and_first_save_moves_it_to_the_dotfile(monkeypatch, tmp_path):
+    mod, uploads, sms = _load(monkeypatch, tmp_path, secret=None)
+    (uploads / '.booking-config.json').rename(uploads / 'booking-config.json.unused')
+    legacy = {'api_key': 'cal_legacy_key_0000', 'username': 'legacy-user', 'notify_phone': ''}
+    (uploads / 'booking-config.json').write_text(json.dumps(legacy))
+    assert mod._load_config() == legacy
+    r = _bare_client(mod).post('/api/booking/config', json={'notify_identity': 'setup'})
+    assert r.status_code == 200
+    moved = json.loads((uploads / '.booking-config.json').read_text())
+    assert moved['api_key'] == 'cal_legacy_key_0000' and moved['notify_identity'] == 'setup'
+    assert json.loads((uploads / 'booking-config.json').read_text()) == legacy   # never rewritten
