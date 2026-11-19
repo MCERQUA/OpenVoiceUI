@@ -516,6 +516,18 @@ def _booking_contact(payload: dict) -> list:
     return out
 
 
+def _notify_phones(raw) -> list:
+    """notify_phone may be one string or a list of strings (co-owners). Returns the
+    de-duplicated, order-preserving list of non-empty numbers."""
+    items = raw if isinstance(raw, (list, tuple)) else [raw]
+    out = []
+    for item in items:
+        num = str(item).strip() if isinstance(item, (str, int)) else ""
+        if num and num not in out:
+            out.append(num)
+    return out
+
+
 def notify_sms(event_type: str, payload: dict) -> None:
     """
     Notify the CLIENT (business owner, not the customer) that their calendar
@@ -532,9 +544,9 @@ def notify_sms(event_type: str, payload: dict) -> None:
     fields (set via the setup wizard, same place the API key lives).
     """
     cfg = _load_config()
-    notify_phone = cfg.get("notify_phone", "")
+    phones = _notify_phones(cfg.get("notify_phone", ""))
     identity = cfg.get("notify_identity", "setup")
-    if not notify_phone:
+    if not phones:
         logger.info("booking: notify_sms skipped for %s — no notify_phone configured "
                     "(set it in Booking Setup)", event_type)
         return
@@ -553,16 +565,18 @@ def notify_sms(event_type: str, payload: dict) -> None:
     # one who calls the customer back). Only fields the booking actually carries are added.
     msg += "".join(f"\n{label}: {value}" for label, value in _booking_contact(payload))
 
-    try:
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
-        # temp is a dotfile (`.<ts>.json.<random>.tmp`): the host drain's *.json glob skips it
-        _atomic_write_text(NOTIFY_QUEUE_DIR.parent, f"{NOTIFY_QUEUE_DIR.name}/{ts}.json", json.dumps({
-            "notify_phone": notify_phone, "identity": identity, "body": msg,
-            "event": event_type, "queued_at": datetime.now(timezone.utc).isoformat(),
-        }), create_dirs=True)
-        logger.info("booking: notify_sms queued for %s -> %s", event_type, notify_phone)
-    except OSError as e:
-        logger.error("booking: notify_sms queue write failed: %s", e)
+    # One queue file (= one SMS) per number; the host drain checks each file's single notify_phone.
+    for idx, notify_phone in enumerate(phones):
+        try:
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f") + f"-{idx}"
+            # temp is a dotfile (`.<ts>.json.<random>.tmp`): the host drain's *.json glob skips it
+            _atomic_write_text(NOTIFY_QUEUE_DIR.parent, f"{NOTIFY_QUEUE_DIR.name}/{ts}.json", json.dumps({
+                "notify_phone": notify_phone, "identity": identity, "body": msg,
+                "event": event_type, "queued_at": datetime.now(timezone.utc).isoformat(),
+            }), create_dirs=True)
+            logger.info("booking: notify_sms queued for %s -> ...%s", event_type, notify_phone[-4:])
+        except OSError as e:
+            logger.error("booking: notify_sms queue write failed: %s", e)
 
 
 def crm_record(event_type: str, payload: dict) -> None:
@@ -701,7 +715,7 @@ def save_config():
       api_url, api_key, username, webhook_secret, notify_phone, notify_identity
     Empty strings are ignored (so saving the wizard without re-typing the key
     keeps the existing key). Send the literal "__CLEAR__" to wipe a field.
-    notify_phone = the business owner's own number, notified on each booking
+    notify_phone = the business owner's own number (or a list of co-owner numbers), notified on each booking
     event (NOT the customer's number — that's per-booking in the payload).
     """
     body = request.get_json(silent=True) or {}
@@ -724,6 +738,10 @@ def save_config():
             val = body[key]
             if val == "__CLEAR__":
                 cfg.pop(key, None)
+            elif key == "notify_phone" and isinstance(val, list):
+                nums = _notify_phones(val)
+                if nums:
+                    cfg[key] = nums
             elif isinstance(val, str) and val.strip():
                 cfg[key] = val.strip()
     try:
