@@ -424,7 +424,7 @@ window.SettingsPanel = {
             // Debounce save to profile
             clearTimeout(saveTimer);
             saveTimer = setTimeout(() => {
-                const profileId = window._activeProfileData?.id || localStorage.getItem('active_profile_id') || 'default';
+                const profileId = window._activeProfileData?.id || 'default';
                 fetch('/api/profiles/' + profileId, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
