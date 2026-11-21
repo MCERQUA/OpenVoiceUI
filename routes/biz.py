@@ -767,6 +767,27 @@ def export():
     return jsonify(g.biz_store.export())
 
 
+@biz_bp.post(f'{API}/import')
+def import_sources():
+    """Migration importer (services/biz/importer.py). Owner only. A dry run unless ?dry_run=0.
+
+    Body: {"sources": {"<path relative to the tenant root>": <parsed JSON>, ...}}. The tenant is this
+    container's (env), never the request's; the body cannot name one (the gate refuses a "tenant" key).
+    """
+    from services.biz import importer as _importer
+    if _agent():
+        return _fail(403, 'owner_only', 'Importing is for the business owner only')
+    sources = _body().get('sources')
+    if not isinstance(sources, dict) or not sources:
+        return _fail(422, 'no_sources', '"sources" must be an object of {source path: data}')
+    dry = request.args.get('dry_run', '1') != '0'
+    try:
+        rep = _importer.run(g.biz_store, sources, dry_run=dry, run_by=g.biz_by)
+    except _importer.ImportRefused as exc:
+        return _fail(409, exc.code, exc.message)
+    return jsonify(rep)
+
+
 # ── backend-private file store (design amendment 2026-11-17) ──────────────
 @biz_bp.post(f'{API}/files')
 def file_upload():

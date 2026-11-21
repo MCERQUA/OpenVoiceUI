@@ -110,11 +110,14 @@ ROUTES = {
     'biz.schema_custom': (('schema_custom',), None),
     'biz.schema_adopt': (('schema_adopt',), None),
     'biz.dev_page_put': (('dev_page',), None),
+    # the migration importer (PR #616): owner only, a dry run unless ?dry_run=0; it creates only core collections
+    # (contact, job, cost_entry, document, invoice, person, product, stock_move) through BizStore.create
+    'biz.import_sources': (('import',), None),
 }
 # routes that by construction write nothing the verdict reads: accepted only if the verdict AND every target record
 # stay byte-identical (checked, never assumed)
 INERT_OK = {'draft', 'upload', 'counter', 'pack_enable', 'page_register', 'page_patch', 'page_archive',
-            'page_unarchive', 'schema_custom', 'schema_adopt', 'dev_page', 'flags_confirm'}
+            'page_unarchive', 'schema_custom', 'schema_adopt', 'dev_page', 'flags_confirm', 'import'}
 
 
 def _cells():
@@ -164,7 +167,8 @@ def test_matrix_covers_every_state_changing_route(h):
             found.add(r.endpoint)
             assert 'DELETE' not in r.methods, r.rule                              # no delete exists
     assert found == set(ROUTES), {'unclassified': sorted(found - set(ROUTES)), 'gone': sorted(set(ROUTES) - found)}
-    assert not [e for e in found if re.search(r'batch|import|bulk', e)]          # none exist; if one appears, classify it
+    # a batch / import / bulk route must be classified here by name: the importer is the only one (PR #616)
+    assert [e for e in found if re.search(r'batch|import|bulk', e)] == ['biz.import_sources']
     # only routes/biz.py opens the business store: no other route can write a record the verdict reads
     users = []
     for p in list(ROOT.glob('routes/*.py')) + list(ROOT.glob('services/**/*.py')) + [ROOT / 'server.py', ROOT / 'app.py']:
@@ -460,6 +464,12 @@ def _act(h, w, verb, t, actor, n):
         r = a.post('/schema/adopt', {'collection': 'contact', 'key': 'nope'})
     elif verb == 'dev_page':
         r = a.put(f'/dev/pages/matrix-{n}.html', {'html': '<!doctype html><title>x</title>'})
+    elif verb == 'import':
+        # hostile: a migration bundle written for real (dry_run=0) that names the party and files paper against it
+        party = (w['party'].get('data') or {}).get('name') or f'Matrix {n} Inc'
+        r = a.post('/import?dry_run=0', {'sources': {'openclaw/workspace/business/jobs.json': {'jobs': [
+            {'id': f'matrix-{n}', 'customer': party, 'status': 'completed', 'revenue_billed': 1.0,
+             'costs': {'lump_sum_cost': 1.0}, 'photo_url': '/uploads/matrix.jpg', 'invoice': f'M{n}'}]}}})
     else:
         raise AssertionError(f'unclassified verb {verb}')
     return r.status_code, (r.get_json() or {}).get('code') if r.is_json else None
