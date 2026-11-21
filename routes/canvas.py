@@ -1033,11 +1033,19 @@ def _resolve_asset_ref(token, base_dir):
 
 
 def _public_page_files(manifest):
-    """Canvas-pages-relative filenames of pages served WITHOUT a session (is_public pages + OS pages)."""
+    """Canvas-pages-relative filenames of pages served WITHOUT a session (is_public pages + OS pages).
+
+    Same rule as the page gate in canvas_pages_proxy, which decides by the URL's stem: the public file is
+    '<page_id>.html'. Never the manifest's 'filename' field -- the manifest is agent-writable, and a public entry
+    whose filename named a PRIVATE page would open that page's assets while the page itself stayed private.
+    """
     names = set(_CANVAS_OS_PAGES)
     for page_id, meta in (manifest.get('pages') or {}).items():
+        page_id = str(page_id)
+        if not page_id or '/' in page_id or '\\' in page_id or page_id.startswith('.'):
+            continue                                    # the gate's stem can never equal such an id
         if isinstance(meta, dict) and meta.get('is_public') is True:
-            names.add(str(meta.get('filename') or f'{page_id}.html'))
+            names.add(f'{page_id}.html')
     return sorted(names)
 
 

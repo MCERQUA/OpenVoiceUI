@@ -118,3 +118,53 @@ def test_signed_out_navigation_to_private_image_goes_to_sign_in(client, monkeypa
     _as(monkeypatch, None)   # owner taps a texted image link: same sign-in redirect as a private page
     r = client.get("/pages/private.png", headers={"Accept": "text/html,application/xhtml+xml"})
     assert r.status_code == 302 and r.headers["Location"].endswith("/?redirect=/pages/private.png")
+
+
+# Review of PR #612: a public manifest entry whose 'filename' names a PRIVATE page must not open that page's
+# assets. The page gate decides by the URL stem, so the scanner must too (the manifest is agent-writable).
+def test_manifest_filename_cannot_open_private_page_assets(client, pages, monkeypatch):
+    _as(monkeypatch, None)
+    import os
+    m = pages._manifest_path_for_test
+    m.write_text(json.dumps({"pages": {
+        "private-page": {"is_public": False},
+        "decoy": {"is_public": True, "filename": "private-page.html"},
+    }}))
+    st = os.stat(m)
+    os.utime(m, ns=(st.st_atime_ns, st.st_mtime_ns + 7_000_000_000))
+    assert client.get("/pages/private-page.html").status_code == 401
+    assert client.get("/pages/private.png").status_code == 401
+    assert client.get("/pages/img/private-hero.webp").status_code == 401
+
+
+# Review of PR #612: path tricks must not reach a private asset through a public page's reference.
+@pytest.mark.parametrize("url", [
+    "/pages/img/../private.png", "/pages/pub.png/../private.png", "/pages/./private.png", "/pages//private.png",
+    "/pages/private%2epng", "/pages/private.png?x=pub.png", "/pages/private.png%3Fpub.png", "/pages/private.PNG",
+    "/pages/img%2fprivate-hero.webp", "/pages/private.png/", "/pages/pub.png%2f..%2fprivate.png",
+])
+def test_path_tricks_do_not_reach_private_assets(client, monkeypatch, url):
+    _as(monkeypatch, None)
+    r = client.get(url)
+    assert not (r.status_code == 200 and r.data == b"asset-bytes"), (url, r.status_code)
+
+
+def test_symlink_at_a_publicly_referenced_name_does_not_serve_its_target(client, pages, monkeypatch):
+    _as(monkeypatch, None)
+    import os
+    root = pages.CANVAS_PAGES_DIR
+    os.rename(root / "pub.png", root / "pub.png.moved")
+    (root / "target.png").write_bytes(b"SECRET-TARGET")
+    os.symlink(root / "target.png", root / "pub.png")
+    assert b"SECRET-TARGET" not in client.get("/pages/pub.png").data
+
+
+def test_private_asset_accepts_bearer_and_session_cookie(client, monkeypatch):
+    import services.auth as auth
+    monkeypatch.setattr(auth, "verify_clerk_token", lambda t: "user_1" if t == "good" else None)
+    assert client.get("/pages/private.png").status_code == 401
+    assert client.get("/pages/private.png", headers={"Authorization": "Bearer good"}).status_code == 200
+    client.set_cookie("__session", "good")
+    assert client.get("/pages/private.png").status_code == 200
+    client.set_cookie("__session", "bad")
+    assert client.get("/pages/private.png").status_code == 401
