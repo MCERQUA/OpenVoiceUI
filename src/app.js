@@ -226,8 +226,9 @@ connectAiradio();
         // False — leaving the hermes run hanging and the actions feed
         // frozen. Openclaw mode continues to use /api/conversation/*.
         // Action is one of: 'abort' | 'steer' | 'interject'.
+        window._gatewayState = window._gatewayState || { gateway_id: '', gateway_agent_id: '' };  // in-memory only, set from server profile
         function convPath(action) {
-            const gid = localStorage.getItem('gateway_id') || 'openclaw';
+            const gid = (window._gatewayState.gateway_id || '') || 'openclaw';
             return gid === 'hermes'
                 ? `/api/hermes/${action}`
                 : `/api/conversation/${action}`;
@@ -428,25 +429,10 @@ connectAiradio();
 
                     this._profiles = data.profiles || [];
 
-                    // Determine which profile to use:
-                    // 1. localStorage (last explicit user choice)
-                    // 2. server's persisted active (survives restarts)
-                    // 3. default
-                    const savedProfile = localStorage.getItem('active_profile_id');
-                    const targetProfile = savedProfile || data.active || this._DEFAULT_PROFILE;
-
-                    // If localStorage says something different from what the server has,
-                    // re-activate so the backend is in sync
-                    if (targetProfile !== data.active) {
-                        const exists = this._profiles.find(p => p.id === targetProfile);
-                        if (exists) {
-                            await fetch('/api/profiles/activate', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ profile_id: targetProfile })
-                            });
-                        }
-                    }
+                    // The server is the only source of truth for the active profile.
+                    // NEVER restore a browser-cached choice and re-activate it on load:
+                    // a stale value silently flipped tenants back to 'default' (FE-5).
+                    const targetProfile = data.active || this._DEFAULT_PROFILE;
 
                     const activeId = this._profiles.find(p => p.id === targetProfile)
                         ? targetProfile
@@ -470,15 +456,14 @@ connectAiradio();
                     // Sync agentId for the active profile
                     const activeProfile = this._profiles.find(p => p.id === activeId);
                     const agentId = activeProfile?.adapter_config?.agentId || null;
-                    localStorage.setItem('gateway_agent_id', agentId || '');
+                    window._gatewayState.gateway_agent_id = agentId || '';
                     // Store the gateway_id so the Action Console can show which
                     // backend gateway is handling conversations ("openclaw",
                     // "hermes", etc.). Defaults to "openclaw" to match the
                     // server-side conversation.py fallback.
                     const gatewayId = activeProfile?.adapter_config?.gateway_id || 'openclaw';
-                    localStorage.setItem('gateway_id', gatewayId);
+                    window._gatewayState.gateway_id = gatewayId;
                     if (activeProfile) TranscriptPanel.agentName = activeProfile.name;
-                    localStorage.setItem('active_profile_id', activeId);
 
                     // Fetch full active profile and apply runtime settings
                     fetch('/api/profiles/active')
@@ -545,17 +530,15 @@ connectAiradio();
                     const data = await res.json();
                     if (statusEl) statusEl.textContent = data.ok ? `✓ ${profileId}` : '✗ Failed';
 
-                    // Persist selection so it survives page reloads and browser restarts
-                    localStorage.setItem('active_profile_id', profileId);
 
                     // Store the agentId for this profile so conversation.py routes correctly
                     const profile = this._profiles.find(p => p.id === profileId);
                     const agentId = profile?.adapter_config?.agentId || null;
-                    localStorage.setItem('gateway_agent_id', agentId || '');
+                    window._gatewayState.gateway_agent_id = agentId || '';
                     // Keep gateway_id in sync so the Action Console label reflects
                     // the backend gateway of the newly-activated profile (openclaw / hermes).
                     const gatewayId = profile?.adapter_config?.gateway_id || 'openclaw';
-                    localStorage.setItem('gateway_id', gatewayId);
+                    window._gatewayState.gateway_id = gatewayId;
                     if (profile) TranscriptPanel.agentName = profile.name;
                     console.log(`[QuickSettings] switched to ${profileId}, agentId=${agentId || 'main'}`);
                     // Apply full profile settings from activate response
@@ -4567,7 +4550,7 @@ connectAiradio();
                     const voice = window.providerManager?.currentVoice || 'autumn';
                     const uiContext = this.getUIContext();
 
-                    const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
+                    const gatewayAgentId = (window._gatewayState.gateway_agent_id || '') || null;
                     // Capture this stream's own controller in the closure so the finally
                     // block only clears the shared slot if it STILL belongs to this stream
                     // (FE-6). Otherwise a slow finally can null a newer send's controller,
@@ -4605,7 +4588,7 @@ connectAiradio();
                         throw apiErr;
                     }
                     {
-                        const _gwId = localStorage.getItem('gateway_id') || 'openclaw';
+                        const _gwId = (window._gatewayState.gateway_id || '') || 'openclaw';
                         const _gwLabel = _gwId === 'hermes' ? 'Hermes' :
                                          _gwId === 'openclaw' ? 'OpenClaw' :
                                          _gwId;
@@ -6370,7 +6353,7 @@ connectAiradio();
                     StatusModule.update('thinking', 'THINKING');
 
                     const uiContext = ModeManager.clawdbotMode?.getUIContext?.() || {};
-                    const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
+                    const gatewayAgentId = (window._gatewayState.gateway_agent_id || '') || null;
                     const body = {
                         message: '__session_start__',
                         tts_provider: this.ttsProvider,
@@ -6524,7 +6507,7 @@ connectAiradio();
                 try {
                     // Gather UI context so the LLM knows about canvas pages, music state, etc.
                     const uiContext = ModeManager.clawdbotMode?.getUIContext?.() || {};
-                    const gatewayAgentId = localStorage.getItem('gateway_agent_id') || null;
+                    const gatewayAgentId = (window._gatewayState.gateway_agent_id || '') || null;
 
                     // Get AI response from backend
                     // Capture this stream's own controller so the finally only clears
@@ -10932,7 +10915,6 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
             _profileBC.onmessage = function(evt) {
                 if (evt.data?.type === 'profile-activated' && evt.data?.profileId) {
                     console.log('[ProfileSync] Admin switched to:', evt.data.profileId);
-                    localStorage.setItem('active_profile_id', evt.data.profileId);
                     // Reload the profile in the dropdown and apply settings
                     const select = document.getElementById('voice-mode-select');
                     if (select) {
