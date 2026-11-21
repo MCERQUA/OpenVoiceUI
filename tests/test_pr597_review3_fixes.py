@@ -122,15 +122,31 @@ def test_booking_config_roundtrip_and_symlinks_refused(monkeypatch, tmp_path, wi
 
     mod._save_config({'api_url': 'https://cal.example'})
     assert mod._load_config() == {'api_url': 'https://cal.example'}
-    assert [p.name for p in uploads.iterdir()] == ['booking-config.json'], 'temp file left behind'
+    # SEC-092 R2: the config is saved inside the fixed .booking-secrets/ dir
+    sdir = uploads / '.booking-secrets'
+    assert [p.name for p in uploads.iterdir()] == ['.booking-secrets'], 'temp file left behind'
+    assert [p.name for p in sdir.iterdir()] == ['booking-config.json'], 'temp file left behind'
 
     # the final name planted as a symlink: replaced (never written through), never read
-    (uploads / 'booking-config.json').unlink()
-    (uploads / 'booking-config.json').symlink_to(victim)
+    (sdir / 'booking-config.json').unlink()
+    (sdir / 'booking-config.json').symlink_to(victim)
     assert mod._load_config() == {}
     mod._save_config({'api_url': 'https://agent.example'})
     assert victim.read_text() == 'ORIGINAL\n'
-    assert not (uploads / 'booking-config.json').is_symlink()
+    assert not (sdir / 'booking-config.json').is_symlink()
+
+    # the DIRECTORY planted as a symlink: never read through, never written through
+    elsewhere = tmp_path / 'elsewhere'
+    elsewhere.mkdir()
+    (elsewhere / 'booking-config.json').write_text('{"api_url": "https://planted.example"}')
+    sdir.rename(tmp_path / 'secrets-moved-aside')
+    sdir.symlink_to(elsewhere)
+    assert mod._load_config() == {}
+    with pytest.raises(OSError):
+        mod._save_config({'api_url': 'https://agent.example'})
+    assert (elsewhere / 'booking-config.json').read_text() == '{"api_url": "https://planted.example"}'
+    assert sorted(p.name for p in elsewhere.iterdir()) == ['booking-config.json']
+    sdir.unlink()
 
     # event log + notify queue through planted symlinks
     log = uploads / 'booking-events.jsonl'
