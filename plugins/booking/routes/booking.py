@@ -14,8 +14,9 @@ Architecture: docs/jambot/booking-system-cal-diy.md
   - The webhook receiver fans out BOOKING_* events to InkBox SMS + Twenty CRM.
 
 Config resolution order (per value):
-  1. Server-side config file (UPLOADS_DIR/.booking-config.json, legacy
-     UPLOADS_DIR/booking-config.json read when the dotfile is absent) — set via the
+  1. Server-side config file (UPLOADS_DIR/.booking-secrets/booking-config.json; the older
+     UPLOADS_DIR/.booking-config.json if it was written later; legacy
+     UPLOADS_DIR/booking-config.json read when neither exists) — set via the
      setup wizard, survives container restarts (bind-mounted volume).
   2. Environment variable (CAL_API_KEY / CAL_API_URL / CAL_USERNAME).
   3. Hard default (CAL_API_URL only → https://cal.jam-bot.com).
@@ -42,6 +43,7 @@ import hmac
 import json
 import logging
 import os
+import stat
 from datetime import datetime, timezone
 
 import requests as http_requests
@@ -104,6 +106,20 @@ NOTIFY_QUEUE_DIR = UPLOADS_DIR / ".booking-notify-queue"
 # tenant whose uploads mode is not "enforce" (measured 2026-11-19). A secret anyone can
 # download signs nothing. Written by the host provisioning script (or POST /config).
 WEBHOOK_SECRET_PATH = UPLOADS_DIR / ".booking-webhook-secret"
+# 2026-11-21 (SEC-092 R2): both secrets now live in ONE fixed, never-renamed directory,
+# UPLOADS_DIR/.booking-secrets/ (booking-config.json, booking-webhook-secret). Why: the admin
+# tenant (test-dev) binds the whole /mnt/clients tree read-only and every OVU container runs as
+# the same uid/gid, so file modes cannot hide one tenant's secrets from it; the host masks this
+# DIRECTORY there instead (scripts/sec034-sync-admin-masks.sh). A per-FILE mask would not hold:
+# every writer replaces these files by rename, which detaches a file bind. The directory itself
+# is never renamed, so its mask stays attached.
+# Read order: whichever of the new file and the old dotfile above was written LAST (a tenant
+# still on the previous plugin, or a host script mid-migration, may have saved only the old
+# dotfile); a tie goes to the new file; then the legacy served-name config. Writes go to the
+# new file only. The old dotfiles are left for the host to archive once every tenant runs this.
+SECRETS_DIRNAME = ".booking-secrets"
+SECRETS_CONFIG_NAME = "booking-config.json"
+SECRETS_WEBHOOK_NAME = "booking-webhook-secret"
 # The webhook is the one booking route reachable without a login (see
 # _install_public_webhook_gate). Cal.com payloads are a few KB; refuse anything big
 # before hashing it.
@@ -227,21 +243,70 @@ def _append_text(root, rel, text) -> None:
         os.close(dfd)
 
 
-def _load_config() -> dict:
-    """Read the server-side config: the dotfile, else the legacy served-name file. {} if neither."""
-    for path in (CONFIG_PATH, LEGACY_CONFIG_PATH):
+def _regular_mtime(root, rel):
+    """st_mtime_ns of root/rel if it is a regular file (no symlink followed anywhere), else None."""
+    try:
+        if _Anchored is not None:
+            a = _Anchored(root, rel)
+            return a.lstat().st_mtime_ns if a.is_file() else None
+        sub, name = _split(rel)
+        dfd = _subdir_fd(root, sub)
         try:
-            raw = _read_text(path.parent, path.name)
+            st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+        finally:
+            os.close(dfd)
+        return st.st_mtime_ns if stat.S_ISREG(st.st_mode) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _secret_candidates(path, secrets_name, legacy=None):
+    """[(root, rel), ...] to try in order for one secret file (see SECRETS_DIRNAME above).
+
+    `path` is the old dotfile (CONFIG_PATH / WEBHOOK_SECRET_PATH); the new file sits beside it in
+    SECRETS_DIRNAME, so a test or caller that repoints `path` repoints both."""
+    root = path.parent
+    pair = []
+    for prio, rel in enumerate((f"{SECRETS_DIRNAME}/{secrets_name}", path.name)):
+        t = _regular_mtime(root, rel)
+        if t is not None:
+            pair.append((-t, prio, rel))
+    out = [(root, rel) for _, _, rel in sorted(pair)]
+    if legacy is not None:
+        out.append((legacy.parent, legacy.name))
+    return out
+
+
+def _config_source() -> str:
+    """Relative name of the config file _load_config would read ('' if none). Never a value."""
+    for root, rel in _secret_candidates(CONFIG_PATH, SECRETS_CONFIG_NAME, LEGACY_CONFIG_PATH):
+        if _regular_mtime(root, rel) is not None:
+            return rel
+    return ""
+
+
+def _load_config() -> dict:
+    """Read the server-side config: newest of .booking-secrets/ + the old dotfile, else legacy. {} if none."""
+    for root, rel in _secret_candidates(CONFIG_PATH, SECRETS_CONFIG_NAME, LEGACY_CONFIG_PATH):
+        try:
+            raw = _read_text(root, rel)
             if raw is not None:
                 return json.loads(raw)
         except (OSError, ValueError) as e:
-            logger.warning("booking: cannot read config file %s: %s", path.name, e)
+            logger.warning("booking: cannot read config file %s: %s", rel, e)
     return {}
 
 
 def _save_config(data: dict) -> None:
-    """Persist the config file atomically (no-follow temp, then rename)."""
-    _atomic_write_text(CONFIG_PATH.parent, CONFIG_PATH.name, json.dumps(data, indent=2))
+    """Persist the config atomically (no-follow temp, then rename) into .booking-secrets/."""
+    _atomic_write_text(CONFIG_PATH.parent, f"{SECRETS_DIRNAME}/{SECRETS_CONFIG_NAME}",
+                       json.dumps(data, indent=2), create_dirs=True)
+
+
+def _save_webhook_secret(value: str) -> None:
+    """Persist the signing secret ('' clears it) into .booking-secrets/."""
+    _atomic_write_text(WEBHOOK_SECRET_PATH.parent, f"{SECRETS_DIRNAME}/{SECRETS_WEBHOOK_NAME}",
+                       value, create_dirs=True)
 
 
 def _api_url() -> str:
@@ -261,13 +326,16 @@ def _username() -> str:
 
 
 def _webhook_secret() -> str:
-    """Signing secret: the dotfile first (never served), then a legacy config value, then env."""
-    try:
-        raw = _read_text(WEBHOOK_SECRET_PATH.parent, WEBHOOK_SECRET_PATH.name)
-        if raw and raw.strip():
-            return raw.strip()
-    except (OSError, ValueError) as e:
-        logger.warning("booking: cannot read webhook secret file: %s", e)
+    """Signing secret: newest of .booking-secrets/ + the old dotfile, then a legacy config value, then env."""
+    cands = _secret_candidates(WEBHOOK_SECRET_PATH, SECRETS_WEBHOOK_NAME)
+    if cands:   # the newest file decides, even when it is empty ('' = cleared via POST /config)
+        root, rel = cands[0]
+        try:
+            raw = _read_text(root, rel)
+            if raw and raw.strip():
+                return raw.strip()
+        except (OSError, ValueError) as e:
+            logger.warning("booking: cannot read webhook secret file: %s", e)
     cfg = _load_config()
     return cfg.get("webhook_secret") or CAL_WEBHOOK_SECRET_ENV
 
@@ -720,15 +788,15 @@ def save_config():
     """
     body = request.get_json(silent=True) or {}
     cfg = _load_config()
-    # The signing secret goes to its own never-served dotfile, not booking-config.json.
+    # The signing secret goes to its own never-served file, not booking-config.json.
     if "webhook_secret" in body:
         val = body["webhook_secret"]
         try:
             if val == "__CLEAR__":
-                _atomic_write_text(WEBHOOK_SECRET_PATH.parent, WEBHOOK_SECRET_PATH.name, "")
+                _save_webhook_secret("")
                 cfg.pop("webhook_secret", None)
             elif isinstance(val, str) and val.strip():
-                _atomic_write_text(WEBHOOK_SECRET_PATH.parent, WEBHOOK_SECRET_PATH.name, val.strip())
+                _save_webhook_secret(val.strip())
                 cfg.pop("webhook_secret", None)
         except OSError as e:
             logger.error("booking: cannot save webhook secret: %s", e)
