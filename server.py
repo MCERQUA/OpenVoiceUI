@@ -195,6 +195,9 @@ app.register_blueprint(static_files_bp)
 from routes.intake import intake_bp
 app.register_blueprint(intake_bp)
 
+from routes.forms import forms_bp   # anonymous canvas-page form capture -> private store (SEC-062)
+app.register_blueprint(forms_bp)
+
 from routes.albums import albums_bp
 app.register_blueprint(albums_bp)
 

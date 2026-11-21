@@ -15,6 +15,7 @@ server.py module-level decorators (@app.route, @sock.route) keep working.
 """
 import logging
 import os
+import re
 
 from flask import Flask, g, jsonify, redirect, request
 from flask_cors import CORS
@@ -318,6 +319,16 @@ def create_app(config_override: dict = None):
                                  # via Clerk token + injects the service key server-side
         }
 
+        # Public for ONE write method on ONE exact path shape. routes/forms.py: an anonymous
+        # visitor submits a canvas-page form (sign-ups) with POST /api/forms/<form_id>. The
+        # handler is the gate (definition must exist + be enabled, Origin/Referer = this host,
+        # per-IP + per-form rate limits, field allowlist, size cap). Every OTHER method and
+        # every deeper path (GET submissions, PUT .../def) falls through to the agent-key /
+        # Clerk check below. Never widen this to a prefix: that would open the reads (SEC-062).
+        _PUBLIC_WRITE_PATTERNS = (
+            ('POST', re.compile(r'^/api/forms/[^/]+$')),
+        )
+
         # Detect whether Clerk auth is configured at startup.
         # Auth is opt-in: when no key is set, all routes are accessible (README § Authentication).
         _clerk_key = (os.getenv('CLERK_PUBLISHABLE_KEY') or os.getenv('VITE_CLERK_PUBLISHABLE_KEY', '')).strip()
@@ -355,6 +366,8 @@ def create_app(config_override: dict = None):
 
             # Always allow health probes and static assets
             if path in _PUBLIC_EXACT:
+                return
+            if any(request.method == _m and _rx.match(path) for _m, _rx in _PUBLIC_WRITE_PATTERNS):
                 return
             # /src/ is public (login-screen assets) EXCEPT the admin shell itself —
             # /src/admin.html must go through the same admin gate as /admin.
