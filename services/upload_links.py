@@ -41,6 +41,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 SIGNING_KEY_ENV = 'UPLOADS_SIGNING_KEY'
 MIN_KEY_LENGTH = 16                      # shorter than this is not treated as a secret
 MAX_TTL_SECONDS = 30 * 24 * 3600         # 30 days
+# Lifetime of a link minted for a machine consumer (the agent and the third parties it hands the
+# link to, e.g. a vision provider): the CLI default and the sms-router signer use the same 7 days.
+DEFAULT_TTL_SECONDS = 7 * 24 * 3600
 UPLOADS_PREFIX = '/uploads/'
 
 # verify() results. OK is the only granting value.
