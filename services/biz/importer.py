@@ -401,9 +401,16 @@ def build_plan(sources: dict) -> Plan:
     for name in sources:
         if name not in ADAPTERS:
             plan.gap(name, 'whole file', 1, 'no importer adapter for this source')
-    for name in KNOWN_SOURCES:                # fixed order: contacts/jobs before things that point at them
-        if name in sources:
-            ADAPTERS[name](name, sources[name], plan)
+    # fixed order: contacts/jobs before things that point at them. Explicit by-name calls (no table
+    # dispatch) so the agent-writable-IO guard can trace every callee.
+    if SRC_JOBS in sources:
+        adapt_jobs(SRC_JOBS, sources[SRC_JOBS], plan)
+    if SRC_FIELD in sources:
+        adapt_field(SRC_FIELD, sources[SRC_FIELD], plan)
+    if SRC_INVENTORY in sources:
+        adapt_inventory(SRC_INVENTORY, sources[SRC_INVENTORY], plan)
+    if SRC_EXTRACTIONS in sources:
+        adapt_extractions(SRC_EXTRACTIONS, sources[SRC_EXTRACTIONS], plan)
     return plan
 
 
