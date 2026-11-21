@@ -403,7 +403,9 @@ def upload_file():
         mime = 'image/jpeg'
     is_image = mime.startswith('image/')
 
-    # Full public URL — the agent (and the index) always get the complete location
+    # Full public URL — the agent (and the index) always get the complete location.
+    # url_full is the AGENT's copy (signed under enforce, see agent_upload_url); the index keeps
+    # the bare URL because it outlives any signature.
     url_full = f"https://{request.host}/uploads/{safe_name}"
 
     result = {
@@ -411,7 +413,7 @@ def upload_file():
         'path': str(dest),
         'filename': safe_name,
         'url': f'/uploads/{safe_name}',
-        'url_full': url_full,
+        'url_full': agent_upload_url(safe_name),
         'agent_path': f'workspace/uploads/{safe_name}',
         'file_size': file_size,
     }
@@ -698,6 +700,39 @@ def _chunk_done_marker(chunk_dir: Path, upload_id: str) -> Path:
     return chunk_dir / f'{upload_id}.done.json'
 
 
+def agent_upload_url(rel_path: str) -> str:
+    """The absolute URL of one upload as handed to the AGENT (SEC-062).
+
+    The agent passes this URL on to third parties that fetch it anonymously: Z.AI's analyze_image
+    tool fetches it from Z.AI's own servers, with no session and no X-Agent-Key. Under enforce a bare
+    /uploads/ URL is 401 for them, so here it is a signed link for this one file
+    (services/upload_links.py, this instance's UPLOADS_SIGNING_KEY, DEFAULT_TTL_SECONDS).
+
+    Signed ONLY when a bare URL would really be denied (auth required AND mode enforce). In shadow
+    and off the bare URL is still served, so it is returned unchanged: nothing a user sees changes.
+    Fails open to the bare URL (logged) when the instance has no usable signing key, which is
+    exactly today's behaviour. The UI's own display URL ('url', relative) is never signed: the
+    logged-in owner's session already grants it."""
+    bare = f"https://{request.host}/uploads/{rel_path}"
+    if not (UPLOADS_REQUIRE_AUTH and UPLOADS_AUTH_MODE == 'enforce'):
+        return bare
+    try:
+        from services import upload_links
+        return upload_links.signed_url(rel_path, upload_links.DEFAULT_TTL_SECONDS,
+                                       base_url=f"https://{request.host}")
+    except Exception as exc:   # UploadLinkError (no key) or anything else: never fail the upload
+        logger.warning('[uploads-auth] url_full left unsigned for %s: %s', str(rel_path)[:200], exc)
+        return bare
+
+
+def _with_agent_url(result):
+    """A chunked-upload result as returned to the client: url_full signed per agent_upload_url.
+    The stored done-marker keeps the bare URL (a resent slice re-signs it fresh)."""
+    if isinstance(result, dict) and result.get('filename'):
+        result = {**result, 'url_full': agent_upload_url(result['filename'])}
+    return result
+
+
 def _chunk_stored_result(done_marker: Path):
     try:
         return json.loads(Anchored(UPLOADS_DIR, done_marker).read_text(max_bytes=65536))
@@ -847,7 +882,7 @@ def upload_file_chunk():
     if not partial.exists():
         stored = _chunk_stored_result(done_marker)
         if stored is not None:
-            return jsonify(stored)
+            return jsonify(_with_agent_url(stored))
     if exp <= time.time():
         return jsonify({'error': 'This upload expired — start it again', 'code': 'start_required'}), 410
     try:
@@ -892,7 +927,7 @@ def upload_file_chunk():
     except (FileNotFoundError, UnsafePath):
         stored = _chunk_stored_result(done_marker)
         if stored is not None:
-            return jsonify(stored)
+            return jsonify(_with_agent_url(stored))
         return jsonify({'error': 'This upload is no longer held — start it again', 'code': 'start_required'}), 410
 
     with fh_ctx as fh:
@@ -908,12 +943,12 @@ def upload_file_chunk():
             if not same:
                 stored = _chunk_stored_result(done_marker)
                 if stored is not None:
-                    return jsonify(stored)
+                    return jsonify(_with_agent_url(stored))
                 return jsonify({'error': 'Upload state changed — retry'}), 409
             if done_marker.exists():
                 # A finish wrote its result and stopped before the rename: complete THAT finish
                 # (same name) instead of touching the bytes.
-                return jsonify(_chunk_finish(chunk_dir, uid, partial, done_marker, meta))
+                return jsonify(_with_agent_url(_chunk_finish(chunk_dir, uid, partial, done_marker, meta)))
             fh.seek(0, 2)
             held = fh.tell()
             if offset > held:
@@ -927,7 +962,7 @@ def upload_file_chunk():
             held = fh.tell()
             if held < size:
                 return jsonify({'ok': True, 'received': held, 'size': size})
-            return jsonify(_chunk_finish(chunk_dir, uid, partial, done_marker, meta))
+            return jsonify(_with_agent_url(_chunk_finish(chunk_dir, uid, partial, done_marker, meta)))
         finally:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
