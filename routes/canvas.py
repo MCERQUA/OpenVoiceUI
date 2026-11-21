@@ -1127,6 +1127,54 @@ def _upload_grant_for_viewer(viewer_id):
         return None
 
 
+# ── Asset grant for a private page opened top-level (follow-up to SEC-094) ─────────────────────────────────────────
+# A private page opened straight from a texted link runs top-level, outside the app shell. The shell rewrites the
+# 60 s Clerk __session cookie every 50 s (src/app.js _syncSessionCookie); a top-level canvas page has nothing that
+# does, so once the token it arrived with expires, every asset the browser fetches later (a lazy <img> below the
+# fold, a video seek = a new Range request) would 401 under the default-deny asset gate. Measured 2026-11-21: the
+# served page carries no Clerk script, and services/auth.verify_clerk_token has no leeway.
+# Fix: when the private-page gate has verified a viewer, it also sets this signed, tenant-bound, HttpOnly cookie,
+# scoped to /pages/. The asset-type gate accepts it; nothing else does (pages, _data/, json/pdf/md still need Clerk).
+_ASSET_GRANT_COOKIE = 'ovu_canvas_assets'
+_ASSET_GRANT_RE = re.compile(r'^a1\.([0-9]{1,12})\.([0-9a-f]{16})\.([0-9a-f]{64})$')
+
+
+def _asset_grant_ttl_s() -> int:
+    try:
+        return max(60, int(float(os.getenv('OVU_CANVAS_ASSET_GRANT_TTL_H', '12')) * 3600))
+    except ValueError:
+        return 12 * 3600
+
+
+def _mint_asset_grant() -> str:
+    """Grant to load /pages/ ASSETS (not pages), minted only for a viewer the page gate verified.
+
+    Same per-instance private key and tenant binding as the chunked-upload grant (routes/static_files.py),
+    under its own purpose label, so neither grant can stand in for the other or verify on another tenant."""
+    import secrets
+    from routes.static_files import _chunk_sig, _chunk_tenant
+    exp = int(time.time()) + _asset_grant_ttl_s()
+    nonce = secrets.token_hex(8)
+    return f'a1.{exp}.{nonce}.{_chunk_sig("canvas-assets", exp, nonce, _chunk_tenant())}'
+
+
+def _asset_grant_ok(token) -> bool:
+    """True only for an unexpired grant this instance minted for this tenant. Fails closed."""
+    try:
+        m = _ASSET_GRANT_RE.match((token or '').strip())
+        if not m:
+            return False
+        exp, now = int(m.group(1)), time.time()
+        if exp <= now or exp > now + _asset_grant_ttl_s() + 60:
+            return False
+        import hmac as _hmac
+        from routes.static_files import _chunk_sig, _chunk_tenant
+        return _hmac.compare_digest(_chunk_sig('canvas-assets', exp, m.group(2), _chunk_tenant()), m.group(3))
+    except Exception as exc:                            # noqa: BLE001 -- fail closed
+        logger.warning('[canvas] asset grant check failed: %s', exc)
+        return False
+
+
 def _platform_page_reserved(name) -> bool:
     """True for a page file name a business-backend pack ships (served only from the image, on the staff origin)."""
     try:
@@ -1190,7 +1238,8 @@ def canvas_pages_proxy(path):
                 # follows its page's is_public); otherwise it needs a session, exactly like a private page.
                 # Nonexistent names get the same 401, so the gate does not reveal which assets exist.
                 import posixpath as _pp
-                if _pp.normpath(path) not in _public_asset_refs():
+                if (_pp.normpath(path) not in _public_asset_refs()
+                        and not _asset_grant_ok(request.cookies.get(_ASSET_GRANT_COOKIE))):
                     denied = _canvas_data_denied(path)
                     if denied:
                         # A texted direct link to an image is a browser navigation: send it to sign-in like a
@@ -1347,6 +1396,14 @@ def canvas_pages_proxy(path):
                 else:
                     content += _body_inject
                 resp = Response(content, mimetype='text/html')
+                if _viewer_id:
+                    # Verified viewer of a private page: let its assets keep loading after the 60 s Clerk
+                    # token expires (see _ASSET_GRANT_COOKIE). Never set for an anonymous or public serve.
+                    try:
+                        resp.set_cookie(_ASSET_GRANT_COOKIE, _mint_asset_grant(), max_age=_asset_grant_ttl_s(),
+                                        path='/pages/', secure=True, httponly=True, samesite='Strict')
+                    except Exception as exc:  # never fail a page serve over the grant
+                        logger.warning('[canvas] could not mint asset grant: %s', exc)
                 resp.headers['Cache-Control'] = 'private, no-cache, no-store, must-revalidate, max-age=0'
                 resp.headers['Pragma'] = 'no-cache'
                 resp.headers['Expires'] = '0'
