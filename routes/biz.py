@@ -782,7 +782,7 @@ def import_sources():
         return _fail(422, 'no_sources', '"sources" must be an object of {source path: data}')
     dry = request.args.get('dry_run', '1') != '0'
     try:
-        rep = _importer.run(g.biz_store, sources, dry_run=dry)
+        rep = _importer.run(g.biz_store, sources, dry_run=dry, run_by=g.biz_by)
     except _importer.ImportRefused as exc:
         return _fail(409, exc.code, exc.message)
     return jsonify(rep)

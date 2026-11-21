@@ -25,15 +25,18 @@ Sources are keyed by their path relative to the tenant root (/mnt/clients/<tenan
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
-IMPORTER_VERSION = '1.0.0'
+IMPORTER_VERSION = '1.1.0'
 REF_PREFIX = 'import:'
 BY = 'import:biz-importer'
+MAX_KEY = 500                   # activity.ref / source.ref limit: every stored key fits, never truncated
 TOTAL_TOLERANCE = 0.05          # dollars: sub-lines must sum to the confirmed total within this
 
 SRC_JOBS = 'openclaw/workspace/business/jobs.json'
@@ -50,12 +53,27 @@ class ImportRefused(Exception):
         self.message = message
 
 
+def norm_key(key: str) -> str:
+    """The stored form of an import key: the key itself, or a stable hashed form if it is too long.
+
+    source.ref holds at most MAX_KEY characters. A longer key (e.g. a very long image path) is
+    replaced by `<import:source>#<item type>:sha256:<hex of the full key>`, so the same item always
+    maps to the same stored key and a re-run finds it. Never truncated (a truncated key is not stable).
+    """
+    if len(key) <= MAX_KEY:
+        return key
+    digest = hashlib.sha256(key.encode('utf-8')).hexdigest()
+    head, _, tail = key.partition('#')
+    short = f'{head}#{tail.split(":", 1)[0][:40]}:sha256:{digest}'
+    return short if len(short) <= MAX_KEY else f'{REF_PREFIX}sha256:{digest}'
+
+
 class Ref:
     """A reference to another import item, resolved to its record id at write time."""
     __slots__ = ('key',)
 
     def __init__(self, key):
-        self.key = key
+        self.key = norm_key(key)
 
 
 def _num(v):
@@ -86,7 +104,7 @@ class Plan:
         self.checks = []
 
     def add(self, key, collection, data, words=None):
-        self.items.append((key, collection, {k: v for k, v in data.items() if v is not None}, words))
+        self.items.append((norm_key(key), collection, {k: v for k, v in data.items() if v is not None}, words))
 
     def gap(self, source, what, count, why):
         if count:
@@ -391,10 +409,15 @@ def build_plan(sources: dict) -> Plan:
 
 # ── apply ────────────────────────────────────────────────────────────────────
 def existing_keys(store) -> dict:
-    """import key -> (collection, record id), from append-only `created` activity rows."""
+    """import key -> (collection, record id), from append-only `created` activity rows.
+
+    Only rows written by the importer itself count (channel 'import'). The tenant's agent can put any
+    text in source.ref, but it can never write channel 'import' (AGENT_CHANNELS excludes it), so a
+    forged `import:` ref cannot make the importer skip, or link to, a record it did not create.
+    """
     with store._read() as conn:
         rows = conn.execute("SELECT ref, collection, record_id FROM activity WHERE type = 'created' "
-                            "AND ref LIKE ?", (REF_PREFIX + '%',)).fetchall()
+                            "AND channel = 'import' AND ref LIKE ?", (REF_PREFIX + '%',)).fetchall()
     return {r[0]: (r[1], r[2]) for r in rows}
 
 
@@ -411,7 +434,7 @@ def _resolve(data, ids, dropped):
     return out
 
 
-def apply_plan(store, plan: Plan) -> dict:
+def apply_plan(store, plan: Plan, *, run_by: str | None = None) -> dict:
     from services.biz.schema import SchemaError
     have = existing_keys(store)
     ids = {k: rid for k, (_c, rid) in have.items()}
@@ -423,17 +446,25 @@ def apply_plan(store, plan: Plan) -> dict:
             store.adopt_library_field('job', 'gen_contract_price', by=BY,
                                       source={'channel': 'import', 'ref': REF_PREFIX + 'adopt:job.gen_contract_price'})
     for key, coll, data, words in plan.items:
-        row = per.setdefault(coll, {'planned': 0, 'created': 0, 'already_imported': 0, 'rejected': 0})
+        row = per.setdefault(coll, {'planned': 0, 'created': 0, 'already_imported': 0, 'merged_in_run': 0,
+                                    'rejected': 0})
         row['planned'] += 1
-        if key in have:
+        if key in have and have[key][0] == coll:
             row['already_imported'] += 1
+            continue
+        if key in ids:
+            # the same item planned again in this run (a repeat customer, a shared phone, a repeated id):
+            # it already exists, so this copy is merged into it, never created twice
+            row['merged_in_run'] += 1
             continue
         dropped = []
         clean = _resolve(data, ids, dropped)
         try:
             rec = store.create(coll, clean, by=BY,
-                               source={'channel': 'import', 'ref': key[:500],
-                                       'words': _clip(f'importer {IMPORTER_VERSION}: {words or key}', 4000)})
+                               source={'channel': 'import', 'ref': key,
+                                       'words': _clip(f'importer {IMPORTER_VERSION}'
+                                                      + (f' run by {run_by}' if run_by else '')
+                                                      + f': {words or key}', 4000)})
         except SchemaError as exc:
             row['rejected'] += 1
             rejects.append({'key': key, 'collection': coll, 'code': exc.code,
@@ -457,7 +488,8 @@ def recompute_checks(store, plan: Plan) -> list:
         prefix = f'{REF_PREFIX}{chk["source"]}#job:'
         with store._read() as conn:
             jobs = conn.execute("SELECT r.id, r.data FROM records r JOIN activity a ON a.record_id = r.id "
-                                "AND a.type = 'created' WHERE a.ref LIKE ? AND r.archived_at IS NULL",
+                                "AND a.type = 'created' AND a.channel = 'import' AND r.collection = 'job' "
+                                "WHERE a.ref LIKE ? AND r.archived_at IS NULL",
                                 (prefix + '%',)).fetchall()
             job_ids = [j[0] for j in jobs]
             revenue = round(sum(json.loads(j[1]).get('gen_contract_price') or 0 for j in jobs), 2)
@@ -478,7 +510,18 @@ def recompute_checks(store, plan: Plan) -> list:
     return out
 
 
-def run(store, sources: dict, *, dry_run: bool = True, expect_tenant: str | None = None) -> dict:
+_RUN_LOCKS = {}
+_RUN_LOCKS_GUARD = threading.Lock()
+
+
+def _run_lock(store):
+    """One live import at a time per database file in this process (two concurrent runs could both miss a key)."""
+    with _RUN_LOCKS_GUARD:
+        return _RUN_LOCKS.setdefault(str(Path(store.path).resolve()), threading.Lock())
+
+
+def run(store, sources: dict, *, dry_run: bool = True, expect_tenant: str | None = None,
+        run_by: str | None = None) -> dict:
     """Import `sources` ({relative source path: parsed JSON}) into this tenant's store.
 
     dry_run: run the identical apply path against a temporary copy and report; the live db is untouched.
@@ -493,9 +536,10 @@ def run(store, sources: dict, *, dry_run: bool = True, expect_tenant: str | None
     report = {'importer': IMPORTER_VERSION, 'tenant': store.tenant, 'dry_run': bool(dry_run),
               'source_rows': plan.source_rows, 'unmapped': plan.unmapped}
     if not dry_run:
-        report.update(apply_plan(store, plan))
-        report['checks'] = recompute_checks(store, plan)
-        report['counts_after'] = store.collection_counts()
+        with _run_lock(store):
+            report.update(apply_plan(store, plan, run_by=run_by))
+            report['checks'] = recompute_checks(store, plan)
+            report['counts_after'] = store.collection_counts()
         return report
     from services.biz.store import BizStore
     with tempfile.TemporaryDirectory(prefix='biz-import-dry-') as tmp:
@@ -506,7 +550,7 @@ def run(store, sources: dict, *, dry_run: bool = True, expect_tenant: str | None
             shutil.copytree(overlay, tmp / 'schema' / 'custom')
         copy = BizStore(tmp, store.tenant)
         try:
-            report.update(apply_plan(copy, plan))
+            report.update(apply_plan(copy, plan, run_by=run_by))
             report['checks'] = recompute_checks(copy, plan)
             report['counts_after'] = copy.collection_counts()
         finally:

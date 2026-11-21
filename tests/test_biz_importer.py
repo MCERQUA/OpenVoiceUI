@@ -130,6 +130,49 @@ def test_unknown_source_is_reported_not_read(store):
                                 'why': 'no importer adapter for this source'}]
 
 
+# ── review fixes (PR #616 review): each of these failed on 54dc07b ────────────
+def test_same_key_twice_in_one_run_creates_one_record(store):
+    """A repeat customer (same phone on two jobs) is one contact, both jobs link to it."""
+    src = {JOBS: {'jobs': [
+        {'id': 'job-a', 'customer': 'Repeat Customer', 'customer_phone': '555-010-0009', 'status': 'completed',
+         'revenue_billed': 100.0, 'costs': {'lump_sum_cost': 10.0}},
+        {'id': 'job-b', 'customer': 'Repeat Customer', 'customer_phone': '(555) 010-0009', 'status': 'completed',
+         'revenue_billed': 200.0, 'costs': {'lump_sum_cost': 20.0}},
+    ]}}
+    rep = importer.run(store, src, dry_run=False, expect_tenant='tenant-a')
+    assert rep['collections']['contact']['created'] == 1
+    assert rep['collections']['contact']['merged_in_run'] == 1
+    assert _live(store, 'contact') == 1 and _live(store, 'job') == 2
+    contact_id = store.list('contact', limit=5)['records'][0]['id']
+    assert {j['data']['contact_id'] for j in store.list('job', limit=5)['records']} == {contact_id}
+
+
+def test_long_key_is_stable_across_runs(store):
+    """A 600-character image path must map to the same stored key every run (2 runs -> 1 document)."""
+    long_url = '/uploads/fd/' + 'x' * 600 + '.jpg'
+    src = {EXT: {'images': {long_url: {'image': long_url, 'doc_type': 'photo', 'title': 'Long'}}}}
+    importer.run(store, copy.deepcopy(src), dry_run=False, expect_tenant='tenant-a')
+    rep2 = importer.run(store, copy.deepcopy(src), dry_run=False, expect_tenant='tenant-a')
+    assert _live(store, 'document') == 1
+    assert rep2['collections']['document'] == {'planned': 1, 'created': 0, 'already_imported': 1,
+                                               'merged_in_run': 0, 'rejected': 0}
+    with store._read() as c:
+        refs = [r[0] for r in c.execute("SELECT ref FROM activity WHERE type = 'created'").fetchall()]
+    assert refs and all(len(r) <= 500 for r in refs)
+
+
+def test_forged_import_ref_from_the_agent_is_not_trusted(store):
+    """The tenant agent writes a contact whose ref looks like an import key; the real contact still imports."""
+    src = {FIELD: {'roster': [{'name': 'Real Person', 'phone': '+15550100777', 'role': 'Office'}]}}
+    key = importer.build_plan(src).items[0][0]
+    store.create('person', {'name': 'Planted'}, by='agent:tenant-a', agent=True,
+                 source={'channel': 'sms', 'ref': key, 'words': 'forged'})
+    rep = importer.run(store, src, dry_run=False, expect_tenant='tenant-a')
+    assert rep['collections']['person']['created'] == 1
+    assert rep['collections']['person']['already_imported'] == 0
+    assert sorted(p['data']['name'] for p in store.list('person', limit=5)['records']) == ['Planted', 'Real Person']
+
+
 # ── the route ───────────────────────────────────────────────────────────────
 OWNER = 'user_owner_a'
 KEY_A = 'agent-key-tenant-a'
