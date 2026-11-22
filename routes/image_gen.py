@@ -1,10 +1,22 @@
 """
-Image generation proxy — Google Gemini / Imagen / HuggingFace APIs.
+Image generation proxy — HuggingFace (default) / Google Gemini / Imagen APIs.
 Keeps API keys server-side.
+
+DEFAULT = FLUX.1-schnell via HF's nscale router (services/image_providers.py).
+Gemini / Imagen / Nano Banana generation is IMPOSSIBLE (operator rule 2026-11-22:
+Gemini is for looking at images, never generating them). services/gemini_guard.py
+refuses every such request, and there is no setting that re-enables it. A text-only
+request that names a Google model is served by the default model and the response
+says so (`fallback_from`); a request that sends reference images to a Google model
+is refused (403), because the hf: models are text-to-image only and silently
+dropping the references would return the wrong picture. The Gemini functions below
+are kept (never delete) but every call to them is refused before any request.
 
 POST /api/image-gen
   body: { prompt, images?: [{mime_type, data: base64}], model?, quality?, aspect? }
-  returns: { images: [{mime_type, data, url}], text }
+  returns: { images: [{mime_type, data, url}], text, model, fallback_from? }
+
+GET  /api/image-gen/config      — default model + which provider families are enabled
   NOTE: every generated image is saved to UPLOADS_DIR on the server immediately
         before the response is returned. `url` is the permanent server path.
 
@@ -22,6 +34,8 @@ import requests as http
 from flask import Blueprint, jsonify, request
 from services.paths import UPLOADS_DIR
 from services.metered_spend import log_spend
+from services.image_providers import DEFAULT_IMAGE_MODEL, GEMINI_DISABLED_MESSAGE
+from services.gemini_guard import GeminiGenerationBlocked, check_gemini_request
 from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
@@ -119,7 +133,9 @@ HF_IMAGES_BASE = 'https://router.huggingface.co/nscale/v1/images/generations'
 # Cheap-by-default (Mike 2026-07-28): last month's ~$100 Gemini bill was driven by
 # generation defaulting to Nano Banana PRO (~$0.13-0.24/img). Flash image is ~4-6x
 # cheaper and fine for drafts. Pro is still available — callers must ASK for it.
-DEFAULT_MODEL = 'gemini-3.1-flash-image-preview'
+# 2026-11-22: Gemini image generation is impossible (services/gemini_guard.py); the
+# default is FLUX.1-schnell on HF/nscale.
+DEFAULT_MODEL = DEFAULT_IMAGE_MODEL
 
 # HuggingFace model IDs — prefix with 'hf:' in the frontend
 HF_MODELS = {
@@ -184,7 +200,8 @@ def _save_generated_image(mime_type: str, b64_data: str) -> str:
 
 
 def _generate_gemini(model, prompt, images):
-    """generateContent-based models (Gemini, nano-banana, etc.)"""
+    """generateContent-based models (Gemini, nano-banana, etc.) — UNREACHABLE: the guard
+    call below refuses every image model / IMAGE modality before a request is sent."""
     parts = []
     for i, img in enumerate(images):
         data = img.get('data')
@@ -203,6 +220,7 @@ def _generate_gemini(model, prompt, images):
         'generationConfig': {'responseModalities': ['IMAGE', 'TEXT']},
     }
     url = f'{GEMINI_BASE}/{model}:generateContent?key={GEMINI_KEY}'
+    check_gemini_request(url, payload)   # raises GeminiGenerationBlocked: IMAGE modality
     resp = http.post(url, json=payload, timeout=90)
     # JamBot Books: in-container Gemini image gen (requests, no SDK to attach).
     try:
@@ -274,6 +292,7 @@ def _enhance_prompt(idea: str, quality: str = 'standard', style: str = '') -> st
         'generationConfig': {'maxOutputTokens': 512, 'temperature': 0.9},
     }
     url = f'{GEMINI_BASE}/gemini-2.0-flash:generateContent?key={GEMINI_KEY}'
+    check_gemini_request(url, payload)   # text in, text out: allowed
     resp = http.post(url, json=payload, timeout=30)
     resp.raise_for_status()
     result = resp.json()
@@ -347,12 +366,13 @@ def _generate_huggingface(model_id, prompt, quality='standard', aspect='1:1'):
 
 
 def _generate_imagen(model, prompt, aspect='1:1'):
-    """predict-based models (Imagen 4, etc.) — text-to-image only"""
+    """predict-based models (Imagen 4, etc.) — UNREACHABLE: :predict is refused by the guard."""
     payload = {
         'instances': [{'prompt': prompt}],
         'parameters': {'sampleCount': 1, 'aspectRatio': aspect},
     }
     url = f'{GEMINI_BASE}/{model}:predict?key={GEMINI_KEY}'
+    check_gemini_request(url, payload)   # raises GeminiGenerationBlocked: :predict
     resp = http.post(url, json=payload, timeout=90)
     # JamBot Books: in-container Imagen gen (same Google generativelanguage API + key).
     try:
@@ -385,6 +405,23 @@ def generate_image():
 
     if not prompt:
         return jsonify({'error': 'prompt is required'}), 400
+
+    # Every non-hf: model on this route is a Google (Gemini / Imagen / Nano Banana) model.
+    fallback_from = None
+    if not model.startswith('hf:'):
+        if any((img or {}).get('data') for img in (images or [])):
+            # Image editing needs a model that reads reference images; the hf: models do
+            # not. Refuse rather than return a picture that ignored the references.
+            return jsonify({
+                'error': GEMINI_DISABLED_MESSAGE + ' Reference-image editing is not '
+                         'available with the hf: models, which are text-to-image only.',
+                'code': 'gemini_image_gen_disabled',
+                'requested_model': model,
+                'default_model': DEFAULT_MODEL,
+            }), 403
+        logger.warning('image_gen: %s requested; Gemini never generates images — serving %s',
+                       model, DEFAULT_MODEL)
+        fallback_from, model = model, DEFAULT_MODEL
 
     try:
         is_hf = model.startswith('hf:')
@@ -419,15 +456,45 @@ def generate_image():
                 logger.error('image_gen: failed to save image to disk: %s', save_err)
                 img['url'] = None  # client must handle this case
 
-        return jsonify({'images': imgs_out, 'text': text_out})
+        out = {'images': imgs_out, 'text': text_out, 'model': model}
+        if fallback_from:
+            out['fallback_from'] = fallback_from
+            out['notice'] = (f'{fallback_from} is not available (Gemini is used only to look '
+                             f'at images, never to generate them); generated with {model} instead.')
+        return jsonify(out)
 
+    except GeminiGenerationBlocked as e:
+        return jsonify({'error': str(e), 'code': 'gemini_image_gen_disabled'}), 403
     except http.HTTPError as e:
-        body = e.response.text[:400] if e.response else str(e)
-        logger.error('image-gen HTTP error: %s', body)
-        return jsonify({'error': body}), e.response.status_code if e.response else 502
+        # `if e.response` is always False for an error Response (Response.__bool__ is
+        # .ok), which hid the upstream body behind str(e). Test for None instead.
+        # The status we return stays 502: an upstream 401 must not reach the browser
+        # as a 401 (that reads as "you are logged out").
+        upstream = e.response.status_code if e.response is not None else None
+        body = e.response.text[:400] if e.response is not None else str(e)
+        logger.error('image-gen HTTP error (upstream %s): %s', upstream, body)
+        out = {'error': body, 'upstream_status': upstream}
+        if upstream in (401, 403):
+            key = 'HF_TOKEN' if model.startswith('hf:') else 'GEMINI_API_KEY'
+            out['error'] = (f'The image provider rejected this server\'s {key} '
+                            f'(HTTP {upstream}); the key needs replacing. Provider said: {body}')
+            out['code'] = 'provider_key_rejected'
+        return jsonify(out), 502
     except Exception as e:
         logger.exception('image-gen error')
         return jsonify({'error': str(e)}), 500
+
+
+@image_gen_bp.route('/api/image-gen/config', methods=['GET'])
+def image_gen_config():
+    """What the image studio should offer: the default model and which provider
+    families can actually run here. Booleans only — never a key or key prefix.
+    gemini_enabled is always False: Gemini never generates images here."""
+    return jsonify({
+        'default_model': DEFAULT_MODEL,
+        'gemini_enabled': False,
+        'hf_enabled': bool(HF_TOKEN),
+    })
 
 
 @image_gen_bp.route('/api/image-gen/enhance', methods=['POST'])

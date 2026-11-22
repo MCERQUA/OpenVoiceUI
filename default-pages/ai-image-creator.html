@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- openvoiceui-version: 2026-11-22-gemini-vision-only -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -369,28 +370,31 @@
 
 <div class="page-header">
     <h1>✨ AI Image Studio</h1>
-    <p>Generate · Edit · Save · Download — powered by Nano Banana Pro, Imagen 4, and Gemini Flash</p>
+    <p>Generate · Edit · Save · Download — FLUX and Stable Diffusion</p>
 </div>
 
 <!-- ═══════════ CREATOR ═══════════ -->
 <div class="creator-card">
 
     <!-- Model -->
-    <div class="opt-row">
-        <span class="opt-label">Google</span>
-        <button class="model-btn" data-model="nano-banana-pro-preview" onclick="setModel(this)">🍌💰 Nano Banana Pro (premium $)</button>
-        <button class="model-btn active" data-model="gemini-3.1-flash-image-preview" onclick="setModel(this)">⚡ Gemini 3.1 Flash</button>
-        <button class="model-btn" data-model="imagen-4.0-generate-001" onclick="setModel(this)">🖼️ Imagen 4</button>
-        <button class="model-btn" data-model="imagen-4.0-fast-generate-001" onclick="setModel(this)">🚀 Imagen 4 Fast</button>
-        <button class="model-btn" data-model="gemini-2.0-flash-exp-image-generation" onclick="setModel(this)">🔬 Flash Exp</button>
-    </div>
+    <!-- HF is the only generator. Gemini is used only to LOOK at images, never to generate them
+         (the server refuses it: services/gemini_guard.py); the Google buttons stay visible but disabled. -->
     <div class="opt-row">
         <span class="opt-label">HF</span>
-        <button class="model-btn" data-model="hf:black-forest-labs/FLUX.1-schnell" onclick="setModel(this)">⚡ FLUX Schnell</button>
+        <button class="model-btn active" data-model="hf:black-forest-labs/FLUX.1-schnell" onclick="setModel(this)">⚡ FLUX Schnell</button>
         <button class="model-btn" data-model="hf:black-forest-labs/FLUX.1-dev" onclick="setModel(this)">🎨 FLUX Dev</button>
         <button class="model-btn" data-model="hf:stabilityai/stable-diffusion-xl-base-1.0" onclick="setModel(this)">🖼️ SDXL</button>
         <button class="model-btn" data-model="hf:stabilityai/stable-diffusion-3.5-large" onclick="setModel(this)">🌟 SD 3.5 Large</button>
         <button class="model-btn" data-model="hf:stabilityai/stable-diffusion-3.5-large-turbo" onclick="setModel(this)">🚀 SD 3.5 Turbo</button>
+    </div>
+
+    <div class="opt-row" id="google-model-row">
+        <span class="opt-label" title="Gemini is used only to look at images, never to generate them">Google (off)</span>
+        <button class="model-btn" data-model="nano-banana-pro-preview" disabled title="Gemini is used only to look at images, never to generate them" style="opacity:.4;cursor:not-allowed">🍌💰 Nano Banana Pro (premium $)</button>
+        <button class="model-btn" data-model="gemini-3.1-flash-image-preview" disabled title="Gemini is used only to look at images, never to generate them" style="opacity:.4;cursor:not-allowed">⚡ Gemini 3.1 Flash</button>
+        <button class="model-btn" data-model="imagen-4.0-generate-001" disabled title="Gemini is used only to look at images, never to generate them" style="opacity:.4;cursor:not-allowed">🖼️ Imagen 4</button>
+        <button class="model-btn" data-model="imagen-4.0-fast-generate-001" disabled title="Gemini is used only to look at images, never to generate them" style="opacity:.4;cursor:not-allowed">🚀 Imagen 4 Fast</button>
+        <button class="model-btn" data-model="gemini-2.0-flash-exp-image-generation" disabled title="Gemini is used only to look at images, never to generate them" style="opacity:.4;cursor:not-allowed">🔬 Flash Exp</button>
     </div>
 
     <!-- Style -->
@@ -550,7 +554,7 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────────
-let selectedModel   = 'gemini-3.1-flash-image-preview';  // cheap-by-default — premium is an explicit click
+let selectedModel   = 'hf:black-forest-labs/FLUX.1-schnell';  // server default; Gemini never generates images
 let selectedStyle   = '';
 let selectedAspect  = '1:1';
 let selectedQuality = 'standard';
@@ -575,7 +579,7 @@ const INSPIRE_PROMPTS = [
 ];
 
 // ── Option setters ─────────────────────────────────────────────────
-function setModel(btn)   { document.querySelectorAll('.model-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedModel=btn.dataset.model; }
+function setModel(btn)   { if (btn.disabled) return; document.querySelectorAll('.model-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedModel=btn.dataset.model; }
 function setStyle(btn)   { document.querySelectorAll('[data-style]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedStyle=btn.dataset.style; }
 function setAspect(btn)  { document.querySelectorAll('[data-aspect]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedAspect=btn.dataset.aspect; }
 function setQuality(btn) { document.querySelectorAll('[data-quality]').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); selectedQuality=btn.dataset.quality; }
@@ -712,6 +716,7 @@ async function generateImage() {
         if (!resp.ok || result.error) { toast('❌ '+(result.error||'Generation failed'), 'err'); return; }
 
         const img = result.images[0];
+        if (result.notice) toast(result.notice, 'info');
         const originalPrompt = document.getElementById('creator-prompt').value.trim();
         lastResult = {
             dataUrl: img.url || `data:${img.mime_type};base64,${img.data}`,

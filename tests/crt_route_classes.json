@@ -270,6 +270,7 @@
  "image_gen.enhance_prompt_route": "fs-caller-path",
  "image_gen.generate_image": "fs-caller-path",
  "image_gen.get_saved_designs": "fs-fixed",
+ "image_gen.image_gen_config": "no-fs",
  "image_gen.save_design": "fs-caller-path",
  "instructions.get_instruction": "fs-caller-path",
  "instructions.list_instructions": "fs-fixed",
