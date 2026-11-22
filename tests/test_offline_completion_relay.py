@@ -356,3 +356,197 @@ class TestSlowParentTurn:
         assert gw._ORPHAN_COLLECT_S >= 600
         assert [c[2] for c in calls] == ["sub-run-slow"], "the slow reply was pushed"
         assert len(_relays(conn)) == 1, "and relayed when nobody received it"
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw's own announce run lands in the parent session (2026-11-22)
+# ---------------------------------------------------------------------------
+#
+# Measured on two tenants (2026-11-16, 2026-11-17): a voice turn spawned a
+# sub-agent, yielded, and its HTTP stream hit the 300 s hard timeout. The
+# child finished minutes later; ~7 s after its end OpenClaw ran its OWN
+# completion turn in the parent session (runId `announce:v1:<child>:<run>`)
+# whose final text was the user-facing result. The orphan nudge was sent
+# while that run was busy, queue mode `collect` held it until the owner's
+# next turn (7.5 / 38 min later), the announce text matched no subscription
+# and was dropped, and the continuation left without a receipt or relay.
+
+CHILD_SK = "agent:openvoiceui:subagent:d344e5a1"
+ANNOUNCE_RUN = f"announce:v1:{CHILD_SK}:sub-run-1"
+ANNOUNCE_TEXT = "The takeoff's done and verified. [CANVAS:mari-grace-takeoff]"
+
+
+async def _child_end(d, run_id="sub-run-1"):
+    await d._route({"type": "event", "event": "agent", "payload": {
+        "runId": run_id, "sessionKey": CHILD_SK, "spawnedBy": CANON_MAIN,
+        "stream": "lifecycle", "data": {"phase": "end"}}})
+
+
+async def _announce_run(d, text=ANNOUNCE_TEXT):
+    for payload in (
+        {"stream": "lifecycle", "data": {"phase": "start"}},
+        {"stream": "tool", "data": {"phase": "start", "name": "exec"}},
+        {"stream": "assistant", "data": {"text": text[:10]}},
+        {"stream": "assistant", "data": {"text": text}},
+        {"stream": "lifecycle", "data": {"phase": "end"}},
+    ):
+        payload.update(runId=ANNOUNCE_RUN, sessionKey=CANON_MAIN)
+        await d._route({"type": "event", "event": "agent", "payload": payload})
+    await d._route({"type": "event", "event": "chat", "payload": {
+        "runId": ANNOUNCE_RUN, "sessionKey": CANON_MAIN, "state": "final"}})
+
+
+def _queued_nudge_conn(clock):
+    """A gateway whose session is busy with the announce run: the nudge is
+    ACKed but never runs inside the collect window (it waits for the owner's
+    next turn). Every nudge sent pushes the fake clock past the window."""
+    conn = _conn()
+    nudges = []
+
+    async def never_runs(frame):
+        if frame.get("method") != "chat.send" or not frame["id"].startswith("chat-"):
+            return
+        nudges.append(frame)
+        await conn._dispatcher._route({"type": "res", "id": frame["id"], "ok": True,
+                                       "payload": {"runId": frame["id"][5:],
+                                                   "status": "started"}})
+        clock.offset += gw._ORPHAN_COLLECT_S + 1
+
+    conn._ws.on_send = never_runs
+    conn._dispatcher.set_orphan_hook(
+        lambda parent, run_ids=(): asyncio.ensure_future(
+            conn._run_orphan_continuation(parent, run_ids)))
+    return conn, nudges
+
+
+class TestOpenClawAnnounceRun:
+    def test_announce_text_is_delivered_and_relayed_without_a_nudge(
+            self, fast_sleep, handler, monkeypatch):
+        clock = _FakeClock()
+        monkeypatch.setattr(gw, "time", clock)
+        calls, _ = handler
+        conn, nudges = _queued_nudge_conn(clock)
+        d = conn._dispatcher
+
+        async def go():
+            await _child_end(d)          # orphan noted, debounce pending
+            await _announce_run(d)       # OpenClaw's own completion turn
+            await _settle(conn, 1, calls)
+
+        asyncio.run(asyncio.wait_for(go(), timeout=15))
+        assert [c[0] for c in calls] == [ANNOUNCE_TEXT], \
+            "the announce reply must be pushed (and so leave a receipt)"
+        assert calls[0][2] == "sub-run-1", "receipt carries the child run id"
+        relays = _relays(conn)
+        assert len(relays) == 1 and ANNOUNCE_TEXT in relays[0]["params"]["message"]
+        assert nudges == [], "no nudge is queued behind the announce run"
+        assert d._orphan_capture == {}, "the capture is dropped after use"
+
+    def test_announce_starting_after_the_hook_is_still_captured(
+            self, fast_sleep, handler):
+        calls, _ = handler
+        clock = _FakeClock()
+        conn, nudges = _queued_nudge_conn(clock)
+        d = conn._dispatcher
+
+        async def go():
+            await _child_end(d)
+            for _ in range(10):          # hook fires, continuation is waiting
+                await _REAL_SLEEP(0.01)
+            await _announce_run(d)
+            await _settle(conn, 1, calls)
+
+        asyncio.run(asyncio.wait_for(go(), timeout=15))
+        assert [c[0] for c in calls] == [ANNOUNCE_TEXT]
+        assert nudges == []
+
+    def test_no_announce_run_falls_back_to_the_nudge(self, fast_sleep, handler, monkeypatch):
+        class _RunningClock(_FakeClock):
+            def time(self):
+                self.offset += 1.0       # every look at the clock costs 1 s
+                return time.time() + self.offset
+        monkeypatch.setattr(gw, "time", _RunningClock())
+        calls, _ = handler
+        conn = _conn()                   # nudge answered normally
+        d = conn._dispatcher
+        d.set_orphan_hook(lambda parent, run_ids=(): asyncio.ensure_future(
+            conn._run_orphan_continuation(parent, run_ids)))
+
+        async def go():
+            await _child_end(d)
+            await _settle(conn, 1, calls)
+
+        asyncio.run(asyncio.wait_for(go(), timeout=15))
+        assert [c[0] for c in calls] == ["Your takeoff is ready. [CANVAS:site-takeoff]"]
+        assert len(_relays(conn)) == 1
+
+    def test_announce_no_reply_then_nudge_no_reply_pushes_nothing(
+            self, fast_sleep, handler):
+        calls, _ = handler
+        conn = _conn()
+
+        async def no_reply(frame):
+            if frame.get("method") != "chat.send" or not frame["id"].startswith("chat-"):
+                return
+            d = conn._dispatcher
+            await d._route({"type": "res", "id": frame["id"], "ok": True,
+                            "payload": {"runId": "cont-run", "status": "started"}})
+            await d._route({"type": "event", "event": "agent", "payload": {
+                "runId": "cont-run", "sessionKey": CANON_MAIN, "stream": "assistant",
+                "data": {"text": "NO_REPLY"}}})
+            await d._route({"type": "event", "event": "chat", "payload": {
+                "runId": "cont-run", "sessionKey": CANON_MAIN, "state": "final"}})
+
+        conn._ws.on_send = no_reply
+        d = conn._dispatcher
+        d.set_orphan_hook(lambda parent, run_ids=(): asyncio.ensure_future(
+            conn._run_orphan_continuation(parent, run_ids)))
+
+        async def go():
+            await _child_end(d)
+            await _announce_run(d, text="NO_REPLY")
+            await _settle(conn, 1, calls, timeout=0.5)
+
+        asyncio.run(asyncio.wait_for(go(), timeout=15))
+        assert calls == [], "a silent completion is not invented"
+        assert _relays(conn) == []
+
+    def test_live_stream_still_owns_the_announce(self, fast_sleep, handler):
+        # A browser turn open on the parent session: the dispatcher routes the
+        # announce to it and no orphan capture exists, so nothing is pushed.
+        calls, _ = handler
+        conn = _conn()
+        d = conn._dispatcher
+        sub = d.subscribe("live-chat", "main")
+        sub.state = gw.Subscription.ACTIVE
+
+        async def go():
+            await _child_end(d)          # routed to the live sub, not orphaned
+            await _announce_run(d)
+            await _settle(conn, 1, calls, timeout=0.3)
+
+        asyncio.run(asyncio.wait_for(go(), timeout=15))
+        assert calls == []
+        assert d._orphan_capture == {}
+        assert not sub.event_queue.empty()
+
+    def test_owner_turn_opened_during_the_announce_owns_it(self, fast_sleep, handler):
+        calls, _ = handler
+        clock = _FakeClock()
+        conn, nudges = _queued_nudge_conn(clock)
+        d = conn._dispatcher
+
+        async def go():
+            await _child_end(d)
+            for _ in range(10):          # hook fired, continuation waiting
+                await _REAL_SLEEP(0.01)
+            sub = d.subscribe("owner-turn", "main")   # owner speaks again
+            sub.state = gw.Subscription.ACTIVE
+            await _announce_run(d)
+            await _settle(conn, 1, calls, timeout=0.3)
+            return sub
+
+        sub = asyncio.run(asyncio.wait_for(go(), timeout=15))
+        assert calls == [], "the live stream got it; no second (push) delivery"
+        assert not sub.event_queue.empty()
+        assert nudges == []
