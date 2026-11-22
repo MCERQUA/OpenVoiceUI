@@ -25,7 +25,7 @@ from pathlib import Path
 
 import requests
 
-from services.gemini_guard import check_gemini_request
+from services.gemini_guard import check_gemini_request, gemini_api_base
 from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger(__name__)
@@ -175,7 +175,8 @@ def _gemini_vision(image_b64: str, mime: str, prompt: str, model: str) -> str:
     # HTTPError message embeds the full URL — so a single 404 on a bad model name writes the live
     # GEMINI_API_KEY into the log, the exception, and any transcript that captures it. Measured
     # 2026-09-06: a fallback test did exactly that. x-goog-api-key keeps it out of every error path.
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+    # gemini_api_base(): Google, or the host-side vision proxy when GEMINI_API_BASE is set.
+    url = f'{gemini_api_base()}/models/{model}:generateContent'
     payload = {'contents': [{'parts': [
         {'text': prompt},
         {'inline_data': {'mime_type': mime, 'data': image_b64}},

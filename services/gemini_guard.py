@@ -22,6 +22,19 @@ A request to a Google generative-AI host is allowed only when ALL of these hold:
   * the JSON body does not ask for IMAGE output (generationConfig.responseModalities /
     response_modalities containing IMAGE, or an imageConfig block).
 
+2026-11-22 (same day, proxy cutover prep): the rule is TEXT OUT ONLY, so the guard also
+  * requires the model id to match ALLOWED_MODEL_RE (a POSITIVE allowlist of gemini text/vision
+    families: gemini[-<ver>]-flash|flash-lite|pro[-latest|-preview[-date]|-exp|-NNN]) -- an
+    unknown model family (a future music/speech/image model with a new name) is refused;
+  * blocks speech/audio/live/music tokens too (tts, audio, live, lyria);
+  * refuses ANY responseModalities entry other than TEXT (IMAGE, AUDIO, VIDEO) and speechConfig.
+The same module is the policy of the host-side Gemini vision proxy
+(MIKE-AI scripts/gemini-vision-proxy.py loads THIS file by path), so there is one source.
+
+GEMINI_API_BASE (env, optional): every caller builds its URL from gemini_api_base(). When it is
+set (the proxy, e.g. http://10.40.16.1:6366/v1beta), that host is treated exactly like a Google
+generative-AI host by both layers, so the in-process check still runs before the proxy's own.
+
 A refusal logs at ERROR and raises GeminiGenerationBlocked. It never fails silently and
 no bytes leave the process.
 
@@ -33,6 +46,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 from urllib.parse import urlparse
@@ -44,7 +58,14 @@ GOOGLE_GENAI_HOSTS = (
     'aiplatform.googleapis.com',          # Vertex AI (incl. <region>-aiplatform.googleapis.com)
 )
 ALLOWED_METHODS = frozenset({'generateContent', 'streamGenerateContent', 'countTokens'})
-BLOCKED_MODEL_TOKENS = ('image', 'imagen', 'veo')
+BLOCKED_MODEL_TOKENS = ('image', 'imagen', 'veo', 'tts', 'audio', 'live', 'lyria', 'banana')
+# Positive allowlist: gemini text/vision families only. Examples that pass: gemini-flash-latest,
+# gemini-pro-latest, gemini-2.5-flash, gemini-2.5-pro, gemini-2.0-flash-001,
+# gemini-2.5-flash-lite, gemini-3-pro-preview, gemini-2.5-flash-preview-09-2025, gemini-2.0-flash-exp.
+ALLOWED_MODEL_RE = re.compile(
+    r'^gemini-(?:\d+(?:\.\d+)?-)?(?:flash-lite|flash|pro)'
+    r'(?:-latest|-preview(?:-\d{2,4}){0,2}|-exp(?:-\d{2,4})?|-\d{3})?$')
+DEFAULT_GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
 
 _MODEL_PATH_RE = re.compile(r'/models/([^/:?]+):([A-Za-z]+)')
 
@@ -53,8 +74,30 @@ class GeminiGenerationBlocked(PermissionError):
     """A request to Google generative AI that could generate media was refused."""
 
 
+def gemini_api_base() -> str:
+    """Base URL every Gemini caller builds on (…/v1beta, no trailing slash). GEMINI_API_BASE
+    points it at the host-side vision proxy; default is Google."""
+    base = (os.environ.get('GEMINI_API_BASE') or '').strip().rstrip('/')
+    if base and urlparse(base).scheme in ('http', 'https') and urlparse(base).hostname:
+        return base
+    return DEFAULT_GEMINI_API_BASE
+
+
+def _proxy_host() -> str:
+    base = (os.environ.get('GEMINI_API_BASE') or '').strip()
+    try:
+        return (urlparse(base).hostname or '').lower() if base else ''
+    except Exception:
+        return ''
+
+
 def is_google_genai_host(host: str) -> bool:
     host = (host or '').lower().split(':')[0]
+    if not host:
+        return False
+    ph = _proxy_host()
+    if ph and host == ph:
+        return True       # the configured Gemini proxy is judged exactly like Google
     return any(host == h or host.endswith('-' + h) or host.endswith('.' + h)
                for h in GOOGLE_GENAI_HOSTS)
 
@@ -70,9 +113,14 @@ def _asks_for_image_output(payload) -> bool:
             mods = cfg.get(mod_key) or []
             if isinstance(mods, str):
                 mods = [mods]
-            if any(str(m).strip().upper() == 'IMAGE' for m in mods):
+            # TEXT is the only permitted output: IMAGE, AUDIO, VIDEO (and anything unknown) refuse.
+            if any(str(m).strip().upper() != 'TEXT' for m in mods):
                 return True
-        if 'imageConfig' in cfg or 'image_config' in cfg:
+        for gen_key in ('imageConfig', 'image_config', 'speechConfig', 'speech_config'):
+            if gen_key in cfg:
+                return True
+    for top_key in ('speechConfig', 'speech_config'):
+        if top_key in payload:
             return True
     return False
 
@@ -108,7 +156,9 @@ def check_gemini_request(url: str, payload=None) -> None:
     low = model.lower()
     for tok in BLOCKED_MODEL_TOKENS:
         if tok in low:
-            _refuse(f'model {model!r} is an image/video generation model', url)
+            _refuse(f'model {model!r} is an image/video/audio generation model', url)
+    if not ALLOWED_MODEL_RE.match(low):
+        _refuse(f'model {model!r} is not an allowlisted gemini text/vision model', url)
 
     body = payload
     if isinstance(body, (bytes, bytearray)):
@@ -125,7 +175,7 @@ def check_gemini_request(url: str, payload=None) -> None:
             except ValueError:
                 _refuse('request body is not JSON', url)
     if _asks_for_image_output(body):
-        _refuse(f'model {model!r} was asked for IMAGE output', url)
+        _refuse(f'model {model!r} was asked for non-TEXT output (image/audio/video)', url)
 
 
 # ── layer 2: process-wide transport hook ──────────────────────────────────────

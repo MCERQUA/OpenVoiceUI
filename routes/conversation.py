@@ -1830,7 +1830,8 @@ def _conversation_inner():
                             }.get(_img_file.suffix.lower(), 'image/jpeg')
                             _img_bytes = _img_file.read_bytes(max_bytes=20_000_000)
                             _b64 = base64.b64encode(_img_bytes).decode()
-                            _gurl = ('https://generativelanguage.googleapis.com/v1beta/models/'
+                            from services.gemini_guard import gemini_api_base as _gbase
+                            _gurl = (f'{_gbase()}/models/'
                                      f'gemini-2.5-flash:generateContent?key={_gem_key}')
                             _gpayload = {'contents': [{'parts': [
                                 {'inline_data': {'mime_type': _mime, 'data': _b64}},

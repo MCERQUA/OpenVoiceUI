@@ -33,7 +33,7 @@ from flask import Blueprint, jsonify, request, send_file, Response
 from PIL import Image
 
 from services.paths import RUNTIME_DIR
-from services.gemini_guard import GeminiGenerationBlocked, check_gemini_request
+from services.gemini_guard import GeminiGenerationBlocked, check_gemini_request, gemini_api_base
 
 icons_bp = Blueprint('icons', __name__)
 
@@ -142,7 +142,7 @@ def search_global_icons(query, limit=10, min_score=0):
 ICON_HF_MODEL = 'black-forest-labs/FLUX.1-schnell'
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_MODEL = 'gemini-2.5-flash-image'
-GEMINI_URL = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent'
+GEMINI_URL = f'{gemini_api_base()}/models/{GEMINI_MODEL}:generateContent'
 
 # Cache icon list (rebuilt on first request)
 _icon_list_cache = None

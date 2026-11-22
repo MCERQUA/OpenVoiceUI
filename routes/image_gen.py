@@ -35,7 +35,7 @@ from flask import Blueprint, jsonify, request
 from services.paths import UPLOADS_DIR
 from services.metered_spend import log_spend
 from services.image_providers import DEFAULT_IMAGE_MODEL, GEMINI_DISABLED_MESSAGE
-from services.gemini_guard import GeminiGenerationBlocked, check_gemini_request
+from services.gemini_guard import GeminiGenerationBlocked, check_gemini_request, gemini_api_base
 from services.safe_open import Anchored  # no-follow I/O (agent-writable dirs)
 
 logger = logging.getLogger(__name__)
@@ -116,7 +116,7 @@ def _assert_image_bytes(content, provider, model_id, declared_ct):
         f'(declared {declared_ct}, {len(content or b"")} bytes): {snippet}')
 
 GEMINI_KEY = os.getenv('GEMINI_API_KEY', '')
-GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+GEMINI_BASE = f'{gemini_api_base()}/models'   # Google, or the vision proxy (GEMINI_API_BASE)
 HF_TOKEN = os.getenv('HF_TOKEN', '')
 HF_INFERENCE_BASE = 'https://router.huggingface.co/hf-inference/models'  # DEAD (HTTP 410)
 # 2026-08-27: hf-inference no longer serves FLUX — POSTing the line above returns

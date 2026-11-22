@@ -266,3 +266,82 @@ def test_vision_refuses_an_image_generation_model(wire):
     with pytest.raises(gg.GeminiGenerationBlocked):
         vision._gemini_vision('AAAA', 'image/png', 'draw a cat', 'gemini-2.5-flash-image')
     assert wire == []
+
+
+# ── TEXT-out only + positive model allowlist (2026-11-22, proxy cutover prep) ──────
+
+@pytest.mark.parametrize('url,payload,why', [
+    (f'{G}/gemini-2.5-flash-preview-tts:generateContent', VISION_BODY, 'tts model'),
+    (f'{G}/gemini-2.5-flash-native-audio-dialog:generateContent', VISION_BODY, 'audio model'),
+    (f'{G}/gemini-live-2.5-flash-preview:generateContent', VISION_BODY, 'live model'),
+    (f'{G}/lyria-002:generateContent', VISION_BODY, 'music model'),
+    (f'{G}/gemma-3-27b-it:generateContent', VISION_BODY, 'not an allowlisted family'),
+    (f'{G}/learnlm-2.0-flash-experimental:generateContent', VISION_BODY, 'not allowlisted'),
+    (f'{G}/gemini-3-pro-music-preview:generateContent', VISION_BODY, 'unknown future suffix'),
+    (f'{G}/gemini-2.5-flash:generateContent',
+     {'contents': [], 'generationConfig': {'responseModalities': ['AUDIO']}}, 'AUDIO modality'),
+    (f'{G}/gemini-2.5-flash:generateContent',
+     {'contents': [], 'generationConfig': {'responseModalities': ['TEXT', 'VIDEO']}}, 'VIDEO modality'),
+    (f'{G}/gemini-2.5-flash:generateContent',
+     {'contents': [], 'generationConfig': {'speechConfig': {'voiceConfig': {}}}}, 'speechConfig'),
+    (f'{G}/gemini-2.5-flash:generateContent',
+     {'contents': [], 'speech_config': {}}, 'top-level speech_config'),
+])
+def test_guard_refuses_non_text_output_and_unknown_models(url, payload, why):
+    with pytest.raises(gg.GeminiGenerationBlocked):
+        gg.check_gemini_request(url, payload)
+
+
+@pytest.mark.parametrize('model', [
+    'gemini-flash-latest', 'gemini-pro-latest', 'gemini-flash-lite-latest', 'gemini-2.5-flash',
+    'gemini-2.5-pro', 'gemini-2.0-flash-001', 'gemini-2.5-flash-lite', 'gemini-3-pro-preview',
+    'gemini-3-flash-preview', 'gemini-2.5-flash-preview-09-2025', 'gemini-2.5-flash-preview-05-20',
+    'gemini-2.0-flash-exp'])
+def test_allowlist_passes_real_vision_text_models(model):
+    gg.check_gemini_request(f'{G}/{model}:countTokens', VISION_BODY)
+
+
+PROXY = 'http://10.40.16.1:6366/v1beta'
+
+
+def test_api_base_defaults_to_google(monkeypatch):
+    monkeypatch.delenv('GEMINI_API_BASE', raising=False)
+    assert gg.gemini_api_base() == 'https://generativelanguage.googleapis.com/v1beta'
+    assert not gg.is_google_genai_host('10.40.16.1')
+
+
+def test_api_base_env_points_at_proxy_and_proxy_is_guarded(monkeypatch):
+    monkeypatch.setenv('GEMINI_API_BASE', PROXY + '/')
+    assert gg.gemini_api_base() == PROXY
+    assert gg.is_google_genai_host('10.40.16.1')
+    with pytest.raises(gg.GeminiGenerationBlocked):
+        gg.check_gemini_request(f'{PROXY}/models/gemini-2.5-flash-image:generateContent', VISION_BODY)
+    with pytest.raises(gg.GeminiGenerationBlocked):
+        gg.check_gemini_request(f'{PROXY}/models/imagen-4.0-generate-001:predict', {})
+    gg.check_gemini_request(f'{PROXY}/models/gemini-flash-latest:generateContent', VISION_BODY)
+
+
+def test_api_base_rejects_garbage(monkeypatch):
+    monkeypatch.setenv('GEMINI_API_BASE', 'not a url')
+    assert gg.gemini_api_base() == 'https://generativelanguage.googleapis.com/v1beta'
+
+
+def test_vision_uses_proxy_base_when_set(monkeypatch, wire):
+    monkeypatch.setenv('GEMINI_API_BASE', PROXY)
+    sent = []
+
+    def fake(self, request, **kw):
+        sent.append(request.url)
+        return _response(request.url, {'candidates': [{'content': {'parts': [{'text': 'ok'}]}}]})
+
+    def guarded(self, request, **kw):
+        if gg.is_google_genai_host(requests.utils.urlparse(request.url).hostname or ''):
+            gg.check_gemini_request(request.url, request.body)
+        return fake(self, request, **kw)
+    guarded._gemini_guard = True
+    monkeypatch.setattr(requests.Session, 'send', guarded)
+    assert vision._gemini_vision('AAAA', 'image/png', 'what', 'gemini-flash-latest') == 'ok'
+    assert sent == [f'{PROXY}/models/gemini-flash-latest:generateContent']
+    with pytest.raises(gg.GeminiGenerationBlocked):
+        requests.post(f'{PROXY}/models/gemini-2.5-flash-image:generateContent', json=VISION_BODY)
+    assert len(sent) == 1
