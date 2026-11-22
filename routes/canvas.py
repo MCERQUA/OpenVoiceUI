@@ -1541,20 +1541,146 @@ def website_dev_proxy(path=''):
 # OpenClaw Control UI proxy — serves the built-in dashboard behind Clerk auth
 # ---------------------------------------------------------------------------
 
+# The proxy is reachable without a Clerk session (app.py lists '/openclaw-ui/'
+# in _PUBLIC_PREFIXES so the SPA shell loads before login), and everything it
+# relays is served on the tenant's own origin. The gateway behind it runs
+# agent-controllable code (plugins register HTTP routes; the agent can rewrite
+# its own openclaw.json), so the proxy must (1) never reach a gateway path
+# outside /openclaw-ui/, (2) never let the gateway set origin-wide browser state
+# (cookies, service-worker scope, site-data wipes, isolation/CSP policy) on the
+# tenant origin, and (3) never register a service worker other than the Control
+# UI's own ./sw.js, whose scope then stays inside /openclaw-ui/.
+_OPENCLAW_UI_UPSTREAM = 'http://openclaw:18789'
+_OPENCLAW_UI_PREFIX = '/openclaw-ui/'
+
+# Response headers relayed from the gateway. Everything else is dropped, so a
+# new dangerous header (Set-Cookie, Service-Worker-Allowed, Clear-Site-Data,
+# Content-Security-Policy[-Report-Only], Cross-Origin-*, Origin-Agent-Cluster,
+# Refresh, Link, Access-Control-*, ...) can never reach the browser by default.
+# app.py's add_security_headers then supplies OVU's own CSP / XFO / nosniff.
+_OPENCLAW_UI_RESPONSE_HEADERS = frozenset({
+    'content-type',
+    'cache-control',
+    'etag',
+    'last-modified',
+    'expires',
+    'pragma',
+    'vary',
+    'accept-ranges',
+    'content-range',
+    'content-language',
+    'location',          # validated by _openclaw_ui_safe_location
+    'retry-after',
+})
+
+# The one script the Control UI registers as a service worker
+# (dist/control-ui/assets/index-*.js: navigator.serviceWorker.register('./sw.js')).
+_OPENCLAW_UI_SW_SCRIPT = 'sw.js'
+
+_OPENCLAW_UI_PATH_SAFE = "/-._~!$&'()*+,;=:@"
+
+
+def _openclaw_ui_target(path: str) -> str | None:
+    """Return the gateway URL for a proxied Control UI path, or None to refuse.
+
+    ``path`` is what Flask's ``<path:path>`` captured, so one layer of
+    percent-decoding has already happened (``..%2F`` arrives as ``../``).
+    Refused: dot segments, backslashes (WHATWG URL parsers read them as '/'),
+    control characters (WHATWG strips tab/CR/LF, so ``.\\t.`` becomes ``..``),
+    and any remaining percent-escape (a double-encoded ``%252e%252e`` would be
+    decoded by the gateway). The accepted path is re-quoted so what the gateway
+    receives is exactly what was checked, and ``?``/``#`` cannot be smuggled in.
+    """
+    from urllib.parse import quote, unquote, urlsplit
+    import posixpath
+
+    if not isinstance(path, str):
+        return None
+    if '\\' in path or any(ord(c) < 0x20 or ord(c) == 0x7f for c in path):
+        return None
+    if unquote(path) != path:
+        return None
+    if any(seg in ('.', '..') for seg in path.split('/')):
+        return None
+
+    target = _OPENCLAW_UI_UPSTREAM + _OPENCLAW_UI_PREFIX + quote(path, safe=_OPENCLAW_UI_PATH_SAFE)
+
+    # Belt and braces: the URL as an HTTP client will normalise it must still
+    # sit under the prefix on the gateway host.
+    parts = urlsplit(target)
+    if parts.netloc != urlsplit(_OPENCLAW_UI_UPSTREAM).netloc or parts.query or parts.fragment:
+        return None
+    norm = posixpath.normpath(unquote(parts.path))
+    if not (norm + '/').startswith(_OPENCLAW_UI_PREFIX):
+        return None
+    return target
+
+
+def _openclaw_ui_safe_location(value: str) -> str | None:
+    """Keep a gateway redirect only if it stays inside /openclaw-ui on this origin."""
+    from urllib.parse import unquote, urljoin, urlsplit
+    import posixpath
+
+    if not value or '\\' in value or any(ord(c) < 0x20 or ord(c) == 0x7f for c in value):
+        return None
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc:
+        return None
+    # Resolve relative redirects against the request path, as a browser would.
+    resolved = urlsplit(urljoin(request.path, value)).path
+    decoded = unquote(resolved)
+    if decoded != resolved and unquote(decoded) != decoded:
+        return None
+    norm = posixpath.normpath(decoded)
+    if norm != '/openclaw-ui' and not norm.startswith(_OPENCLAW_UI_PREFIX):
+        return None
+    return value
+
+
+def _openclaw_ui_response_headers(upstream_headers) -> list:
+    """Allowlisted upstream response headers (see _OPENCLAW_UI_RESPONSE_HEADERS)."""
+    out = []
+    for k, v in upstream_headers.items():
+        lk = k.lower()
+        if lk not in _OPENCLAW_UI_RESPONSE_HEADERS:
+            continue
+        if lk == 'location':
+            v = _openclaw_ui_safe_location(v)
+            if v is None:
+                logger.warning('OpenClaw UI proxy: dropped off-prefix redirect Location')
+                continue
+        out.append((k, v))
+    return out
+
+
 @canvas_bp.route('/openclaw-ui/')
 @canvas_bp.route('/openclaw-ui/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
 def openclaw_ui_proxy(path=''):
-    """Proxy the OpenClaw Control UI behind Clerk auth.
+    """Proxy the OpenClaw Control UI (SPA shell + assets) from the gateway.
 
-    Routes all HTTP requests to the internal openclaw gateway container which
-    serves the built-in dashboard SPA at its basePath (/openclaw-ui).
-    Clerk auth is enforced by the require_auth() before_request handler —
-    this path is NOT in the public prefixes.
+    Routes HTTP requests to the internal openclaw gateway container, which
+    serves the built-in dashboard SPA at its basePath (/openclaw-ui). The
+    operator-scope part (gateway RPC) is the /openclaw-ui WebSocket in
+    server.py, which is admin-gated; this HTTP path is public (see the block
+    comment above _OPENCLAW_UI_UPSTREAM), so it is confined to the prefix,
+    relays only allowlisted headers, and never follows upstream redirects.
     """
-    target_url = f'http://openclaw:18789/openclaw-ui/{path}'
+    target_url = _openclaw_ui_target(path)
+    if target_url is None:
+        logger.warning('OpenClaw UI proxy: refused path %r', path[:200] if isinstance(path, str) else path)
+        return 'Bad request', 400
+
+    # A service-worker script fetch carries `Service-Worker: script`. Only the
+    # Control UI's own ./sw.js may be registered; anything else could be an
+    # agent-served script trying to claim a scope on the tenant origin.
+    if request.headers.get('Service-Worker') is not None and (
+        request.method != 'GET' or path != _OPENCLAW_UI_SW_SCRIPT
+    ):
+        logger.warning('OpenClaw UI proxy: refused service-worker fetch for %r', path[:200])
+        return 'Forbidden', 403
 
     try:
-        kwargs = dict(params=request.args, timeout=30, stream=True)
+        kwargs = dict(params=request.args, timeout=30, stream=True, allow_redirects=False)
         if request.method in ('POST', 'PUT', 'PATCH'):
             kwargs['data'] = request.get_data()
             if request.content_type:
@@ -1567,14 +1693,7 @@ def openclaw_ui_proxy(path=''):
                 if chunk:
                     yield chunk
 
-        # Strip headers that interfere with iframe/proxy rendering
-        excluded_headers = [
-            'content-encoding', 'content-length', 'transfer-encoding',
-            'connection', 'x-frame-options', 'content-security-policy',
-        ]
-        headers = [(k, v) for k, v in resp.headers.items()
-                   if k.lower() not in excluded_headers]
-
+        headers = _openclaw_ui_response_headers(resp.headers)
         return Response(generate(), status=resp.status_code, headers=headers)
     except Exception as exc:
         logger.error(f'OpenClaw UI proxy error: {exc}')
