@@ -105,6 +105,7 @@
  "biz.get_record": "biz-read",
  "biz.health": "biz-read",
  "biz.hub_summary": "biz-read",
+ "biz.import_sources": "biz-state",
  "biz.list_records": "biz-read",
  "biz.packs_enable": "biz-state",
  "biz.packs_list": "biz-read",

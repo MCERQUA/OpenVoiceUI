@@ -378,6 +378,14 @@ class _ActivityQueue:
 # ---------------------------------------------------------------------------
 
 
+def _usable_orphan_reply(text):
+    """User-facing text from an orphan-continuation reply, or ''."""
+    text = _strip_internal_markers(text or '')
+    if not text or is_system_response(text):
+        return ''
+    return text
+
+
 def _strip_internal_markers(text):
     """Remove openclaw-internal reply markers (NO_REPLY / ANNOUNCE_SKIP /
     REPLY_SKIP) that can leak into the visible text of a COALESCED followup
@@ -432,6 +440,24 @@ _SUBAGENT_NUDGE_MSG = (
 # Nobody is waiting on this stream (the owner's request is already gone), so
 # a longer wait costs nothing user-visible.
 _ORPHAN_COLLECT_S = 600
+
+# OpenClaw runs its OWN completion turn in the parent session when a sub-agent
+# finishes: a run whose id starts `announce:` (announce:v1:<child>:<runId>).
+# Measured on ica 2026-11-17 and danielle 2026-11-16: it starts ~7 s after the
+# child ends and its final text IS the user-facing completion message. The
+# orphan nudge used to be sent ~8 s after the child ended, i.e. while that
+# announce run was busy in the same session: queue mode `collect` held the
+# nudge, nothing drained it until the owner's NEXT turn (7.5 and 38 min
+# later), and the announce text itself matched no subscription and was
+# dropped. The continuation then left on a no-receipt path (600 s with no
+# reply / NO_REPLY), so the completion reached nobody and left no trace.
+# Now the dispatcher captures the announce run for an orphaned parent and the
+# continuation delivers ITS text; the nudge is only the fallback when no
+# announce run shows up. This is how long the continuation waits for one to
+# START (counted from the hook, which already sits ORPHAN_DEBOUNCE_S after
+# the child's end).
+_ORPHAN_ANNOUNCE_PREFIX = 'announce:'
+_ORPHAN_ANNOUNCE_START_WAIT_S = 20
 
 # Offline relay — a subagent result that finished while no browser was
 # connected is handed to the tenant's OWN agent (default agent, in a session
@@ -515,6 +541,11 @@ class EventDispatcher:
         self._orphan_debounce: dict[str, asyncio.Task] = {}  # parent → pending task
         self._orphan_last_fired: dict[str, float] = {}       # parent → ts cooldown
         self._orphan_run_ids: dict[str, set] = {}     # parent → finished subagent runIds
+        # parent alias → capture of OpenClaw's own announce run in that
+        # session (see _ORPHAN_ANNOUNCE_PREFIX): {'since', 'started',
+        # 'ended', 'text'}. Filled by _capture_orphan_announce, read and
+        # dropped by GatewayConnection._run_orphan_continuation.
+        self._orphan_capture: dict[str, dict] = {}
         self._last_sub_alias: str | None = None       # newest subscribe() alias
 
     ORPHAN_DEBOUNCE_S = 5      # batch: wait for sibling subagents to finish
@@ -533,6 +564,9 @@ class EventDispatcher:
         for k in [k for k, t in self._orphan_debounce.items()
                   if t is None or t.done()]:
             self._orphan_debounce.pop(k, None)
+        for k in [k for k, c in self._orphan_capture.items()
+                  if c.get('since', 0) < cutoff]:
+            self._orphan_capture.pop(k, None)
 
     def _alias_for_canonical(self, canonical: str) -> str | None:
         """Best-effort map a canonical sessionKey (or spawnedBy value like
@@ -566,6 +600,12 @@ class EventDispatcher:
             return
         if payload.get('runId'):
             self._orphan_run_ids.setdefault(parent, set()).add(payload['runId'])
+        cap = self._orphan_capture.get(parent)
+        if cap is None or cap.get('ended'):
+            # Open a fresh capture BEFORE the debounce: OpenClaw's announce
+            # run can start inside the debounce window.
+            self._orphan_capture[parent] = {'since': now, 'started': False,
+                                            'ended': False, 'text': ''}
         pending = self._orphan_debounce.get(parent)
         if pending and not pending.done():
             pending.cancel()
@@ -580,17 +620,73 @@ class EventDispatcher:
             return
         # A live subscription may have appeared meanwhile (user sent a new
         # message) — the normal in-stream path owns delivery in that case.
-        for sub in self._subscriptions.values():
-            if sub.state != Subscription.DONE and self._sk_match_alias(parent, sub.session_key):
-                logger.info(f"### ORPHAN continuation cancelled — live sub exists for {parent}")
-                self._orphan_run_ids.pop(parent, None)
-                return
+        if self.has_live_sub(parent):
+            logger.info(f"### ORPHAN continuation cancelled — live sub exists for {parent}")
+            self._orphan_run_ids.pop(parent, None)
+            self._orphan_capture.pop(parent, None)
+            return
         self._orphan_last_fired[parent] = time.time()
         run_ids = tuple(sorted(self._orphan_run_ids.pop(parent, ())))
         try:
             self._orphan_hook(parent, run_ids)
         except Exception as e:
             logger.error(f"### ORPHAN hook failed: {e}")
+
+    def has_live_sub(self, session_alias: str) -> bool:
+        """True when a not-yet-DONE subscription exists for this session."""
+        return any(sub.state != Subscription.DONE
+                   and self._sk_match_alias(session_alias, sub.session_key)
+                   for sub in self._subscriptions.values())
+
+    def _capture_orphan_announce(self, canonical_evt, payload):
+        """Record OpenClaw's own announce run for a parent session that has
+        an orphaned sub-agent completion pending. Observes only: routing of
+        the event is unchanged (a live subscription still gets it)."""
+        if not self._orphan_capture:
+            return
+        run_id = str(payload.get('runId') or '')
+        sk = payload.get('sessionKey') or ''
+        if not run_id.startswith(_ORPHAN_ANNOUNCE_PREFIX) or not sk \
+                or is_subagent_session_key(sk):
+            return
+        alias = self._alias_for_canonical(sk)
+        cap = None
+        for parent, c in self._orphan_capture.items():
+            if parent == alias or self._sk_match_alias(parent, sk):
+                cap = c
+                break
+        if cap is None or cap.get('ended'):
+            return
+        if canonical_evt == 'agent':
+            stream = match_stream(payload.get('stream', ''))
+            d = payload.get('data') or {}
+            if stream == 'assistant':
+                cap['started'] = True
+                full_text = d.get('text', '')
+                if full_text and len(full_text) > len(cap['text']):
+                    cap['text'] = full_text
+            elif stream == 'lifecycle':
+                phase = d.get('phase', '')
+                if phase == 'start':
+                    cap['started'] = True
+                elif phase in ('end', 'error'):
+                    cap['started'] = True
+                    cap['ended'] = True
+            else:
+                cap['started'] = True
+        elif canonical_evt == 'chat':
+            state = match_state(payload.get('state', ''))
+            if state == 'final':
+                if not cap['text'] and 'message' in payload:
+                    content = extract_text_content(
+                        (payload.get('message') or {}).get('content', ''))
+                    if content and content.strip():
+                        cap['text'] = content
+                cap['started'] = True
+                cap['ended'] = True
+            elif state in ('aborted', 'error'):
+                cap['started'] = True
+                cap['ended'] = True
 
     @staticmethod
     def _sk_match_alias(a: str, b: str) -> bool:
@@ -710,6 +806,10 @@ class EventDispatcher:
                 event_run_id = payload.get('runId', '')
                 event_state = payload.get('state', '')
                 event_session_key = payload.get('sessionKey', '')
+
+                # Observe OpenClaw's own announce run for an orphaned parent
+                # (no effect on routing below).
+                self._capture_orphan_announce(canonical_evt, payload)
 
                 # Track aborted runs so their subsequent events aren't
                 # delivered to new subscriptions (prevents stale replays).
@@ -1214,8 +1314,33 @@ class GatewayConnection:
             return
         if _PROACTIVE_HANDLER is None:
             logger.info("### ORPHAN continuation skipped — no proactive handler registered")
+            if self._dispatcher:
+                self._dispatcher._orphan_capture.pop(session_key, None)
             return
         try:
+            # OpenClaw's own announce run usually carries the completion
+            # (see _ORPHAN_ANNOUNCE_PREFIX). Deliver its text when it has one;
+            # nudging while it runs only queues the nudge behind it.
+            announced = await self._await_orphan_announce(session_key)
+            text = _usable_orphan_reply(announced)
+            if text and self._dispatcher and self._dispatcher.has_live_sub(session_key):
+                # The owner started a turn while the announce ran: the
+                # dispatcher routed it to that live stream, which owns
+                # delivery (same rule as _fire_orphan_after_debounce).
+                logger.info(f"### ORPHAN continuation: announce reply went to a live "
+                            f"stream for {session_key} — no push")
+                return
+            if text:
+                logger.info(f"### ORPHAN continuation: OpenClaw announce reply "
+                            f"captured — delivering it, no nudge "
+                            f"(session={session_key}, runs={list(run_ids)})")
+                self._deliver_orphan_text(
+                    text, session_key,
+                    tuple(run_ids) or (f"orphan-{uuid.uuid4().hex[:12]}",))
+                return
+            if announced is not None:
+                logger.info("### ORPHAN continuation: announce run ended with no "
+                            "user-facing text — nudging the parent")
             await asyncio.sleep(3)  # let the gateway announce-back settle in session
             if not self._connected or not self._ws or not self._dispatcher:
                 logger.warning("### ORPHAN continuation skipped — gateway not connected")
@@ -1238,6 +1363,7 @@ class GatewayConnection:
                 collected_text = ''
                 prev_len = 0
                 orphan_subagent_runs = set()
+                ended_badly = None
                 deadline = time.time() + _ORPHAN_COLLECT_S
                 while time.time() < deadline:
                     try:
@@ -1246,7 +1372,8 @@ class GatewayConnection:
                         continue
                     if data.get('_type') == 'ws_closed':
                         logger.warning("### ORPHAN continuation: WS closed mid-collect")
-                        return
+                        ended_badly = 'ws_closed'
+                        break
                     if data.get('type') == 'res':
                         continue
                     if data.get('type') != 'event':
@@ -1279,7 +1406,8 @@ class GatewayConnection:
                             continue
                         if state in ('aborted', 'error'):
                             logger.warning(f"### ORPHAN continuation: run {state}")
-                            return
+                            ended_badly = state
+                            break
                         if state == 'final':
                             if not collected_text and 'message' in payload:
                                 content = extract_text_content(
@@ -1290,27 +1418,71 @@ class GatewayConnection:
             finally:
                 self._dispatcher.unsubscribe(cont_chat_id)
 
-            text = _strip_internal_markers(collected_text or '')
-            if not text and time.time() >= deadline:
+            text = _usable_orphan_reply(collected_text)
+            if not text:
+                # The nudge got nothing usable (no reply in time, NO_REPLY
+                # because the agent already answered in its announce turn,
+                # aborted, WS closed). An announce run captured meanwhile
+                # still carries the completion.
+                cap = self._dispatcher._orphan_capture.get(session_key) \
+                    if self._dispatcher else None
+                late = _usable_orphan_reply(cap.get('text') if cap else '')
+                if late:
+                    logger.info("### ORPHAN continuation: nudge gave no usable "
+                                "reply — delivering the captured announce reply")
+                    text = late
+            if not text and (ended_badly or time.time() >= deadline):
                 logger.warning(
-                    f"### ORPHAN continuation: no reply within {_ORPHAN_COLLECT_S}s "
+                    f"### ORPHAN continuation: no reply "
+                    f"({ended_badly or f'within {_ORPHAN_COLLECT_S}s'}) "
                     f"(session={session_key}, runs={list(run_ids)}) — completion "
                     f"NOT pushed or relayed")
                 return
-            if not text or is_system_response(text):
+            if not text:
                 logger.info("### ORPHAN continuation: no user-facing text — nothing to push")
                 return
-            logger.info(f"### ORPHAN continuation: pushing proactive message "
-                        f"({len(text)} chars): {text[:120]}")
-            loop = asyncio.get_running_loop()
-            relay_ids = tuple(run_ids) or (cont_chat_id,)
-
-            def _deliver():
-                self.deliver_offline_completion(text, session_key, relay_ids, loop=loop)
-
-            threading.Thread(target=_deliver, name='proactive-push', daemon=True).start()
+            self._deliver_orphan_text(text, session_key,
+                                      tuple(run_ids) or (cont_chat_id,))
         except Exception as e:
             logger.error(f"### ORPHAN continuation failed: {e}")
+        finally:
+            if self._dispatcher:
+                self._dispatcher._orphan_capture.pop(session_key, None)
+
+    async def _await_orphan_announce(self, session_key):
+        """Wait for OpenClaw's own announce run in the orphaned parent session
+        (captured by EventDispatcher._capture_orphan_announce).
+
+        Returns its final text ('' when it ended with none), or None when no
+        announce run started within _ORPHAN_ANNOUNCE_START_WAIT_S, none is
+        being captured, or it is still running after _ORPHAN_COLLECT_S."""
+        d = self._dispatcher
+        cap = d._orphan_capture.get(session_key) if d else None
+        if cap is None:
+            return None
+        t0 = time.time()
+        while True:
+            if cap.get('ended'):
+                return cap.get('text') or ''
+            waited = time.time() - t0
+            if not cap.get('started') and waited >= _ORPHAN_ANNOUNCE_START_WAIT_S:
+                return None
+            if waited >= _ORPHAN_COLLECT_S:
+                logger.warning(f"### ORPHAN continuation: announce run still open "
+                               f"after {_ORPHAN_COLLECT_S}s (session={session_key})")
+                return None
+            await asyncio.sleep(0.5)
+
+    def _deliver_orphan_text(self, text, session_key, relay_ids):
+        """Push (receipt) and, if nobody saw it, relay — off the loop thread."""
+        logger.info(f"### ORPHAN continuation: pushing proactive message "
+                    f"({len(text)} chars): {text[:120]}")
+        loop = asyncio.get_running_loop()
+
+        def _deliver():
+            self.deliver_offline_completion(text, session_key, relay_ids, loop=loop)
+
+        threading.Thread(target=_deliver, name='proactive-push', daemon=True).start()
 
     def deliver_offline_completion(self, text, session_key, run_ids, loop=None):
         """Deliver a completed reply whose originating stream is gone.

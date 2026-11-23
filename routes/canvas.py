@@ -56,15 +56,21 @@ BRAIN_EVENTS_PATH = Path(_EVENTS_PATH)
 # Self-hosted installs: auth is disabled by default. Set CANVAS_REQUIRE_AUTH=true to enable Clerk JWT checks.
 CANVAS_REQUIRE_AUTH = os.getenv('CANVAS_REQUIRE_AUTH', 'false').lower() == 'true'
 
-# Embedded-resource types /pages/ serves WITHOUT a session: public pages need their images, styles, scripts, fonts
-# and media. Every OTHER non-.html file under /pages/ (page backups, .htm, .json/.md/.txt/.pdf, no extension)
-# requires the same session as _data/ -- see canvas_pages_proxy. Add a type here only if a public page needs it.
+# Embedded-resource types under /pages/. DEFAULT-DENY (2026-11-21, mesh SEC-094): with CANVAS_REQUIRE_AUTH on, a file
+# of one of these types is served WITHOUT a session only when a PUBLIC page (or an OS page, which is served without
+# a session) references it -- the asset follows its page's is_public. Anything else needs the same session as a
+# private page. Until 2026-11-21 every file of these types was open to anyone with the URL, so a private page's
+# images were readable signed-out (measured: 200 for png/jpg/webp/svg/js/css/mp4 on test-dev and :latest).
+# Every OTHER non-.html file under /pages/ (page backups, .htm, .json/.md/.txt/.pdf, no extension) needs a session
+# even when a public page names it -- see canvas_pages_proxy.
 _CANVAS_OPEN_ASSET_EXTS = frozenset({
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'ico', 'bmp',
     'css', 'js', 'mjs', 'woff', 'woff2', 'ttf', 'otf', 'eot',
     'mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'mp4', 'webm', 'mov', 'm4v', 'vtt',
     'glb', 'gltf', 'wasm', 'webmanifest',
 })
+# OS pages are served without a session (see canvas_pages_proxy), so the assets they name are open too.
+_CANVAS_OS_PAGES = frozenset({'desktop.html', 'file-explorer.html', 'terminal.html'})
 
 CATEGORY_KEYWORDS = {
     'dashboards': ['dashboard', 'monitor', 'status', 'overview', 'control panel', 'panel'],
@@ -990,6 +996,112 @@ def _safe_canvas_path(base: str, user_path: str) -> Path | None:
     return None
 
 
+# ── Public-page asset references (default-deny for /pages/ assets) ──────────────────────────────────────────────
+# A token in page text that names a file of an embeddable type: src="a.png", url(./b.webp), srcset="c.png 2x",
+# content="https://x.jam-bot.com/pages/og.png", "/pages/sub/d.svg". Commas, quotes, parens, whitespace end a token.
+_ASSET_REF_RE = re.compile(
+    r'([^\s"\'()<>,`=]+?\.(?:' + '|'.join(sorted(_CANVAS_OPEN_ASSET_EXTS, key=len, reverse=True)) + r'))'
+    r'(?=[?#"\'()\s<>,`;]|$)', re.IGNORECASE)
+_ASSET_REF_SCAN_EXTS = frozenset({'html', 'css', 'svg', 'js', 'mjs', 'webmanifest'})   # text that can name more assets
+_ASSET_REF_MAX_BYTES = 4 * 1024 * 1024
+_ASSET_REF_MAX_DEPTH = 3
+_ASSET_REF_MAX_AGE_S = 30   # CSS/JS a public page pulls in are not in the signature: rescan at least this often
+_public_asset_cache = {'sig': None, 'refs': frozenset(), 'at': 0.0}
+_public_asset_lock = threading.Lock()
+
+
+def _resolve_asset_ref(token, base_dir):
+    """Canvas-pages-relative path a reference points at, or None if it is not under /pages/."""
+    from urllib.parse import unquote
+    import posixpath
+    t = unquote(token.strip())
+    m = re.match(r'^(?:[a-z][a-z0-9+.-]*:)?//[^/]+(/.*)$', t, re.IGNORECASE)   # absolute or protocol-relative URL
+    if m:
+        t = m.group(1)
+    elif re.match(r'^[a-z][a-z0-9+.-]*:', t, re.IGNORECASE):                  # data:, blob:, mailto: ...
+        return None
+    if t.startswith('/'):
+        if not t.startswith('/pages/'):
+            return None
+        rel = t[len('/pages/'):]
+    else:
+        rel = posixpath.join(base_dir, t) if base_dir else t
+    rel = posixpath.normpath(rel)
+    if rel in ('.', '') or rel.startswith('../') or rel == '..' or rel.startswith('/'):
+        return None
+    return rel
+
+
+def _public_page_files(manifest):
+    """Canvas-pages-relative filenames of pages served WITHOUT a session (is_public pages + OS pages).
+
+    Same rule as the page gate in canvas_pages_proxy, which decides by the URL's stem: the public file is
+    '<page_id>.html'. Never the manifest's 'filename' field -- the manifest is agent-writable, and a public entry
+    whose filename named a PRIVATE page would open that page's assets while the page itself stayed private.
+    """
+    names = set(_CANVAS_OS_PAGES)
+    for page_id, meta in (manifest.get('pages') or {}).items():
+        page_id = str(page_id)
+        if not page_id or '/' in page_id or '\\' in page_id or page_id.startswith('.'):
+            continue                                    # the gate's stem can never equal such an id
+        if isinstance(meta, dict) and meta.get('is_public') is True:
+            names.add(f'{page_id}.html')
+    return sorted(names)
+
+
+def _public_asset_refs():
+    """Set of canvas-pages-relative asset paths referenced by a page that is served without a session.
+
+    Recomputed whenever the manifest or any public page changes (and at least every _ASSET_REF_MAX_AGE_S, for the
+    CSS/JS those pages pull in); files are read
+    no-follow (canvas-pages is agent-writable). Fails CLOSED: an unreadable page contributes nothing.
+    """
+    manifest = load_canvas_manifest()
+    roots = _public_page_files(manifest)
+    sig_parts = []
+    try:
+        sig_parts.append(CANVAS_MANIFEST_PATH.stat().st_mtime_ns)
+    except OSError:
+        sig_parts.append(None)
+    for name in roots:
+        try:
+            st = Anchored(CANVAS_PAGES_DIR, name).lstat()
+            sig_parts.append((name, st.st_mtime_ns, st.st_size))
+        except (OSError, UnsafePath, ValueError):
+            sig_parts.append((name, None))
+    sig = (str(CANVAS_PAGES_DIR), tuple(sig_parts))
+    with _public_asset_lock:
+        if _public_asset_cache['sig'] == sig and time.monotonic() - _public_asset_cache['at'] < _ASSET_REF_MAX_AGE_S:
+            return _public_asset_cache['refs']
+    import posixpath
+    refs, seen = set(), set()
+    frontier = [(name, 0) for name in roots]
+    while frontier:
+        name, depth = frontier.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            text = Anchored(CANVAS_PAGES_DIR, name).read_bytes(max_bytes=_ASSET_REF_MAX_BYTES).decode('utf-8', 'replace')
+        except Exception:                               # noqa: BLE001 -- missing / symlink / too big: contributes nothing
+            continue
+        base_dir = posixpath.dirname(name)
+        for token in _ASSET_REF_RE.findall(text):
+            rel = _resolve_asset_ref(token, base_dir)
+            if not rel:
+                continue
+            refs.add(rel)
+            ext = rel.rsplit('.', 1)[-1].lower()
+            if ext in _ASSET_REF_SCAN_EXTS and depth < _ASSET_REF_MAX_DEPTH:
+                frontier.append((rel, depth + 1))
+    frozen = frozenset(refs)
+    with _public_asset_lock:
+        _public_asset_cache['sig'] = sig
+        _public_asset_cache['refs'] = frozen
+        _public_asset_cache['at'] = time.monotonic()
+    return frozen
+
+
 _TRAILING_PUNCT_PAGE_RE = re.compile('(.+\\.html)[.,;:!)\\]}>\'"\u2019\u201d\u2026]+')
 
 
@@ -1013,6 +1125,54 @@ def _upload_grant_for_viewer(viewer_id):
     except Exception as exc:  # never fail a page serve over the grant
         logger.warning('[canvas] could not mint upload grant: %s', exc)
         return None
+
+
+# ── Asset grant for a private page opened top-level (follow-up to SEC-094) ─────────────────────────────────────────
+# A private page opened straight from a texted link runs top-level, outside the app shell. The shell rewrites the
+# 60 s Clerk __session cookie every 50 s (src/app.js _syncSessionCookie); a top-level canvas page has nothing that
+# does, so once the token it arrived with expires, every asset the browser fetches later (a lazy <img> below the
+# fold, a video seek = a new Range request) would 401 under the default-deny asset gate. Measured 2026-11-21: the
+# served page carries no Clerk script, and services/auth.verify_clerk_token has no leeway.
+# Fix: when the private-page gate has verified a viewer, it also sets this signed, tenant-bound, HttpOnly cookie,
+# scoped to /pages/. The asset-type gate accepts it; nothing else does (pages, _data/, json/pdf/md still need Clerk).
+_ASSET_GRANT_COOKIE = 'ovu_canvas_assets'
+_ASSET_GRANT_RE = re.compile(r'^a1\.([0-9]{1,12})\.([0-9a-f]{16})\.([0-9a-f]{64})$')
+
+
+def _asset_grant_ttl_s() -> int:
+    try:
+        return max(60, int(float(os.getenv('OVU_CANVAS_ASSET_GRANT_TTL_H', '12')) * 3600))
+    except ValueError:
+        return 12 * 3600
+
+
+def _mint_asset_grant() -> str:
+    """Grant to load /pages/ ASSETS (not pages), minted only for a viewer the page gate verified.
+
+    Same per-instance private key and tenant binding as the chunked-upload grant (routes/static_files.py),
+    under its own purpose label, so neither grant can stand in for the other or verify on another tenant."""
+    import secrets
+    from routes.static_files import _chunk_sig, _chunk_tenant
+    exp = int(time.time()) + _asset_grant_ttl_s()
+    nonce = secrets.token_hex(8)
+    return f'a1.{exp}.{nonce}.{_chunk_sig("canvas-assets", exp, nonce, _chunk_tenant())}'
+
+
+def _asset_grant_ok(token) -> bool:
+    """True only for an unexpired grant this instance minted for this tenant. Fails closed."""
+    try:
+        m = _ASSET_GRANT_RE.match((token or '').strip())
+        if not m:
+            return False
+        exp, now = int(m.group(1)), time.time()
+        if exp <= now or exp > now + _asset_grant_ttl_s() + 60:
+            return False
+        import hmac as _hmac
+        from routes.static_files import _chunk_sig, _chunk_tenant
+        return _hmac.compare_digest(_chunk_sig('canvas-assets', exp, m.group(2), _chunk_tenant()), m.group(3))
+    except Exception as exc:                            # noqa: BLE001 -- fail closed
+        logger.warning('[canvas] asset grant check failed: %s', exc)
+        return False
 
 
 def _platform_page_reserved(name) -> bool:
@@ -1049,7 +1209,7 @@ def canvas_pages_proxy(path):
         return jsonify({'error': 'Not found', 'code': 'platform_page_reserved'}), 404
     try:
         # Auth check — only when explicitly enabled (opt-in for self-hosted deployments)
-        # Skip auth for non-HTML assets (images, icons, CSS) — they're embedded resources
+        # Non-HTML assets (images, icons, CSS) are open ONLY when a public/OS page references them (below)
         # Skip auth for OS infrastructure pages (desktop, file-explorer) — they are loaded
         # inside the app's own iframe and the parent page already handled authentication.
         # The iframe may not have the Clerk __session cookie on cross-subdomain visits.
@@ -1058,7 +1218,7 @@ def canvas_pages_proxy(path):
         # default-pages/retired/). This set SKIPS AUTH, so a stale entry for a page we no
         # longer ship is a latent hole: anything later dropped at that filename in a
         # tenant's canvas-pages would serve unauthenticated.
-        _OS_PAGES = {'desktop.html', 'file-explorer.html', 'terminal.html'}
+        _OS_PAGES = _CANVAS_OS_PAGES
         _viewer_id = None   # set when the private-page gate below verified a session
         # _data/ under /pages/ bypasses the *.html gate entirely -- gate it here too.
         if CANVAS_REQUIRE_AUTH and (path.startswith('_data/') or '/_data/' in path):
@@ -1073,7 +1233,21 @@ def canvas_pages_proxy(path):
         if CANVAS_REQUIRE_AUTH and not _is_html and not (path.startswith('_data/') or '/_data/' in path):
             _name = Path(path).name
             _ext = _name.rsplit('.', 1)[-1].lower() if '.' in _name else ''
-            if _ext not in _CANVAS_OPEN_ASSET_EXTS:
+            if _ext in _CANVAS_OPEN_ASSET_EXTS:
+                # Embeddable asset: open only if a page served without a session references it (the asset
+                # follows its page's is_public); otherwise it needs a session, exactly like a private page.
+                # Nonexistent names get the same 401, so the gate does not reveal which assets exist.
+                import posixpath as _pp
+                if (_pp.normpath(path) not in _public_asset_refs()
+                        and not _asset_grant_ok(request.cookies.get(_ASSET_GRANT_COOKIE))):
+                    denied = _canvas_data_denied(path)
+                    if denied:
+                        # A texted direct link to an image is a browser navigation: send it to sign-in like a
+                        # private page does; an embedded <img>/<script> fetch gets the plain 401.
+                        if request.headers.get('Accept', '').startswith('text/html'):
+                            return redirect('/?redirect=/pages/' + path)
+                        return denied
+            else:
                 _target = _safe_canvas_path(str(CANVAS_PAGES_DIR), path)
                 # A slug-only URL that is not a file falls through to the .html redirect below, where the
                 # page's own is_public gate applies. Anything that IS a file needs a session.
@@ -1222,6 +1396,14 @@ def canvas_pages_proxy(path):
                 else:
                     content += _body_inject
                 resp = Response(content, mimetype='text/html')
+                if _viewer_id:
+                    # Verified viewer of a private page: let its assets keep loading after the 60 s Clerk
+                    # token expires (see _ASSET_GRANT_COOKIE). Never set for an anonymous or public serve.
+                    try:
+                        resp.set_cookie(_ASSET_GRANT_COOKIE, _mint_asset_grant(), max_age=_asset_grant_ttl_s(),
+                                        path='/pages/', secure=True, httponly=True, samesite='Strict')
+                    except Exception as exc:  # never fail a page serve over the grant
+                        logger.warning('[canvas] could not mint asset grant: %s', exc)
                 resp.headers['Cache-Control'] = 'private, no-cache, no-store, must-revalidate, max-age=0'
                 resp.headers['Pragma'] = 'no-cache'
                 resp.headers['Expires'] = '0'

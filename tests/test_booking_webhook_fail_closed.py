@@ -152,8 +152,9 @@ def test_secret_is_never_written_into_booking_config(monkeypatch, tmp_path):
     mod, uploads, sms = _load(monkeypatch, tmp_path, secret=None)
     r = _bare_client(mod).post('/api/booking/config', json={'webhook_secret': SECRET})
     assert r.status_code == 200
-    assert 'webhook_secret' not in json.loads((uploads / '.booking-config.json').read_text())
-    assert (uploads / '.booking-webhook-secret').read_text().strip() == SECRET
+    # SEC-092 R2: both are written into the fixed .booking-secrets/ dir
+    assert 'webhook_secret' not in json.loads((uploads / '.booking-secrets' / 'booking-config.json').read_text())
+    assert (uploads / '.booking-secrets' / 'booking-webhook-secret').read_text().strip() == SECRET
 
 
 def test_config_secret_and_event_log_are_dotfiles():
@@ -165,6 +166,7 @@ def test_config_secret_and_event_log_are_dotfiles():
     spec.loader.exec_module(mod)
     for name in ('CONFIG_PATH', 'WEBHOOK_LOG_PATH', 'WEBHOOK_SECRET_PATH', 'NOTIFY_QUEUE_DIR'):
         assert getattr(mod, name).name.startswith('.'), (name, getattr(mod, name))
+    assert mod.SECRETS_DIRNAME.startswith('.')   # SEC-092 R2: the dir is a dot component too
     src = (ROOT / 'routes' / 'static_files.py').read_text()
     assert "any(part.startswith('.') for part in Path(filename).parts)" in src
 
@@ -177,6 +179,6 @@ def test_legacy_config_is_read_and_first_save_moves_it_to_the_dotfile(monkeypatc
     assert mod._load_config() == legacy
     r = _bare_client(mod).post('/api/booking/config', json={'notify_identity': 'setup'})
     assert r.status_code == 200
-    moved = json.loads((uploads / '.booking-config.json').read_text())
+    moved = json.loads((uploads / '.booking-secrets' / 'booking-config.json').read_text())   # SEC-092 R2
     assert moved['api_key'] == 'cal_legacy_key_0000' and moved['notify_identity'] == 'setup'
     assert json.loads((uploads / 'booking-config.json').read_text()) == legacy   # never rewritten

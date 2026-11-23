@@ -1,5 +1,6 @@
 """
 /pages/ non-asset auth gate (2026-09-15): with CANVAS_REQUIRE_AUTH on, only embedded-asset types are served
+(and since 2026-11-21, SEC-094, only when a public page references them -- see test_canvas_pages_asset_default_deny)
 without a session; page backups, .htm, data/doc files and extensionless files need one. Slug-only URLs still
 redirect to their .html page, and the self-hosted default (auth off) is unchanged.
 """
@@ -36,7 +37,7 @@ def _as(monkeypatch, user):
 
 
 @pytest.mark.parametrize("path,expected", [
-    ("logo.png", 200), ("app.webmanifest", 200),
+    ("logo.png", 401), ("app.webmanifest", 401),   # no public page names them (SEC-094)
     ("plan.json", 401), ("report.html.bak-20260626-002747", 401), ("legacy.htm", 401), ("notes", 401),
 ])
 def test_anonymous(client, monkeypatch, path, expected):

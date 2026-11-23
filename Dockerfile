@@ -1,11 +1,5 @@
 FROM python:3.12-slim
 
-# Source-commit provenance — readable via `docker inspect` so the drift detector
-# reads the baked commit directly instead of guessing (closes ovui_commit_drift).
-# Passed by jambot-build-images.sh as: --build-arg SOURCE_COMMIT=$(git rev-parse --short HEAD)
-ARG SOURCE_COMMIT=unknown
-LABEL com.jambot.source_commit=$SOURCE_COMMIT
-
 WORKDIR /app
 
 # System deps for cryptography, audio processing, vision, and canvas features
@@ -19,6 +13,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Source-commit provenance — readable via `docker inspect` so the drift detector
+# reads the baked commit directly instead of guessing (closes ovui_commit_drift).
+# Passed by jambot-build-images.sh as: --build-arg SOURCE_COMMIT=$(git rev-parse --short HEAD)
+#
+# Declared AFTER the apt/pip layers on purpose: every RUN that follows an ARG
+# sees it as an env var, so a per-build value declared above them changes their
+# cache key and re-runs apt + pip on every candidate (~2.5 GB of new layers).
+# Nothing above this line may reference SOURCE_COMMIT.
+ARG SOURCE_COMMIT=unknown
+LABEL com.jambot.source_commit=$SOURCE_COMMIT
 
 COPY . .
 
