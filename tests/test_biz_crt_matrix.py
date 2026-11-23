@@ -809,6 +809,13 @@ def _classify(app, rule):
     # read-only helpers of routes/biz.py other routes may call (page names a pack ships; the menu shell tags)
     helper = re.compile(r'^\s*from routes\.biz import (platform_page_names|shell_injection)\s*$', re.M)
     uses_helper = bool(helper.search(src))
+    # routes/forms.py (anonymous form capture, SEC-062) keeps its own store in the SAME durable db dir, so it borrows
+    # two pure helpers: the dir resolver and the card-number scan. These exact imports only; any other biz mark in
+    # routes/forms.py (get_store, BizStore, business.db, ...) still reads as biz-other and fails below.
+    forms_helper = re.compile(r'^\s*from services\.biz\.(store import resolve_location|'
+                              r'schema import (SchemaError|contains_card_number))\s*$', re.M)
+    if mod == 'routes.forms':
+        src = forms_helper.sub('', src)
     if _BIZ_MARK.search(helper.sub('', src)):
         return 'biz-other'                     # must never happen: only routes/biz.py opens the store
     if _EXEC_MARK.search(src):

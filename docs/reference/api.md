@@ -24,6 +24,7 @@ HTTP status codes follow standard conventions: `400` for bad requests, `404` for
 | [Conversation](#conversation) | `/api/conversation` | Voice conversation, TTS generation |
 | [TTS](#tts-text-to-speech) | `/api/tts/*` | Text-to-speech providers, voices, cloning |
 | [Canvas](#canvas) | `/api/canvas/*` | Canvas page CRUD, versioning, manifest |
+| [Forms](#forms) | `/api/forms/*` | Anonymous canvas-page form capture into a private store |
 | [Music](#music) | `/api/music` | Music player control, uploads, playlists |
 | [Suno](#suno-ai-song-generation) | `/api/suno` | AI music generation |
 | [Image Generation](#image-generation) | `/api/image-gen` | Image creation, saved designs |
@@ -418,6 +419,64 @@ Serve a canvas HTML page from the pages directory. Handles authentication (when 
 ### GET /images/\{path\}
 
 Serve image assets from the canvas images directory.
+
+---
+
+## Forms
+
+One common form-capture route (`routes/forms.py`) so a canvas page can collect a sign-up from an anonymous visitor without the data ever touching `/uploads/` (which is served without a login on most installs). Never collect personal data by POSTing a JSON file to `/api/upload`.
+
+Store: `<db dir>/forms/<form_id>.def.json` + `<form_id>.jsonl` — the business backend's durable db dir (`BIZ_DB_DIR`, else the dir of `OVUI_DB_PATH`). Not under any served path; the dir is 0700 and the files 0600. A hosted install with no durable db dir answers 503.
+
+`form_id`: `^[a-z0-9][a-z0-9_-]{0,63}$`.
+
+### PUT /api/forms/\{form_id\}/def
+
+Agent key or Clerk. Create (201) or replace (200) the definition — the field allowlist:
+
+```json
+{
+  "label": "Group registration",
+  "enabled": true,
+  "fields": {
+    "name":     {"type": "string", "label": "Full name", "required": true, "max_length": 120},
+    "phone":    {"type": "phone",  "label": "Mobile",    "required": true, "max_length": 40},
+    "email":    {"type": "email",  "label": "Email",     "required": true, "max_length": 254},
+    "timezone": {"type": "enum",   "label": "Time zone", "required": true,
+                 "values": ["America/New_York", "America/Chicago", "America/Denver",
+                            "America/Phoenix", "America/Los_Angeles"]}
+  },
+  "honeypot": "company_website",
+  "max_bytes": 4096,
+  "rate_limit": {"per_minute": 5, "per_day": 50, "form_per_day": 1000}
+}
+```
+
+Field types (business-backend names): `string` (max 1000), `text` (5000, newlines allowed), `email` (320), `phone` (40, needs 7+ digits), `url` (http/https), `enum` (needs `values`), `date` (YYYY-MM-DD), `integer`, `number`, `boolean`. Field keys: `type`, `label`, `description`, `required`, `max_length`, `values`. Field names: `^[a-z][a-z0-9_]{0,40}$`. `honeypot` (default `company_website`) is a field the page renders hidden; it must not be one of the fields. `max_bytes` 256-65536 (default 8192). `rate_limit` defaults shown; caps 60 / 1000 / 10000. Unknown keys → 422.
+
+### POST /api/forms/\{form_id\}
+
+**Public.** `application/json` or `application/x-www-form-urlencoded` (send `new URLSearchParams(new FormData(form))`; multipart → 415). Answers:
+
+| Status | When |
+|--------|------|
+| 201 `{"ok": true}` | Stored — or the honeypot was filled (nothing stored, same answer) |
+| 400 | `unknown_fields` (names only), `validation_failed` (`fields: {name: reason}`), `duplicate_field`, `bad_json` |
+| 403 | `origin_mismatch` — Origin (or, without one, Referer) is not this host |
+| 404 | `form_not_found` — unknown, disabled, or invalid `form_id` |
+| 413 | Body over `max_bytes` |
+| 422 | `card_number_refused` |
+| 429 | Per-IP per-minute / per-day, or the per-form daily ceiling |
+
+Row: `{"id", "tenant", "form_id", "received_at", "data": {...}, "source": {"channel": "web", "ref": "form:<form_id>"}}`. Logs carry the form_id, counts and status only.
+
+### GET /api/forms/\{form_id\}
+
+Agent key or Clerk. `{"form_id", "count", "rows": [...]}` (newest last; `?limit=` default 500, max 5000).
+
+### GET /api/forms/\{form_id\}/def · GET /api/forms
+
+Agent key or Clerk. The definition; or every form with `enabled`, `label` and its row `count`.
 
 ---
 
