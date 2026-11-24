@@ -1954,6 +1954,15 @@ def push_proactive_message(text: str, session_key: str = None, run_id: str = Non
         return 0
     spoken = re.sub(r'\[[A-Z_]+(?::[^\]]*)?\]', '', text).strip()
     audio_b64 = None
+    # A push is unprompted speech: a profile with conversation.speak_unprompted=false
+    # gets it as text only (no TTS is paid for). Unreadable profile -> speak (default).
+    try:
+        from routes.profiles import speaks_unprompted
+        if spoken and not speaks_unprompted():
+            logger.info("Proactive push: text only (profile conversation.speak_unprompted=false)")
+            spoken = ""
+    except Exception:
+        pass
     if spoken:
         try:
             audio_b64 = _generate_tts_b64(spoken, **_push_tts_args())

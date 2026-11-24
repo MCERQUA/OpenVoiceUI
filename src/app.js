@@ -4595,6 +4595,9 @@ connectAiradio();
                             ...(gatewayAgentId ? { agent_id: gatewayAgentId } : {}),
                             ...(window._maxResponseChars ? { max_response_chars: window._maxResponseChars } : {}),
                             ...(opts.image_path ? { image_path: opts.image_path } : {}),
+                            // Not asked for by the user (untagged canvas auto-speak): the server
+                            // shows it as text only when the profile sets speak_unprompted=false.
+                            ...(opts.unprompted ? { unprompted: true } : {}),
                             ...(window.TranscriptPanel?.textMode ? { skip_tts: true } : {})
                         })
                     });
@@ -8054,7 +8057,8 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                                     }
                                     window._lastAutoSpeakAt = Date.now();
                                 }
-                                ModeManager.clawdbotMode.sendMessage(text);
+                                ModeManager.clawdbotMode.sendMessage(text,
+                                    event.data.userInitiated === true ? {} : { unprompted: true });
                             }
                             break;
                         case 'navigate':
