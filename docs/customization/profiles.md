@@ -159,6 +159,7 @@ Controls the conversation flow.
 | `auto_hangup_silence_ms` | integer or null | `null` | Auto-hangup after N ms of total silence (5000--600000). `null` = never. |
 | `interruption_enabled` | boolean or null | `null` | Allow user to barge in during TTS playback. Requires `llm.queue.mode` set to `"steer"`. `null` = platform default (`false`). |
 | `max_response_chars` | integer or null | `null` | Hard cap on AI response length before TTS. Truncates at sentence boundary (50--16000). `null` = no cap. |
+| `speak_unprompted` | boolean or null | `null` | `false` = the agent never speaks unprompted: the session-start greeting, background pushes and untagged canvas auto-speaks show as text with no TTS. Replies to what the user says still speak. `null`/`true` = speak. Read every turn, so a profile update takes effect without a restart. |
 
 ### Modes (`modes`)
 
