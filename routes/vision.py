@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 
 import requests
+
+from services.gemini_guard import check_gemini_request, gemini_api_base
 from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger(__name__)
@@ -173,15 +175,16 @@ def _gemini_vision(image_b64: str, mime: str, prompt: str, model: str) -> str:
     # HTTPError message embeds the full URL — so a single 404 on a bad model name writes the live
     # GEMINI_API_KEY into the log, the exception, and any transcript that captures it. Measured
     # 2026-09-06: a fallback test did exactly that. x-goog-api-key keeps it out of every error path.
-    resp = requests.post(
-        f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
-        headers={'x-goog-api-key': key},
-        json={'contents': [{'parts': [
-            {'text': prompt},
-            {'inline_data': {'mime_type': mime, 'data': image_b64}},
-        ]}]},
-        timeout=60,
-    )
+    # gemini_api_base(): Google, or the host-side vision proxy when GEMINI_API_BASE is set.
+    url = f'{gemini_api_base()}/models/{model}:generateContent'
+    payload = {'contents': [{'parts': [
+        {'text': prompt},
+        {'inline_data': {'mime_type': mime, 'data': image_b64}},
+    ]}]}
+    # Vision only (2026-11-22): refuses an image-GENERATION model id (e.g. a VISION_MODEL
+    # env pointed at a *-image model) before any request. Text-out vision passes.
+    check_gemini_request(url, payload)
+    resp = requests.post(url, headers={'x-goog-api-key': key}, json=payload, timeout=60)
     resp.raise_for_status()
     cands = resp.json().get('candidates') or []
     if not cands:

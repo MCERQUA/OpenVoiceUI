@@ -7,7 +7,8 @@ Static icons:
   GET /api/icons/library/<name>.svg             → serve a Lucide SVG icon
 
 Generated icons:
-  POST /api/icons/generate                      → generate icon via Gemini
+  POST /api/icons/generate                      → generate icon (FLUX.1-schnell on HF; Gemini
+                                                  never generates images — services/gemini_guard.py)
   GET  /api/icons/generated                     → list user's generated icons
   GET  /api/icons/generated/<filename>          → serve a generated icon
 
@@ -32,6 +33,7 @@ from flask import Blueprint, jsonify, request, send_file, Response
 from PIL import Image
 
 from services.paths import RUNTIME_DIR
+from services.gemini_guard import GeminiGenerationBlocked, check_gemini_request, gemini_api_base
 
 icons_bp = Blueprint('icons', __name__)
 
@@ -133,10 +135,14 @@ def search_global_icons(query, limit=10, min_score=0):
     scored.sort(key=lambda i: i['score'], reverse=True)
     return scored[:limit]
 
-# ── Gemini config ──
+# ── Provider config ──
+# Icon provider = FLUX.1-schnell via HF/nscale (routes/image_gen.py _generate_huggingface).
+# Gemini never generates images (operator rule 2026-11-22; services/gemini_guard.py), so
+# the Gemini helper below is kept but unreachable.
+ICON_HF_MODEL = 'black-forest-labs/FLUX.1-schnell'
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
 GEMINI_MODEL = 'gemini-2.5-flash-image'
-GEMINI_URL = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent'
+GEMINI_URL = f'{gemini_api_base()}/models/{GEMINI_MODEL}:generateContent'
 
 # Cache icon list (rebuilt on first request)
 _icon_list_cache = None
@@ -311,6 +317,83 @@ class IconGenerationError(Exception):
 ICON_REUSE_MIN_SCORE = 78
 
 
+def _icon_provider():
+    """Always 'hf'. There is deliberately no setting that selects Gemini."""
+    return 'hf'
+
+
+def _generate_icon_hf(full_prompt):
+    """FLUX.1-schnell via HF/nscale. Returns (image_bytes, mime). The shared
+    generator asserts the bytes are a real image before returning."""
+    from routes import image_gen as _ig   # lazy: avoid an import cycle at blueprint load
+    if not _ig.HF_TOKEN:
+        raise IconGenerationError('HF_TOKEN not configured', status=500)
+    try:
+        imgs, _ = _ig._generate_huggingface(ICON_HF_MODEL, full_prompt, 'standard', '1:1')
+    except requests.RequestException as e:
+        raise IconGenerationError(f'HF image API error: {str(e)}', status=502)
+    except ValueError as e:   # non-image body (see image_gen._assert_image_bytes)
+        raise IconGenerationError(str(e), status=502)
+    if not imgs:
+        raise IconGenerationError('HF did not return an image', status=502)
+    from services.metered_spend import log_spend
+    log_spend('icons/generate', 'hf:' + ICON_HF_MODEL, cost_key='hf-inference')
+    return base64.b64decode(imgs[0]['data']), imgs[0].get('mime_type', 'image/png')
+
+
+def _generate_icon_gemini(full_prompt):
+    """Old Gemini generateContent icon path — kept (never delete) but UNREACHABLE:
+    gemini_guard refuses the image model and the IMAGE modality before any request."""
+    payload = {
+        'contents': [{'parts': [{'text': full_prompt}]}],
+        'generationConfig': {
+            'responseModalities': ['IMAGE', 'TEXT'],
+        },
+    }
+    try:
+        check_gemini_request(GEMINI_URL, payload)
+    except GeminiGenerationBlocked as e:
+        raise IconGenerationError(str(e), status=403)
+    if not GEMINI_API_KEY:
+        raise IconGenerationError('GEMINI_API_KEY not configured', status=500)
+
+    # Call Gemini API
+    try:
+        resp = requests.post(
+            f'{GEMINI_URL}?key={GEMINI_API_KEY}',
+            json=payload,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        # Bill ONLY a successful (2xx) call. Logging before the POST counted every
+        # 429 rejection as spend (Google does not bill 429s) — inflated the tally
+        # ~35x during the auto-icon 429-storm (0 successes / 874 attempts, 2026-07-29).
+        from services.metered_spend import log_spend
+        log_spend('icons/generate', GEMINI_MODEL)
+    except requests.RequestException as e:
+        raise IconGenerationError(f'Gemini API error: {str(e)}', status=502)
+
+    # Extract image from response
+    image_data = None
+    mime_type = 'image/png'
+    try:
+        for candidate in result.get('candidates', []):
+            for part in candidate.get('content', {}).get('parts', []):
+                if 'inlineData' in part:
+                    image_data = base64.b64decode(part['inlineData']['data'])
+                    mime_type = part['inlineData'].get('mimeType', 'image/png')
+                    break
+            if image_data:
+                break
+    except (KeyError, TypeError):
+        pass
+
+    if not image_data:
+        raise IconGenerationError('Gemini did not return an image', status=502)
+    return image_data, mime_type
+
+
 def generate_icon_image(prompt, name=None, style=None, allow_reuse=True):
     """
     Core icon-generation logic — callable directly (used by the auto-gen
@@ -341,8 +424,7 @@ def generate_icon_image(prompt, name=None, style=None, allow_reuse=True):
                 'matched_prompt': m.get('prompt', ''),
             }
 
-    if not GEMINI_API_KEY:
-        raise IconGenerationError('GEMINI_API_KEY not configured', status=500)
+    provider = _icon_provider()
 
     name_slug = (name or '').strip()
     style = (style or '').strip()
@@ -372,45 +454,10 @@ def generate_icon_image(prompt, name=None, style=None, allow_reuse=True):
     if not safe_name:
         safe_name = 'icon-' + hashlib.md5(user_prompt.encode()).hexdigest()[:8]
 
-    # Call Gemini API
-    try:
-        resp = requests.post(
-            f'{GEMINI_URL}?key={GEMINI_API_KEY}',
-            json={
-                'contents': [{'parts': [{'text': full_prompt}]}],
-                'generationConfig': {
-                    'responseModalities': ['IMAGE', 'TEXT'],
-                },
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-        result = resp.json()
-        # Bill ONLY a successful (2xx) call. Logging before the POST counted every
-        # 429 rejection as spend (Google does not bill 429s) — inflated the tally
-        # ~35x during the auto-icon 429-storm (0 successes / 874 attempts, 2026-07-29).
-        from services.metered_spend import log_spend
-        log_spend('icons/generate', GEMINI_MODEL)
-    except requests.RequestException as e:
-        raise IconGenerationError(f'Gemini API error: {str(e)}', status=502)
-
-    # Extract image from response
-    image_data = None
-    mime_type = 'image/png'
-    try:
-        for candidate in result.get('candidates', []):
-            for part in candidate.get('content', {}).get('parts', []):
-                if 'inlineData' in part:
-                    image_data = base64.b64decode(part['inlineData']['data'])
-                    mime_type = part['inlineData'].get('mimeType', 'image/png')
-                    break
-            if image_data:
-                break
-    except (KeyError, TypeError):
-        pass
-
-    if not image_data:
-        raise IconGenerationError('Gemini did not return an image', status=502)
+    if provider == 'gemini':
+        image_data, mime_type = _generate_icon_gemini(full_prompt)
+    else:
+        image_data, mime_type = _generate_icon_hf(full_prompt)
 
     # Remove background → real PNG alpha transparency
     # Save original as backup first, then process
@@ -458,7 +505,7 @@ def generate_icon_image(prompt, name=None, style=None, allow_reuse=True):
 @icons_bp.route('/api/icons/generate', methods=['POST'])
 def generate_icon():
     """
-    Generate a custom icon via Gemini image generation.
+    Generate a custom icon (FLUX.1-schnell on HF by default; see _icon_provider).
 
     POST body:
       { "prompt": "description of icon",

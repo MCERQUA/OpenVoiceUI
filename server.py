@@ -39,6 +39,10 @@ from flask import Response, g, request, jsonify
 
 faulthandler.enable()  # print traceback on hard crashes (SIGSEGV etc.)
 
+# Gemini = vision/text only, never image generation (2026-11-22). Importing the guard
+# wraps requests.Session.send for the whole process; see services/gemini_guard.py.
+import services.gemini_guard  # noqa: F401,E402
+
 # Load environment variables before anything else
 env_path = Path(__file__).parent / ".env"
 load_dotenv(env_path, override=True)

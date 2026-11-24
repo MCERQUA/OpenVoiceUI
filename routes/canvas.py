@@ -443,6 +443,9 @@ def _kick_off_pending_icon_generation(manifest: dict) -> None:
     # failed pages stay pending and re-fire every sync). Mike confirmed pages show only
     # default icons. Re-enable ONLY once icon-gen is repointed off Gemini to the Mac's
     # ComfyUI (env AUTO_ICON_GEN=on). Root fix = the Mac creative node, not this path.
+    # 2026-11-22: routes/icons.py now generates on HF FLUX.1-schnell; Gemini never
+    # generates images (services/gemini_guard.py). This gate is unchanged: turning
+    # auto-gen on is a separate spend decision (one metered HF call per pending page).
     import os
     if os.getenv('AUTO_ICON_GEN', '').strip().lower() not in ('1', 'true', 'yes', 'on'):
         return
