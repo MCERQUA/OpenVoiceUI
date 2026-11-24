@@ -2254,6 +2254,24 @@ def _conversation_inner():
     except Exception:
         pass  # Profile system not available — skip gracefully
 
+    # Unprompted-speech switch (2026-11-24, josh: "Don't talk to me on the Mac mini").
+    # A profile with conversation.speak_unprompted = false gets its session-start
+    # greeting, and any turn the browser marks unprompted (an untagged canvas
+    # auto-speak), as TEXT ONLY: no TTS is generated and the stream ends with
+    # no_audio so the browser re-opens the mic exactly as for a silent reply.
+    # Replies to what the user says are untouched. Default (unset/true) unchanged.
+    _quiet_turn = False
+    if user_message == '__session_start__' or data.get('unprompted') is True:
+        try:
+            from routes.profiles import speaks_unprompted as _speaks_unprompted
+            if not _speaks_unprompted():
+                _quiet_turn = True
+                skip_tts = True
+                logger.info('### UNPROMPTED TURN shown as text only '
+                            '(profile conversation.speak_unprompted=false)')
+        except Exception:
+            pass
+
     # Greetings are short by design ("Hey, what's up?") — with the 40-char
     # minimum they never hit a mid-stream sentence boundary, so greeting TTS
     # only fired at text_done (issue #81: 5-38s first-audio latency on
@@ -3833,6 +3851,10 @@ def _conversation_inner():
                                 if tts_text and tts_text.strip():
                                     _tts_pending.append(_fire_tts(tts_text))
 
+                            if _quiet_turn:
+                                # skip_tts placeholders carry no audio; drop them so the
+                                # no_audio below re-opens the mic (speak_unprompted=false).
+                                _tts_pending.clear()
                             if not _tts_pending:
                                 logger.info('Skipping TTS — no speakable text')
                                 # Tell the frontend there's no audio coming so it can
@@ -4116,7 +4138,7 @@ def _conversation_inner():
     # Generate TTS audio
     t_tts_start = time.time()
     audio_base64 = None
-    if tts_text and tts_text.strip():
+    if tts_text and tts_text.strip() and not _quiet_turn:
         audio_base64 = _tts_generate_b64(tts_text, voice=voice or 'M1',
                                           tts_provider=tts_provider)
         if audio_base64 is None:

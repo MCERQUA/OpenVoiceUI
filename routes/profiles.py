@@ -52,6 +52,21 @@ def _save_active_profile_id(profile_id: str) -> None:
 _active_profile_id = _load_active_profile_id()
 
 
+def speaks_unprompted() -> bool:
+    """False only when the ACTIVE profile sets conversation.speak_unprompted to false.
+
+    Read on every call (a profile PUT or switch takes effect at once). Any failure
+    means True, the platform default: speech is only ever withheld on an explicit opt-out.
+    """
+    try:
+        prof = get_profile_manager().get_profile(_active_profile_id)
+        conv = getattr(prof, "conversation", None)
+        return getattr(conv, "speak_unprompted", None) is not False
+    except Exception as exc:
+        logger.warning("speaks_unprompted: active profile unreadable (%s) - speaking", exc)
+        return True
+
+
 # ---------------------------------------------------------------------------
 # GET /api/profiles
 # ---------------------------------------------------------------------------

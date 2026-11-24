@@ -532,6 +532,14 @@
           ],
           "default": null,
           "description": "Keep the mic open while the agent is thinking: words spoken during an in-flight reply are held and sent as the next turn the moment that reply finishes (nothing is sent mid-turn). null/false = platform default (speech during thinking is dropped). Built for slow-thinking gateways such as comms-brain."
+        },
+        "speak_unprompted": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null,
+          "description": "false = the agent never speaks unprompted: the session-start greeting, background pushes (sub-agent completions) and untagged canvas auto-speaks appear as text only, with no TTS. Replies to what the user says or asks still speak. null/true = speak (platform default). Read on every turn; a profile update takes effect at once."
         }
       }
     },

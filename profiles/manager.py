@@ -122,6 +122,10 @@ class ConversationConfig:
     # Hold speech heard while a reply is in flight and send it when the reply ends
     # (default: dropped — the STT is deaf from submit until the reply's TTS ends).
     hold_speech_while_thinking: Optional[bool] = None
+    # False = the agent never speaks UNPROMPTED: the session-start greeting, background
+    # pushes (sub-agent completions) and untagged canvas auto-speaks are shown as text
+    # with no TTS. Replies to what the user says/asks still speak. null/true = speak.
+    speak_unprompted: Optional[bool] = None
 
 
 @dataclass
