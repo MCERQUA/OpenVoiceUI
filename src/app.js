@@ -218,6 +218,32 @@ connectAiradio();
             return url;
         }
 
+        // ===== [CANVAS_URL:...] TAG =====
+        // Loads an external URL (e.g. a YouTube embed) in the canvas iframe. The ONE handler
+        // for every path that carries agent text: the streamed reply, the non-streamed
+        // voice/greeting reply (_processCommandTags) and the proactive push
+        // (_handleProactiveMessage: an agent the owner texted while the app was open).
+        // resolveCanvasUrl() keeps blocking private/internal URLs and rewriting dev domains
+        // to the same-origin proxy. Returns true when the text held a complete tag (so a
+        // streaming caller can mark it processed), false otherwise.
+        function openCanvasUrlTag(text, { chip = false } = {}) {
+            const canvasUrlMatch = String(text || '').match(/\[CANVAS_URL:([^\]]+)\]/i);
+            if (!canvasUrlMatch) return false;
+            const externalUrl = canvasUrlMatch[1].trim();
+            const resolvedUrl = resolveCanvasUrl(externalUrl);
+            if (resolvedUrl) {
+                console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
+                ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
+                if (chip) AgentActivityChip.handleTag('canvas_url', resolvedUrl);
+                const iframe = document.getElementById('canvas-iframe');
+                if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
+            } else {
+                console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
+                ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
+            }
+            return true;
+        }
+
         // Route abort/interject calls to the active gateway's namespace.
         // When gateway_id=hermes, we MUST call /api/hermes/* because hermes
         // has its own mid-flight pipeline (separate active_runs dict,
@@ -4399,6 +4425,10 @@ connectAiradio();
                     AgentActivityChip.handleTag('canvas_menu');
                     CanvasControl.showMenu?.() || document.getElementById('canvas-menu-button')?.click();
                 }
+                // [CANVAS_URL:...] (e.g. a YouTube embed after the owner texted the agent):
+                // the same handler as the reply path. Opens whether or not the push carries
+                // audio (a profile with speak_unprompted=false gets text only).
+                openCanvasUrlTag(rawText, { chip: true });
 
                 // Dispatch canvas-action tags, then strip ALL tags for display
                 window.__canvasAction?.dispatchFrom(rawText);
@@ -4903,21 +4933,9 @@ connectAiradio();
                             _tag('sound', () => DJSoundboard.play(soundName));
                         }
                         // Check for [CANVAS_URL:https://example.com] — load external URL in iframe
-                        const canvasUrlMatch = text.match(/\[CANVAS_URL:([^\]]+)\]/i);
-                        if (canvasUrlMatch && !canvasCommandsProcessed.has('CANVAS_URL')) {
+                        // (only once the tag is complete in the streamed text)
+                        if (!canvasCommandsProcessed.has('CANVAS_URL') && openCanvasUrlTag(text, { chip: true })) {
                             canvasCommandsProcessed.add('CANVAS_URL');
-                            const externalUrl = canvasUrlMatch[1].trim();
-                            const resolvedUrl = resolveCanvasUrl(externalUrl);
-                            if (resolvedUrl) {
-                                console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
-                                ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
-                                AgentActivityChip.handleTag('canvas_url', resolvedUrl);
-                                const iframe = document.getElementById('canvas-iframe');
-                                if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
-                            } else {
-                                console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
-                                ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
-                            }
                         }
                         // Check for [BROWSE:url] — start a server-side co-browsing
                         // session (agent browses on the VPS, user watches live) and
@@ -6650,20 +6668,7 @@ connectAiradio();
                     CanvasControl.showPage?.(pageName);
                 }
                 // [CANVAS_URL:https://example.com]
-                const canvasUrlMatch = text.match(/\[CANVAS_URL:([^\]]+)\]/i);
-                if (canvasUrlMatch) {
-                    const externalUrl = canvasUrlMatch[1].trim();
-                    const resolvedUrl = resolveCanvasUrl(externalUrl);
-                    if (resolvedUrl) {
-                        console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
-                        ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
-                        const iframe = document.getElementById('canvas-iframe');
-                        if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
-                    } else {
-                        console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
-                        ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
-                    }
-                }
+                openCanvasUrlTag(text);
                 // [MUSIC_PLAY] or [MUSIC_PLAY:track]
                 const musicPlay = text.match(/\[MUSIC_PLAY(?::([^\]]+))?\]/i);
                 if (musicPlay) {
@@ -8271,6 +8276,16 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 }
             },
 
+            _directPageFilename(pageName) {
+                // Filename for a direct load when the manifest has no match. A page ID
+                // (one token, e.g. yt-EFdA5duvOas) keeps its case: the file on disk is
+                // named that way and the server is case-sensitive. Only a spoken phrase
+                // with spaces ("Marketing Plan") is slugged to lowercase.
+                const name = String(pageName).trim();
+                const stem = name.replace(/\s+/g, '-');
+                return (/\s/.test(name) ? stem.toLowerCase() : stem) + '.html';
+            },
+
             showPageByName(pageName) {
                 // Fuzzy-find page by name — for voice commands and agent
                 // [CANVAS:pagename] tags where the exact id isn't known.
@@ -8278,7 +8293,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 const menu = window.CanvasMenu;
                 if (!menu?.manifest) {
                     // Manifest not loaded yet — try direct filename
-                    const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
+                    const filename = this._directPageFilename(pageName);
                     console.log('[Canvas] showPageByName direct:', filename);
                     if (this.iframe) {
                         this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
@@ -8294,7 +8309,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     menu.showPage(match.page.filename);
                 } else {
                     // Fallback: try as-is with .html
-                    const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
+                    const filename = this._directPageFilename(pageName);
                     console.log('[Canvas] showPageByName fallback:', filename);
                     if (this.iframe) {
                         this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
@@ -8992,7 +9007,8 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 /** Find a page by name or voice alias (fuzzy match) */
                 if (!query || !this.manifest?.pages) return null;
 
-                const q = query.toLowerCase().trim();
+                const raw = query.trim();
+                const q = raw.toLowerCase();
                 // Structured id => exact-match only. Spoken phrase => fuzzy. (2026-08-23)
                 // Any hyphen/underscore-segmented single token is a PAGE ID, not speech:
                 // agents emit [CANVAS:job-2026-0001] / [CANVAS:marketing-plan]; people say
@@ -9009,9 +9025,22 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     return isSep(i === 0 ? '' : hay[i - 1]) && isSep(hay[i + needle.length] || '');
                 };
 
-                // Exact page ID match (highest priority — agent sends [CANVAS:page-id])
-                if (this.manifest.pages[q]) {
-                    return { page: this.manifest.pages[q], pageId: q, score: 100 };
+                // Exact page ID match (highest priority — agent sends [CANVAS:page-id]).
+                // Page ids keep their case (yt-EFdA5duvOas: a YouTube id). Lowercasing the
+                // query missed every mixed-case id and the fallback loaded a lowercased
+                // filename that 404s (2026-11-24). Try the id as sent, then a case-insensitive
+                // match only when it is UNIQUE; two ids differing only by case are ambiguous,
+                // so no match (never a guess).
+                if (this.manifest.pages[raw]) {
+                    return { page: this.manifest.pages[raw], pageId: raw, score: 100 };
+                }
+                const _ciIds = Object.keys(this.manifest.pages).filter((k) => k.toLowerCase() === q);
+                if (_ciIds.length === 1) {
+                    return { page: this.manifest.pages[_ciIds[0]], pageId: _ciIds[0], score: 100 };
+                }
+                if (_ciIds.length > 1) {
+                    console.warn('[Canvas] ambiguous page id (differs only by case):', raw, _ciIds);
+                    return null;
                 }
 
                 let bestMatch = null;
