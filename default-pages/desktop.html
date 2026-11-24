@@ -2237,6 +2237,21 @@ function moveFolder(fid, newParent) {
       return false;
     }
     if (folderParent(fid) === newParent) return true;
+    // Damaged saved state can hold a parent loop that folderParent() hides (every folder in
+    // the loop shows top-level). If newParent's stored chain leads back to fid, clear the
+    // stored parents along that path so the result matches what was on screen and the move sticks.
+    {
+      const path = [];
+      const seen = new Set();
+      let cur = newParent;
+      while (cur && customFolders[cur] && !seen.has(cur)) {
+        seen.add(cur);
+        path.push(cur);
+        const p = customFolders[cur].parent;
+        if (p === fid) { path.forEach(id => { delete customFolders[id].parent; }); break; }
+        cur = p;
+      }
+    }
     f.parent = newParent;
     delete iconPositions[fid];
     delete iconPositionsTablet[fid];
@@ -2680,15 +2695,20 @@ function openCustomFolder(folderId) {
   const folder = customFolders[folderId];
   if (!folder) return;
   const content = `<div class="cf-view" data-folder-view="${_escHtml(folderId)}" style="display:flex;flex-direction:column;flex:1;min-height:0;height:100%">${renderFolderView(folderId)}</div>`;
-  createWindow({
-    title: folderWindowTitle(folderId),
+  const rawTitle = folderWindowTitle(folderId);
+  const winId = createWindow({
+    title: _escHtml(rawTitle),   // createWindow puts the title into innerHTML
     content, width: 600, height: 400,
   });
+  // The taskbar renders win.title with textContent, so it must hold the raw name
+  const rec = windows.get(winId);
+  if (rec) { rec.title = rawTitle; updateTaskbar(); }
 }
 
 function folderWindowTitle(folderId) {
   const explorerTitle = currentTheme === 'mac' ? 'Finder' : (currentTheme === 'ubuntu' ? 'Files' : 'Explorer');
-  return explorerTitle + ' – ' + _escHtml(customFolders[folderId] ? customFolders[folderId].name : '');
+  // Raw text: callers escape it for innerHTML or set it via textContent
+  return explorerTitle + ' – ' + (customFolders[folderId] ? customFolders[folderId].name : '');
 }
 
 function renderFolderView(folderId) {
@@ -2723,7 +2743,7 @@ function refreshFolderWindows(onlyFid) {
     if (w) {
       const t = w.querySelector('.titlebar-title');
       const title = folderWindowTitle(fid);
-      if (t) t.innerHTML = title;
+      if (t) t.textContent = title;
       const rec = windows.get(parseInt(w.dataset.winId));
       if (rec) rec.title = title;
     }
@@ -2875,8 +2895,9 @@ function showFolderItemMenu(e, pageId, folderId) {
 // Long-press (touch) opens the same context menu as right-click on folder-window items
 // and empty folder space — iOS Safari never fires `contextmenu` on long-press.
 (function bindFolderLongPress() {
-  let lpTimer = null, lpX = 0, lpY = 0;
+  let lpTimer = null, lpX = 0, lpY = 0, lpFired = false;
   document.addEventListener('touchstart', (ev) => {
+    lpFired = false;
     const area = ev.target.closest && ev.target.closest('.cf-grid');
     if (!area || ev.touches.length !== 1) return;
     lpX = ev.touches[0].clientX; lpY = ev.touches[0].clientY;
@@ -2884,6 +2905,7 @@ function showFolderItemMenu(e, pageId, folderId) {
     const target = ev.target;
     lpTimer = setTimeout(() => {
       lpTimer = null;
+      lpFired = true;
       _cfLongPressAt = Date.now();
       target.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: lpX, clientY: lpY}));
     }, 550);
@@ -2897,7 +2919,10 @@ function showFolderItemMenu(e, pageId, folderId) {
     clearTimeout(lpTimer); lpTimer = null;
   };
   document.addEventListener('touchmove', cancel, {passive: true});
-  document.addEventListener('touchend', cancel, {passive: true});
+  document.addEventListener('touchend', (ev) => {
+    if (lpFired) { lpFired = false; if (ev.cancelable) ev.preventDefault(); return; }
+    cancel(ev);
+  }, {passive: false});
   document.addEventListener('touchcancel', cancel, {passive: true});
   // Browsers that DO fire a native contextmenu on long-press (Android) win; skip ours
   document.addEventListener('contextmenu', (ev) => {
