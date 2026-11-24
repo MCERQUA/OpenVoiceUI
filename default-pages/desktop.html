@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- openvoiceui-version: 2026.8.9 -->
+<!-- openvoiceui-version: 2026.11.24 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -241,6 +241,17 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important;b
   padding:2px 6px;background:transparent;
 }
 .explorer-toolbar button:hover{background:rgba(0,0,0,0.08)}
+.explorer-toolbar button:disabled{opacity:0.4;cursor:default}
+.cf-empty{padding:30px;text-align:center;color:#888}
+.cf-empty .cf-empty-icon{width:40px;height:40px;margin:0 auto 10px}
+.cf-empty .cf-empty-icon svg{width:100%;height:100%}
+.cf-empty button{padding:4px 12px;cursor:pointer;margin:0 3px}
+/* Touch screens: 44px targets for folder-window buttons and menu rows (nested folders, 2026-11-24) */
+@media (pointer:coarse){
+  .explorer-toolbar button{min-height:44px!important;min-width:44px;padding:0 12px!important}
+  .cf-empty button{min-height:44px;padding:0 16px}
+  #context-menu .ctx-item{padding-top:12px!important;padding-bottom:12px!important}
+}
 
 /* ── Recycle Bin Content ── */
 .recycle-empty{text-align:center;padding:40px;color:#888;font-size:14px}
@@ -917,7 +928,10 @@ let selectedIcons = new Set();
 let startMenuOpen = false;
 let contextMenuOpen = false;
 let _saveTimer = null;
-let customFolders = {};    // { 'custom-xyz': { name:'Folder', pages:['p1','p2'] } }
+let customFolders = {};    // { 'custom-xyz': { name:'Folder', pages:['p1','p2'], parent?:'custom-abc' } }
+                           // `parent` (optional, 2026-11-24) nests a folder inside another custom folder.
+                           // Absent / unknown / cyclic parent = top-level desktop folder, so older
+                           // saved desktops load unchanged with no migration.
 let desktopPages = [];     // page IDs shown as loose desktop icons
 let knownPages = [];       // all page IDs we've ever seen
 let _manifestTimer = null;
@@ -1232,6 +1246,7 @@ function rebuildDesktopItems() {
   // Custom folders — skip recycled
   Object.keys(customFolders).forEach(fid => {
     if (recycleBin.includes(fid)) return;
+    if (folderParent(fid)) return; // nested folder — lives inside its parent's window, not on the desktop
     if (DESKTOP_ITEMS.find(i => i.id === fid)) return;
     DESKTOP_ITEMS.push({
       id: fid,
@@ -1494,6 +1509,8 @@ function findDropTarget(draggedEl, draggedItem) {
     if (!targetItem) continue;
     // Folders, custom folders, system folders (My Documents, Game Library), and recycle bin are valid drop targets
     if (targetItem.action !== 'folder' && targetItem.action !== 'customFolder' && targetItem.action !== 'recycle' && targetItem.action !== 'docsfolder' && targetItem.action !== 'gamefolder') continue;
+    // A custom folder can only be dropped into another custom folder (or the recycle bin)
+    if (draggedItem.action === 'customFolder' && targetItem.action !== 'customFolder' && targetItem.action !== 'recycle') continue;
     // Don't allow dropping the recycle bin into itself
     if (targetItem.action === 'recycle' && draggedItem.action === 'recycle') continue;
     const r = icon.getBoundingClientRect();
@@ -1505,6 +1522,12 @@ function findDropTarget(draggedEl, draggedItem) {
 }
 
 function dropIntoFolder(draggedItem, targetId) {
+  // Folder dragged onto another custom folder — nest it (moveFolder refuses cycles)
+  if (draggedItem.action === 'customFolder' && draggedItem.folderId) {
+    const t = DESKTOP_ITEMS.find(i => i.id === targetId);
+    if (t && t.action === 'customFolder' && t.folderId) moveFolder(draggedItem.folderId, t.folderId);
+    return;
+  }
   // Determine what page/item is being dragged
   let pageId = null;
   if (draggedItem.action === 'openPage' && draggedItem.pageId) {
@@ -1982,23 +2005,29 @@ function getIconContextItems(item) {
 
   // ── Custom folder icons ──
   if (item.action === 'customFolder') {
-    const doDeleteFolder = () => showConfirmModal('Delete folder "'+item.name+'"?', (ok)=>{ if(ok){delete customFolders[item.folderId];saveState();rebuildDesktopItems();buildDesktopIcons();} });
+    const doDeleteFolder = () => deleteCustomFolder(item.folderId);
+    const folderMoveSub = buildFolderMoveSubmenu(item.folderId);
+    const moveEntry = folderMoveSub.length ? [{label:'Move to\u2026', sub: folderMoveSub}] : [];
     if (isMac || isUbuntu) {
       return [
         {label:'Open', action:()=>onIconDblClick(item)},
+        {label:'New Folder Inside\u2026', action:()=>createNewFolder(item.folderId)},
         {label:'Add Pages\u2026', action:()=>addPagesToFolder(item.folderId)},
         '---',
         {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
         '---',
         {label:'Rename', action:()=>renameCustomFolder(item)},
+        ...moveEntry,
         {label:isMac?'Move to Trash':'Move to Trash', action:doDeleteFolder},
       ];
     }
     return [
       {label:'Open', action:()=>onIconDblClick(item)},
+      {label:'New Folder Inside\u2026', action:()=>createNewFolder(item.folderId)},
       {label:'Add Pages\u2026', action:()=>addPagesToFolder(item.folderId)},
       '---',
       {label:'Rename', action:()=>renameCustomFolder(item)},
+      ...moveEntry,
       {label:'Delete', action:doDeleteFolder},
       '---',
       {label:'Properties', action:()=>showProperties(item)},
@@ -2055,9 +2084,9 @@ function buildMoveToSubmenu(item) {
   });
   if (Object.keys(customFolders).length > 0) {
     subs.push('---');
-    Object.keys(customFolders).forEach(fid => {
+    sortedFolderIds().forEach(fid => {
       subs.push({
-        label: customFolders[fid].name,
+        label: folderPath(fid),
         action: () => {
           if (item.pageId && !customFolders[fid].pages.includes(item.pageId)) {
             customFolders[fid].pages.push(item.pageId);
@@ -2082,6 +2111,7 @@ function renameCustomFolder(item) {
     saveState();
     rebuildDesktopItems();
     buildDesktopIcons();
+    refreshFolderWindows();
   });
 }
 
@@ -2116,16 +2146,188 @@ function sortIcons(by) {
   buildDesktopIcons();
 }
 
-function createNewFolder() {
+// parentId (optional): create the new folder INSIDE that custom folder.
+function createNewFolder(parentId) {
+  if (parentId && !customFolders[parentId]) parentId = null;
   showPromptModal('New folder name:', 'New Folder', (name) => {
     if (!name || !name.trim()) return;
     const id = 'custom-' + Date.now() + '-' + name.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-');
     customFolders[id] = { name: name.trim(), pages: [] };
+    if (parentId && customFolders[parentId]) customFolders[id].parent = parentId;
     saveState();
     rebuildDesktopItems();
     buildDesktopIcons();
-    // Open the folder immediately so user can add pages
-    openCustomFolder(id);
+    if (parentId) {
+      // Show it in the parent's open window(s); open the parent if none is showing it
+      if (!refreshFolderWindows(parentId)) openCustomFolder(parentId);
+    } else {
+      // Open the folder immediately so user can add pages
+      openCustomFolder(id);
+    }
+  });
+}
+
+/* ── Nested custom folders (2026-11-24) ──────────────────────────────
+   A custom folder may carry `parent: <custom folder id>`. These helpers
+   treat a missing, unknown or cyclic parent as "top level", so a damaged
+   or older state still renders every folder somewhere and loses nothing. */
+function _escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// A JS string literal that is safe inside a double-quoted HTML attribute (onclick="fn(${_jsArg(x)})")
+function _jsArg(s) { return _escHtml(JSON.stringify(String(s))); }
+
+function folderParent(fid) {
+  const f = customFolders[fid];
+  if (!f || !f.parent || f.parent === fid || !customFolders[f.parent]) return null;
+  // Walk up; if the chain loops back on itself, treat this folder as top-level
+  const seen = new Set([fid]);
+  let cur = f.parent;
+  while (cur) {
+    if (seen.has(cur)) return null;
+    seen.add(cur);
+    const c = customFolders[cur];
+    cur = (c && c.parent && customFolders[c.parent]) ? c.parent : null;
+  }
+  return f.parent;
+}
+function folderChildren(fid) {
+  return Object.keys(customFolders)
+    .filter(id => folderParent(id) === fid && !recycleBin.includes(id))
+    .sort((a, b) => customFolders[a].name.localeCompare(customFolders[b].name));
+}
+// True when `candidate` is `ancestor` itself or sits anywhere inside it
+function isFolderInside(candidate, ancestor) {
+  const seen = new Set();
+  let cur = candidate;
+  while (cur) {
+    if (cur === ancestor) return true;
+    if (seen.has(cur)) return false;
+    seen.add(cur);
+    cur = folderParent(cur);
+  }
+  return false;
+}
+function folderPath(fid) {
+  const parts = [];
+  let cur = fid;
+  const seen = new Set();
+  while (cur && customFolders[cur] && !seen.has(cur)) {
+    seen.add(cur);
+    parts.unshift(customFolders[cur].name);
+    cur = folderParent(cur);
+  }
+  return parts.join(' / ');
+}
+function sortedFolderIds() {
+  return Object.keys(customFolders)
+    .filter(id => !recycleBin.includes(id))
+    .sort((a, b) => folderPath(a).localeCompare(folderPath(b)));
+}
+
+// Move folder `fid` into `newParent` (a custom folder id), or onto the desktop when newParent is null.
+// Refuses (returns false, state untouched) when newParent is fid itself or one of its descendants.
+function moveFolder(fid, newParent) {
+  const f = customFolders[fid];
+  if (!f) return false;
+  if (newParent) {
+    if (!customFolders[newParent]) return false;
+    if (isFolderInside(newParent, fid)) {
+      showConfirmModal('"' + f.name + '" cannot be moved into itself or into a folder inside it.', () => {});
+      return false;
+    }
+    if (folderParent(fid) === newParent) return true;
+    // Damaged saved state can hold a parent loop that folderParent() hides (every folder in
+    // the loop shows top-level). If newParent's stored chain leads back to fid, clear the
+    // stored parents along that path so the result matches what was on screen and the move sticks.
+    {
+      const path = [];
+      const seen = new Set();
+      let cur = newParent;
+      while (cur && customFolders[cur] && !seen.has(cur)) {
+        seen.add(cur);
+        path.push(cur);
+        const p = customFolders[cur].parent;
+        if (p === fid) { path.forEach(id => { delete customFolders[id].parent; }); break; }
+        cur = p;
+      }
+    }
+    f.parent = newParent;
+    delete iconPositions[fid];
+    delete iconPositionsTablet[fid];
+    delete iconPositionsPhone[fid];
+  } else {
+    if (!folderParent(fid)) return true;
+    delete f.parent;
+  }
+  saveState();
+  rebuildDesktopItems();
+  buildDesktopIcons();
+  refreshFolderWindows();
+  return true;
+}
+
+// Move targets for folder `fid`: the desktop (when nested) plus every folder that is
+// not fid, not one of its descendants, and not its current parent.
+function buildFolderMoveSubmenu(fid) {
+  const subs = [];
+  const cur = folderParent(fid);
+  if (cur) subs.push({label: 'Desktop', action: () => moveFolder(fid, null)});
+  const targets = sortedFolderIds().filter(id => id !== cur && !isFolderInside(id, fid));
+  if (targets.length && subs.length) subs.push('---');
+  targets.forEach(id => subs.push({label: folderPath(id), action: () => moveFolder(fid, id)}));
+  return subs;
+}
+
+// Move a page out of custom folder `fromFid` to another folder, or back to the desktop (toFid null)
+function movePageBetweenFolders(pageId, fromFid, toFid) {
+  if (fromFid && customFolders[fromFid]) {
+    customFolders[fromFid].pages = customFolders[fromFid].pages.filter(id => id !== pageId);
+  }
+  if (toFid && customFolders[toFid]) {
+    if (!customFolders[toFid].pages.includes(pageId)) customFolders[toFid].pages.push(pageId);
+    desktopPages = desktopPages.filter(id => id !== pageId);
+  } else if (!desktopPages.includes(pageId)) {
+    desktopPages.push(pageId);
+  }
+  saveState();
+  rebuildDesktopItems();
+  buildDesktopIcons();
+  refreshFolderWindows();
+}
+function buildPageMoveSubmenu(pageId, fromFid) {
+  const subs = [{label: 'Desktop', action: () => movePageBetweenFolders(pageId, fromFid, null)}];
+  const targets = sortedFolderIds().filter(id => id !== fromFid);
+  if (targets.length) subs.push('---');
+  targets.forEach(id => subs.push({label: folderPath(id), action: () => movePageBetweenFolders(pageId, fromFid, id)}));
+  return subs;
+}
+
+// Delete a custom folder (with the existing confirm). Folders inside it move up one
+// level instead of disappearing, so deleting a parent never strands its children.
+function deleteCustomFolder(fid) {
+  const f = customFolders[fid];
+  if (!f) return;
+  const kids = folderChildren(fid);
+  const msg = 'Delete folder "' + f.name + '"?' +
+    (kids.length ? ' The ' + kids.length + ' folder' + (kids.length === 1 ? '' : 's') + ' inside it will move up one level.' : '');
+  showConfirmModal(msg, (ok) => {
+    if (!ok || !customFolders[fid]) return;
+    const up = folderParent(fid);
+    kids.forEach(k => { if (up) customFolders[k].parent = up; else delete customFolders[k].parent; });
+    // Windows showing the deleted folder step up to its parent (or close)
+    document.querySelectorAll('.cf-view').forEach(v => {
+      if (v.dataset.folderView === fid) {
+        if (up) v.dataset.folderView = up;
+        else { const w = v.closest('.window'); if (w) closeWindow(parseInt(w.dataset.winId)); }
+      }
+    });
+    delete customFolders[fid];
+    delete iconPositions[fid];
+    saveState();
+    rebuildDesktopItems();
+    buildDesktopIcons();
+    refreshFolderWindows();
   });
 }
 
@@ -2214,7 +2416,9 @@ function showProperties(item) {
   }
   else if (item.action === 'customFolder' && item.folderId) {
     const cf = customFolders[item.folderId];
-    type = 'Custom Folder (' + (cf ? cf.pages.length : 0) + ' items)';
+    const nKids = cf ? folderChildren(item.folderId).length : 0;
+    type = 'Custom Folder (' + (cf ? cf.pages.length + nKids : 0) + ' items)';
+    if (cf && folderParent(item.folderId)) type += ' in ' + _escHtml(folderPath(folderParent(item.folderId)));
   }
   else if (item.action === 'settings') type = 'Application';
   else type = 'System Item';
@@ -2484,51 +2688,181 @@ function openExplorer(activeCat) {
   });
 }
 
+// Custom folder window. The window body holds one .cf-view whose data-folder-view
+// names the folder on show; opening a subfolder navigates the same window (Up goes back),
+// which keeps phones from stacking windows.
 function openCustomFolder(folderId) {
   const folder = customFolders[folderId];
   if (!folder) return;
-  const explorerTitle = currentTheme === 'mac' ? 'Finder' : (currentTheme === 'ubuntu' ? 'Files' : 'Explorer');
-  const gridHtml = buildCustomFolderGrid(folderId);
-  const content = `
-    <div class="explorer-toolbar">
-      <button onclick="addPagesToFolder('${folderId}')">Add Pages\u2026</button>
-    </div>
-    <div class="explorer-addr"><span>Folder:</span> ${folder.name}</div>
-    <div style="display:flex;flex:1;overflow:hidden">
-      <div class="explorer-content" id="explorer-grid-area">${gridHtml}</div>
-    </div>
-  `;
-  createWindow({
-    title: explorerTitle + ' \u2013 ' + folder.name,
+  const content = `<div class="cf-view" data-folder-view="${_escHtml(folderId)}" style="display:flex;flex-direction:column;flex:1;min-height:0;height:100%">${renderFolderView(folderId)}</div>`;
+  const rawTitle = folderWindowTitle(folderId);
+  const winId = createWindow({
+    title: _escHtml(rawTitle),   // createWindow puts the title into innerHTML
     content, width: 600, height: 400,
   });
+  // The taskbar renders win.title with textContent, so it must hold the raw name
+  const rec = windows.get(winId);
+  if (rec) { rec.title = rawTitle; updateTaskbar(); }
+}
+
+function folderWindowTitle(folderId) {
+  const explorerTitle = currentTheme === 'mac' ? 'Finder' : (currentTheme === 'ubuntu' ? 'Files' : 'Explorer');
+  // Raw text: callers escape it for innerHTML or set it via textContent
+  return explorerTitle + ' – ' + (customFolders[folderId] ? customFolders[folderId].name : '');
+}
+
+function renderFolderView(folderId) {
+  const parent = folderParent(folderId);
+  const fa = _jsArg(folderId);
+  return `
+    <div class="explorer-toolbar">
+      <button onclick="folderViewUp(this)"${parent ? '' : ' disabled'} title="Up one level">Up</button>
+      <button onclick="createNewFolder(${fa})">New Folder</button>
+      <button onclick="addPagesToFolder(${fa})">Add Pages…</button>
+    </div>
+    <div class="explorer-addr"><span>Folder:</span> ${_escHtml(folderPath(folderId))}</div>
+    <div style="display:flex;flex:1;overflow:hidden">
+      <div class="explorer-content cf-grid" id="explorer-grid-area" oncontextmenu="showFolderBackgroundMenu(event,${fa})">${buildCustomFolderGrid(folderId)}</div>
+    </div>`;
+}
+
+// Re-render every open folder window (or only those showing `onlyFid`).
+// Returns true when at least one window showing `onlyFid` was refreshed.
+function refreshFolderWindows(onlyFid) {
+  let hit = false;
+  document.querySelectorAll('.cf-view').forEach(v => {
+    const fid = v.dataset.folderView;
+    const w = v.closest('.window');
+    if (!customFolders[fid] || recycleBin.includes(fid)) {
+      if (w) closeWindow(parseInt(w.dataset.winId));
+      return;
+    }
+    if (onlyFid && fid !== onlyFid) return;
+    if (fid === onlyFid) hit = true;
+    v.innerHTML = renderFolderView(fid);
+    if (w) {
+      const t = w.querySelector('.titlebar-title');
+      const title = folderWindowTitle(fid);
+      if (t) t.textContent = title;
+      const rec = windows.get(parseInt(w.dataset.winId));
+      if (rec) rec.title = title;
+    }
+  });
+  updateTaskbar();
+  return hit;
+}
+
+function navigateFolderView(viewEl, folderId) {
+  if (!viewEl || !customFolders[folderId]) return;
+  viewEl.dataset.folderView = folderId;
+  refreshFolderWindows(folderId);
+}
+function folderViewUp(btn) {
+  const v = btn.closest('.cf-view');
+  if (!v) return;
+  const p = folderParent(v.dataset.folderView);
+  if (p) navigateFolderView(v, p);
+}
+// Open a subfolder from its icon inside a folder window: same window
+function openSubfolderFromItem(el, folderId) {
+  const v = el && el.closest('.cf-view');
+  if (v) navigateFolderView(v, folderId); else openCustomFolder(folderId);
+}
+// Touch screens get single-tap open (there is no reliable double-tap there)
+let _cfLongPressAt = 0; // set when a long-press opened a menu, so the tap that ends it does not also open the item
+function _cfTap(ev, fn) {
+  if (Date.now() - _cfLongPressAt < 800) return;
+  if (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) { ev.stopPropagation(); fn(); }
 }
 
 function buildCustomFolderGrid(folderId) {
   const folder = customFolders[folderId];
   if (!folder) return '';
+  const fa = _jsArg(folderId);
+  const subs = folderChildren(folderId);
   const pages = (folder.pages || []).filter(id => PAGES[id] && !recycleBin.includes(id));
-  if (pages.length === 0) {
-    return `<div style="padding:30px;text-align:center;color:#888">
-      <div style="font-size:32px;margin-bottom:10px">📁</div>
+  if (pages.length === 0 && subs.length === 0) {
+    return `<div class="cf-empty">
+      <div class="cf-empty-icon">${getIcon('folder')}</div>
       <div>Folder is empty</div>
-      <div style="margin-top:8px"><button onclick="addPagesToFolder('${folderId}')" style="padding:4px 12px;cursor:pointer">Add Pages\u2026</button></div>
+      <div style="margin-top:10px">
+        <button onclick="createNewFolder(${fa})">New Folder</button>
+        <button onclick="addPagesToFolder(${fa})">Add Pages…</button>
+      </div>
     </div>`;
   }
   let html = '<div class="explorer-grid">';
+  subs.forEach(sid => {
+    const sf = customFolders[sid];
+    const sa = _jsArg(sid);
+    const iconHtml = sf.iconUrl
+      ? `<img src="${_escHtml(sf.iconUrl)}" style="width:100%;height:100%;object-fit:contain;">`
+      : getIcon(sf.icon || 'folder');
+    html += `<div class="explorer-item cf-subfolder" data-folder-id="${_escHtml(sid)}" ondblclick="openSubfolderFromItem(this,${sa})" onclick="_cfTap(event,()=>openSubfolderFromItem(this,${sa}))" oncontextmenu="event.preventDefault();event.stopPropagation();showSubfolderMenu(event,${sa})">
+      <div class="ei-icon">${iconHtml}</div>
+      <div class="ei-name">${_escHtml(sf.name)}</div>
+    </div>`;
+  });
   pages.forEach(id => {
     const p = PAGES[id];
     if (!p) return;
+    const pa = _jsArg(id);
     const eiIconHtml = p.iconUrl
       ? `<img src="${p.iconUrl}" style="width:100%;height:100%;object-fit:contain;">`
       : getIcon(getPageIconType(p.cat, id, p.name));
-    html += `<div class="explorer-item" ondblclick="openCanvasPage('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showFolderItemMenu(event,'${id}','${folderId}')">
+    html += `<div class="explorer-item" data-page-id="${_escHtml(id)}" ondblclick="openCanvasPage(${pa})" onclick="_cfTap(event,()=>openCanvasPage(${pa}))" oncontextmenu="event.preventDefault();event.stopPropagation();showFolderItemMenu(event,${pa},${fa})">
       <div class="ei-icon">${eiIconHtml}</div>
-      <div class="ei-name">${p.name}</div>
+      <div class="ei-name">${_escHtml(p.name)}</div>
     </div>`;
   });
   html += '</div>';
   return html;
+}
+
+// Right-click on empty space inside a folder window
+function showFolderBackgroundMenu(e, folderId) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!customFolders[folderId]) return;
+  const v = e.target.closest('.cf-view');
+  const parent = folderParent(folderId);
+  const isMac = currentTheme === 'mac';
+  showContextMenu(e.clientX, e.clientY, [
+    {label:'New Folder', action:()=>createNewFolder(folderId)},
+    {label:'Add Pages…', action:()=>addPagesToFolder(folderId)},
+    '---',
+    ...(parent ? [{label:'Up One Level', action:()=>navigateFolderView(v, parent)}] : []),
+    {label:'Refresh', action:()=>refreshFolderWindows()},
+    '---',
+    {label:isMac?'Get Info':'Properties', action:()=>showProperties(folderItemFor(folderId))},
+  ]);
+}
+
+function folderItemFor(fid) {
+  const f = customFolders[fid] || {};
+  return {id: fid, name: f.name || fid, icon: f.icon || 'folder', iconUrl: f.iconUrl || null, action: 'customFolder', folderId: fid};
+}
+
+// Right-click on a subfolder icon inside a folder window
+function showSubfolderMenu(e, subId) {
+  if (!customFolders[subId]) return;
+  const v = e.target.closest('.cf-view');
+  const item = folderItemFor(subId);
+  const isMac = currentTheme === 'mac';
+  const moveSub = buildFolderMoveSubmenu(subId);
+  showContextMenu(e.clientX, e.clientY, [
+    {label:'Open', action:()=>{ if (v) navigateFolderView(v, subId); else openCustomFolder(subId); }},
+    {label:'Open in New Window', action:()=>openCustomFolder(subId)},
+    '---',
+    {label:'New Folder Inside…', action:()=>createNewFolder(subId)},
+    {label:'Add Pages…', action:()=>addPagesToFolder(subId)},
+    '---',
+    {label:'Rename', action:()=>renameCustomFolder(item)},
+    ...(moveSub.length ? [{label:'Move to…', sub: moveSub}] : []),
+    {label:isMac?'Move to Trash':'Delete', action:()=>deleteCustomFolder(subId)},
+    '---',
+    {label:isMac?'Get Info':'Properties', action:()=>showProperties(item)},
+  ]);
 }
 
 function showFolderItemMenu(e, pageId, folderId) {
@@ -2539,23 +2873,8 @@ function showFolderItemMenu(e, pageId, folderId) {
     {label:'Open', action:()=>openCanvasPage(pageId)},
     {label:'Open in New Tab', action:()=>openCanvasPage(pageId, true)},
     '---',
-    {label:'Remove from Folder', action:()=>{
-      if (customFolders[folderId]) {
-        customFolders[folderId].pages = customFolders[folderId].pages.filter(id => id !== pageId);
-        desktopPages.push(pageId); // put back on desktop
-        saveState();
-        rebuildDesktopItems();
-        buildDesktopIcons();
-        // Refresh the folder window
-        document.querySelectorAll('.window').forEach(w => {
-          const t = w.querySelector('.titlebar-title');
-          if (t && t.textContent.includes(customFolders[folderId]?.name || '')) {
-            const g = w.querySelector('#explorer-grid-area');
-            if (g) g.innerHTML = buildCustomFolderGrid(folderId);
-          }
-        });
-      }
-    }},
+    {label:'Move to…', sub: buildPageMoveSubmenu(pageId, folderId)},
+    {label:'Remove from Folder', action:()=>movePageBetweenFolders(pageId, folderId, null)},
     '---',
     {label:isMac?'Move to Trash':'Delete', action:()=>{
       showConfirmModal('Move "'+pageName+'" to Recycle Bin?', (ok)=>{
@@ -2565,19 +2884,51 @@ function showFolderItemMenu(e, pageId, folderId) {
         saveState();
         rebuildDesktopItems();
         buildDesktopIcons();
-        document.querySelectorAll('.window').forEach(w => {
-          const t = w.querySelector('.titlebar-title');
-          if (t && t.textContent.includes(customFolders[folderId]?.name || '')) {
-            const g = w.querySelector('#explorer-grid-area');
-            if (g) g.innerHTML = buildCustomFolderGrid(folderId);
-          }
-        });
+        refreshFolderWindows();
       });
     }},
     '---',
     {label:'Properties', action:()=>showPageProperties(pageId)},
   ]);
 }
+
+// Long-press (touch) opens the same context menu as right-click on folder-window items
+// and empty folder space — iOS Safari never fires `contextmenu` on long-press.
+(function bindFolderLongPress() {
+  let lpTimer = null, lpX = 0, lpY = 0, lpFired = false;
+  document.addEventListener('touchstart', (ev) => {
+    lpFired = false;
+    const area = ev.target.closest && ev.target.closest('.cf-grid');
+    if (!area || ev.touches.length !== 1) return;
+    lpX = ev.touches[0].clientX; lpY = ev.touches[0].clientY;
+    clearTimeout(lpTimer);
+    const target = ev.target;
+    lpTimer = setTimeout(() => {
+      lpTimer = null;
+      lpFired = true;
+      _cfLongPressAt = Date.now();
+      target.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: lpX, clientY: lpY}));
+    }, 550);
+  }, {passive: true});
+  const cancel = (ev) => {
+    if (!lpTimer) return;
+    if (ev.type === 'touchmove') {
+      const t = ev.touches[0];
+      if (t && Math.abs(t.clientX - lpX) < 10 && Math.abs(t.clientY - lpY) < 10) return;
+    }
+    clearTimeout(lpTimer); lpTimer = null;
+  };
+  document.addEventListener('touchmove', cancel, {passive: true});
+  document.addEventListener('touchend', (ev) => {
+    if (lpFired) { lpFired = false; if (ev.cancelable) ev.preventDefault(); return; }
+    cancel(ev);
+  }, {passive: false});
+  document.addEventListener('touchcancel', cancel, {passive: true});
+  // Browsers that DO fire a native contextmenu on long-press (Android) win; skip ours
+  document.addEventListener('contextmenu', (ev) => {
+    if (ev.isTrusted && lpTimer) { clearTimeout(lpTimer); lpTimer = null; _cfLongPressAt = Date.now(); }
+  }, true);
+})();
 
 async function addPagesToFolder(folderId) {
   const folder = customFolders[folderId];
@@ -2618,8 +2969,8 @@ function confirmAddToFolder(folderId, btn) {
   rebuildDesktopItems();
   buildDesktopIcons();
   closeWindow(parseInt(win.dataset.winId));
-  // Refresh any open folder windows and reopen
-  openCustomFolder(folderId);
+  // Refresh the folder's open window(s); open it only when none is showing it
+  if (!refreshFolderWindows(folderId)) openCustomFolder(folderId);
 }
 
 function buildExplorerGrid(catId) {
@@ -2816,6 +3167,7 @@ function refreshExplorers() {
       gridArea.innerHTML = buildExplorerGrid(catId);
     }
   });
+  refreshFolderWindows();
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -2873,7 +3225,7 @@ function buildRecycleContent() {
   displayItems.forEach(id => {
     const page = PAGES[id];
     const sysItem = SYSTEM_ITEMS.find(s => s.pageId === id || s.id === id);
-    const name = page ? page.name : sysItem ? sysItem.name : CATEGORIES[id.replace('cat-','')]?.name || id;
+    const name = _escHtml(page ? page.name : sysItem ? sysItem.name : customFolders[id] ? customFolders[id].name : CATEGORIES[id.replace('cat-','')]?.name || id);
     html += `<div class="explorer-item" ondblclick="restoreItem('${id}')" oncontextmenu="event.preventDefault();event.stopPropagation();showRecycleItemMenu(event,'${id}')">
       <div class="ei-icon">${getIcon('document')}</div>
       <div class="ei-name">${name}</div>
