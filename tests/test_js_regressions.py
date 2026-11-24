@@ -34,6 +34,11 @@ is deaf from the moment it hands over a transcript until the reply's TTS has pla
 opt-in conversation.hold_speech_while_thinking the words are held and sent once the reply is over. The test
 fails on an app.js without the change.
 
+tests/js/proactive-canvas-url.test.js covers a PUSHED [CANVAS_URL:...] (an agent the owner texted while the
+app was open on a TV pushes a YouTube embed). The push handler stripped the tag and never opened it while the
+reply path did (2026-11-24). All three paths now share one handler, openCanvasUrlTag, and the private-URL block
+still applies. The test fails on an app.js without the change.
+
 Skips only when node is absent, and the skip is visible in pytest output. CI (ubuntu-latest)
 always has node.
 """
@@ -56,6 +61,7 @@ JS_TESTS = Path(__file__).resolve().parent / "js"
     "safe-redirect.test.js",
     "push-channel.test.js",
     "hold-speech-while-thinking.test.js",
+    "proactive-canvas-url.test.js",
 ])
 def test_js_regression_suite(name: str) -> None:
     node = shutil.which("node")

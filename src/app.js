@@ -218,6 +218,32 @@ connectAiradio();
             return url;
         }
 
+        // ===== [CANVAS_URL:...] TAG =====
+        // Loads an external URL (e.g. a YouTube embed) in the canvas iframe. The ONE handler
+        // for every path that carries agent text: the streamed reply, the non-streamed
+        // voice/greeting reply (_processCommandTags) and the proactive push
+        // (_handleProactiveMessage: an agent the owner texted while the app was open).
+        // resolveCanvasUrl() keeps blocking private/internal URLs and rewriting dev domains
+        // to the same-origin proxy. Returns true when the text held a complete tag (so a
+        // streaming caller can mark it processed), false otherwise.
+        function openCanvasUrlTag(text, { chip = false } = {}) {
+            const canvasUrlMatch = String(text || '').match(/\[CANVAS_URL:([^\]]+)\]/i);
+            if (!canvasUrlMatch) return false;
+            const externalUrl = canvasUrlMatch[1].trim();
+            const resolvedUrl = resolveCanvasUrl(externalUrl);
+            if (resolvedUrl) {
+                console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
+                ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
+                if (chip) AgentActivityChip.handleTag('canvas_url', resolvedUrl);
+                const iframe = document.getElementById('canvas-iframe');
+                if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
+            } else {
+                console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
+                ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
+            }
+            return true;
+        }
+
         // Route abort/interject calls to the active gateway's namespace.
         // When gateway_id=hermes, we MUST call /api/hermes/* because hermes
         // has its own mid-flight pipeline (separate active_runs dict,
@@ -4399,6 +4425,10 @@ connectAiradio();
                     AgentActivityChip.handleTag('canvas_menu');
                     CanvasControl.showMenu?.() || document.getElementById('canvas-menu-button')?.click();
                 }
+                // [CANVAS_URL:...] (e.g. a YouTube embed after the owner texted the agent):
+                // the same handler as the reply path. Opens whether or not the push carries
+                // audio (a profile with speak_unprompted=false gets text only).
+                openCanvasUrlTag(rawText, { chip: true });
 
                 // Dispatch canvas-action tags, then strip ALL tags for display
                 window.__canvasAction?.dispatchFrom(rawText);
@@ -4903,21 +4933,9 @@ connectAiradio();
                             _tag('sound', () => DJSoundboard.play(soundName));
                         }
                         // Check for [CANVAS_URL:https://example.com] — load external URL in iframe
-                        const canvasUrlMatch = text.match(/\[CANVAS_URL:([^\]]+)\]/i);
-                        if (canvasUrlMatch && !canvasCommandsProcessed.has('CANVAS_URL')) {
+                        // (only once the tag is complete in the streamed text)
+                        if (!canvasCommandsProcessed.has('CANVAS_URL') && openCanvasUrlTag(text, { chip: true })) {
                             canvasCommandsProcessed.add('CANVAS_URL');
-                            const externalUrl = canvasUrlMatch[1].trim();
-                            const resolvedUrl = resolveCanvasUrl(externalUrl);
-                            if (resolvedUrl) {
-                                console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
-                                ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
-                                AgentActivityChip.handleTag('canvas_url', resolvedUrl);
-                                const iframe = document.getElementById('canvas-iframe');
-                                if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
-                            } else {
-                                console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
-                                ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
-                            }
                         }
                         // Check for [BROWSE:url] — start a server-side co-browsing
                         // session (agent browses on the VPS, user watches live) and
@@ -6650,20 +6668,7 @@ connectAiradio();
                     CanvasControl.showPage?.(pageName);
                 }
                 // [CANVAS_URL:https://example.com]
-                const canvasUrlMatch = text.match(/\[CANVAS_URL:([^\]]+)\]/i);
-                if (canvasUrlMatch) {
-                    const externalUrl = canvasUrlMatch[1].trim();
-                    const resolvedUrl = resolveCanvasUrl(externalUrl);
-                    if (resolvedUrl) {
-                        console.log('[Canvas] External URL trigger:', externalUrl, resolvedUrl !== externalUrl ? `→ ${resolvedUrl}` : '');
-                        ActionConsole.addEntry('system', `Canvas: loading ${resolvedUrl}`);
-                        const iframe = document.getElementById('canvas-iframe');
-                        if (iframe) { iframe.src = resolvedUrl; CanvasControl.show(); }
-                    } else {
-                        console.warn('[Canvas] Blocked private/internal URL from agent:', externalUrl);
-                        ActionConsole.addEntry('system', `Canvas: blocked private URL — agent should use the public dev URL`);
-                    }
-                }
+                openCanvasUrlTag(text);
                 // [MUSIC_PLAY] or [MUSIC_PLAY:track]
                 const musicPlay = text.match(/\[MUSIC_PLAY(?::([^\]]+))?\]/i);
                 if (musicPlay) {
