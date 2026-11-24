@@ -8276,6 +8276,16 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 }
             },
 
+            _directPageFilename(pageName) {
+                // Filename for a direct load when the manifest has no match. A page ID
+                // (one token, e.g. yt-EFdA5duvOas) keeps its case: the file on disk is
+                // named that way and the server is case-sensitive. Only a spoken phrase
+                // with spaces ("Marketing Plan") is slugged to lowercase.
+                const name = String(pageName).trim();
+                const stem = name.replace(/\s+/g, '-');
+                return (/\s/.test(name) ? stem.toLowerCase() : stem) + '.html';
+            },
+
             showPageByName(pageName) {
                 // Fuzzy-find page by name — for voice commands and agent
                 // [CANVAS:pagename] tags where the exact id isn't known.
@@ -8283,7 +8293,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 const menu = window.CanvasMenu;
                 if (!menu?.manifest) {
                     // Manifest not loaded yet — try direct filename
-                    const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
+                    const filename = this._directPageFilename(pageName);
                     console.log('[Canvas] showPageByName direct:', filename);
                     if (this.iframe) {
                         this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
@@ -8299,7 +8309,7 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     menu.showPage(match.page.filename);
                 } else {
                     // Fallback: try as-is with .html
-                    const filename = pageName.replace(/\s+/g, '-').toLowerCase() + '.html';
+                    const filename = this._directPageFilename(pageName);
                     console.log('[Canvas] showPageByName fallback:', filename);
                     if (this.iframe) {
                         this.iframe.src = `/pages/${filename}?t=${Date.now()}`;
@@ -8997,7 +9007,8 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                 /** Find a page by name or voice alias (fuzzy match) */
                 if (!query || !this.manifest?.pages) return null;
 
-                const q = query.toLowerCase().trim();
+                const raw = query.trim();
+                const q = raw.toLowerCase();
                 // Structured id => exact-match only. Spoken phrase => fuzzy. (2026-08-23)
                 // Any hyphen/underscore-segmented single token is a PAGE ID, not speech:
                 // agents emit [CANVAS:job-2026-0001] / [CANVAS:marketing-plan]; people say
@@ -9014,9 +9025,22 @@ ${meta.artwork ? `<img class="art" src="${esc(meta.artwork)}" alt="">` : ''}
                     return isSep(i === 0 ? '' : hay[i - 1]) && isSep(hay[i + needle.length] || '');
                 };
 
-                // Exact page ID match (highest priority — agent sends [CANVAS:page-id])
-                if (this.manifest.pages[q]) {
-                    return { page: this.manifest.pages[q], pageId: q, score: 100 };
+                // Exact page ID match (highest priority — agent sends [CANVAS:page-id]).
+                // Page ids keep their case (yt-EFdA5duvOas: a YouTube id). Lowercasing the
+                // query missed every mixed-case id and the fallback loaded a lowercased
+                // filename that 404s (2026-11-24). Try the id as sent, then a case-insensitive
+                // match only when it is UNIQUE; two ids differing only by case are ambiguous,
+                // so no match (never a guess).
+                if (this.manifest.pages[raw]) {
+                    return { page: this.manifest.pages[raw], pageId: raw, score: 100 };
+                }
+                const _ciIds = Object.keys(this.manifest.pages).filter((k) => k.toLowerCase() === q);
+                if (_ciIds.length === 1) {
+                    return { page: this.manifest.pages[_ciIds[0]], pageId: _ciIds[0], score: 100 };
+                }
+                if (_ciIds.length > 1) {
+                    console.warn('[Canvas] ambiguous page id (differs only by case):', raw, _ciIds);
+                    return null;
                 }
 
                 let bestMatch = null;

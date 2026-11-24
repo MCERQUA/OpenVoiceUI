@@ -39,6 +39,11 @@ app was open on a TV pushes a YouTube embed). The push handler stripped the tag 
 reply path did (2026-11-24). All three paths now share one handler, openCanvasUrlTag, and the private-URL block
 still applies. The test fails on an app.js without the change.
 
+tests/js/canvas-page-case.test.js covers [CANVAS:<id>] for a mixed-case page (yt-EFdA5duvOas-b.html). The
+menu lowercased the id, missed the manifest key and loaded a lowercased filename that 404s (2026-11-24,
+809 mixed-case page files on the fleet). Ids keep their case; a case-insensitive match is used only when it is
+unique. The test fails on an app.js without the change.
+
 Skips only when node is absent, and the skip is visible in pytest output. CI (ubuntu-latest)
 always has node.
 """
@@ -62,6 +67,7 @@ JS_TESTS = Path(__file__).resolve().parent / "js"
     "push-channel.test.js",
     "hold-speech-while-thinking.test.js",
     "proactive-canvas-url.test.js",
+    "canvas-page-case.test.js",
 ])
 def test_js_regression_suite(name: str) -> None:
     node = shutil.which("node")
