@@ -991,6 +991,16 @@ def _private_prefixes():
     return tuple(out)
 
 
+_PROVENANCE_SIDECAR_SUFFIXES = ('.meta.json', '.social.json')
+
+
+def _is_provenance_sidecar(filename):
+    """True for a provenance record beside a media file (<name>.meta.json / <name>.social.json). Case-folded, judged
+    on the last path part, so 'x.PNG.Meta.JSON' and 'sub/x.png.meta.json' are caught too."""
+    name = Path(str(filename)).name.lower().rstrip('. ')
+    return name.endswith(_PROVENANCE_SIDECAR_SUFFIXES)
+
+
 def _upload_is_private(rel_path):
     """True when a path relative to UPLOADS_DIR (posix, already resolved) is in an always-private
     area. Case-folded so 'Field-Dock/' cannot slip past on a case-insensitive filesystem. The area's
@@ -1200,6 +1210,13 @@ def serve_upload(filename):
     """
     # dotfiles (e.g. the .uploads-index.jsonl ledger) are internal — never served
     if any(part.startswith('.') for part in Path(filename).parts):
+        return jsonify({"error": "File not found"}), 404
+    # Provenance sidecars are internal records, never page assets (2026-11-27): <file>.meta.json (the Mac lane's
+    # generation record: tool, prompt, source paths) and <file>.social.json (the social-post gate's record) sit next to
+    # the media they describe. Measured the same day, signed out: a known *.meta.json answered 200 with its JSON on
+    # all 10 live tenants that have one. Same answer as a dotfile, in every UPLOADS_AUTH_MODE, before any existence
+    # check (no 401/404 oracle).
+    if _is_provenance_sidecar(filename):
         return jsonify({"error": "File not found"}), 404
     upload_path = _safe_path(UPLOADS_DIR, filename)
     if upload_path is None:
